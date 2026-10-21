@@ -2,8 +2,9 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    is_ready_tech_lead_refinement as matches_ready_tech_lead_refinement, JobRequest,
-    PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
+    is_owned_stage, is_qc, is_ready_tech_lead_refinement as matches_ready_tech_lead_refinement,
+    is_stage_eligible, stage_owner_for, stage_owner_label, JobRequest, PendingRecommendation,
+    RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::providers::AgentRunResult;
 use time::format_description::well_known::Rfc3339;
@@ -187,7 +188,11 @@ impl WorkflowService {
             return Ok(action);
         }
 
-        if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
+        let gate = resolve_succeeded_gate(ctx.current_status, &ctx.agent_role);
+
+        if let Some(target) = gate.filter(|next| is_owned_stage(*next)) {
+            resolve_stage_owner(&mut action, &ctx, target);
+        } else if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
             let key_known = ctx.board_agent_keys.iter().any(|k| k == &assign_key);
             if ctx.auto_assign_enabled && !key_known {
                 // PM backlog refinement must assign a real board agent; implementer
@@ -212,7 +217,7 @@ impl WorkflowService {
             }
         }
 
-        if let Some(next) = resolve_succeeded_gate(ctx.current_status, &ctx.agent_role) {
+        if let Some(next) = gate {
             if !Self::is_legal_transition(ctx.current_status, next) {
                 return Err(format!(
                     "illegal transition {:?} -> {:?}",
@@ -286,11 +291,6 @@ fn is_reviewer(role: &str) -> bool {
 fn is_tech_lead(role: &str) -> bool {
     let r = role.to_lowercase();
     r.contains("tech lead") || r.contains("technical lead")
-}
-
-fn is_qc(role: &str) -> bool {
-    let r = role.to_lowercase();
-    r == "qc" || r.contains("quality")
 }
 
 fn is_verification_role(role: &str) -> bool {
@@ -462,6 +462,66 @@ fn unknown_assign_to_notice(assign_key: &str, known_keys: &[String], blocked: bo
     }
 }
 
+/// Picks who owns the ticket in In Review / In QA. An eligible `assignTo`
+/// wins; otherwise the oldest eligible board agent other than the finishing
+/// one. With no eligible agent the ticket is left unassigned.
+fn resolve_stage_owner(
+    action: &mut TransitionAction,
+    ctx: &TransitionContext,
+    target: TicketStatus,
+) {
+    let finishing_id = ctx.board_agent_ids.get(&ctx.agent_key).copied();
+    let requested = assign_to_from_contract(&ctx.contract)
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+
+    if let Some(key) = requested.as_deref() {
+        let eligible = ctx
+            .board_agent_ids
+            .get(key)
+            .and_then(|id| ctx.board_agents.iter().find(|agent| agent.id == *id))
+            .is_some_and(|agent| {
+                Some(agent.id) != finishing_id && is_stage_eligible(target, &agent.key, &agent.role)
+            });
+        if eligible {
+            apply_assign_to(action, ctx, key);
+            return;
+        }
+    }
+
+    let label = stage_owner_label(target);
+    let stage = status_label(target);
+    match stage_owner_for(target, &ctx.board_agents, finishing_id) {
+        Some(owner) => {
+            apply_assign_to(action, ctx, &owner.key);
+            if let Some(key) = requested {
+                action.system_comments.push(format!(
+                    "Workflow note: the agent returned assignTo `{key}`, which is not an available {label} for {stage}. Assigned `{}` instead.",
+                    owner.key
+                ));
+            }
+        }
+        None => {
+            if ctx.auto_assign_enabled {
+                action.new_assignee_id = Some(None);
+            }
+            let ignored = requested
+                .map(|key| format!(" The agent's assignTo `{key}` is not an available {label}."))
+                .unwrap_or_default();
+            action.system_comments.push(format!(
+                "Workflow note: the ticket moved to {stage}, but no enabled {label} agent is on this board, so it is unassigned and no run was started.{ignored} Add or enable a {label} agent, then assign it."
+            ));
+        }
+    }
+}
+
+fn status_label(status: TicketStatus) -> &'static str {
+    match status {
+        TicketStatus::InQa => "In QA",
+        _ => "In Review",
+    }
+}
+
 fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketStatus> {
     use TicketStatus::*;
     match (current, role) {
@@ -534,6 +594,7 @@ fn apply_assign_to(action: &mut TransitionAction, ctx: &TransitionContext, key: 
 mod tests {
     use super::*;
     use crate::domain::context_profile::ContextProfile;
+    use crate::domain::workflow::BoardAgentInfo;
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -584,6 +645,7 @@ mod tests {
             clarification_round: 0,
             context_profile: ContextProfile::Full,
             plan_allows_ready: false,
+            board_agents: vec![],
         }
     }
 
@@ -625,6 +687,186 @@ mod tests {
 
     fn agent_map(keys: &[(&str, Uuid)]) -> HashMap<String, Uuid> {
         keys.iter().map(|(k, id)| (k.to_string(), *id)).collect()
+    }
+
+    fn qc_agent_id() -> Uuid {
+        Uuid::from_u128(0x400)
+    }
+
+    fn reviewer_agent_id() -> Uuid {
+        Uuid::from_u128(0x500)
+    }
+
+    /// A board of `(key, id, role, created_secs)` agents, all enabled.
+    fn with_board(ctx: TransitionContext, agents: &[(&str, Uuid, &str, i64)]) -> TransitionContext {
+        TransitionContext {
+            board_agent_keys: agents.iter().map(|(key, ..)| key.to_string()).collect(),
+            board_agent_ids: agents
+                .iter()
+                .map(|(key, id, ..)| (key.to_string(), *id))
+                .collect(),
+            board_agents: agents
+                .iter()
+                .map(|(key, id, role, secs)| BoardAgentInfo {
+                    key: key.to_string(),
+                    id: *id,
+                    role: role.to_string(),
+                    created_at: OffsetDateTime::from_unix_timestamp(*secs).unwrap(),
+                })
+                .collect(),
+            ..ctx
+        }
+    }
+
+    fn full_board() -> Vec<(&'static str, Uuid, &'static str, i64)> {
+        vec![
+            ("pm", pm_agent_id(), "PM", 1),
+            ("tech_lead", tech_lead_agent_id(), "Technical Lead", 2),
+            (
+                "backend_engineer",
+                engineer_agent_id(),
+                "Backend Engineer",
+                3,
+            ),
+            ("qc", qc_agent_id(), "QC", 4),
+            ("reviewer", reviewer_agent_id(), "Reviewer", 5),
+        ]
+    }
+
+    fn implementer_done(assign_to: Option<&str>) -> TransitionContext {
+        let contract = match assign_to {
+            Some(key) => done_with_assign_to(key),
+            None => minimal_ctx().contract,
+        };
+        with_board(
+            TransitionContext {
+                current_status: TicketStatus::InProgress,
+                agent_role: "Backend Engineer".into(),
+                agent_key: "backend_engineer".into(),
+                assignee_agent_id: Some(engineer_agent_id()),
+                contract,
+                ..minimal_ctx()
+            },
+            &full_board(),
+        )
+    }
+
+    fn tech_lead_approves(assign_to: Option<&str>) -> TransitionContext {
+        TransitionContext {
+            current_status: TicketStatus::InReview,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            ..implementer_done(assign_to)
+        }
+    }
+
+    #[test]
+    fn implementer_eligible_assign_to_gets_the_review() {
+        let action =
+            WorkflowService::resolve_transition(implementer_done(Some("reviewer"))).unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+        assert_eq!(action.new_assignee_id, Some(Some(reviewer_agent_id())));
+        assert!(action.system_comments.is_empty());
+    }
+
+    #[test]
+    fn implementer_without_assign_to_hands_review_to_oldest_tech_lead() {
+        let action = WorkflowService::resolve_transition(implementer_done(None)).unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+        assert_eq!(action.new_assignee_id, Some(Some(tech_lead_agent_id())));
+        assert!(action.system_comments.is_empty());
+    }
+
+    #[test]
+    fn implementer_ineligible_assign_to_falls_back_with_a_note() {
+        for key in ["pm", "qc", "nobody", "backend_engineer"] {
+            let action = WorkflowService::resolve_transition(implementer_done(Some(key))).unwrap();
+            assert_eq!(action.new_status, Some(TicketStatus::InReview), "{key}");
+            assert_eq!(
+                action.new_assignee_id,
+                Some(Some(tech_lead_agent_id())),
+                "{key}"
+            );
+            assert_eq!(action.system_comments.len(), 1, "{key}");
+            assert!(action.system_comments[0].contains(key), "{key}");
+            assert!(action.system_comments[0].contains("`tech_lead`"), "{key}");
+        }
+    }
+
+    #[test]
+    fn implementer_done_with_no_reviewer_enters_in_review_unassigned() {
+        let ctx = with_board(
+            implementer_done(None),
+            &[
+                ("pm", pm_agent_id(), "PM", 1),
+                (
+                    "backend_engineer",
+                    engineer_agent_id(),
+                    "Backend Engineer",
+                    3,
+                ),
+            ],
+        );
+        let action = WorkflowService::resolve_transition(ctx).unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+        assert_eq!(action.new_assignee_id, Some(None));
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("no enabled Tech Lead or reviewer"));
+    }
+
+    #[test]
+    fn tech_lead_approval_hands_ticket_to_qc() {
+        let action = WorkflowService::resolve_transition(tech_lead_approves(None)).unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InQa));
+        assert_eq!(action.new_assignee_id, Some(Some(qc_agent_id())));
+        assert!(action.system_comments.is_empty());
+
+        let action = WorkflowService::resolve_transition(tech_lead_approves(Some("qc"))).unwrap();
+        assert_eq!(action.new_assignee_id, Some(Some(qc_agent_id())));
+        assert!(action.system_comments.is_empty());
+    }
+
+    #[test]
+    fn tech_lead_approval_without_qc_enters_in_qa_unassigned() {
+        let board: Vec<_> = full_board()
+            .into_iter()
+            .filter(|(key, ..)| *key != "qc")
+            .collect();
+        let action =
+            WorkflowService::resolve_transition(with_board(tech_lead_approves(None), &board))
+                .unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InQa));
+        assert_eq!(action.new_assignee_id, Some(None));
+        assert!(action.system_comments[0].contains("no enabled QC agent"));
+    }
+
+    #[test]
+    fn stage_owner_under_manual_assign_records_pending_recommendation() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            auto_assign_enabled: false,
+            ..implementer_done(None)
+        })
+        .unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+        assert!(action.new_assignee_id.is_none());
+        let pending = action
+            .pending_recommendation
+            .flatten()
+            .expect("pending recommendation");
+        assert_eq!(pending.recommended_agent_key, "tech_lead");
+        assert_eq!(pending.recommended_by_agent_id, engineer_agent_id());
+    }
+
+    #[test]
+    fn scope_b_still_skips_review_with_a_full_board() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            clarification_round: 1,
+            ..implementer_done(Some("tech_lead"))
+        })
+        .unwrap();
+        assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
+        assert_eq!(action.new_assignee_id, Some(None));
     }
 
     #[test]
@@ -1208,10 +1450,10 @@ mod tests {
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::InReview));
-        assert!(action.new_assignee_id.is_none());
+        assert_eq!(action.new_assignee_id, Some(None));
         assert_eq!(action.system_comments.len(), 1);
         assert!(action.system_comments[0].contains("frontend_engineer"));
-        assert!(action.system_comments[0].contains("ignored"));
+        assert!(action.system_comments[0].contains("Tech Lead or reviewer"));
     }
 
     #[test]

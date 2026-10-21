@@ -10,8 +10,8 @@ use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    is_ready_tech_lead_refinement, is_tech_lead_identity, JobRequest, RunOutcome, TransitionAction,
-    TransitionContext,
+    is_ready_tech_lead_refinement, is_tech_lead_identity, BoardAgentInfo, JobRequest, RunOutcome,
+    TransitionAction, TransitionContext,
 };
 use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
@@ -120,6 +120,7 @@ impl<'a> RunOrchestrator<'a> {
         let agents = AgentService::new(self.pool).list_agents().await?;
         let (board_agent_keys, board_agent_ids, board_implementer_keys) =
             build_board_agent_maps(&agents);
+        let board_agents = board_agent_infos(&agents, &board_agent_ids);
 
         let agent_key = agent
             .preset_source
@@ -167,6 +168,7 @@ impl<'a> RunOrchestrator<'a> {
                 .plan_entry(&ticket.ticket)
                 .await?
                 .allows_ready(),
+            board_agents,
         };
 
         let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
@@ -1025,6 +1027,31 @@ fn pending_recommendation_target(
     board_agent_ids.get(pending_key).copied()
 }
 
+/// Enabled agents with the board key that resolves to each: the preset key
+/// when it maps to that agent, else the name slug.
+pub(crate) fn board_agent_infos(
+    agents: &[Agent],
+    agent_ids: &HashMap<String, Uuid>,
+) -> Vec<BoardAgentInfo> {
+    agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| {
+            let key = agent
+                .preset_source
+                .clone()
+                .filter(|preset| agent_ids.get(preset) == Some(&agent.id))
+                .unwrap_or_else(|| slugify(&agent.name));
+            BoardAgentInfo {
+                key,
+                id: agent.id,
+                role: agent.role.clone(),
+                created_at: agent.created_at,
+            }
+        })
+        .collect()
+}
+
 fn build_board_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
     let mut keys = Vec::new();
 
@@ -1706,6 +1733,7 @@ mod tests {
             clarification_round: 0,
             context_profile: ContextProfile::HumanAgent,
             plan_allows_ready: false,
+            board_agents: vec![],
         };
 
         let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
@@ -3652,7 +3680,8 @@ mod tests {
             .expect("load ticket before chained response");
         assert_eq!(before.ticket.status, TicketStatus::InReview);
         assert_eq!(before.ticket.substatus, Some(Substatus::WaitingForHuman));
-        assert_eq!(before.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+        // No Tech Lead or reviewer on this board, so In Review is unassigned.
+        assert_eq!(before.ticket.assignee_agent_id, None);
         let pending_pm_mentions = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
             r#"
             SELECT id, resume_agent_id FROM ticket_mentions

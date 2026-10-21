@@ -1410,3 +1410,313 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         "QC comment must not claim a commit: {body}"
     );
 }
+
+async fn patch_status(
+    app: &axum::Router,
+    ticket_id: &str,
+    status: &str,
+    cookie: &str,
+    csrf: &str,
+) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            &format!(r#"{{"status":"{status}"}}"#),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    common::json_body(res).await
+}
+
+async fn system_comments(pool: &sqlx::PgPool, ticket_id: &str) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT body FROM ticket_comments WHERE ticket_id = $1 AND author_type = 'system' ORDER BY created_at",
+    )
+    .bind(uuid::Uuid::parse_str(ticket_id).expect("ticket UUID"))
+    .fetch_all(pool)
+    .await
+    .expect("system comments")
+}
+
+fn has_work_run(runs: &[serde_json::Value], agent_id: &str) -> bool {
+    runs.iter().any(|run| {
+        run["agentId"].as_str() == Some(agent_id)
+            && run["jobType"].as_str() == Some("work_on_ticket")
+    })
+}
+
+#[tokio::test]
+async fn implementer_finish_starts_tech_lead_review_and_approval_starts_qc() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Stage Tech Lead", &cookie, &csrf)
+            .await;
+    // The frontend fixture finishes cleanly with no mentions or assignTo.
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "frontend_engineer",
+        "Stage Frontend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let qc_id = common::create_agent_with_preset_key(&app, "qc", "Stage QC", &cookie, &csrf).await;
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
+
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "implementer finish starts a Tech Lead review, approval starts QC",
+        Duration::from_secs(60),
+        |runs| {
+            let tech_lead_work = runs
+                .iter()
+                .filter(|run| {
+                    run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                        && run["jobType"].as_str() == Some("work_on_ticket")
+                })
+                .count();
+            has_work_run(runs, &engineer_id) && tech_lead_work >= 1 && has_work_run(runs, &qc_id)
+        },
+    )
+    .await;
+    assert!(has_work_run(&runs, &qc_id));
+    let review = runs
+        .iter()
+        .find(|run| run["agentId"].as_str() == Some(tech_lead_id.as_str()))
+        .expect("Tech Lead review run");
+    assert_eq!(review["status"], "succeeded");
+}
+
+#[tokio::test]
+async fn drag_into_in_review_assigns_tech_lead_and_starts_its_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Drag Tech Lead", &cookie, &csrf)
+            .await;
+    common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Drag Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let review_ticket = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &review_ticket, &repo_id, &cookie, &csrf).await;
+    let moved = patch_status(&app, &review_ticket, "in_review", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_review");
+    assert_eq!(moved["assigneeAgentId"], tech_lead_id);
+    common::poll_runs_until_count(
+        &app,
+        &review_ticket,
+        &cookie,
+        &csrf,
+        "drag into In Review starts the Tech Lead",
+        Duration::from_secs(30),
+        |runs| has_work_run(runs, &tech_lead_id),
+    )
+    .await;
+
+    // No QC agent on this board: the ticket stays unassigned with a note.
+    let qa_ticket = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &qa_ticket, &repo_id, &cookie, &csrf).await;
+    let moved = patch_status(&app, &qa_ticket, "in_qa", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_qa");
+    assert!(moved["assigneeAgentId"].is_null());
+    let notes = system_comments(pool, &qa_ticket).await;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("No enabled QC agent")),
+        "{notes:?}"
+    );
+    let runs = common::poll_runs_until_count(
+        &app,
+        &qa_ticket,
+        &cookie,
+        &csrf,
+        "no QC run",
+        Duration::from_secs(1),
+        |_| true,
+    )
+    .await;
+    assert!(runs.is_empty());
+}
+
+#[tokio::test]
+async fn drag_into_in_review_without_auto_start_starts_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_worker_config(1, |config| {
+            config.workflow.auto_start_runs = false;
+        })
+        .await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::create_agent_with_preset_key(&app, "tech_lead", "Idle Tech Lead", &cookie, &csrf).await;
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let moved = patch_status(&app, &ticket_id, "in_review", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_review");
+    assert!(moved["assigneeAgentId"].is_null());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "no run",
+        Duration::from_secs(1),
+        |_| true,
+    )
+    .await;
+    assert!(runs.is_empty());
+}
+
+#[tokio::test]
+async fn drag_into_in_review_with_auto_assign_off_assigns_nobody() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_worker_config(1, |config| {
+            config.workflow.auto_assign.in_review = Some(false);
+        })
+        .await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::create_agent_with_preset_key(&app, "tech_lead", "Manual Tech Lead", &cookie, &csrf)
+        .await;
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let moved = patch_status(&app, &ticket_id, "in_review", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_review");
+    assert!(moved["assigneeAgentId"].is_null());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "no run",
+        Duration::from_secs(1),
+        |_| true,
+    )
+    .await;
+    assert!(runs.is_empty());
+}
+
+#[tokio::test]
+async fn drag_into_in_review_during_an_active_run_starts_no_second_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Busy Tech Lead", &cookie, &csrf)
+            .await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Busy Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
+    let engineer_uuid = uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID");
+    sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
+        .bind(ticket_uuid)
+        .bind(engineer_uuid)
+        .execute(pool)
+        .await
+        .expect("engineer owns the ticket");
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+            context_profile, started_at
+        )
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default', 'full', now())
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(ticket_uuid)
+    .bind(engineer_uuid)
+    .execute(pool)
+    .await
+    .expect("active engineer run");
+
+    let moved = patch_status(&app, &ticket_id, "in_review", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_review");
+    assert_eq!(moved["assigneeAgentId"], engineer_id);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "only the engineer run",
+        Duration::from_secs(1),
+        |_| true,
+    )
+    .await;
+    assert!(!has_work_run(&runs, &tech_lead_id), "{runs:?}");
+    assert_eq!(runs.len(), 1);
+}

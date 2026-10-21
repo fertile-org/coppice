@@ -21,7 +21,13 @@ use time::OffsetDateTime;
 pub const STARTER_PRESET_ID: &str = "starter";
 
 /// Role presets in the starter team, in create order.
-pub const STARTER_PRESET_KEYS: &[&str] = &["pm", "tech_lead", "backend_engineer"];
+pub const STARTER_PRESET_KEYS: &[&str] = &[
+    "pm",
+    "tech_lead",
+    "backend_engineer",
+    "frontend_engineer",
+    "qc",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DetectedConnector {

@@ -49,6 +49,6 @@ On changes required, use `status: "blocked"`, list concrete fixes in `summary`, 
 ```
 
 - Put test commands in the `testsRun` JSON array only — do not append a "Tests run" section inside `summary`.
-- On approval, return `status: "done"` and **omit `assignTo` and `mentionAgents`** — workflow gates advance the ticket to In QA.
+- On approval, return `status: "done"` and set `assignTo` to a QC key from `board_agents` (e.g. `qc`); if you omit it, Coppice picks the oldest enabled QC agent. Still **omit `mentionAgents`** — workflow gates advance the ticket to In QA and start QC.
 - When changes are required, set `mentionAgents` to the implementer agent key — Coppice assigns them and auto-starts a fix run.
 - Use blank lines between `##` sections so comments render cleanly.

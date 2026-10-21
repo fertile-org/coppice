@@ -8,7 +8,7 @@ description: "Go from a fresh install to your first agent run in five steps."
 
 Five steps take you from a fresh install to your first agent run. You need a local git checkout and one agent CLI. No Coppice account.
 
-On a fresh install, Coppice opens a short setup that adds your first repository, board, and starter team. You can reopen it from **System → Connectors** with **Set up workspace**.
+On a fresh install, Coppice opens a short setup that adds your first repository, board, and starter team: PM, Technical Lead, Backend Engineer, Frontend Engineer, and QC. You can reopen it from **System → Connectors** with **Set up workspace**.
 
 ## 1. Install a provider and sign in
 A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code or Grok. Coppice doesn't install it. It finds the CLIs already on your computer.
@@ -31,7 +31,7 @@ Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed**. Coppice c
 
 Saving turns that connector on. You'll see "{name} turned on."
 
-Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three.
+Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three. Add a **QC** agent too, so tickets that pass code review get verified in In QA.
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="The new agent form with a name, a role and a CLI chosen.">

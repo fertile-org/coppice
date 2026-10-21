@@ -93,9 +93,10 @@ async fn successful_attention_mention_persists_without_starting_response_run() {
     .expect("count attention notifications");
     assert_eq!(notification_count, 1);
 
+    // No Tech Lead or reviewer on this board: In Review is left unassigned.
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(ticket["status"], "in_review");
-    assert_eq!(ticket["assigneeAgentId"], research_id);
+    assert!(ticket["assigneeAgentId"].is_null());
     assert!(ticket["substatus"].is_null());
 }
 

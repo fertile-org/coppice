@@ -1472,11 +1472,10 @@ fn is_tech_lead_agent(agent: &crate::domain::agent::Agent) -> bool {
 }
 
 fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
-    if matches!(agent.preset_source.as_deref(), Some("qc")) {
-        return true;
-    }
-    let role = agent.role.to_ascii_lowercase();
-    role == "qc" || role.contains("quality")
+    crate::domain::workflow::is_qc_identity(
+        agent.preset_source.as_deref().unwrap_or(""),
+        &agent.role,
+    )
 }
 
 /// Whether a successful `work_on_ticket` run should auto-commit worktree changes.
