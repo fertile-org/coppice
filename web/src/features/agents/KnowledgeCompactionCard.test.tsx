@@ -74,7 +74,11 @@ function settings(compactionAgent: Agent | null): KnowledgeSettings {
           connector: compactionAgent.connector,
         }
       : null,
-    readOnlyConnectors: ['mock', 'claude-code', 'cursor'],
+    readOnlyConnectors: [
+      { id: 'mock', displayName: 'Mock' },
+      { id: 'claude-code', displayName: 'Claude Code' },
+      { id: 'cursor', displayName: 'Cursor' },
+    ],
   };
 }
 
@@ -127,12 +131,12 @@ describe('KnowledgeCompactionCard', () => {
     expect(option).toHaveTextContent("Can't run compaction safely");
   });
 
-  it('names only the connector shown to block writes', () => {
+  it('names every read-only-capable connector in the warning', () => {
     mocks.settings = settings(coder);
     renderCard([coder]);
     expect(
       screen.getByText(
-        "This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.",
+        "This agent's CLI can't run compaction safely. Pick an agent that uses Mock, Claude Code, or Cursor.",
       ),
     ).toBeVisible();
   });

@@ -58,7 +58,7 @@ async fn compaction_agent_defaults_to_off_and_round_trips() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|connector| connector == "mock"));
+        .any(|connector| connector["id"] == "mock" && connector["displayName"] == "Mock"));
 
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Compactor", &cookie, &csrf)
