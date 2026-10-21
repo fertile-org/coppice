@@ -3680,7 +3680,8 @@ mod tests {
             .expect("load ticket before chained response");
         assert_eq!(before.ticket.status, TicketStatus::InReview);
         assert_eq!(before.ticket.substatus, Some(Substatus::WaitingForHuman));
-        assert_eq!(before.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+        // No Tech Lead or reviewer on this board, so In Review is unassigned.
+        assert_eq!(before.ticket.assignee_agent_id, None);
         let pending_pm_mentions = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
             r#"
             SELECT id, resume_agent_id FROM ticket_mentions
