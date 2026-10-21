@@ -340,6 +340,7 @@ async fn create_comment(
                         StartRunOptions {
                             context_profile: profile,
                             trigger_comment_id: Some(comment.id),
+                            ..StartRunOptions::default()
                         },
                     )
                     .await

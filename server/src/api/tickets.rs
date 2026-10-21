@@ -651,41 +651,6 @@ async fn git_failure_response(
             detail,
         } => {
             tracing::info!(%detail, ?paths, "git conflict aborted");
-            if matches!(&kind, GitConflictKind::Merge) {
-                match conflict_resolve::reopen_done_after_merge_conflict(
-                    pool,
-                    ticket_id,
-                    &base_branch,
-                    &paths,
-                )
-                .await
-                {
-                    Ok(Some(reopen)) => {
-                        tracing::info!(
-                            comment_id = %reopen.comment_id,
-                            run_id = ?reopen.run_id,
-                            "done ticket returned to in progress after a merge conflict"
-                        );
-                        state.event_bus.publish(AppEvent::CommentCreated {
-                            comment_id: reopen.comment_id,
-                            ticket_id,
-                            author_type: "system".into(),
-                        });
-                        publish_ticket_state(state, pool, ticket_id).await;
-                    }
-                    Ok(None) => {}
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "merge conflict did not return the ticket to In Progress"
-                        );
-                        return TicketGitApiError::Message(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            crate::copy::conflict::MERGE_CONFLICT_REOPEN_FAILED.to_string(),
-                        );
-                    }
-                }
-            }
             let ready = |connector: &str| connector_is_ready(state, connector);
             let body = conflict_resolve::build_git_conflict_response(
                 pool,
@@ -1775,6 +1740,10 @@ struct ResolveConflictBody {
     base_branch: String,
     #[serde(default)]
     files: Vec<String>,
+    /// `operation` from the conflict offer. Only a merge conflict reopens a
+    /// Done ticket; a missing value is treated as a rebase.
+    #[serde(default)]
+    operation: Option<String>,
 }
 
 enum ResolveConflictApiError {
@@ -1848,9 +1817,14 @@ async fn resolve_ticket_conflict(
 ) -> Result<Json<SingleRunResponse>, ResolveConflictApiError> {
     let pool = pool_from_state(&state).map_err(ResolveConflictApiError::Status)?;
     let ready = |connector: &str| connector_is_ready(&state, connector);
+    let kind = match body.operation.as_deref() {
+        Some("merge") => GitConflictKind::Merge,
+        _ => GitConflictKind::Rebase,
+    };
     let outcome = conflict_resolve::start_resolve(
         pool,
         ticket_id,
+        kind,
         &body.base_branch,
         &body.files,
         &ready,
@@ -1864,6 +1838,9 @@ async fn resolve_ticket_conflict(
             ticket_id,
             author_type: "system".into(),
         });
+    }
+    if outcome.reopened {
+        publish_ticket_state(&state, pool, ticket_id).await;
     }
 
     let service = RunService::new(pool);

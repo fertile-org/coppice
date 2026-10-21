@@ -5,7 +5,6 @@ use coppice_server::copy::review::{
     ready_held, review_entry_held, waiting_on_review, REVIEW_CAP_HINT, REVIEW_CAP_INVALID,
     REVIEW_CAP_LABEL,
 };
-use coppice_server::services::ticket_service::TicketService;
 use tower::ServiceExt;
 
 async fn message(response: axum::response::Response) -> String {
@@ -233,11 +232,27 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
     if !common::db_available().await {
         return;
     }
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let worktrees_path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = worktrees_path;
+    })
+    .await;
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let reopened = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    // Ask needs an assignee, a ready repository and an accepted worktree.
+    // No workers, so the run stays queued.
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &reopened, &repo_id, &cookie, &csrf).await;
+    common::setup_worktree_with_commit(&local_path, worktrees.path(), "test-repo", &reopened);
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "Ada", &cookie, &csrf)
+            .await;
+    common::assign_agent_to_ticket(&app, &reopened, &agent_id, &cookie, &csrf).await;
     let to_review = app
         .clone()
         .oneshot(common::json_request(
@@ -264,10 +279,24 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
     assert_eq!(approved.status(), StatusCode::OK);
 
     let reopened_id = uuid::Uuid::parse_str(&reopened).unwrap();
-    TicketService::new(pool)
-        .reopen_after_merge_conflict(reopened_id)
+    let asked = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{reopened}/resolve-conflict"),
+            r#"{"baseBranch":"main","files":["README.md"],"operation":"merge"}"#,
+            &cookie,
+            &csrf,
+        ))
         .await
-        .expect("merge conflict reopen");
+        .unwrap();
+    assert_eq!(asked.status(), StatusCode::OK, "{}", message(asked).await);
+    let status: String = sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+        .bind(reopened_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "in_progress");
     let exempt: bool = sqlx::query_scalar("SELECT review_cap_exempt FROM tickets WHERE id = $1")
         .bind(reopened_id)
         .fetch_one(pool)

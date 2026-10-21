@@ -18,11 +18,8 @@ pub const INVALID_FILE_LIST: &str = "The conflict file list is invalid.";
 pub const DONE_COLUMN_HOLDS: &str =
     "Done tickets can't be moved. Create a new ticket for follow-up work.";
 
-/// Shown when a merge conflict was cleared but the ticket could not leave Done.
-pub const MERGE_CONFLICT_REOPEN_FAILED: &str =
-    "The conflict was cleared, but Coppice couldn't move this ticket back to In Progress. Move it there yourself.";
-
-/// Comment posted when a Done ticket's merge hits a conflict.
+/// Comment posted when a person asks the assignee to resolve a Done ticket's
+/// merge conflict.
 /// Also copied into the assignee's run context.
 pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
     let listed = if files.is_empty() {
@@ -132,10 +129,6 @@ mod tests {
         assert_eq!(
             DONE_COLUMN_HOLDS,
             "Done tickets can't be moved. Create a new ticket for follow-up work."
-        );
-        assert_eq!(
-            MERGE_CONFLICT_REOPEN_FAILED,
-            "The conflict was cleared, but Coppice couldn't move this ticket back to In Progress. Move it there yourself."
         );
         assert_eq!(
             merge_conflict_reopen_comment("main", &["README.md".into(), "src/lib.rs".into()]),

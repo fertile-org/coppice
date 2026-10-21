@@ -1,7 +1,8 @@
 //! Ask the ticket's assignee to resolve a merge or rebase conflict.
 //!
 //! The run is a normal `work_on_ticket` run for that agent, so the job worker
-//! launches their connector with the pinned run contract.
+//! launches their connector with the pinned run contract. A merge conflict on
+//! a Done ticket changes nothing until a person asks; see [`start_resolve`].
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -18,7 +19,6 @@ use crate::domain::run::AgentRun;
 use crate::domain::substatus::TicketStatus;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
-use crate::services::human_review_service::HumanReviewService;
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::ticket_git_service::{validate_branch_name, GitConflictKind};
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -49,11 +49,8 @@ pub struct GitConflictHttp {
 pub struct ResolveConflictOutcome {
     pub run: AgentRun,
     pub new_comment_id: Option<Uuid>,
-}
-
-pub struct MergeConflictReopen {
-    pub comment_id: Uuid,
-    pub run_id: Option<Uuid>,
+    /// The ticket moved from Done to In Progress.
+    pub reopened: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -135,9 +132,15 @@ async fn ask_offer(
     (true, Some(ask_to_resolve_label(&agent.name)), None)
 }
 
+/// Ask the assignee to resolve a conflict.
+///
+/// A merge conflict on a Done ticket moves it to In Progress in the same
+/// transaction that queues the assignee's run, so the ticket never leaves Done
+/// without a run. Any other conflict starts a resolve run and leaves the status.
 pub async fn start_resolve(
     pool: &PgPool,
     ticket_id: Uuid,
+    kind: GitConflictKind,
     base_branch: &str,
     files: &[String],
     connector_ready: &(dyn Fn(&str) -> bool + Sync),
@@ -166,16 +169,37 @@ pub async fn start_resolve(
         return Ok(ResolveConflictOutcome {
             run,
             new_comment_id: None,
+            reopened: false,
         });
     }
 
-    let prompt = resolve_prompt(base_branch, &files);
-    let comment = CommentService::new(pool)
+    let reopen =
+        matches!(kind, GitConflictKind::Merge) && ticket.ticket.status == TicketStatus::Done;
+    let (body, options) = if reopen {
+        (
+            merge_conflict_reopen_comment(base_branch, &files),
+            StartRunOptions {
+                context_profile: ContextProfile::Full,
+                trigger_comment_id: None,
+                reopen_done_after_merge_conflict: true,
+            },
+        )
+    } else {
+        (
+            resolve_prompt(base_branch, &files),
+            StartRunOptions {
+                context_profile: ContextProfile::HumanAgent,
+                ..StartRunOptions::default()
+            },
+        )
+    };
+    let comments = CommentService::new(pool);
+    let comment = comments
         .create(
             ticket_id,
             AuthorType::System,
             None,
-            &prompt,
+            &body,
             CommentIntent::SystemEvent,
             &[],
             &[],
@@ -188,8 +212,8 @@ pub async fn start_resolve(
             agent_id,
             JOB_TYPE_WORK_ON_TICKET,
             StartRunOptions {
-                context_profile: ContextProfile::HumanAgent,
                 trigger_comment_id: Some(comment.id),
+                ..options
             },
         )
         .await
@@ -197,8 +221,10 @@ pub async fn start_resolve(
         Ok(run) => Ok(ResolveConflictOutcome {
             run,
             new_comment_id: Some(comment.id),
+            reopened: reopen,
         }),
         Err(RunError::ActiveRunExists) => {
+            discard_comment(&comments, comment.id).await;
             let run = run_svc
                 .active_for_ticket_agent(ticket_id, agent_id)
                 .await?
@@ -206,91 +232,21 @@ pub async fn start_resolve(
             Ok(ResolveConflictOutcome {
                 run,
                 new_comment_id: None,
+                reopened: false,
             })
         }
-        Err(err) => Err(err.into()),
-    }
-}
-
-/// When a Done ticket's merge conflicts, move it to In Progress, keep the
-/// assignee and the earlier acceptance, and start that agent's normal work run
-/// with the conflict comment as its trigger.
-///
-/// Returns `None` when the ticket is not Done. Rebase conflicts do not call this.
-pub async fn reopen_done_after_merge_conflict(
-    pool: &PgPool,
-    ticket_id: Uuid,
-    base_branch: &str,
-    files: &[String],
-) -> Result<Option<MergeConflictReopen>, ConflictResolveError> {
-    let tickets = TicketService::new(pool);
-    let ticket = tickets.get(ticket_id).await?;
-    if ticket.ticket.status != TicketStatus::Done {
-        return Ok(None);
-    }
-    TicketService::ensure_not_archived(&ticket.ticket)?;
-    let assignee = ticket.ticket.assignee_agent_id;
-
-    tickets.reopen_after_merge_conflict(ticket_id).await?;
-    HumanReviewService::new(pool)
-        .retain_stale_acceptance(ticket_id)
-        .await
-        .map_err(|err| {
-            let crate::services::human_review_service::HumanReviewError::Database(err) = err;
-            ConflictResolveError::Ticket(TicketError::Database(err))
-        })?;
-
-    let comment = CommentService::new(pool)
-        .create(
-            ticket_id,
-            AuthorType::System,
-            None,
-            &merge_conflict_reopen_comment(base_branch, files),
-            CommentIntent::SystemEvent,
-            &[],
-            &[],
-        )
-        .await?;
-
-    let run_id = match assignee {
-        Some(agent_id) => start_assignee_work(pool, ticket_id, agent_id, comment.id).await?,
-        None => None,
-    };
-
-    Ok(Some(MergeConflictReopen {
-        comment_id: comment.id,
-        run_id,
-    }))
-}
-
-async fn start_assignee_work(
-    pool: &PgPool,
-    ticket_id: Uuid,
-    agent_id: Uuid,
-    comment_id: Uuid,
-) -> Result<Option<Uuid>, ConflictResolveError> {
-    let run_svc = RunService::new(pool);
-    match run_svc
-        .start_run_for_agent(
-            ticket_id,
-            agent_id,
-            JOB_TYPE_WORK_ON_TICKET,
-            StartRunOptions {
-                context_profile: ContextProfile::Full,
-                trigger_comment_id: Some(comment_id),
-            },
-        )
-        .await
-    {
-        Ok(run) => Ok(Some(run.id)),
-        Err(RunError::ActiveRunExists) => Ok(run_svc
-            .active_for_ticket_agent(ticket_id, agent_id)
-            .await?
-            .map(|run| run.id)),
         Err(err) => {
-            tracing::warn!(error = %err, "merge conflict did not start a run");
-            Ok(None)
+            discard_comment(&comments, comment.id).await;
+            Err(err.into())
         }
+    }
+}
+
+/// The run did not start, so its trigger comment would describe something
+/// that did not happen.
+async fn discard_comment(comments: &CommentService<'_>, comment_id: Uuid) {
+    if let Err(err) = comments.delete(comment_id).await {
+        tracing::error!(error = %err, %comment_id, "could not remove the resolve comment");
     }
 }
 

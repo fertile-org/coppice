@@ -142,7 +142,11 @@ impl<'a> HumanReviewService<'a> {
 
     /// Keep the acceptance row and mark it stale. Does not change ticket status,
     /// the accepted commit, or who accepted it.
-    pub async fn retain_stale_acceptance(&self, ticket_id: Uuid) -> Result<(), HumanReviewError> {
+    /// Takes an executor so a run start can do this in its own transaction.
+    pub async fn retain_stale_acceptance(
+        executor: impl sqlx::PgExecutor<'_>,
+        ticket_id: Uuid,
+    ) -> Result<(), HumanReviewError> {
         sqlx::query(
             r#"
             UPDATE ticket_human_reviews
@@ -152,7 +156,7 @@ impl<'a> HumanReviewService<'a> {
             "#,
         )
         .bind(ticket_id)
-        .execute(self.pool)
+        .execute(executor)
         .await?;
         Ok(())
     }
