@@ -109,7 +109,7 @@ Changer la `command` d’OpenCode demande aussi un redémarrage.
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
-| `auto_start_runs` | bool | `false` | Si true, assigner un agent à un ticket qui a un dépôt lance un lancement. Si false, vous cliquez sur **Run agent**. |
+| `auto_start_runs` | bool | `true` | Si true, assigner un agent à un ticket qui a un dépôt lance un lancement. Si false, vous cliquez sur **Run agent**. |
 | `auto_assign.default` | bool | `true` | Active l’assignation automatique pour chaque statut sans réglage propre. |
 | `auto_assign.<status>` | bool | `backlog` : `false`. Autres : suit `default` | Active ou désactive l’assignation automatique pour un statut. |
 | `auto_split.default` | bool | `false` | Active le découpage automatique pour chaque statut sans réglage propre. |

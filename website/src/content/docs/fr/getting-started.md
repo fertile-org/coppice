@@ -81,8 +81,8 @@ Le ticket passe sur **Live Console** pour que vous puissiez suivre le travail de
 <a id="what-happens-next"></a>
 
 ## Et ensuite
-1. **Plan Review.** L’agent PM écrit un plan, et le ticket passe en Plan Review. Il attend là que vous approuviez le plan. Cliquez sur **Approve plan**.
-2. **Ready.** Quand vous approuvez, le ticket passe en Ready. Les agents décident qui s’en charge ensuite. Si personne ne convient, ils le laissent sans responsable et ajoutent un commentaire qui explique pourquoi.
+1. **Plan Review.** L’agent PM écrit un plan, et le ticket passe en Plan Review. Le plan s’affiche juste sous la description, avec **Approve plan** et **Ask for changes** en dessous. Approuver ajoute le plan à la description sous **Approved plan**, après votre propre texte.
+2. **Ready.** Quand vous approuvez, le ticket passe en Ready. Votre agent Technical Lead vérifie le plan par rapport au code, corrige le plan approuvé seulement si nécessaire, et choisit qui fait le travail. Cet agent démarre aussitôt. Si personne ne convient, le ticket reste sans responsable avec un commentaire qui explique pourquoi.
 3. **In Progress.** L’agent assigné fait le travail dans son propre worktree git.
 4. **Wait for Human Review.** Vous lisez le diff. Cliquez sur **Accept** dans Human Review.
 5. **Done.** Une carte Done peut afficher « Accepted, not merged ». Ouvrez le ticket et choisissez **Merge…**, ou **Create PR via API** si vous préférez le relire sous forme de pull request.

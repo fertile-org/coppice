@@ -385,6 +385,32 @@ pub fn merge_ticket_description(
     }
 }
 
+/// Ready-stage Tech Lead refinement. Once a plan is approved the description
+/// is the original text plus an `## Approved plan` section, and the Tech Lead
+/// may only revise that section. A reply that repeats the whole body is cut
+/// down to its own `## Approved plan` section. Without that section this is
+/// [`merge_ticket_description`].
+pub fn merge_refined_description(
+    current: &str,
+    updated_description: Option<&str>,
+    acceptance_criteria: Option<&str>,
+) -> Option<String> {
+    let header = crate::copy::plan::APPROVED_PLAN_SECTION;
+    let updated = updated_description.map(str::trim).filter(|s| !s.is_empty());
+    let (Some(updated), true) = (updated, current.contains(header)) else {
+        return merge_ticket_description(current, updated_description, acceptance_criteria);
+    };
+    let section = match updated.find(header) {
+        Some(start) => {
+            let rest = &updated[start + header.len()..];
+            rest[..rest.find("\n## ").unwrap_or(rest.len())].trim()
+        }
+        None => updated,
+    };
+    let base = upsert_markdown_section(current, header, section);
+    merge_ticket_description(current, Some(&base), acceptance_criteria)
+}
+
 /// Light cleanup for agent-authored markdown before storing on tickets.
 pub fn normalize_agent_markdown(text: &str) -> String {
     let mut out = text.replace("\r\n", "\n");
@@ -413,7 +439,7 @@ fn format_acceptance_criteria_section(criteria: &str) -> String {
     )
 }
 
-fn upsert_markdown_section(body: &str, header: &str, content: &str) -> String {
+pub(crate) fn upsert_markdown_section(body: &str, header: &str, content: &str) -> String {
     let section = format!("{header}\n\n{content}");
     if let Some(start) = body.find(header) {
         let after_header = start + header.len();
@@ -1162,5 +1188,41 @@ mod tests {
             applied.ticket.substatus_metadata,
             Some(serde_json::json!({ "capability": "postgres" }))
         );
+    }
+
+    #[test]
+    fn refinement_replaces_only_the_approved_plan_section() {
+        let current =
+            "Make the board settings a drawer.\n\n## Approved plan\n\n### Approach\nOld approach.";
+        let merged =
+            merge_refined_description(current, Some("### Approach\nUse RepoDrawer."), None)
+                .unwrap();
+        assert_eq!(
+            merged,
+            "Make the board settings a drawer.\n\n## Approved plan\n\n### Approach\nUse RepoDrawer."
+        );
+    }
+
+    #[test]
+    fn refinement_that_repeats_the_whole_body_keeps_the_original_text() {
+        let current = "Original ask.\n\n## Approved plan\n\n### Approach\nOld.";
+        let reply = "Rewritten ask.\n\n## Approved plan\n\n### Approach\nNew.";
+        let merged = merge_refined_description(current, Some(reply), None).unwrap();
+        assert_eq!(
+            merged,
+            "Original ask.\n\n## Approved plan\n\n### Approach\nNew."
+        );
+    }
+
+    #[test]
+    fn refinement_without_changes_leaves_the_description() {
+        let current = "Original ask.\n\n## Approved plan\n\n### Approach\nOld.";
+        assert_eq!(merge_refined_description(current, None, None), None);
+    }
+
+    #[test]
+    fn refinement_without_an_approved_plan_replaces_the_body() {
+        let merged = merge_refined_description("Old body.", Some("New body."), None).unwrap();
+        assert_eq!(merged, "New body.");
     }
 }

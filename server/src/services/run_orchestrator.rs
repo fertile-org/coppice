@@ -22,7 +22,9 @@ use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::{resolve_agent_keys, MentionService};
 use crate::services::notification_service::NotificationService;
-use crate::services::result_contract::{merge_ticket_description, ApplyResult};
+use crate::services::result_contract::{
+    merge_refined_description, merge_ticket_description, ApplyResult,
+};
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::split_service::SplitService;
 use crate::services::ticket_service::TicketService;
@@ -231,7 +233,12 @@ impl<'a> RunOrchestrator<'a> {
             .await?;
 
         if !consultation_run {
-            if let Some(description) = merge_ticket_description(
+            let merge = if technical_refinement_run {
+                merge_refined_description
+            } else {
+                merge_ticket_description
+            };
+            if let Some(description) = merge(
                 &original_description,
                 apply.ticket.updated_description.as_deref(),
                 apply.ticket.acceptance_criteria.as_deref(),

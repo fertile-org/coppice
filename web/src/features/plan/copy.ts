@@ -9,6 +9,8 @@ export const PLAN_COPY = {
   skipPlanning: 'Skip planning',
   skipFailed: "Couldn't change Skip planning. Try again.",
   approvedPlan: 'Approved plan',
+  proposedPlan: 'Proposed plan',
+  approveAddsToDescription: 'Approving adds this plan to the description, under Approved plan.',
   noSteps: 'This plan has no steps.',
   criteria: 'Acceptance criteria',
   steps: 'Steps',

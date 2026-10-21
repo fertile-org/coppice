@@ -166,6 +166,10 @@ pub(crate) struct TicketResponse {
     latest_plan_run_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     approved_plan: Option<ApprovedPlanResponse>,
+    /// In Plan Review: the plan waiting for approval, shown under the
+    /// description next to Approve and Ask for changes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_plan: Option<PendingPlanResponse>,
     /// The planner's questions. `waiting` is the stored "waiting for your
     /// answers" state.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,6 +198,13 @@ struct AttachmentSummary {
     filename: String,
     content_type: String,
     size_bytes: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanResponse {
+    comment_id: Uuid,
+    markdown: String,
 }
 
 #[derive(Serialize)]
@@ -303,6 +314,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         plan_approved: item.plan_approved,
         latest_plan_run_status: item.latest_plan_run_status,
         approved_plan: None,
+        pending_plan: None,
         plan_questions: item.plan_questions,
         has_plan: item.has_plan,
         split_parent: item.split_parent,
@@ -1189,6 +1201,16 @@ async fn with_approved_plan(
         }
         None => Vec::new(),
     };
+    if status == TicketStatus::PlanReview && response.has_plan {
+        response.pending_plan = PlanningService::new(pool)
+            .latest_plan_comment(ticket_id)
+            .await
+            .map_err(|err| TicketError::Validation(err.to_string()))?
+            .map(|comment| PendingPlanResponse {
+                comment_id: comment.id,
+                markdown: comment.body,
+            });
+    }
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,

@@ -116,7 +116,7 @@ Chỉ dành cho OpenCode:
 
 | Trường | Kiểu | Mặc định | Tác dụng |
 | --- | --- | --- | --- |
-| `auto_start_runs` | bool | `false` | Khi true, giao agent cho một ticket đã có repository là tự bắt đầu chạy. Khi false, bạn bấm **Run agent**. |
+| `auto_start_runs` | bool | `true` | Khi true, giao agent cho một ticket đã có repository là tự bắt đầu chạy. Khi false, bạn bấm **Run agent**. |
 | `auto_assign.default` | bool | `true` | Bật tự giao việc cho mọi trạng thái không có thiết lập riêng. |
 | `auto_assign.<status>` | bool | `backlog`: `false`. Còn lại: theo `default` | Bật hoặc tắt tự giao việc cho một trạng thái. |
 | `auto_split.default` | bool | `false` | Bật tự tách ticket cho mọi trạng thái không có thiết lập riêng. |

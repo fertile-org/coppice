@@ -250,6 +250,7 @@ export function TicketDetailPanel({
           ticketId={ticket.id}
           boardId={ticket.boardId}
           hasPlan={ticket.hasPlan ?? true}
+          plan={ticket.pendingPlan?.markdown}
           planQuestions={ticket.planQuestions}
         />
       )}

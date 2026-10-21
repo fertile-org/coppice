@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey, type PlanQuestions } from '../board/useTickets';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
@@ -114,12 +115,15 @@ export function PlanReviewActions({
   ticketId,
   boardId,
   hasPlan = true,
+  plan,
   planQuestions,
 }: {
   ticketId: string;
   boardId: string;
   /** False while there is no plan yet: Approve and Ask for changes stay hidden. */
   hasPlan?: boolean;
+  /** The plan to review, shown right above Approve and Ask for changes. */
+  plan?: string | null;
   planQuestions?: PlanQuestions | null;
 }) {
   const queryClient = useQueryClient();
@@ -171,7 +175,23 @@ export function PlanReviewActions({
   }
 
   return (
-    <section className="space-y-3 border-t border-border pt-6">
+    <section className="space-y-3 border-t border-border pt-6" aria-label={PLAN_COPY.proposedPlan}>
+      {plan?.trim() && (
+        <>
+          <h3 className="font-display text-base font-semibold tracking-tight text-text-primary">
+            {PLAN_COPY.proposedPlan}
+          </h3>
+          <div
+            data-testid="pending-plan"
+            className="rounded-md border border-accent/40 bg-surface px-4 py-3"
+          >
+            <TicketMarkdown>{plan}</TicketMarkdown>
+          </div>
+          <p className="font-body text-xs text-text-secondary">
+            {PLAN_COPY.approveAddsToDescription}
+          </p>
+        </>
+      )}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"

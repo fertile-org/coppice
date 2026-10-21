@@ -81,8 +81,8 @@ Nút **Run agent** chỉ bật khi ticket đã có người được giao và re
 <a id="what-happens-next"></a>
 
 ## Sau đó thì sao
-1. **Plan Review.** Agent PM viết kế hoạch, và ticket chuyển sang Plan Review để chờ bạn duyệt. Bấm **Approve plan**.
-2. **Ready.** Bạn duyệt xong, ticket chuyển sang Ready. Các agent tự quyết định ai làm tiếp. Nếu không ai phù hợp, ticket sẽ để trống người được giao kèm một bình luận giải thích.
+1. **Plan Review.** Agent PM viết kế hoạch, và ticket chuyển sang Plan Review. Kế hoạch hiện ngay dưới phần mô tả, bên dưới là **Approve plan** và **Ask for changes**. Khi duyệt, kế hoạch được thêm vào mô tả dưới mục **Approved plan**, sau phần bạn viết.
+2. **Ready.** Bạn duyệt xong, ticket chuyển sang Ready. Agent Technical Lead đối chiếu kế hoạch với code, chỉ sửa kế hoạch đã duyệt khi cần, rồi chọn người làm. Agent đó bắt đầu chạy ngay. Nếu không ai phù hợp, ticket sẽ để trống người được giao kèm một bình luận giải thích.
 3. **In Progress.** Agent được giao làm việc trong git worktree riêng.
 4. **Wait for Human Review.** Bạn đọc diff, rồi bấm **Accept** trong Human Review.
 5. **Done.** Thẻ ở cột Done có thể hiện "Accepted, not merged". Mở ticket và chọn **Merge…**, hoặc **Create PR via API** nếu bạn muốn review qua pull request.

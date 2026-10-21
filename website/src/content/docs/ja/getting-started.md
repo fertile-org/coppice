@@ -81,8 +81,8 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示�
 <a id="what-happens-next"></a>
 
 ## このあと起きること
-1. **Plan Review**。PM エージェントが計画を書き、チケットが Plan Review に移ります。計画を承認するまでそこで待ちます。**Approve plan** をクリックします。
-2. **Ready**。承認すると、チケットは Ready に移ります。次に誰が作業するかはエージェントが決めます。適任者がいなければ担当者なしのままにして、理由をコメントします。
+1. **Plan Review**。PM エージェントが計画を書き、チケットが Plan Review に移ります。計画は説明のすぐ下に表示され、その下に **Approve plan** と **Ask for changes** があります。承認すると、計画はあなたの文章の後ろに **Approved plan** として説明に追加されます。
+2. **Ready**。承認すると、チケットは Ready に移ります。Technical Lead エージェントがコードと照らして計画を確認し、必要なときだけ承認済みの計画を直して、担当者を選びます。その担当エージェントはすぐに動き始めます。適任者がいなければ担当者なしのままにして、理由をコメントします。
 3. **In Progress**。割り当てられたエージェントが自分の git worktree で作業します。
 4. **Wait for Human Review**。あなたが diff を読みます。Human Review で **Accept** をクリックします。
 5. **Done**。Done のカードに "Accepted, not merged" と表示されることがあります。チケットを開いて **Merge…** を選ぶか、プルリクエストでレビューしたい場合は **Create PR via API** を選びます。

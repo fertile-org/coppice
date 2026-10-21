@@ -73,7 +73,7 @@ static_dir = "./web/dist"  # used by `coppice web start`
 # api_url = "http://127.0.0.1:5000"  # optional; defaults to server port
 
 [workflow]
-auto_start_runs = false
+auto_start_runs = true
 
 [workflow.auto_assign]
 default = true
