@@ -28,11 +28,14 @@ import { useTicketChildren, useUpdateTicket, useUploadAttachment } from './useTi
 interface TicketDetailPanelProps {
   ticket: Ticket;
   parentTicket?: TicketParentSummary | null;
+  /** False while the drawer slides in; comments and the composer mount after. */
+  commentsReady?: boolean;
 }
 
 export function TicketDetailPanel({
   ticket,
   parentTicket = null,
+  commentsReady = true,
 }: TicketDetailPanelProps) {
   const toast = useToast();
   const [, setSearchParams] = useSearchParams();
@@ -316,7 +319,15 @@ export function TicketDetailPanel({
         <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
           Comments
         </h3>
-        <TicketCommentsTab ticketId={ticket.id} />
+        {commentsReady ? (
+          <TicketCommentsTab ticketId={ticket.id} />
+        ) : (
+          <div
+            data-testid="ticket-comments-deferred"
+            aria-busy="true"
+            className="min-h-48"
+          />
+        )}
       </section>
     </div>
   );

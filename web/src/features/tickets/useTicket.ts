@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
 import { ticketsQueryKey, type Ticket } from '../board/useTickets';
@@ -293,11 +298,46 @@ async function postUnarchiveTicket(ticketId: string): Promise<Ticket> {
   return res.json() as Promise<Ticket>;
 }
 
-export function useTicket(ticketId: string | undefined) {
+/**
+ * The ticket from any cached board list (`['tickets', boardId, includeArchived]`).
+ * List tickets lack detail-only fields such as `description`.
+ */
+export function findListTicket(
+  queryClient: QueryClient,
+  ticketId: string,
+): Ticket | undefined {
+  for (const [, tickets] of queryClient.getQueriesData<Ticket[]>({
+    queryKey: ['tickets'],
+  })) {
+    const found = Array.isArray(tickets)
+      ? tickets.find((ticket) => ticket.id === ticketId)
+      : undefined;
+    if (found) return found;
+  }
+  return undefined;
+}
+
+interface UseTicketOptions {
+  /**
+   * Show the board list's copy of the ticket while the detail loads. Check
+   * `isPlaceholderData` before mounting anything that edits the ticket.
+   */
+  placeholderFromList?: boolean;
+}
+
+export function useTicket(
+  ticketId: string | undefined,
+  { placeholderFromList = false }: UseTicketOptions = {},
+) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ticketQueryKey(ticketId ?? ''),
     queryFn: () => fetchTicket(ticketId!),
     enabled: Boolean(ticketId),
+    placeholderData:
+      placeholderFromList && ticketId
+        ? () => findListTicket(queryClient, ticketId)
+        : undefined,
   });
 }
 

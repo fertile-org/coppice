@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
+import { useStableCallback } from '../../lib/useStableCallback';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
 import { codeReviewHref } from '../code/codeReviewHref';
@@ -82,9 +83,15 @@ export function BoardPage() {
   const panelOpen = filterOpen || settingsOpen;
   const reviewCapacity = useReviewCapacity(boardId);
 
+  // Keyed on the filter params only, so opening a ticket (`?ticket=`) does not
+  // recompute the board.
+  const filterKey = writeBoardFilters(
+    new URLSearchParams(),
+    parseBoardFilters(searchParams),
+  ).toString();
   const filters = useMemo(
-    () => parseBoardFilters(searchParams),
-    [searchParams],
+    () => parseBoardFilters(new URLSearchParams(filterKey)),
+    [filterKey],
   );
   const includeArchived = includeArchivedForVisibility(filters.visibility);
   const activeFilterCount = countActiveBoardFilters(filters);
@@ -106,6 +113,34 @@ export function BoardPage() {
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
   const returnTicketId = useRef<string | null>(null);
+
+  // Keep the current object when nothing changed so memoized columns skip.
+  const focusCard = useCallback((ticketId: string) => {
+    setFocusState((current) =>
+      current?.type === 'card' && current.ticketId === ticketId
+        ? current
+        : { type: 'card', ticketId },
+    );
+  }, []);
+  const focusHeading = useCallback((column: number) => {
+    setFocusState((current) =>
+      current?.type === 'heading' && current.column === column
+        ? current
+        : { type: 'heading', column },
+    );
+  }, []);
+
+  const openTicket = useStableCallback((ticketId: string) => {
+    returnTicketId.current = ticketId;
+    focusCard(ticketId);
+    setFilterOpen(false);
+    setSettingsOpen(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ticket', ticketId);
+      return next;
+    });
+  });
 
   const agentsById = useMemo(() => {
     const map = new Map<string, string>();
@@ -158,7 +193,10 @@ export function BoardPage() {
       })),
     [ticketsByStatus],
   );
-  const boardFocus = reconcileBoardFocus(columnSnapshots, focusState);
+  const boardFocus = useMemo(
+    () => reconcileBoardFocus(columnSnapshots, focusState),
+    [columnSnapshots, focusState],
+  );
   const closeDrawer = useCallback(() => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -281,18 +319,6 @@ export function BoardPage() {
     });
   }
 
-  function openTicket(ticketId: string) {
-    returnTicketId.current = ticketId;
-    setFocusState({ type: 'card', ticketId });
-    setFilterOpen(false);
-    setSettingsOpen(false);
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('ticket', ticketId);
-      return next;
-    });
-  }
-
   function restoreBoardFocus() {
     const ticketId = returnTicketId.current;
     if (!ticketId) return;
@@ -343,15 +369,15 @@ export function BoardPage() {
     commitStatus(ticketId, targetStatus);
   }
 
-  async function handleQuickAdd(title: string) {
+  const handleQuickAdd = useStableCallback(async (title: string) => {
     await createTicket.mutateAsync(title);
-  }
+  });
 
-  function handleRunPlan(ticketId: string) {
+  const handleRunPlan = useStableCallback((ticketId: string) => {
     void startPlan.mutateAsync(ticketId).catch((err: unknown) => {
       toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
     });
-  }
+  });
 
   if (!boardId) {
     return (
@@ -429,21 +455,18 @@ export function BoardPage() {
                   planRunTicketId={
                     startPlan.isPending ? (startPlan.variables ?? null) : null
                   }
-                  boardFocus={boardFocus}
-                  onCardFocus={(ticketId) =>
-                    setFocusState((current) =>
-                      current?.type === 'card' && current.ticketId === ticketId
-                        ? current
-                        : { type: 'card', ticketId },
-                    )
+                  hasBoardFocus
+                  focusedTicketId={
+                    boardFocus.type === 'card' &&
+                    columnSnapshots[columnIndex]?.ticketIds.includes(boardFocus.ticketId)
+                      ? boardFocus.ticketId
+                      : null
                   }
-                  onHeadingFocus={(index) =>
-                    setFocusState((current) =>
-                      current?.type === 'heading' && current.column === index
-                        ? current
-                        : { type: 'heading', column: index },
-                    )
+                  headingFocused={
+                    boardFocus.type === 'heading' && boardFocus.column === columnIndex
                   }
+                  onCardFocus={focusCard}
+                  onHeadingFocus={focusHeading}
                 />
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type AnimationEvent } from 'react';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import { useConnectors } from '../agents/useAgents';
 import { LiveRunView } from '../runs/LiveRunView';
@@ -48,11 +48,55 @@ interface TicketDrawerProps {
 
 const TAB_ORDER: DrawerTab[] = ['detail', 'live', 'runs'];
 
+/** The slide is 240ms; settle anyway if `animationend` never arrives. */
+const SETTLE_FALLBACK_MS = 300;
+
+function expectsSlide(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * False while the sheet slides in, so heavy content (comments, the TipTap
+ * composer) mounts after the slide instead of competing with it. Switching
+ * tickets while open has no slide, so it settles right away.
+ */
+function useSheetSettled(open: boolean, ticketId: string) {
+  const [settled, setSettled] = useState(() => !open || !expectsSlide());
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevTicketId, setPrevTicketId] = useState(ticketId);
+  if (open !== prevOpen || ticketId !== prevTicketId) {
+    const opening = open && !prevOpen;
+    setPrevOpen(open);
+    setPrevTicketId(ticketId);
+    if (opening) setSettled(!expectsSlide());
+    else if (open) setSettled(true);
+  }
+
+  useEffect(() => {
+    if (!open || settled) return;
+    const timer = window.setTimeout(() => setSettled(true), SETTLE_FALLBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, settled]);
+
+  function onAnimationEnd(event: AnimationEvent<HTMLDivElement>) {
+    // Child animations (fade-in, spinners) bubble up here too.
+    if (event.target !== event.currentTarget) return;
+    if (event.animationName !== 'sheet-in-right') return;
+    setSettled(true);
+  }
+
+  return { settled, onAnimationEnd };
+}
+
 export function TicketDrawer({
   open = true,
   onRestoreFocus,
   ...panelProps
 }: TicketDrawerProps) {
+  const { settled, onAnimationEnd } = useSheetSettled(open, panelProps.ticketId);
   return (
     <Sheet open={open} onOpenChange={(next) => !next && panelProps.onClose()}>
       <SheetContent
@@ -61,13 +105,14 @@ export function TicketDrawer({
         aria-describedby={undefined}
         className="w-[90%] max-w-[90vw]"
         data-shortcut-layer="ticket"
+        onAnimationEnd={onAnimationEnd}
         onCloseAutoFocus={(event) => {
           if (!onRestoreFocus) return;
           event.preventDefault();
           onRestoreFocus();
         }}
       >
-        <TicketDrawerPanel {...panelProps} />
+        <TicketDrawerPanel {...panelProps} settled={settled} />
       </SheetContent>
     </Sheet>
   );
@@ -77,8 +122,17 @@ function TicketDrawerPanel({
   ticketId,
   parentTicket = null,
   onClose,
-}: Omit<TicketDrawerProps, 'open'>) {
-  const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
+  settled,
+}: Omit<TicketDrawerProps, 'open' | 'onRestoreFocus'> & { settled: boolean }) {
+  const {
+    data: ticket,
+    isLoading,
+    isError,
+    isPlaceholderData,
+    refetch,
+  } = useTicket(ticketId, { placeholderFromList: true });
+  // List data lacks the description and detail fields: show the header only.
+  const detailLoaded = Boolean(ticket) && !isPlaceholderData;
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticketId);
   const { data: connectors } = useConnectors();
@@ -150,7 +204,7 @@ function TicketDrawerPanel({
   useRegisterShortcut(
     'review.accept',
     () => setAcceptOpen(true),
-    acceptShortcutEnabled(ticket),
+    detailLoaded && acceptShortcutEnabled(ticket),
   );
   useKeyboardLayer({
     focusDrawerTabs: () => {
@@ -213,6 +267,7 @@ function TicketDrawerPanel({
   }
 
   const headerBusy =
+    !detailLoaded ||
     runAgent.isPending ||
     stopRun.isPending ||
     finalApprove.isPending ||
@@ -386,12 +441,23 @@ function TicketDrawerPanel({
           </div>
         )}
 
-        {ticket && tab === 'detail' && (
+        {ticket && !detailLoaded && tab === 'detail' && (
+          <div
+            data-testid="ticket-detail-skeleton"
+            aria-busy="true"
+            className="h-full min-h-64 px-6 py-5"
+          >
+            <span className="sr-only">Loading ticket…</span>
+          </div>
+        )}
+
+        {ticket && detailLoaded && tab === 'detail' && (
           <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]">
             <div className="min-h-0 overflow-y-auto px-6 py-5">
               <TicketDetailPanel
                 ticket={ticket}
                 parentTicket={parentTicket}
+                commentsReady={settled}
               />
             </div>
             <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">

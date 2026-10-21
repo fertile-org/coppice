@@ -27,6 +27,19 @@ vi.mock('./useReviewCapacity', () => ({
 }));
 import type { Ticket } from './useTickets';
 
+// TicketCard calls planCardState once per render: count renders by ticket id.
+const cardRenders = vi.hoisted(() => ({ ids: [] as string[] }));
+vi.mock('../plan/planCardState', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../plan/planCardState')>();
+  return {
+    ...actual,
+    planCardState: (ticket: Parameters<typeof actual.planCardState>[0]) => {
+      cardRenders.ids.push((ticket as { id?: string }).id ?? '');
+      return actual.planCardState(ticket);
+    },
+  };
+});
+
 const ticketsState = vi.hoisted(() => ({
   active: [] as Ticket[],
   archived: [] as Ticket[],
@@ -352,5 +365,52 @@ describe('BoardPage ticket hierarchy', () => {
     expect(
       screen.getByRole('button', { name: 'Filters, 2 active', hidden: true }),
     ).toBeVisible();
+  });
+});
+
+describe('BoardPage render cost when opening a ticket', () => {
+  beforeEach(() => {
+    ticketsState.lastIncludeArchived = false;
+    ticketsState.archived = [];
+    ticketsState.active = [
+      makeTicket({ id: 'a', title: 'Ticket A', status: 'backlog' }),
+      makeTicket({ id: 'b', title: 'Ticket B', status: 'backlog' }),
+      makeTicket({ id: 'c', title: 'Ticket C', status: 'backlog' }),
+      makeTicket({ id: 'd', title: 'Ticket D', status: 'in_progress' }),
+      makeTicket({ id: 'e', title: 'Ticket E', status: 'in_progress' }),
+    ];
+  });
+
+  it('re-renders only the cards whose focus changed, on the first click', () => {
+    renderBoard();
+    cardRenders.ids = [];
+
+    // focusState is still null here: the default focus is card A.
+    fireEvent.click(screen.getByText('Ticket E'));
+
+    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+    const rendered = new Set(cardRenders.ids);
+    expect(rendered).not.toContain('b');
+    expect(rendered).not.toContain('c');
+    expect(rendered).not.toContain('d');
+    // A loses the tab stop and E gains it.
+    expect([...rendered].sort()).toEqual(['a', 'e']);
+  });
+
+  it('does not re-render any card when the drawer opens on the focused card', () => {
+    renderBoard();
+    fireEvent.focus(screen.getByText('Ticket D').closest('[role="button"]')!);
+    cardRenders.ids = [];
+
+    fireEvent.click(screen.getByText('Ticket D'));
+
+    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+    expect(cardRenders.ids).toEqual([]);
   });
 });

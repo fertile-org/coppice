@@ -1,7 +1,7 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Bot, GitBranch, Network } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { PLAN_COPY } from '../plan/copy';
 import { planCardState } from '../plan/planCardState';
 import { CreatePrButton } from '../tickets/TicketGitActions';
@@ -53,10 +53,11 @@ interface TicketCardProps {
   tabIndex?: number;
   boardFocusId?: string;
   boardTabStop?: boolean;
-  onFocusCard?: () => void;
+  onFocusCard?: (ticketId: string) => void;
 }
 
-export function TicketCard({
+/** Memoized: opening the drawer must not re-render every card on the board. */
+export const TicketCard = memo(function TicketCard({
   ticket,
   hierarchy,
   onOpen,
@@ -115,7 +116,7 @@ export function TicketCard({
         onClick={() => {
           if (!isDragging) onOpen(ticket.id);
         }}
-        onFocus={() => onFocusCard?.()}
+        onFocus={() => onFocusCard?.(ticket.id)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -241,7 +242,7 @@ export function TicketCard({
       )}
     </div>
   );
-}
+});
 
 /** Resolve assignee label for a card; returns undefined when unassigned. */
 export function resolveAssigneeName(
