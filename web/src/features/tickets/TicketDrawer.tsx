@@ -279,7 +279,7 @@ function TicketDrawerPanel({
 
   return (
     <>
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
+      <header className="flex shrink-0 items-end justify-between gap-4 border-b border-border px-6 py-4">
         <div className="min-w-0">
           <p className="font-body text-xs uppercase tracking-wide text-text-muted">
             Ticket
