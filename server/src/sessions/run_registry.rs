@@ -255,4 +255,44 @@ mod tests {
         handle.note_reported_model("gpt-5");
         assert_eq!(handle.reported_model().as_deref(), Some("composer-2.5"));
     }
+
+    #[test]
+    fn live_buffer_keeps_only_the_last_500_messages() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(Uuid::new_v4());
+        for seq in 0..600 {
+            handle.publish_frame(seq, format!("line-{seq}\n").into_bytes());
+        }
+        let tail = handle.buffered_tail();
+        assert_eq!(tail.len(), 500);
+        match &tail[0] {
+            LiveMessage::Frame { seq, .. } => assert_eq!(*seq, 100),
+            other => panic!("expected first kept frame, got {other:?}"),
+        }
+        match tail.last() {
+            Some(LiveMessage::Frame { seq, .. }) => assert_eq!(*seq, 599),
+            other => panic!("expected last frame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_drops_the_handle_so_ten_runs_do_not_accumulate() {
+        let registry = RunStreamRegistry::new();
+        let mut ids = Vec::new();
+        for _ in 0..10 {
+            let id = Uuid::new_v4();
+            let handle = registry.register(id);
+            for seq in 0..80 {
+                handle.publish_frame(seq, b"chunk\n".to_vec());
+            }
+            ids.push(id);
+            registry.remove(id);
+        }
+        for id in ids {
+            assert!(
+                registry.get(id).is_none(),
+                "stream {id} stayed after remove"
+            );
+        }
+    }
 }

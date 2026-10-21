@@ -410,3 +410,96 @@ async fn reject_run_when_agent_provider_missing_config() {
         "OpenCode is turned off. Turn it on in System → Connectors, or switch this agent to another connector."
     );
 }
+
+fn process_rss_kb() -> u64 {
+    let status = std::fs::read_to_string("/proc/self/status").expect("status");
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            return rest
+                .split_whitespace()
+                .next()
+                .expect("VmRSS value")
+                .parse()
+                .expect("VmRSS kb");
+        }
+    }
+    panic!("VmRSS missing from /proc/self/status");
+}
+
+async fn wait_stream_gone(state: &std::sync::Arc<coppice_server::AppState>, run_id: uuid::Uuid) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if state.run_streams.get(run_id).is_none() {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("run stream {run_id} was still registered after the run ended");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Ten sequential MockProvider runs on one ticket. Server RSS is sampled after
+/// runs 1, 5 and 10. Growth during a real desktop run is rustc/cargo in the
+/// connector tree, not this in-process mock path — this catches a leftover
+/// live buffer or stream handle.
+#[tokio::test]
+async fn ten_mock_runs_do_not_grow_server_rss_or_leave_streams() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("backend_engineer/continued", |_| {})
+            .await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let mut samples = Vec::new();
+    let mut run_ids = Vec::new();
+    for n in 1..=10 {
+        let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::CREATED, "run {n}");
+        let run_id = body.as_ref().unwrap()["run"]["id"]
+            .as_str()
+            .unwrap()
+            .parse::<uuid::Uuid>()
+            .expect("run id");
+        run_ids.push(run_id);
+
+        let run = poll_run_until(
+            &app,
+            &ticket_id,
+            &cookie,
+            &csrf,
+            "succeeded",
+            Duration::from_secs(15),
+        )
+        .await;
+        assert_eq!(run["id"].as_str().unwrap(), run_id.to_string());
+        wait_stream_gone(&state, run_id).await;
+
+        if n == 1 || n == 5 || n == 10 {
+            samples.push((n, process_rss_kb()));
+        }
+    }
+
+    for run_id in &run_ids {
+        assert!(
+            state.run_streams.get(*run_id).is_none(),
+            "stream {run_id} leaked after ten runs"
+        );
+    }
+
+    let after1 = samples[0].1;
+    let slack = after1 / 100 * 15 + 8 * 1024;
+    for (n, rss) in &samples[1..] {
+        assert!(
+            *rss <= after1 + slack,
+            "server RSS grew steadily across mock runs: after 1 = {after1} KB, after {n} = {rss} KB (samples {samples:?})"
+        );
+    }
+}
