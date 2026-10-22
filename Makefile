@@ -15,7 +15,12 @@ export COPPICE_GID ?= $(shell id -g)
 
 .PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke gen-icons e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot screenshot-docs benchmark-m06-knowledge-retrieval release-tar
 
-CARGO_TEST = cargo test --features embedded-test-db
+# Bound rustc parallelism so `make test` fits in 16 GB. Override for low-mem:
+#   make test CARGO_BUILD_JOBS=2 NEXTEST_PROFILE=low-mem
+CARGO_BUILD_JOBS ?= 4
+NEXTEST_PROFILE ?= default
+
+CARGO_TEST = CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo test --features embedded-test-db
 
 # Create /tmp/smoke-repo inside the server container as COPPICE_UID (matches API process).
 define SMOKE_REPO_SETUP
@@ -61,11 +66,11 @@ bootstrap:
 tools:
 	cargo install --locked cargo-nextest cargo-watch
 
-# Full suite in parallel via cargo-nextest (one process and database per test, ~1 min warm).
+# Full suite in parallel via cargo-nextest (one process and database per test, ~2.5 min warm).
 # Falls back to the serial cargo test runner when nextest is not installed.
 test:
 	@if cargo nextest --version >/dev/null 2>&1; then \
-		cargo nextest run --features embedded-test-db --workspace; \
+		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
 	else \
 		echo "cargo-nextest not found; running serially (install: https://nexte.st)"; \
 		$(CARGO_TEST) --workspace -- --test-threads 1; \
@@ -78,8 +83,8 @@ test-unit:
 # Smoke integration — lib + health + comments + tickets (~target <60s warm).
 test-smoke:
 	@if cargo nextest --version >/dev/null 2>&1; then \
-		cargo nextest run --features embedded-test-db --workspace --lib && \
-		cargo nextest run --features embedded-test-db -p coppice-server --test health --test integration_comments --test integration_tickets; \
+		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --lib --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS) && \
+		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db -p coppice-server --test health --test integration_comments --test integration_tickets --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
 	else \
 		$(CARGO_TEST) --workspace --lib -q -- --test-threads 1 && \
 		$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q; \

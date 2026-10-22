@@ -55,7 +55,7 @@ cargo test -p coppice-server --features embedded-test-db --test integration_chat
 - Escape hatch for debugging against compose: `COPPICE_TEST_USE_EXTERNAL_DB=1` + `DATABASE_URL=postgres://coppice:coppice@127.0.0.1:5433/coppice`. This path uses the caller's shared database, so run database tests serially.
 - One embedded PostgreSQL process is shared across test binaries. Migrations run once per fingerprinted template; each pool clones a fresh database from that template, so library tests are safe under Rust's parallel runner.
 - `make test` and CI use cargo-nextest, which runs every test in its own process, so tests that set process environment (`MOCK_AGENT_RESPONSE`, …) don't race. `DB_TEST_LOCK` only matters under plain `cargo test`, which runs a binary's tests as threads of one process; `truncate_workspace()` preserves the external-database escape hatch.
-- `.config/nextest.toml` kills any test still running after 2 minutes, so a hang fails the run instead of stalling it.
+- `.config/nextest.toml` caps default/CI concurrency at 8 test threads (sized for 16 GB) and kills any test still running after 2 minutes, so a hang fails the run instead of stalling it.
 - Auth: `login_and_csrf()` performs bootstrap login, returns session cookie + CSRF token
 - Artifact dir: `/tmp/coppice-test-artifacts`
 
@@ -70,13 +70,42 @@ make test
 | Cause | Effect |
 |-------|--------|
 | **Many integration binaries** | Each links the full server; cold compile is ~2 min |
-| **Serial runner** | `cargo test -- --test-threads 1` runs ~1100 tests one by one (~6 min); nextest runs them in parallel (~25 s on 16 cores) |
+| **Serial runner** | `cargo test -- --test-threads 1` runs the suite one by one (~6 min); nextest defaults to 8 threads (see [Memory caps](#memory-caps-16-gb-default)) |
 | **Password hashing** | Argon2 is unusably slow unoptimized and every integration test logs in, so the root `Cargo.toml` builds `argon2`/`blake2` at `opt-level = 3` in the dev profile |
 | **Git-heavy tests** (`integration_plugins`, `integration_repo_git`) | Create and clone real repos, ~1 s each |
 
-**Typical wall times** (warm build, 16 cores): `make test` ~25 s of test execution; serial fallback ~6 min.
+**Typical wall times** (warm build, 16 cores, default 8 nextest threads): `make test` ~2.5 min wall / ~2 min of test execution; serial fallback ~6 min.
 
-**Agent / OpenCode runs:** prefer fast iteration during a ticket:
+### Memory caps (16 GB default)
+
+Unbounded nextest (`test-threads = num-cpus`) plus uncapped `rustc` jobs OOM a 16 GB machine. Measured on a 16-core / 29 GB host (process-tree RSS sampled every 250 ms):
+
+| Run | Wall | Test execution | Peak RSS | Result |
+|-----|------|----------------|----------|--------|
+| Before (unbounded jobs + threads, full debug) | 5:42 | 71 s (fail-fast after 1592/1727) | **21.6 GiB** | would OOM 16 GB |
+| After (defaults below), including test-profile rebuild | 6:14 | 131 s (1727 passed) | 5.7 GiB | fits 16 GB |
+| After, warm | 2:45 | 129 s (1727 passed) | 4.3 GiB | fits 16 GB |
+
+The wall-clock cost is extra test execution (~71 s unbounded vs ~129 s capped, ~1.8×) from `test-threads = 8` and `threads-required` on heavy binaries. That is the trade for dropping peak RSS from 22 GiB to ~4–6 GiB. Defaults:
+
+| Cap | Default | Where |
+|-----|---------|--------|
+| nextest `test-threads` | 8 | `.config/nextest.toml` profiles `default` and `ci` |
+| `threads-required` | 4 | Heavy integration binaries: `integration_plugins`, `integration_repo_git`, `integration_ticket_git`, `integration_knowledge`, `integration_knowledge_compaction`, `integration_workflow`, `integration_mcp`, `integration_desktop` |
+| cargo build jobs | 4 | `make test` / `make test-smoke` / `make test-unit` via `CARGO_BUILD_JOBS` (CI passes `--build-jobs 4`) |
+| test debuginfo | `line-tables-only` | root `Cargo.toml` `[profile.test]` — cuts rustc/linker RSS; backtraces still have line numbers |
+
+**Low-memory override** (~8 GB):
+
+```bash
+make test CARGO_BUILD_JOBS=2 NEXTEST_PROFILE=low-mem
+# or
+CARGO_BUILD_JOBS=2 cargo nextest run --features embedded-test-db --workspace --profile low-mem --build-jobs 2
+```
+
+`low-mem` uses `test-threads = 2` and `threads-required = 2` for those same heavy binaries (one heavy test at a time). `NEXTEST_TEST_THREADS` also overrides the profile thread cap.
+
+Agents should not run the full suite while iterating — use targeted tests ([AGENTS.md](../AGENTS.md) rule 7):
 
 ```bash
 make test-unit              # parallel lib tests only (~seconds)
