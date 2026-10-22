@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Repo } from '../../lib/schemas/repo';
 import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
 import type { DefaultBranchSyncStatus } from './useRepos';
@@ -79,13 +81,17 @@ const DIRTY_PUSH =
   'Main repository has uncommitted changes — commit or stash before pushing';
 const NO_REMOTE = 'Set repository remote URL in Settings → Repositories';
 
+function renderControls(ui: ReactElement) {
+  return render(<ConfirmProvider>{ui}</ConfirmProvider>);
+}
+
 describe('DefaultBranchSyncControls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('enables Fetch and Push when status allows both', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls repo={repo} statusOverride={baseStatus()} />,
     );
 
@@ -96,7 +102,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('enables Pull from server canPull and disables Push when behind', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -119,7 +125,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('shows one uncommitted-changes line for a dirty tree', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -144,7 +150,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('keeps the push-disabled reason next to the dirty-tree line', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -165,7 +171,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('does not repeat not-behind / not-ahead when in sync', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -187,7 +193,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('shows "Fetch remote first" once when there is no remote ref', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -206,7 +212,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('shows the missing remote URL reason once', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -227,7 +233,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('shows both hints when diverged', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -248,7 +254,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('disables Push and surfaces pushDisabledReason when canPush is false', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -273,7 +279,7 @@ describe('DefaultBranchSyncControls', () => {
   });
 
   it('disables Fetch when canFetch is false and shows reason', () => {
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -297,9 +303,8 @@ describe('DefaultBranchSyncControls', () => {
 
   it('confirms before pushing', async () => {
     const onPush = vi.fn();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus()}
@@ -308,16 +313,17 @@ describe('DefaultBranchSyncControls', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Push to remote' }));
-    expect(confirm).toHaveBeenCalled();
-    expect(onPush).toHaveBeenCalled();
-    confirm.mockRestore();
+    const dialog = await screen.findByRole('dialog', {
+      name: /Push local `main` to the remote default branch/,
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(onPush).toHaveBeenCalled());
   });
 
   it('confirms before pulling', async () => {
     const onPull = vi.fn();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(
+    renderControls(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
@@ -332,8 +338,10 @@ describe('DefaultBranchSyncControls', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Pull' }));
-    expect(confirm).toHaveBeenCalled();
-    expect(onPull).toHaveBeenCalled();
-    confirm.mockRestore();
+    const dialog = await screen.findByRole('dialog', {
+      name: /Pull remote `main` into the local default branch/,
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(onPull).toHaveBeenCalled());
   });
 });

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { selectComboboxOption } from '../../test/combobox';
 import { PluginsPage } from './PluginsPage';
 
@@ -102,7 +103,9 @@ function renderPage() {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PluginsPage />
+        <ConfirmProvider>
+          <PluginsPage />
+        </ConfirmProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -191,24 +194,21 @@ describe('PluginsPage', () => {
   });
 
   it('enabling plugin with stdio server asks for confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPage();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
-
-    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(mocks.apiFetch).not.toHaveBeenCalledWith(
       `/api/plugins/${samplePlugin.id}`,
       expect.objectContaining({ method: 'PATCH' }),
     );
-    confirm.mockRestore();
   });
 
   it('enabling plugin with only http servers does not confirm', async () => {
     plugins = [
       { ...samplePlugin, mcpServers: [{ name: 'docs', kind: 'http', health: 'stopped' }] },
     ];
-    const confirm = vi.spyOn(window, 'confirm');
     renderPage();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
@@ -219,15 +219,15 @@ describe('PluginsPage', () => {
         expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ enabled: true }) }),
       ),
     );
-    expect(confirm).not.toHaveBeenCalled();
-    confirm.mockRestore();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('toggling enable sends PATCH', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
+    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() =>
       expect(mocks.apiFetch).toHaveBeenCalledWith(
@@ -238,8 +238,6 @@ describe('PluginsPage', () => {
         }),
       ),
     );
-    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
-    confirm.mockRestore();
   });
 
   it('install posts git url and shows failure', async () => {
@@ -417,5 +415,55 @@ describe('PluginsPage', () => {
     expect(within(defaultRow).queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument();
     const extraRow = screen.getByTestId(`plugin-dir-${extraDir.id}`);
     expect(within(extraRow).getByRole('button', { name: /Remove/ })).toBeVisible();
+  });
+
+  it('canceling remove plugin directory leaves the directory in place', async () => {
+    renderPage();
+
+    const extraRow = await screen.findByTestId(`plugin-dir-${extraDir.id}`);
+    fireEvent.click(within(extraRow).getByRole('button', { name: /Remove/ }));
+    const dialog = await screen.findByRole('dialog', {
+      name: `Remove plugin directory "${extraDir.path}"?`,
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(mocks.apiFetch).not.toHaveBeenCalledWith(
+      `/api/plugin-dirs/${extraDir.id}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('confirming remove plugin directory deletes it', async () => {
+    mocks.apiFetch.mockImplementation((path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/plugin-dirs' && method === 'GET') {
+        return Promise.resolve(json(dirs));
+      }
+      if (path === '/api/plugins' && method === 'GET') {
+        return Promise.resolve(json(plugins));
+      }
+      if (path === '/api/agents' && method === 'GET') {
+        return Promise.resolve(json({ items: [] }));
+      }
+      if (path === `/api/plugin-dirs/${extraDir.id}` && method === 'DELETE') {
+        return Promise.resolve(json(null));
+      }
+      return Promise.reject(new Error(`unexpected ${method} ${path}`));
+    });
+    renderPage();
+
+    const extraRow = await screen.findByTestId(`plugin-dir-${extraDir.id}`);
+    fireEvent.click(within(extraRow).getByRole('button', { name: /Remove/ }));
+    const dialog = await screen.findByRole('dialog', {
+      name: `Remove plugin directory "${extraDir.path}"?`,
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/plugin-dirs/${extraDir.id}`,
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
   });
 });

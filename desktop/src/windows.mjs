@@ -2,6 +2,7 @@ import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isExternalHttpUrl, isSameOrigin } from './navigation.mjs';
+import { attachMainWindowFocus } from './windowFocus.mjs';
 
 const DESKTOP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATIC_DIR = path.join(DESKTOP_DIR, 'static');
@@ -57,6 +58,7 @@ export function createMainWindow({ origin }) {
     console.error('preload failed:', preloadPath, error);
   });
   restrictNavigation(win, origin);
+  attachMainWindowFocus(win);
   win.once('ready-to-show', () => win.show());
   return win;
 }

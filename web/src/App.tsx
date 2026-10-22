@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
+import { ConfirmProvider } from './components/ui/confirm-dialog';
 import { ToastProvider, useToast } from './components/ToastProvider';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AgentsPage } from './features/agents/AgentsPage';
@@ -71,6 +72,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+      <ConfirmProvider>
       <BrowserRouter>
         <AuthProvider>
           <KeyboardProvider>
@@ -110,6 +112,7 @@ function App() {
           </KeyboardProvider>
         </AuthProvider>
       </BrowserRouter>
+      </ConfirmProvider>
       </ToastProvider>
     </QueryClientProvider>
   );

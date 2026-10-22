@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Repo } from '../../lib/schemas/repo';
 import { RepositoriesPage } from './RepositoriesPage';
 
@@ -63,6 +64,14 @@ vi.mock('../../components/ToastProvider', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
 
+function renderPage() {
+  return render(
+    <ConfirmProvider>
+      <RepositoriesPage />
+    </ConfirmProvider>,
+  );
+}
+
 describe('RepositoriesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -77,7 +86,7 @@ describe('RepositoriesPage', () => {
   });
 
   it('shows a list-only page for admins without a side form or token selector', () => {
-    render(<RepositoriesPage />);
+    renderPage();
 
     expect(screen.getByRole('heading', { name: 'Repositories' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Add repository' })).toBeVisible();
@@ -98,7 +107,7 @@ describe('RepositoriesPage', () => {
   });
 
   it('opens a create drawer from Add repository and closes on Escape and backdrop', async () => {
-    render(<RepositoriesPage />);
+    renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add repository' }));
 
@@ -124,7 +133,7 @@ describe('RepositoriesPage', () => {
   });
 
   it('opens an edit drawer with verify, remove, and sync controls (no forge token)', () => {
-    render(<RepositoriesPage />);
+    renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
@@ -144,7 +153,7 @@ describe('RepositoriesPage', () => {
 
   it('asks for a forge token again only after import marks it', () => {
     mocks.repos = [{ ...sampleRepo, forgeTokenNeedsReentry: true }];
-    render(<RepositoriesPage />);
+    renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
@@ -161,7 +170,7 @@ describe('RepositoriesPage', () => {
 
   it('hides admin controls for non-admins but keeps View code', () => {
     mocks.role = 'member';
-    render(<RepositoriesPage />);
+    renderPage();
 
     expect(screen.getByText('coppice')).toBeVisible();
     expect(screen.getByRole('button', { name: 'View code' })).toBeVisible();
@@ -177,5 +186,31 @@ describe('RepositoriesPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Remove' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('canceling remove repository leaves it in place', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Edit repository' })).getByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Remove repository "coppice"?',
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it('confirming remove repository deletes it', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Edit repository' })).getByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Remove repository "coppice"?',
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(sampleRepo.id));
   });
 });

@@ -4,6 +4,7 @@ import type { HumanReview, Ticket } from '../board/useTickets';
 import { useToast } from '../../components/ToastProvider';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -59,6 +60,7 @@ function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
 
 export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const toast = useToast();
+  const confirm = useConfirm();
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const assignAgent = useAssignAgent(ticket.id);
@@ -107,9 +109,9 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
 
     const label = splits.length === 1 ? '1 child ticket' : `${splits.length} child tickets`;
     if (
-      !window.confirm(
-        `Create ${label} from this split recommendation? The parent ticket will remain unchanged.`,
-      )
+      !(await confirm({
+        title: `Create ${label} from this split recommendation? The parent ticket will remain unchanged.`,
+      }))
     ) {
       return;
     }

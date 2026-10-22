@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import type { Repo } from '../../lib/schemas/repo';
@@ -116,6 +117,7 @@ export function DefaultBranchSyncControls({
   pullPending: pullPendingOverride,
 }: DefaultBranchSyncControlsProps) {
   const toast = useToast();
+  const confirm = useConfirm();
   const enabled = statusOverride == null && repo.verificationStatus === 'ready';
   const { data: fetched, isLoading } = useDefaultBranchSync(repo.id, enabled);
   const fetchMutation = useFetchDefaultBranch(repo.id);
@@ -151,9 +153,9 @@ export function DefaultBranchSyncControls({
 
   async function handlePull() {
     if (
-      !window.confirm(
-        `Pull remote \`${repo.defaultBranch}\` into the local default branch?\n\nThis fast-forwards the registered checkout only when it is strictly behind (no merge or rebase).`,
-      )
+      !(await confirm({
+        title: `Pull remote \`${repo.defaultBranch}\` into the local default branch?\n\nThis fast-forwards the registered checkout only when it is strictly behind (no merge or rebase).`,
+      }))
     ) {
       return;
     }
@@ -175,9 +177,9 @@ export function DefaultBranchSyncControls({
 
   async function handlePush() {
     if (
-      !window.confirm(
-        `Push local \`${repo.defaultBranch}\` to the remote default branch?\n\nThis updates the remote to match your local checkout (no force).`,
-      )
+      !(await confirm({
+        title: `Push local \`${repo.defaultBranch}\` to the remote default branch?\n\nThis updates the remote to match your local checkout (no force).`,
+      }))
     ) {
       return;
     }

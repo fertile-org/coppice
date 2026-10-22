@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../components/ToastProvider';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { ApiError } from '../../lib/api';
 import type { Ticket } from '../board/useTickets';
 import { TicketGitActions } from './TicketGitActions';
@@ -11,6 +12,7 @@ import type { TicketGitInfo } from './useTicket';
 const rebaseMutateAsync = vi.fn();
 const mergeMutateAsync = vi.fn();
 const resolveMutateAsync = vi.fn();
+const removeWorktreeMutateAsync = vi.fn();
 const gitInfoState: { data: TicketGitInfo | undefined; isLoading: boolean } = {
   data: undefined,
   isLoading: false,
@@ -33,7 +35,10 @@ vi.mock('./useTicket', () => ({
     mutateAsync: resolveMutateAsync,
     isPending: false,
   }),
-  useRemoveWorktree: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveWorktree: () => ({
+    mutateAsync: removeWorktreeMutateAsync,
+    isPending: false,
+  }),
   usePushTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateTicketPr: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -71,7 +76,9 @@ function renderActions(ticket: Ticket) {
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <TicketGitActions ticket={ticket} />
+        <ConfirmProvider>
+          <TicketGitActions ticket={ticket} />
+        </ConfirmProvider>
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -82,6 +89,8 @@ describe('TicketGitActions', () => {
     rebaseMutateAsync.mockReset();
     mergeMutateAsync.mockReset();
     resolveMutateAsync.mockReset();
+    removeWorktreeMutateAsync.mockReset();
+    removeWorktreeMutateAsync.mockResolvedValue(undefined);
     resolveMutateAsync.mockResolvedValue({ run: { id: 'run-1' } });
     gitInfoState.data = { ...baseGitInfo };
     gitInfoState.isLoading = false;
@@ -344,5 +353,30 @@ describe('TicketGitActions', () => {
 
     expect(await screen.findAllByText(reason)).not.toHaveLength(0);
     expect(screen.queryByRole('button', { name: /Ask .+ to resolve/ })).not.toBeInTheDocument();
+  });
+
+  it('cancels remove worktree without calling the API', async () => {
+    renderActions(makeTicket({ status: 'wait_for_final_review' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: /Remove worktree at:/,
+    });
+    expect(dialog).toHaveTextContent(baseGitInfo.worktreePath);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(removeWorktreeMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('removes the worktree after confirm', async () => {
+    renderActions(makeTicket({ status: 'wait_for_final_review' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: /Remove worktree at:/,
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(removeWorktreeMutateAsync).toHaveBeenCalled());
   });
 });

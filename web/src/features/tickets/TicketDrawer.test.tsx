@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { useKeyboardEnvironment } from '../keyboard/useKeyboard';
 import { ApiError } from '../../lib/api';
@@ -189,12 +190,14 @@ function renderDrawer(parentTicket: TicketParentSummary | null = null) {
     <MemoryRouter initialEntries={[`/?ticket=${ticketState.ticket.id}`]}>
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <TicketDrawer
-            ticketId="00000000-0000-0000-0000-000000000001"
-            parentTicket={parentTicket}
-            onClose={() => {}}
-          />
-          <LocationProbe />
+          <ConfirmProvider>
+            <TicketDrawer
+              ticketId="00000000-0000-0000-0000-000000000001"
+              parentTicket={parentTicket}
+              onClose={() => {}}
+            />
+            <LocationProbe />
+          </ConfirmProvider>
         </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -577,11 +580,13 @@ describe('TicketDrawer keyboard sections', () => {
         <KeyboardProvider>
           <QueryClientProvider client={client}>
             <ToastProvider>
-              <DrawerKeyboardEnvironment />
-              <TicketDrawer
-                ticketId="00000000-0000-0000-0000-000000000001"
-                onClose={() => {}}
-              />
+              <ConfirmProvider>
+                <DrawerKeyboardEnvironment />
+                <TicketDrawer
+                  ticketId="00000000-0000-0000-0000-000000000001"
+                  onClose={() => {}}
+                />
+              </ConfirmProvider>
             </ToastProvider>
           </QueryClientProvider>
         </KeyboardProvider>
