@@ -644,7 +644,7 @@ async fn connector_without_read_only_enforcement_fails_closed() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let fx = Fixture::with_workers("", |_| {}).await;
     let agent_id = fx.configure_agent().await;
-    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
         .bind(agent_id)
         .execute(fx.pool())
         .await
@@ -657,6 +657,39 @@ async fn connector_without_read_only_enforcement_fails_closed() {
     let message = batch.error_message.unwrap();
     assert!(message.contains("cannot enforce read-only"), "{message}");
     assert_eq!(fx.count("SELECT count(*) FROM knowledge_items").await, 0);
+}
+
+#[tokio::test]
+async fn codex_agent_can_be_saved_as_the_compaction_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    let agent_id = Uuid::parse_str(
+        &common::create_agent_with_preset_key(
+            &fx.app,
+            "backend_engineer",
+            "Codex Compactor",
+            &fx.cookie,
+            &fx.csrf,
+        )
+        .await,
+    )
+    .unwrap();
+    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
+        .bind(agent_id)
+        .execute(fx.pool())
+        .await
+        .unwrap();
+    WorkspaceSettingsService::new(fx.pool())
+        .set_knowledge_compaction_agent(Some(agent_id), fx.admin_id().await)
+        .await
+        .unwrap();
+    let saved = WorkspaceSettingsService::new(fx.pool())
+        .knowledge_compaction_agent()
+        .await
+        .unwrap()
+        .expect("compaction agent");
+    assert_eq!(saved.id, agent_id);
+    assert_eq!(saved.connector, "codex");
 }
 
 #[tokio::test]

@@ -219,7 +219,7 @@ pub const CODEX: RunContract = RunContract {
         read_only_min_version: None,
         min_version: None,
         gate: false,
-        reason: "Ticket runs bypass approvals and the sandbox. Chat passes --sandbox read-only and never the bypass flag. A signed-in write with that flag was not shown to be blocked (codex-cli 0.162.1 exited 401), so chat still runs in a temporary clone.",
+        reason: "Ticket runs bypass approvals and the sandbox. Chat passes --sandbox read-only and never the bypass flag. On codex-cli 0.163.0 (Linux, signed in) that blocked a shell write and a file write (tests/real_codex.rs).",
     },
     leading: &[
         gated(
