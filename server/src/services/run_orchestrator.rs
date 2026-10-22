@@ -289,17 +289,23 @@ impl<'a> RunOrchestrator<'a> {
             }
         }
 
-        let comment = CommentService::new(self.pool)
-            .create(
-                ticket_id,
-                AuthorType::Agent,
-                Some(run.agent_id),
-                &apply.comment.body,
-                apply.comment.intent,
-                &[],
-                &collaboration_targets.keys,
+        let comment = if apply.comment.intent == CommentIntent::Plan {
+            None
+        } else {
+            Some(
+                CommentService::new(self.pool)
+                    .create(
+                        ticket_id,
+                        AuthorType::Agent,
+                        Some(run.agent_id),
+                        &apply.comment.body,
+                        apply.comment.intent,
+                        &[],
+                        &collaboration_targets.keys,
+                    )
+                    .await?,
             )
-            .await?;
+        };
 
         for notice in &action.system_comments {
             CommentService::new(self.pool)
@@ -317,7 +323,7 @@ impl<'a> RunOrchestrator<'a> {
 
         let mentions = if collaboration_targets.agent_ids.is_empty() {
             Vec::new()
-        } else {
+        } else if let Some(comment) = comment.as_ref() {
             let resume_agent_id =
                 if apply.run_status == RunStatus::Blocked && run.job_type == "work_on_ticket" {
                     Some(run.agent_id)
@@ -332,6 +338,8 @@ impl<'a> RunOrchestrator<'a> {
                     resume_agent_id,
                 )
                 .await?
+        } else {
+            Vec::new()
         };
 
         self.persist_and_publish_mentions(&mentions).await;
@@ -377,7 +385,7 @@ impl<'a> RunOrchestrator<'a> {
             {
                 let options = if job_req.job_type == "respond_to_mention" {
                     StartRunOptions {
-                        trigger_comment_id: Some(comment.id),
+                        trigger_comment_id: comment.as_ref().map(|posted| posted.id),
                         ..StartRunOptions::default()
                     }
                 } else {

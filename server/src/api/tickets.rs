@@ -204,14 +204,16 @@ struct AttachmentSummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingPlanResponse {
-    comment_id: Uuid,
+    plan_id: Uuid,
+    revision: i32,
     markdown: String,
+    change_requests: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovedPlanResponse {
-    comment_id: Uuid,
+    plan_id: Uuid,
     markdown: String,
     steps: Vec<String>,
     /// The plan's acceptance criteria, each with the latest result for the
@@ -1182,17 +1184,23 @@ async fn with_approved_plan(
         None => Vec::new(),
     };
     if status == TicketStatus::PlanReview && response.has_plan {
-        response.pending_plan = PlanningService::new(pool)
-            .latest_plan_comment(ticket_id)
-            .await
-            .map_err(|err| TicketError::Validation(err.to_string()))?
-            .map(|comment| PendingPlanResponse {
-                comment_id: comment.id,
-                markdown: comment.body,
-            });
+        let planning = PlanningService::new(pool);
+        response.pending_plan = match planning.latest_plan(ticket_id).await {
+            Ok(Some(latest)) => Some(PendingPlanResponse {
+                plan_id: latest.id,
+                revision: latest.revision,
+                markdown: latest.body,
+                change_requests: planning
+                    .change_requests(ticket_id)
+                    .await
+                    .map_err(|err| TicketError::Validation(err.to_string()))?,
+            }),
+            Ok(None) => None,
+            Err(err) => return Err(TicketError::Validation(err.to_string())),
+        };
     }
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
-        comment_id: plan.comment_id,
+        plan_id: plan.plan_id,
         markdown: plan.markdown,
         steps: plan.steps,
         criteria,

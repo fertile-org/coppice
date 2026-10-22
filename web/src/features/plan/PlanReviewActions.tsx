@@ -116,6 +116,8 @@ export function PlanReviewActions({
   boardId,
   hasPlan = true,
   plan,
+  revision,
+  changeRequests = [],
   planQuestions,
 }: {
   ticketId: string;
@@ -124,6 +126,8 @@ export function PlanReviewActions({
   hasPlan?: boolean;
   /** The plan to review, shown right above Approve and Ask for changes. */
   plan?: string | null;
+  revision?: number;
+  changeRequests?: string[];
   planQuestions?: PlanQuestions | null;
 }) {
   const queryClient = useQueryClient();
@@ -178,15 +182,32 @@ export function PlanReviewActions({
     <section className="space-y-3 border-t border-border pt-6" aria-label={PLAN_COPY.proposedPlan}>
       {plan?.trim() && (
         <>
-          <h3 className="font-display text-base font-semibold tracking-tight text-text-primary">
-            {PLAN_COPY.proposedPlan}
-          </h3>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="font-display text-base font-semibold tracking-tight text-text-primary">
+              {PLAN_COPY.proposedPlan}
+            </h3>
+            {revision != null && (
+              <p className="font-body text-xs text-text-secondary">{PLAN_COPY.revision(revision)}</p>
+            )}
+          </div>
           <div
             data-testid="pending-plan"
             className="rounded-md border border-accent/40 bg-surface px-4 py-3"
           >
             <TicketMarkdown>{plan}</TicketMarkdown>
           </div>
+          {changeRequests.length > 0 && (
+            <details className="rounded-md border border-border bg-surface px-3 py-2">
+              <summary className="cursor-pointer font-body text-sm text-text-primary">
+                {PLAN_COPY.requestedChanges}
+              </summary>
+              <ol className="mt-2 list-decimal space-y-2 pl-5 font-body text-sm text-text-primary">
+                {changeRequests.map((request, index) => (
+                  <li key={`${index}-${request.slice(0, 24)}`}>{request}</li>
+                ))}
+              </ol>
+            </details>
+          )}
           <p className="font-body text-xs text-text-secondary">
             {PLAN_COPY.approveAddsToDescription}
           </p>

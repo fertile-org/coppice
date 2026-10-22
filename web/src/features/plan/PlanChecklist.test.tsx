@@ -9,7 +9,7 @@ describe('PlanChecklist', () => {
     render(
       <PlanChecklist
         plan={{
-          commentId: 'c1',
+          planId: 'c1',
           markdown: '## Plan',
           steps: ['Add the column', 'Gate In Progress'],
         }}
@@ -29,7 +29,7 @@ describe('PlanChecklist', () => {
 
   it('says when the plan has no steps', () => {
     render(
-      <PlanChecklist plan={{ commentId: 'c1', markdown: '## Plan', steps: [] }} />,
+      <PlanChecklist plan={{ planId: 'c1', markdown: '## Plan', steps: [] }} />,
     );
     expect(screen.getByText(PLAN_COPY.noSteps)).toBeVisible();
   });
@@ -38,7 +38,7 @@ describe('PlanChecklist', () => {
     render(
       <PlanChecklist
         plan={{
-          commentId: 'c1',
+          planId: 'c1',
           markdown: '## Plan',
           steps: ['Write the gate'],
           criteria: [
@@ -65,7 +65,7 @@ describe('PlanChecklist', () => {
 
   it('shows only steps when the plan has no criteria', () => {
     render(
-      <PlanChecklist plan={{ commentId: 'c1', markdown: '## Plan', steps: ['One'], criteria: [] }} />,
+      <PlanChecklist plan={{ planId: 'c1', markdown: '## Plan', steps: ['One'], criteria: [] }} />,
     );
     expect(screen.queryByRole('region', { name: PLAN_COPY.criteria })).not.toBeInTheDocument();
     expect(screen.queryByText(PLAN_COPY.steps)).not.toBeInTheDocument();

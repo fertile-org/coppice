@@ -58,10 +58,10 @@ pub enum TicketError {
     Database(#[from] sqlx::Error),
 }
 
-/// The approved plan is the newest plan comment, written for the ticket's
+/// The approved plan is the newest ticket_plans row, written for the ticket's
 /// current content. Same rule as [`TicketService::approved_plan_is_current`].
 fn plan_is_current(ticket: &Ticket, latest_plan_id: Option<Uuid>, latest_plan_version: Option<i32>) -> bool {
-    match (ticket.approved_plan_comment_id, ticket.approved_plan_content_version) {
+    match (ticket.approved_plan_id, ticket.approved_plan_content_version) {
         (Some(approved_id), Some(approved_version)) => {
             approved_version == ticket.content_version
                 && latest_plan_id == Some(approved_id)
@@ -88,7 +88,7 @@ const TICKET_COLUMNS_ALIASED: &str = r#"
                 t.pending_assign_recommendation, t.parent_ticket_id,
                 t.pending_split_recommendation, t.clarification_round,
                 t.skip_planning, t.content_version,
-                t.approved_plan_comment_id, t.approved_plan_content_version,
+                t.approved_plan_id, t.approved_plan_content_version,
                 t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at,
                 t.attachment_ids
 "#;
@@ -259,7 +259,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -305,7 +305,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -345,7 +345,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -370,7 +370,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
             WHERE id = $1
@@ -446,7 +446,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -485,7 +485,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -625,7 +625,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -720,7 +720,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -763,7 +763,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -791,7 +791,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -818,7 +818,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
             WHERE parent_ticket_id = $1
@@ -862,7 +862,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -896,7 +896,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -926,7 +926,7 @@ impl<'a> TicketService<'a> {
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
-                approved_plan_comment_id, approved_plan_content_version,
+                approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
@@ -1062,7 +1062,7 @@ impl<'a> TicketService<'a> {
                 agent.name AS agent_name,
                 GREATEST(t.updated_at, COALESCE(last_comment.at, t.updated_at)) AS last_activity_at,
                 latest_plan.id AS latest_plan_id,
-                latest_plan.plan_content_version AS latest_plan_version,
+                latest_plan.content_version AS latest_plan_version,
                 plan_run.status AS latest_plan_run_status,
                 questions.questions AS plan_questions,
                 questions.answers AS plan_answers,
@@ -1075,9 +1075,9 @@ impl<'a> TicketService<'a> {
                 SELECT max(c.created_at) AS at FROM ticket_comments c WHERE c.ticket_id = t.id
             ) last_comment ON true
             LEFT JOIN LATERAL (
-                SELECT c.id, c.plan_content_version FROM ticket_comments c
-                WHERE c.ticket_id = t.id AND c.intent = 'plan'
-                ORDER BY c.created_at DESC, c.id DESC
+                SELECT p.id, p.content_version FROM ticket_plans p
+                WHERE p.ticket_id = t.id
+                ORDER BY p.revision DESC
                 LIMIT 1
             ) latest_plan ON true
             LEFT JOIN LATERAL (
@@ -1168,7 +1168,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn approved_plan_is_current(&self, ticket: &Ticket) -> Result<bool, TicketError> {
         let (Some(approved_id), Some(approved_version)) = (
-            ticket.approved_plan_comment_id,
+            ticket.approved_plan_id,
             ticket.approved_plan_content_version,
         ) else {
             return Ok(false);
@@ -1178,10 +1178,10 @@ impl<'a> TicketService<'a> {
         }
         let row = sqlx::query(
             r#"
-            SELECT id, plan_content_version
-            FROM ticket_comments
-            WHERE ticket_id = $1 AND intent = 'plan'
-            ORDER BY created_at DESC, id DESC
+            SELECT id, content_version
+            FROM ticket_plans
+            WHERE ticket_id = $1
+            ORDER BY revision DESC
             LIMIT 1
             "#,
         )
@@ -1192,8 +1192,8 @@ impl<'a> TicketService<'a> {
             return Ok(false);
         };
         let id: Uuid = row.get("id");
-        let version: Option<i32> = row.get("plan_content_version");
-        Ok(id == approved_id && version == Some(ticket.content_version))
+        let version: i32 = row.get("content_version");
+        Ok(id == approved_id && version == ticket.content_version)
     }
 }
 
@@ -1228,7 +1228,7 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         clarification_round: row.get("clarification_round"),
         skip_planning: row.get("skip_planning"),
         content_version: row.get("content_version"),
-        approved_plan_comment_id: row.get("approved_plan_comment_id"),
+        approved_plan_id: row.get("approved_plan_id"),
         approved_plan_content_version: row.get("approved_plan_content_version"),
         created_by: row.get("created_by"),
         created_by_id: row.get("created_by_id"),

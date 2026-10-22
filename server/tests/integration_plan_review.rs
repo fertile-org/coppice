@@ -281,14 +281,16 @@ async fn post_plan(
     cookie: &str,
     csrf: &str,
 ) {
-    PlanningService::new(pool)
-        .record_plan(
-            Uuid::parse_str(ticket_id).unwrap(),
-            agent_id,
-            CANONICAL_PLAN,
-        )
+    let planning = PlanningService::new(pool);
+    let ticket = Uuid::parse_str(ticket_id).unwrap();
+    planning
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, None)
         .await
-        .expect("record plan");
+        .expect("insert plan");
+    planning
+        .bind_latest_plan(ticket)
+        .await
+        .expect("bind plan");
     let moved = app
         .clone()
         .oneshot(common::json_request(
@@ -339,10 +341,14 @@ async fn ask_for_changes_revises_the_plan_and_refuses_a_second_request() {
     assert_eq!(ask.status(), StatusCode::OK);
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(ticket["status"], "plan_review");
+    assert_eq!(
+        ticket["pendingPlan"]["changeRequests"],
+        serde_json::json!(["Drop the migration."])
+    );
     let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
-    assert!(thread
-        .iter()
-        .any(|note| note["body"] == "Drop the migration."));
+    assert!(thread.iter().all(|note| {
+        note["intent"] != "review_feedback" && note["body"] != "Drop the migration."
+    }));
     assert_eq!(
         plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(),
         1
@@ -491,14 +497,12 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     )
     .await;
     assert_eq!(ticket["status"], "plan_review");
-    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
-    let plan = thread
-        .iter()
-        .find(|note| note["intent"] == "plan")
-        .expect("plan comment");
-    let body = plan["body"].as_str().unwrap();
+    let body = ticket["pendingPlan"]["markdown"].as_str().expect("pending plan");
     assert!(body.contains("## Plan"));
     assert!(body.contains("- [ ] Add the column"));
+    assert_eq!(ticket["pendingPlan"]["revision"], 1);
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(thread.iter().all(|note| note["intent"] != "plan"));
     assert_eq!(
         plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(),
         1
@@ -887,11 +891,11 @@ async fn ask_for_changes(app: &axum::Router, ticket_id: &str, comment: &str, coo
     assert_eq!(ask.status(), StatusCode::OK);
 }
 
-/// The queued plan run's trigger comment, after marking that run finished.
-async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> Uuid {
-    let (run_id, trigger): (Uuid, Uuid) = sqlx::query_as(
+/// Mark the queued plan run finished so another Ask for changes can start.
+async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) {
+    let run_id: Uuid = sqlx::query_scalar(
         r#"
-        SELECT id, trigger_comment_id FROM agent_runs
+        SELECT id FROM agent_runs
         WHERE ticket_id = $1 AND job_type = 'plan_ticket' AND status IN ('queued', 'running')
         ORDER BY created_at DESC LIMIT 1
         "#,
@@ -905,7 +909,6 @@ async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> Uuid {
         .execute(pool)
         .await
         .unwrap();
-    trigger
 }
 
 #[tokio::test]
@@ -926,13 +929,13 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
 
     // First plan: no revision context.
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
-    assert_eq!(planning.revision_context(ticket, None).await.unwrap(), None);
+    assert_eq!(planning.revision_context(ticket).await.unwrap(), None);
 
     // Round 2.
     ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
-    let first = finish_latest_plan_run(pool, ticket).await;
+    finish_latest_plan_run(pool, ticket).await;
     let round_two = planning
-        .revision_context(ticket, Some(first))
+        .revision_context(ticket)
         .await
         .unwrap()
         .expect("revision");
@@ -940,7 +943,11 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
     assert_eq!(round_two.requests, vec!["Use Postgres."]);
 
     let second_plan = "### Changes requested\n- Use Postgres: switched the store.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n";
-    planning.record_plan(ticket, pm, second_plan).await.unwrap();
+    planning
+        .insert_plan(ticket, pm, second_plan, None)
+        .await
+        .unwrap();
+    planning.bind_latest_plan(ticket).await.unwrap();
 
     // A review comment that did not start a plan run is not a change request.
     let review = app
@@ -958,9 +965,9 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
 
     // Round 3: both requests, oldest first, and the plan it replaces.
     ask_for_changes(&app, &ticket_id, "Split the API change.", &cookie, &csrf).await;
-    let second = finish_latest_plan_run(pool, ticket).await;
+    finish_latest_plan_run(pool, ticket).await;
     let round_three = planning
-        .revision_context(ticket, Some(second))
+        .revision_context(ticket)
         .await
         .unwrap()
         .expect("revision");
@@ -1352,4 +1359,212 @@ async fn asking_for_changes_drops_the_split_proposed_with_the_plan() {
     ask_for_changes(&app, &ticket_id, "Keep it one ticket.", &cookie, &csrf).await;
     let after = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert!(after["pendingSplitRecommendation"].is_null(), "{after}");
+}
+
+async fn plan_count(pool: &sqlx::PgPool, ticket_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM ticket_plans WHERE ticket_id = $1")
+        .bind(ticket_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn intent_count(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND intent = $2",
+    )
+    .bind(ticket_id)
+    .bind(intent)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn plans_and_change_requests_stay_off_the_comment_thread() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    let first = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(first["pendingPlan"]["revision"], 1);
+    assert_eq!(first["pendingPlan"]["changeRequests"], serde_json::json!([]));
+    assert_eq!(plan_count(pool, ticket).await, 1);
+    assert_eq!(intent_count(pool, ticket, "plan").await, 0);
+
+    ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
+    let asked = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(
+        asked["pendingPlan"]["changeRequests"],
+        serde_json::json!(["Use Postgres."])
+    );
+    assert_eq!(intent_count(pool, ticket, "review_feedback").await, 0);
+    finish_latest_plan_run(pool, ticket).await;
+    let context = planning
+        .revision_context(ticket)
+        .await
+        .unwrap()
+        .expect("revision context");
+    assert!(context.previous_plan.contains("Ship the parser first."));
+    assert_eq!(context.requests, vec!["Use Postgres.".to_string()]);
+
+    planning
+        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nPostgres.\n", None)
+        .await
+        .unwrap();
+    planning.bind_latest_plan(ticket).await.unwrap();
+    ask_for_changes(&app, &ticket_id, "Split the API change.", &cookie, &csrf).await;
+    finish_latest_plan_run(pool, ticket).await;
+    let both = planning
+        .revision_context(ticket)
+        .await
+        .unwrap()
+        .expect("both requests");
+    assert_eq!(
+        both.requests,
+        vec!["Use Postgres.".to_string(), "Split the API change.".to_string()]
+    );
+
+    planning
+        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nSplit store and API.\n", None)
+        .await
+        .unwrap();
+    planning.bind_latest_plan(ticket).await.unwrap();
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/approve-plan"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+    let approved = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(approved["status"], "ready");
+    assert!(approved.get("pendingPlan").is_none());
+    assert!(approved["description"]
+        .as_str()
+        .unwrap()
+        .contains("## Approved plan\n\n### Approach"));
+    assert_eq!(plan_count(pool, ticket).await, 3);
+    assert_eq!(intent_count(pool, ticket, "plan").await, 0);
+    assert_eq!(intent_count(pool, ticket, "review_feedback").await, 0);
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(thread.iter().all(|note| note["intent"] != "plan"));
+    assert!(thread
+        .iter()
+        .any(|note| note["body"] == PLAN_APPROVED_NOTE));
+    assert!(!thread
+        .iter()
+        .any(|note| note["body"].as_str().is_some_and(|body| body.contains("### Approach"))));
+
+    let run_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agent_runs WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ticket)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let scope = coppice_server::mcp::token::RunToolScope {
+        token_id: Uuid::new_v4(),
+        run_id,
+        agent_id: pm,
+        ticket_id: Some(ticket),
+        chat_session_id: None,
+        board_id: Some(Uuid::parse_str(&board_id).unwrap()),
+        profile: coppice_server::domain::context_profile::ContextProfile::Full,
+        job_type: "plan_ticket".into(),
+        compaction_ticket_ids: vec![],
+        plugin_ids: vec![],
+    };
+    let ctx = coppice_server::mcp::tools::ToolCtx {
+        state: state.as_ref(),
+        pool,
+        scope: &scope,
+    };
+    let listed = coppice_server::mcp::tools::tickets::call_ticket_comments(
+        &ctx,
+        serde_json::json!({ "ticketId": ticket_id }),
+    )
+    .await
+    .expect("ticket_comments");
+    let bodies = listed["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|comment| comment["body"].as_str().unwrap_or_default().to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        bodies.iter().all(|body| !body.contains("### Approach")),
+        "{bodies:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_second_ask_after_a_failed_revision_appends_on_that_revision() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+
+    ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
+    sqlx::query(
+        "UPDATE agent_runs SET status = 'failed', ended_at = now() WHERE ticket_id = $1 AND status IN ('queued', 'running')",
+    )
+    .bind(ticket)
+    .execute(pool)
+    .await
+    .unwrap();
+    ask_for_changes(&app, &ticket_id, "And keep the public API.", &cookie, &csrf).await;
+
+    let (revision, change_request): (i32, String) = sqlx::query_as(
+        "SELECT revision, change_request FROM ticket_plans WHERE ticket_id = $1 ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(ticket)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(revision, 1);
+    assert_eq!(
+        change_request,
+        "Use Postgres.\n\nAnd keep the public API."
+    );
+    assert_eq!(plan_count(pool, ticket).await, 1);
+    let context = PlanningService::new(pool)
+        .revision_context(ticket)
+        .await
+        .unwrap()
+        .expect("appended requests");
+    assert_eq!(
+        context.requests,
+        vec!["Use Postgres.\n\nAnd keep the public API.".to_string()]
+    );
+    let shown = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(
+        shown["pendingPlan"]["changeRequests"],
+        serde_json::json!(["Use Postgres.\n\nAnd keep the public API."])
+    );
 }

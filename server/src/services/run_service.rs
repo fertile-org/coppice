@@ -706,7 +706,7 @@ impl<'a> RunService<'a> {
             r#"
             SELECT status, substatus, substatus_metadata,
                    skip_planning, content_version,
-                   approved_plan_comment_id, approved_plan_content_version
+                   approved_plan_id, approved_plan_content_version
             FROM tickets
             WHERE id = $1
             FOR UPDATE
@@ -738,19 +738,19 @@ impl<'a> RunService<'a> {
         if new_status == TicketStatus::InProgress {
             let skip_planning: bool = row.get("skip_planning");
             let content_version: i32 = row.get("content_version");
-            let approved_id: Option<Uuid> = row.get("approved_plan_comment_id");
+            let approved_id: Option<Uuid> = row.get("approved_plan_id");
             let approved_version: Option<i32> = row.get("approved_plan_content_version");
             let approved = if skip_planning {
                 false
             } else {
                 match (approved_id, approved_version) {
-                    (Some(comment_id), Some(version)) if version == content_version => {
-                        let latest: Option<(Uuid, Option<i32>)> = sqlx::query_as(
+                    (Some(plan_id), Some(version)) if version == content_version => {
+                        let latest: Option<(Uuid, i32)> = sqlx::query_as(
                             r#"
-                            SELECT id, plan_content_version
-                            FROM ticket_comments
-                            WHERE ticket_id = $1 AND intent = 'plan'
-                            ORDER BY created_at DESC, id DESC
+                            SELECT id, content_version
+                            FROM ticket_plans
+                            WHERE ticket_id = $1
+                            ORDER BY revision DESC
                             LIMIT 1
                             "#,
                         )
@@ -758,7 +758,7 @@ impl<'a> RunService<'a> {
                         .fetch_optional(&mut **tx)
                         .await?;
                         latest.is_some_and(|(id, plan_version)| {
-                            id == comment_id && plan_version == Some(content_version)
+                            id == plan_id && plan_version == content_version
                         })
                     }
                     _ => false,
