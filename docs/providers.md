@@ -30,7 +30,7 @@ The agent form lists every connector with its status:
 | **Not on your PATH** | Coppice can't find the command. Install it, or check your PATH. |
 | **Installed** | Coppice found the command. For Kilo Code it cannot check sign-in without using your plan. |
 
-Kilo Code shows **Kilo Code — Installed**. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." Every CLI can chat. Claude Code, Codex, Cursor, and Kilo Code chats show "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." OpenCode chats have no banner. Test connection checks that the `kilo` command runs.
+Kilo Code shows **Kilo Code — Installed**. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." Every CLI can chat. Claude Code, Cursor, and Kilo Code chats show "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." OpenCode and Codex chats have no banner. Test connection checks that the `kilo` command runs.
 
 You can save an agent before its CLI is ready. It starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
 

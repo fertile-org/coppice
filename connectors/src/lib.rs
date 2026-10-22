@@ -39,9 +39,9 @@ pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
         // writes and commands refused by Coppice. The last two were checked
         // against a scripted model; enforcement is the CLI's, not the model's.
         // Grok: its read-only sandbox plus commands refused by Coppice (real
-        // model).
-        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK => ChatReadOnlyStatus::Passed,
-        CLAUDE_CODE | CODEX | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
+        // model). Codex: OS `--sandbox read-only` (real model, 0.163.0).
+        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX => ChatReadOnlyStatus::Passed,
+        CLAUDE_CODE | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
         _ => ChatReadOnlyStatus::Unavailable,
     }
 }
@@ -325,7 +325,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::ServerToolFields,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            read_only_tools: false,
+            read_only_tools: true,
             chat_resume: true,
             session_events: true,
             run_resume: false,
@@ -630,7 +630,7 @@ mod tests {
             CodexFlags,
             ServerToolFields,
             Structured,
-            false,
+            true,
             true,
             true,
             false,

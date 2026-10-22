@@ -29,7 +29,7 @@ Each agent can use a different model, even on the same CLI. Your PM can run on C
 
 Open **Chat** and click an agent to talk about your code, an idea, or a ticket. Each agent can see all your repositories, boards, tickets, and Knowledge. It can draft a ticket or suggest a Knowledge note, but nothing is saved until you approve it. Choose **New chat** to start a separate chat.
 
-Every CLI can chat. Coppice hasn't confirmed that Claude Code, Codex, Cursor or Kilo Code stay read-only, so their chats show a banner. The agent can still run commands on your computer.
+Every CLI can chat. Coppice hasn't confirmed that Claude Code, Cursor or Kilo Code stay read-only, so their chats show a banner. The agent can still run commands on your computer.
 
 ## Everything is on the card
 

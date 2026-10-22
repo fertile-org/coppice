@@ -187,14 +187,16 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
 
 /// Connectors whose descriptor has `caps.read_only_tools`, in the order shown
 /// to users (settings API, compaction error). Compaction and plan use this
-/// list. Chat does not: Claude Code, Codex, Cursor, and Kilo Code stay on
-/// with the untested banner. Cursor is omitted here because `--mode ask` was
-/// not shown to block shell writes. Kilo Code's ask agent is the same.
-/// OpenCode is included: its per-run deny was.
+/// list. Chat does not: Claude Code, Cursor, and Kilo Code stay on with the
+/// untested banner. Cursor is omitted here because `--mode ask` was not shown
+/// to block shell writes. Kilo Code's ask agent is the same. OpenCode is
+/// included: its per-run deny was. Codex is included: `--sandbox read-only`
+/// blocked a shell write and a file write on 0.163.0.
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     #[cfg(feature = "mock-provider")]
     coppice_connectors::MOCK,
     coppice_connectors::CLAUDE_CODE,
+    coppice_connectors::CODEX,
     coppice_connectors::OPENCODE,
     coppice_connectors::COPILOT,
     coppice_connectors::QWEN_CODE,
@@ -640,7 +642,7 @@ mod tests {
         for id in READ_ONLY_CAPABLE_CONNECTORS {
             assert!(connector_enforces_read_only(id));
         }
-        assert!(!connector_enforces_read_only("codex"));
+        assert!(connector_enforces_read_only("codex"));
         assert!(!connector_enforces_read_only("cursor"));
         assert!(connector_enforces_read_only("opencode"));
         assert!(!connector_enforces_read_only("kilo-code"));
@@ -652,7 +654,6 @@ mod tests {
 
         let untested = [
             (coppice_connectors::CLAUDE_CODE, "Claude Code"),
-            (coppice_connectors::CODEX, "Codex"),
             (coppice_connectors::CURSOR, "Cursor"),
             (coppice_connectors::KILO_CODE, "Kilo Code"),
         ];
@@ -685,6 +686,13 @@ mod tests {
         assert!(!chat_needs_isolation(coppice_connectors::OPENCODE));
         assert!(chat_isolation_banner(coppice_connectors::OPENCODE).is_none());
         assert!(chat_unavailable_message(coppice_connectors::OPENCODE).is_none());
+        assert_eq!(
+            chat_read_only_status(coppice_connectors::CODEX),
+            ChatReadOnlyStatus::Passed
+        );
+        assert!(!chat_needs_isolation(coppice_connectors::CODEX));
+        assert!(chat_isolation_banner(coppice_connectors::CODEX).is_none());
+        assert!(chat_unavailable_message(coppice_connectors::CODEX).is_none());
         assert_eq!(
             chat_read_only_status(coppice_connectors::MOCK),
             ChatReadOnlyStatus::Passed

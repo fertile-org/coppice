@@ -59,6 +59,11 @@ async fn compaction_agent_defaults_to_off_and_round_trips() {
         .unwrap()
         .iter()
         .any(|connector| connector["id"] == "mock" && connector["displayName"] == "Mock"));
+    assert!(initial["readOnlyConnectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|connector| connector["id"] == "codex" && connector["displayName"] == "Codex"));
 
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Compactor", &cookie, &csrf)
@@ -112,7 +117,7 @@ async fn compaction_agent_rejects_unknown_and_non_read_only_agents() {
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Writer", &cookie, &csrf)
             .await;
-    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::uuid")
         .bind(&agent_id)
         .execute(state.db.as_ref().unwrap())
         .await
@@ -128,6 +133,40 @@ async fn compaction_agent_rejects_unknown_and_non_read_only_agents() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["message"].as_str().unwrap().contains("read-only"));
     assert!(get_settings(&app, &cookie, &csrf).await["compactionAgentId"].is_null());
+}
+
+#[tokio::test]
+async fn compaction_agent_accepts_a_codex_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Codex Compactor",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1::uuid")
+        .bind(&agent_id)
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+    let (status, saved) = send(
+        &app,
+        "PUT",
+        serde_json::json!({ "compactionAgentId": agent_id }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["compactionAgentId"], agent_id);
+    assert_eq!(saved["compactionAgent"]["connector"], "codex");
+    assert_eq!(
+        get_settings(&app, &cookie, &csrf).await["compactionAgentId"],
+        agent_id
+    );
 }
 
 #[tokio::test]

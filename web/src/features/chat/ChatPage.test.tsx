@@ -432,10 +432,6 @@ describe('ChatPage', () => {
       "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     ],
     [
-      '00000000-0000-4000-8000-000000000013',
-      "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
-    ],
-    [
       '00000000-0000-4000-8000-000000000015',
       "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer.",
     ],
@@ -456,11 +452,14 @@ describe('ChatPage', () => {
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
   });
 
-  it('hides the isolation banner for an OpenCode session', () => {
+  it.each([
+    ['OpenCode', '00000000-0000-4000-8000-000000000014'],
+    ['Codex', '00000000-0000-4000-8000-000000000013'],
+  ])('hides the isolation banner for a %s session', (_name, agentId) => {
     mocks.sessions = [
       {
         ...ACTIVE_SESSION,
-        agentId: '00000000-0000-4000-8000-000000000014',
+        agentId,
       },
     ];
     renderChat(`/chat/${ACTIVE_SESSION.id}`);

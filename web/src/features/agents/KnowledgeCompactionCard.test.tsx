@@ -60,7 +60,7 @@ const reviewer = agent({});
 const coder = agent({
   id: '00000000-0000-4000-8000-000000000002',
   name: 'Coder',
-  connector: 'codex',
+  connector: 'kilo-code',
 });
 
 function settings(compactionAgent: Agent | null): KnowledgeSettings {
@@ -77,6 +77,7 @@ function settings(compactionAgent: Agent | null): KnowledgeSettings {
     readOnlyConnectors: [
       { id: 'mock', displayName: 'Mock' },
       { id: 'claude-code', displayName: 'Claude Code' },
+      { id: 'codex', displayName: 'Codex' },
       { id: 'cursor', displayName: 'Cursor' },
     ],
   };
@@ -126,7 +127,7 @@ describe('KnowledgeCompactionCard', () => {
   it('marks connectors without read-only mode as unusable', () => {
     renderCard([reviewer, coder]);
     const list = openCombobox(screen.getByLabelText('Compaction agent'));
-    const option = within(list).getByRole('option', { name: /Coder \(codex\)/ });
+    const option = within(list).getByRole('option', { name: /Coder \(kilo-code\)/ });
     expect(option).toHaveAttribute('aria-disabled', 'true');
     expect(option).toHaveTextContent("Can't run compaction safely");
   });
@@ -136,7 +137,7 @@ describe('KnowledgeCompactionCard', () => {
     renderCard([coder]);
     expect(
       screen.getByText(
-        "This agent's CLI can't run compaction safely. Pick an agent that uses Mock, Claude Code, or Cursor.",
+        "This agent's CLI can't run compaction safely. Pick an agent that uses Mock, Claude Code, Codex, or Cursor.",
       ),
     ).toBeVisible();
   });

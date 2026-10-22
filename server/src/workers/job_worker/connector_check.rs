@@ -464,7 +464,8 @@ mod tests {
         assert!(!CheckPhase::Ticket.read_only_tools(coppice_connectors::CLAUDE_CODE));
         // Planning blocks writes only where the CLI enforces read-only.
         assert!(CheckPhase::Plan.must_block_writes(coppice_connectors::CLAUDE_CODE));
-        assert!(!CheckPhase::Plan.must_block_writes(coppice_connectors::CODEX));
+        assert!(CheckPhase::Plan.must_block_writes(coppice_connectors::CODEX));
+        assert!(!CheckPhase::Plan.must_block_writes(coppice_connectors::CURSOR));
         assert!(!CheckPhase::Ticket.must_block_writes(coppice_connectors::CLAUDE_CODE));
         let chat = CheckPhase::Chat.context("Ada", coppice_connectors::CLAUDE_CODE);
         assert!(chat.contains(WRITE_CHECK_FILE));
