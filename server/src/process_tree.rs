@@ -14,8 +14,11 @@
 //! parser and `ps` group scan are unit-tested on Linux; live macOS process
 //! checks are not run in CI.
 //!
-//! Grandchildren that call `setsid` themselves leave the group and are not
-//! stopped. Dev servers and shells started in the agent's session are.
+//! Grandchildren that call `setsid` themselves leave the group (`pg_ctl
+//! start`, daemons). Every tree is also spawned with a random
+//! [`TREE_ENV`] tag, which those escapees inherit. When a tree stops, Linux
+//! scans `/proc/<pid>/environ` for the tag and stops them too. macOS has no
+//! readable environ, so escapees still outlive the run there.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -28,6 +31,8 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 
 /// How long a group has to exit after SIGTERM before SIGKILL.
 pub const TERM_GRACE: Duration = Duration::from_secs(3);
+/// Env var carrying a tree's tag to every descendant, including escapees.
+pub const TREE_ENV: &str = "COPPICE_AGENT_TREE";
 
 static ACTIVE: OnceLock<Mutex<std::sync::Arc<ProcessRegistry>>> = OnceLock::new();
 
@@ -120,6 +125,9 @@ struct ProcessRecord {
     run_id: Option<String>,
     #[serde(default)]
     task_log_dir: Option<PathBuf>,
+    /// Empty on records written before tags existed.
+    #[serde(default)]
+    tree_token: String,
 }
 
 struct Identity {
@@ -173,6 +181,8 @@ impl ProcessRegistry {
         cmd: &mut Command,
         meta: SpawnMeta,
     ) -> io::Result<TrackedProcess> {
+        let tree_token = uuid::Uuid::new_v4().simple().to_string();
+        cmd.env(TREE_ENV, &tree_token);
         // SAFETY: `setsid(2)` is async-signal-safe and runs in the forked child
         // before exec, so the agent becomes its own session and process group.
         unsafe {
@@ -217,6 +227,7 @@ impl ProcessRegistry {
             label: meta.label.to_string(),
             run_id: meta.run_id,
             task_log_dir: meta.task_log_dir,
+            tree_token,
         };
         self.insert(&record);
         Ok(TrackedProcess {
@@ -278,6 +289,9 @@ impl ProcessRegistry {
     }
 
     fn kill_now(&self, record: &ProcessRecord, reason: &str) {
+        for pid in escaped_members(record) {
+            signal_tagged(pid, &record.tree_token, libc::SIGKILL);
+        }
         match classify(record) {
             Claim::Ours | Claim::Orphans => {
                 let _ = signal_group(record.pgid, libc::SIGKILL);
@@ -294,6 +308,18 @@ impl ProcessRegistry {
     }
 
     async fn stop_records(&self, records: Vec<ProcessRecord>, reason: &str) -> Vec<StopReport> {
+        let tagged: Vec<ProcessRecord> = records
+            .iter()
+            .filter(|record| !record.tree_token.is_empty())
+            .cloned()
+            .collect();
+        let reports = self.stop_groups(records, reason).await;
+        // After the group, so a daemon's parent is gone before it is signaled.
+        self.stop_escapees(&tagged, reason).await;
+        reports
+    }
+
+    async fn stop_groups(&self, records: Vec<ProcessRecord>, reason: &str) -> Vec<StopReport> {
         let mut signaled = Vec::new();
         let mut reports = Vec::new();
         for record in records {
@@ -333,6 +359,66 @@ impl ProcessRegistry {
         }
         wait_until_quiet(&killed, Duration::from_millis(500)).await;
         reports
+    }
+
+    /// SIGTERM, then SIGKILL after the grace, for tagged processes that left
+    /// their tree's group. Group members are already stopped and dead.
+    async fn stop_escapees(&self, records: &[ProcessRecord], reason: &str) {
+        let mut found = Vec::new();
+        for record in records {
+            for pid in escaped_members(record) {
+                if signal_tagged(pid, &record.tree_token, libc::SIGTERM) {
+                    found.push((record, pid));
+                }
+            }
+        }
+        if found.is_empty() {
+            return;
+        }
+        let deadline = tokio::time::Instant::now() + self.term_grace;
+        while found.iter().any(|(_, pid)| process_alive(*pid))
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        for (record, pid) in found {
+            let outcome =
+                if process_alive(pid) && signal_tagged(pid, &record.tree_token, libc::SIGKILL) {
+                    "killed"
+                } else {
+                    "terminated"
+                };
+            self.note_escapee(record, pid, outcome, reason);
+        }
+    }
+
+    fn note_escapee(&self, record: &ProcessRecord, pid: u32, outcome: &str, reason: &str) {
+        let command = proc_command(pid).unwrap_or_default();
+        let line = serde_json::json!({
+            "pid": pid,
+            "pgid": record.pgid,
+            "command": command,
+            "runId": record.run_id,
+            "label": record.label,
+            "outcome": outcome,
+            "reason": reason,
+            "escaped": true,
+        });
+        if let Ok(text) = serde_json::to_string(&line) {
+            append_line(&self.log_path, &text);
+            if let Some(dir) = &record.task_log_dir {
+                append_line(&dir.join("process-stops.log"), &text);
+            }
+        }
+        tracing::info!(
+            target: "coppice::agent_process",
+            pid,
+            pgid = record.pgid,
+            run_id = record.run_id.as_deref().unwrap_or(""),
+            outcome,
+            reason,
+            "stopped a process that left its agent's group"
+        );
     }
 
     fn note(&self, record: &ProcessRecord, outcome: &str, reason: &str) -> StopReport {
@@ -573,6 +659,64 @@ fn signal_group(pgid: u32, sig: i32) -> Result<(), SignalError> {
         tracing::warn!(pgid, error = %err, "failed to signal agent process group");
         Err(SignalError::Io)
     }
+}
+
+/// Live processes outside `record`'s group that carry its tree tag.
+fn escaped_members(record: &ProcessRecord) -> Vec<u32> {
+    if record.tree_token.is_empty() {
+        return Vec::new();
+    }
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let own = std::process::id();
+    let mut pids = Vec::new();
+    for entry in dir.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid <= 1 || pid == own {
+            continue;
+        }
+        let Some(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| parse_proc_stat(&stat))
+        else {
+            continue;
+        };
+        if stat.pgrp == record.pgid || stat.state == 'Z' || stat.state == 'X' {
+            continue;
+        }
+        if has_tree_tag(pid, &record.tree_token) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// Other users' environ is unreadable, so only our own processes match.
+fn has_tree_tag(pid: u32, token: &str) -> bool {
+    let Ok(environ) = fs::read(format!("/proc/{pid}/environ")) else {
+        return false;
+    };
+    let wanted = format!("{TREE_ENV}={token}");
+    environ
+        .split(|byte| *byte == 0)
+        .any(|entry| entry == wanted.as_bytes())
+}
+
+/// Re-checks the tag right before signaling, so a reused pid is left alone.
+fn signal_tagged(pid: u32, token: &str, sig: i32) -> bool {
+    if pid <= 1 || pid == std::process::id() || !has_tree_tag(pid, token) {
+        return false;
+    }
+    // SAFETY: `pid` is a single process (not a group) that still carries this
+    // tree's tag.
+    unsafe { libc::kill(pid as i32, sig) == 0 }
 }
 
 fn try_reap(pid: u32) {
@@ -1185,6 +1329,99 @@ mod tests {
 
         assert!(reports.is_empty());
         assert!(process_alive(pid));
+        let _ = bystander.kill();
+        let _ = bystander.wait();
+    }
+
+    /// The agent starts a daemon that leaves its group, like `pg_ctl start`.
+    fn escaping_script(pid_file: &Path, then: &str) -> String {
+        format!(
+            "setsid sh -c 'echo $$ > \"{}\"; exec sleep 20' </dev/null >/dev/null 2>&1 & {then}",
+            pid_file.display()
+        )
+    }
+
+    struct KillPid(u32);
+
+    impl Drop for KillPid {
+        fn drop(&mut self) {
+            unsafe {
+                libc::kill(self.0 as i32, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn run_end_stops_a_tagged_process_that_left_the_group() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let pid_file = dir.path().join("daemon.pid");
+        let mut tracked = registry
+            .spawn(
+                &mut shell(&escaping_script(&pid_file, "exit 0")),
+                meta(dir.path()),
+            )
+            .expect("spawn");
+        let daemon = read_child_pid(&pid_file).await;
+        let _cleanup = KillPid(daemon);
+        assert_ne!(pgid_of(daemon), Some(tracked.record.pgid));
+        assert!(process_alive(daemon));
+
+        tracked.wait_and_reap("run finished").await.expect("wait");
+
+        assert!(wait_dead(daemon).await, "escaped {daemon} still running");
+        let task_log = fs::read_to_string(dir.path().join("task").join("process-stops.log"))
+            .expect("task log");
+        assert!(task_log.contains("\"escaped\":true"), "{task_log}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn shutdown_and_restart_stop_tagged_escapees() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let pid_file = dir.path().join("daemon.pid");
+        let tracked = registry
+            .spawn(
+                &mut shell(&escaping_script(&pid_file, "wait")),
+                meta(dir.path()),
+            )
+            .expect("spawn");
+        let _group = KillGroup(tracked.record.pgid);
+        let daemon = read_child_pid(&pid_file).await;
+        let _cleanup = KillPid(daemon);
+        // A crash: the record stays on disk and nothing is signaled.
+        tracked.abandon();
+
+        let restarted = ProcessRegistry::with_grace(
+            dir.path().join("agent-processes.json"),
+            Duration::from_millis(400),
+        );
+        restarted.reap_orphans().await;
+
+        assert!(wait_dead(daemon).await, "escaped {daemon} still running");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn escapee_sweep_leaves_untagged_processes_alone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let tracked = registry
+            .spawn(&mut shell("sleep 20"), meta(dir.path()))
+            .expect("spawn");
+        let _cleanup = KillGroup(tracked.record.pgid);
+        let mut bystander = std::process::Command::new("setsid")
+            .args(["sleep", "1000"])
+            .spawn()
+            .expect("setsid sleep");
+        let bystander_pid = bystander.id();
+
+        registry.stop_all("server shutdown").await;
+
+        assert!(wait_dead(tracked.id()).await);
+        assert!(process_alive(bystander_pid));
         let _ = bystander.kill();
         let _ = bystander.wait();
     }
