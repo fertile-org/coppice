@@ -798,24 +798,22 @@ describe('TicketDrawer first frame', () => {
     expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
   });
 
-  it('mounts the detail body only after the sheet slide ends', () => {
+  it('mounts comments only after the sheet slide ends', () => {
     stubReducedMotion(false);
     renderDrawer();
 
-    const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
-    // The header is in the first frame; the body waits for the slide.
-    expect(within(dialog).getByRole('heading', { name: 'Test ticket' })).toBeVisible();
-    const skeleton = screen.getByTestId('ticket-detail-skeleton');
-    expect(screen.queryByText('Ticket description')).toBeNull();
+    expect(screen.getByText('Ticket description')).toBeInTheDocument();
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
+    expect(screen.queryByText('Comments', { selector: 'div' })).toBeNull();
 
+    const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
     // A child's animation bubbles up; it must not settle the sheet.
-    fireAnimationEnd(skeleton, 'sheet-in-right');
+    fireAnimationEnd(screen.getByText('Ticket description'), 'sheet-in-right');
     fireAnimationEnd(dialog, 'fade-in');
-    expect(screen.getByTestId('ticket-detail-skeleton')).toBeInTheDocument();
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
 
     fireAnimationEnd(dialog, 'sheet-in-right');
-    expect(screen.queryByTestId('ticket-detail-skeleton')).toBeNull();
-    expect(screen.getByText('Ticket description')).toBeInTheDocument();
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
     expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
   });
 
@@ -823,20 +821,19 @@ describe('TicketDrawer first frame', () => {
     vi.useFakeTimers();
     stubReducedMotion(false);
     renderDrawer();
-    expect(screen.getByTestId('ticket-detail-skeleton')).toBeInTheDocument();
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    expect(screen.queryByTestId('ticket-detail-skeleton')).toBeNull();
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
   });
 
-  it('mounts the detail body right away with prefers-reduced-motion', () => {
+  it('mounts comments right away with prefers-reduced-motion', () => {
     stubReducedMotion(true);
     renderDrawer();
 
-    expect(screen.queryByTestId('ticket-detail-skeleton')).toBeNull();
-    expect(screen.getByText('Ticket description')).toBeInTheDocument();
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
     expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
   });
 });

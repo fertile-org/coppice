@@ -59,10 +59,9 @@ function expectsSlide(): boolean {
 }
 
 /**
- * False while the sheet slides in, so the detail body (markdown, Mermaid,
- * comments, the TipTap composer) mounts after the slide instead of delaying
- * its first frame. Switching tickets while open has no slide, so it settles
- * right away.
+ * False while the sheet slides in, so heavy content (comments, the TipTap
+ * composer) mounts after the slide instead of competing with it. Switching
+ * tickets while open has no slide, so it settles right away.
  */
 function useSheetSettled(open: boolean, ticketId: string) {
   const [settled, setSettled] = useState(() => !open || !expectsSlide());
@@ -442,7 +441,7 @@ function TicketDrawerPanel({
           </div>
         )}
 
-        {ticket && !(detailLoaded && settled) && tab === 'detail' && (
+        {ticket && !detailLoaded && tab === 'detail' && (
           <div
             data-testid="ticket-detail-skeleton"
             aria-busy="true"
@@ -452,10 +451,14 @@ function TicketDrawerPanel({
           </div>
         )}
 
-        {ticket && detailLoaded && settled && tab === 'detail' && (
+        {ticket && detailLoaded && tab === 'detail' && (
           <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]">
             <div className="min-h-0 overflow-y-auto px-6 py-5">
-              <TicketDetailPanel ticket={ticket} parentTicket={parentTicket} />
+              <TicketDetailPanel
+                ticket={ticket}
+                parentTicket={parentTicket}
+                commentsReady={settled}
+              />
             </div>
             <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">
               <TicketMetadataPanel ticket={ticket} />
