@@ -7,21 +7,15 @@ pub struct ModelOption {
     pub name: String,
 }
 
+/// Keeps only `{model_provider}/<model>` lines from the full `opencode models` catalog.
 pub fn parse_opencode_models_stdout(stdout: &str, model_provider: &str) -> Vec<ModelOption> {
     let prefix = format!("{model_provider}/");
     let mut models = Vec::new();
     for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("Error") {
+        let Some(id) = line.trim().strip_prefix(&prefix) else {
             continue;
-        }
-        let id = if let Some(rest) = line.strip_prefix(&prefix) {
-            rest.to_string()
-        } else if let Some((_provider, model)) = line.rsplit_once('/') {
-            model.to_string()
-        } else {
-            line.to_string()
         };
+        let id = id.to_string();
         if !id.is_empty() {
             models.push(ModelOption {
                 name: id.clone(),
@@ -38,9 +32,11 @@ pub async fn list_opencode_models(
     command: &str,
     model_provider: &str,
 ) -> anyhow::Result<Vec<ModelOption>> {
+    // OpenCode 2.x rejects a provider positional (`opencode models <provider>`), so list
+    // the whole catalog and filter by prefix. Older releases accept the bare form too.
     let output = crate::providers::cli_catalog::capture_cli(
         command,
-        &["models", model_provider],
+        &["models"],
         crate::host_env::MODEL_LIST_TIMEOUT,
     )
     .await
@@ -74,5 +70,22 @@ mod tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "glm-4.7");
         assert_eq!(models[1].id, "glm-5.1");
+    }
+
+    #[test]
+    fn filters_full_catalog_to_the_requested_provider() {
+        let stdout = "opencode-go/kimi-k3\nopencode/big-pickle\nopencode-go/glm-5.3\n\
+                      anthropic/claude\nError: ignored\nnot a model\nopencode-go/\n";
+        let models = parse_opencode_models_stdout(stdout, "opencode-go");
+        let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["glm-5.3", "kimi-k3"]);
+    }
+
+    #[test]
+    fn does_not_match_a_provider_that_only_shares_a_prefix() {
+        let stdout = "opencode-go/kimi-k3\nopencode/big-pickle\n";
+        let models = parse_opencode_models_stdout(stdout, "opencode");
+        let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["big-pickle"]);
     }
 }

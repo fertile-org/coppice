@@ -295,7 +295,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cases = [
             ("kilo", &["models"][..], "models"),
-            ("opencode", &["models", "anthropic"][..], "models anthropic"),
+            ("opencode", &["models"][..], "models"),
             ("codex", &["debug", "models"][..], "debug models"),
         ];
         for (name, args, shown) in cases {
