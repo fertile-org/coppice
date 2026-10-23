@@ -29,7 +29,8 @@ interface SheetContentProps
 
 /**
  * Full-height drawer. Focuses the panel itself on open (not its first control)
- * unless `onOpenAutoFocus` prevents default.
+ * unless `onOpenAutoFocus` prevents default. The focus waits a frame: it forces
+ * a style recalc that would otherwise hold back the slide's first paint.
  */
 function SheetContent({
   className,
@@ -56,7 +57,12 @@ function SheetContent({
           onOpenAutoFocus?.(event);
           if (event.defaultPrevented) return;
           event.preventDefault();
-          (event.currentTarget as HTMLElement | null)?.focus();
+          const panel = event.currentTarget as HTMLElement | null;
+          requestAnimationFrame(() => {
+            // Skip if the sheet closed or something inside took focus first.
+            if (!panel?.isConnected || panel.contains(document.activeElement)) return;
+            panel.focus({ preventScroll: true });
+          });
         }}
         onInteractOutside={ignoreToastInteractions(onInteractOutside)}
         {...props}
