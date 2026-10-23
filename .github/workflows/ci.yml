@@ -21,10 +21,12 @@ jobs:
       - name: Cache pg-embed
         uses: actions/cache@v4
         with:
+          # pg-embed downloads the binaries to ~/.cache/pg-embed; without it
+          # every run fetches them from Maven Central, which rate-limits (429).
           path: |
+            ~/.cache/pg-embed
             ~/.cache/coppice
-            ~/.embedded-postgres
-          key: pg-embed-${{ runner.os }}-${{ hashFiles('server/Cargo.toml') }}
+          key: pg-embed-v2-${{ runner.os }}-${{ hashFiles('server/Cargo.toml') }}
       - uses: taiki-e/install-action@nextest
       - name: Install zsh and psql
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh postgresql-client

@@ -338,9 +338,37 @@ fn pg_fetch_settings() -> PgFetchSettings {
 #[cfg(feature = "embedded-test-db")]
 pub async fn embedded_pg_install_dir() -> anyhow::Result<PathBuf> {
     let _leader = lock_session_leader()?;
+    acquire_pg_binaries().await
+}
+
+/// Delays between download attempts. Maven Central answers bursts from shared
+/// CI runners with HTTP 429, and every test would fail on one refused fetch.
+#[cfg(feature = "embedded-test-db")]
+const DOWNLOAD_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+];
+
+/// Downloads the binaries into pg-embed's cache unless present. Callers hold
+/// the session leader lock, so one process fetches and the rest reuse it.
+#[cfg(feature = "embedded-test-db")]
+async fn acquire_pg_binaries() -> anyhow::Result<PathBuf> {
     let access = PgAccess::new(&pg_fetch_settings(), &session_dir_path().join("cluster")).await?;
-    access.maybe_acquire_postgres().await?;
-    Ok(access.cache_dir)
+    let mut delays = DOWNLOAD_BACKOFF.iter();
+    loop {
+        match access.maybe_acquire_postgres().await {
+            Ok(()) => return Ok(access.cache_dir),
+            Err(err) => {
+                let Some(delay) = delays.next() else {
+                    return Err(err.into());
+                };
+                eprintln!("PostgreSQL binaries download failed, retrying in {delay:?}: {err}");
+                tokio::time::sleep(*delay).await;
+            }
+        }
+    }
 }
 
 #[cfg(feature = "embedded-test-db")]
@@ -355,6 +383,7 @@ async fn session_reachable(session: &TestPgSession) -> bool {
 
 #[cfg(feature = "embedded-test-db")]
 async fn start_shared_embedded_pg() -> anyhow::Result<TestPgSession> {
+    acquire_pg_binaries().await?;
     let port = pick_free_port()?;
     let cluster_dir = session_dir_path().join("cluster");
 
