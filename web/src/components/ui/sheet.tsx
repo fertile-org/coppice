@@ -14,7 +14,7 @@ import {
 
 const sheetSideClassName = {
   right:
-    'inset-y-0 right-0 motion-safe:data-[state=open]:animate-sheet-in-right motion-safe:data-[state=closed]:animate-sheet-out-right',
+    'inset-y-0 right-0 motion-safe:data-[state=open]:animate-sheet-in motion-safe:data-[state=closed]:animate-sheet-out',
 } as const;
 
 interface SheetContentProps

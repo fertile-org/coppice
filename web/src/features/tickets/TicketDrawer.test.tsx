@@ -798,7 +798,7 @@ describe('TicketDrawer first frame', () => {
     expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
   });
 
-  it('mounts comments only after the sheet slide ends', () => {
+  it('mounts comments only after the sheet fade ends', () => {
     stubReducedMotion(false);
     renderDrawer();
 
@@ -808,11 +808,11 @@ describe('TicketDrawer first frame', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
     // A child's animation bubbles up; it must not settle the sheet.
-    fireAnimationEnd(screen.getByText('Ticket description'), 'sheet-in-right');
+    fireAnimationEnd(screen.getByText('Ticket description'), 'sheet-in');
     fireAnimationEnd(dialog, 'fade-in');
     expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
 
-    fireAnimationEnd(dialog, 'sheet-in-right');
+    fireAnimationEnd(dialog, 'sheet-in');
     expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
     expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
   });
@@ -824,7 +824,7 @@ describe('TicketDrawer first frame', () => {
     expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(200);
     });
     expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
   });

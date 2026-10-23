@@ -198,13 +198,13 @@ export default {
           from: { opacity: '1', scale: '1', translate: '0 0' },
           to: { opacity: '0', scale: '0.95', translate: '0 0.25rem' },
         },
-        'sheet-in-right': {
-          from: { translate: '100% 0' },
-          to: { translate: '0 0' },
+        'sheet-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
         },
-        'sheet-out-right': {
-          from: { translate: '0 0' },
-          to: { translate: '100% 0' },
+        'sheet-out': {
+          from: { opacity: '1' },
+          to: { opacity: '0' },
         },
       },
       animation: {
@@ -214,8 +214,8 @@ export default {
         'overlay-out': 'overlay-out 120ms ease-in forwards',
         'dialog-in': 'dialog-in 190ms var(--ease-out)',
         'dialog-out': 'dialog-out 130ms ease-in forwards',
-        'sheet-in-right': 'sheet-in-right 240ms var(--ease-out)',
-        'sheet-out-right': 'sheet-out-right 180ms ease-in forwards',
+        'sheet-in': 'sheet-in 150ms var(--ease-out)',
+        'sheet-out': 'sheet-out 120ms ease-in forwards',
       },
     },
   },

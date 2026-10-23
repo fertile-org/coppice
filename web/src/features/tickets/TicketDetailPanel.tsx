@@ -28,7 +28,7 @@ import { useTicketChildren, useUpdateTicket, useUploadAttachment } from './useTi
 interface TicketDetailPanelProps {
   ticket: Ticket;
   parentTicket?: TicketParentSummary | null;
-  /** False while the drawer slides in; comments and the composer mount after. */
+  /** False while the drawer fades in; comments and the composer mount after. */
   commentsReady?: boolean;
 }
 

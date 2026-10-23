@@ -48,10 +48,10 @@ interface TicketDrawerProps {
 
 const TAB_ORDER: DrawerTab[] = ['detail', 'live', 'runs'];
 
-/** The slide is 240ms; settle anyway if `animationend` never arrives. */
-const SETTLE_FALLBACK_MS = 300;
+/** The fade is 150ms; settle anyway if `animationend` never arrives. */
+const SETTLE_FALLBACK_MS = 200;
 
-function expectsSlide(): boolean {
+function expectsFade(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return false;
   }
@@ -59,19 +59,19 @@ function expectsSlide(): boolean {
 }
 
 /**
- * False while the sheet slides in, so heavy content (comments, the TipTap
- * composer) mounts after the slide instead of competing with it. Switching
- * tickets while open has no slide, so it settles right away.
+ * False while the sheet fades in, so heavy content (comments, the TipTap
+ * composer) mounts after the fade instead of competing with it. Switching
+ * tickets while open has no fade, so it settles right away.
  */
 function useSheetSettled(open: boolean, ticketId: string) {
-  const [settled, setSettled] = useState(() => !open || !expectsSlide());
+  const [settled, setSettled] = useState(() => !open || !expectsFade());
   const [prevOpen, setPrevOpen] = useState(open);
   const [prevTicketId, setPrevTicketId] = useState(ticketId);
   if (open !== prevOpen || ticketId !== prevTicketId) {
     const opening = open && !prevOpen;
     setPrevOpen(open);
     setPrevTicketId(ticketId);
-    if (opening) setSettled(!expectsSlide());
+    if (opening) setSettled(!expectsFade());
     else if (open) setSettled(true);
   }
 
@@ -84,7 +84,7 @@ function useSheetSettled(open: boolean, ticketId: string) {
   function onAnimationEnd(event: AnimationEvent<HTMLDivElement>) {
     // Child animations (fade-in, spinners) bubble up here too.
     if (event.target !== event.currentTarget) return;
-    if (event.animationName !== 'sheet-in-right') return;
+    if (event.animationName !== 'sheet-in') return;
     setSettled(true);
   }
 
