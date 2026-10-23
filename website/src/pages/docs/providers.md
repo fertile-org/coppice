@@ -10,17 +10,19 @@ Tired of keeping a terminal open for every agent? Coppice runs the coding agent 
 
 ## Supported connectors
 
-| Connector | Command Coppice looks for | Install |
-| --- | --- | --- |
-| Claude Code | `claude` | [Install guide](https://docs.anthropic.com/en/docs/claude-code/setup) |
-| Codex | `codex` | [Install guide](https://developers.openai.com/codex/cli) |
-| Cursor | `cursor-agent` | [Install guide](https://cursor.com/docs/cli/installation) |
-| OpenCode | `opencode` | [Install guide](https://opencode.ai/docs/) |
-| Kilo Code | `kilo` | [Install guide](https://kilo.ai/docs/cli) |
-| GitHub Copilot | `copilot` | [Install guide](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
-| Qwen Code | `qwen` | [Install guide](https://github.com/QwenLM/qwen-code) |
-| Kimi Code | `kimi` | [Install guide](https://moonshotai.github.io/kimi-code/) |
-| Grok | `grok` | [Install guide](https://x.ai/cli) |
+| Connector | Command Coppice looks for | Install | Tested versions |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | [Install guide](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
+| Codex | `codex` | [Install guide](https://developers.openai.com/codex/cli) | 0.163.0 |
+| Cursor | `cursor-agent` | [Install guide](https://cursor.com/docs/cli/installation) | 2026.10.01 |
+| OpenCode | `opencode` | [Install guide](https://opencode.ai/docs/) | 1.x, 2.x |
+| Kilo Code | `kilo` | [Install guide](https://kilo.ai/docs/cli) | 7.8.3 |
+| GitHub Copilot | `copilot` | [Install guide](https://docs.github.com/en/copilot/how-tos/copilot-cli) | 1.0.98 |
+| Qwen Code | `qwen` | [Install guide](https://github.com/QwenLM/qwen-code) | 0.25.2 |
+| Kimi Code | `kimi` | [Install guide](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
+| Grok | `grok` | [Install guide](https://x.ai/cli) | 1.0.62 |
+
+Compatibility info will be updated over time as we test more CLI versions.
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="The model picker on an agent, listing the models from the agent's CLI.">

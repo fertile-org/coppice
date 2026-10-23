@@ -11,17 +11,19 @@ Ngán cảnh mỗi agent phải mở một terminal? Coppice chạy luôn các c
 
 ## Các connector được hỗ trợ
 
-| Connector | Lệnh Coppice tìm | Cài đặt |
-| --- | --- | --- |
-| Claude Code | `claude` | [Hướng dẫn cài](https://docs.anthropic.com/en/docs/claude-code/setup) |
-| Codex | `codex` | [Hướng dẫn cài](https://developers.openai.com/codex/cli) |
-| Cursor | `cursor-agent` | [Hướng dẫn cài](https://cursor.com/docs/cli/installation) |
-| OpenCode | `opencode` | [Hướng dẫn cài](https://opencode.ai/docs/) |
-| Kilo Code | `kilo` | [Hướng dẫn cài](https://kilo.ai/docs/cli) |
-| GitHub Copilot | `copilot` | [Hướng dẫn cài](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
-| Qwen Code | `qwen` | [Hướng dẫn cài](https://github.com/QwenLM/qwen-code) |
-| Kimi Code | `kimi` | [Hướng dẫn cài](https://moonshotai.github.io/kimi-code/) |
-| Grok | `grok` | [Hướng dẫn cài](https://x.ai/cli) |
+| Connector | Lệnh Coppice tìm | Cài đặt | Phiên bản đã thử |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | [Hướng dẫn cài](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
+| Codex | `codex` | [Hướng dẫn cài](https://developers.openai.com/codex/cli) | 0.163.0 |
+| Cursor | `cursor-agent` | [Hướng dẫn cài](https://cursor.com/docs/cli/installation) | 2026.10.01 |
+| OpenCode | `opencode` | [Hướng dẫn cài](https://opencode.ai/docs/) | 1.x, 2.x |
+| Kilo Code | `kilo` | [Hướng dẫn cài](https://kilo.ai/docs/cli) | 7.8.3 |
+| GitHub Copilot | `copilot` | [Hướng dẫn cài](https://docs.github.com/en/copilot/how-tos/copilot-cli) | 1.0.98 |
+| Qwen Code | `qwen` | [Hướng dẫn cài](https://github.com/QwenLM/qwen-code) | 0.25.2 |
+| Kimi Code | `kimi` | [Hướng dẫn cài](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
+| Grok | `grok` | [Hướng dẫn cài](https://x.ai/cli) | 1.0.62 |
+
+Thông tin tương thích sẽ được cập nhật dần khi chúng tôi thử thêm các phiên bản CLI khác.
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="Ô chọn model của một agent, liệt kê các model lấy từ CLI của agent đó.">

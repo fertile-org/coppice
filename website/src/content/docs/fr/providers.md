@@ -11,17 +11,19 @@ Fatigué de garder un terminal ouvert pour chaque agent ? Coppice pilote les CLI
 
 ## Connecteurs pris en charge
 
-| Connecteur | Commande que Coppice cherche | Installation |
-| --- | --- | --- |
-| Claude Code | `claude` | [Guide d’installation](https://docs.anthropic.com/en/docs/claude-code/setup) |
-| Codex | `codex` | [Guide d’installation](https://developers.openai.com/codex/cli) |
-| Cursor | `cursor-agent` | [Guide d’installation](https://cursor.com/docs/cli/installation) |
-| OpenCode | `opencode` | [Guide d’installation](https://opencode.ai/docs/) |
-| Kilo Code | `kilo` | [Guide d’installation](https://kilo.ai/docs/cli) |
-| GitHub Copilot | `copilot` | [Guide d’installation](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
-| Qwen Code | `qwen` | [Guide d’installation](https://github.com/QwenLM/qwen-code) |
-| Kimi Code | `kimi` | [Guide d’installation](https://moonshotai.github.io/kimi-code/) |
-| Grok | `grok` | [Guide d’installation](https://x.ai/cli) |
+| Connecteur | Commande que Coppice cherche | Installation | Versions testées |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | [Guide d’installation](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
+| Codex | `codex` | [Guide d’installation](https://developers.openai.com/codex/cli) | 0.163.0 |
+| Cursor | `cursor-agent` | [Guide d’installation](https://cursor.com/docs/cli/installation) | 2026.10.01 |
+| OpenCode | `opencode` | [Guide d’installation](https://opencode.ai/docs/) | 1.x, 2.x |
+| Kilo Code | `kilo` | [Guide d’installation](https://kilo.ai/docs/cli) | 7.8.3 |
+| GitHub Copilot | `copilot` | [Guide d’installation](https://docs.github.com/en/copilot/how-tos/copilot-cli) | 1.0.98 |
+| Qwen Code | `qwen` | [Guide d’installation](https://github.com/QwenLM/qwen-code) | 0.25.2 |
+| Kimi Code | `kimi` | [Guide d’installation](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
+| Grok | `grok` | [Guide d’installation](https://x.ai/cli) | 1.0.62 |
+
+Les informations de compatibilité seront mises à jour au fil du temps, à mesure que nous testons d’autres versions des CLI.
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="Le sélecteur de modèle d’un agent, avec les modèles de la CLI de l’agent.">

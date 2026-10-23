@@ -71,17 +71,19 @@ Download, open, work. There's nothing to set up: no Docker and no Coppice accoun
 
 Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
 
-| CLI | Command |
-| --- | --- |
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Cursor | `cursor-agent` |
-| OpenCode | `opencode` |
-| Kilo Code | `kilo` |
-| GitHub Copilot | `copilot` |
-| Qwen Code | `qwen` |
-| Kimi Code | `kimi` |
-| Grok | `grok` |
+| CLI | Command | Tested versions |
+| --- | --- | --- |
+| Claude Code | `claude` | 2.1.309 |
+| Codex | `codex` | 0.163.0 |
+| Cursor | `cursor-agent` | 2026.10.01 |
+| OpenCode | `opencode` | 1.x, 2.x |
+| Kilo Code | `kilo` | 7.8.3 |
+| GitHub Copilot | `copilot` | 1.0.98 |
+| Qwen Code | `qwen` | 0.25.2 |
+| Kimi Code | `kimi` | 2.2.0 |
+| Grok | `grok` | 1.0.62 |
+
+Compatibility info will be updated over time as we test more CLI versions.
 
 See [Providers](https://getcoppice.app/docs/providers) for install links and what each one supports.
 

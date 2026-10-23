@@ -11,17 +11,19 @@ description: "Coppice が動かすエージェント CLI：Claude Code、Codex�
 
 ## 対応しているコネクタ
 
-| コネクタ | Coppice が探すコマンド | インストール |
-| --- | --- | --- |
-| Claude Code | `claude` | [インストールガイド](https://docs.anthropic.com/en/docs/claude-code/setup) |
-| Codex | `codex` | [インストールガイド](https://developers.openai.com/codex/cli) |
-| Cursor | `cursor-agent` | [インストールガイド](https://cursor.com/docs/cli/installation) |
-| OpenCode | `opencode` | [インストールガイド](https://opencode.ai/docs/) |
-| Kilo Code | `kilo` | [インストールガイド](https://kilo.ai/docs/cli) |
-| GitHub Copilot | `copilot` | [インストールガイド](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
-| Qwen Code | `qwen` | [インストールガイド](https://github.com/QwenLM/qwen-code) |
-| Kimi Code | `kimi` | [インストールガイド](https://moonshotai.github.io/kimi-code/) |
-| Grok | `grok` | [インストールガイド](https://x.ai/cli) |
+| コネクタ | Coppice が探すコマンド | インストール | テスト済みバージョン |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | [インストールガイド](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
+| Codex | `codex` | [インストールガイド](https://developers.openai.com/codex/cli) | 0.163.0 |
+| Cursor | `cursor-agent` | [インストールガイド](https://cursor.com/docs/cli/installation) | 2026.10.01 |
+| OpenCode | `opencode` | [インストールガイド](https://opencode.ai/docs/) | 1.x, 2.x |
+| Kilo Code | `kilo` | [インストールガイド](https://kilo.ai/docs/cli) | 7.8.3 |
+| GitHub Copilot | `copilot` | [インストールガイド](https://docs.github.com/en/copilot/how-tos/copilot-cli) | 1.0.98 |
+| Qwen Code | `qwen` | [インストールガイド](https://github.com/QwenLM/qwen-code) | 0.25.2 |
+| Kimi Code | `kimi` | [インストールガイド](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
+| Grok | `grok` | [インストールガイド](https://x.ai/cli) | 1.0.62 |
+
+互換性の情報は、ほかの CLI バージョンをテストするにつれて随時更新します。
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="エージェントのモデル選択。エージェントの CLI が提供するモデルが並んでいる。">

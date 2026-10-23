@@ -11,17 +11,19 @@ description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、Op
 
 ## 支持的连接器
 
-| 连接器 | Coppice 查找的命令 | 安装 |
-| --- | --- | --- |
-| Claude Code | `claude` | [安装指南](https://docs.anthropic.com/en/docs/claude-code/setup) |
-| Codex | `codex` | [安装指南](https://developers.openai.com/codex/cli) |
-| Cursor | `cursor-agent` | [安装指南](https://cursor.com/docs/cli/installation) |
-| OpenCode | `opencode` | [安装指南](https://opencode.ai/docs/) |
-| Kilo Code | `kilo` | [安装指南](https://kilo.ai/docs/cli) |
-| GitHub Copilot | `copilot` | [安装指南](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
-| Qwen Code | `qwen` | [安装指南](https://github.com/QwenLM/qwen-code) |
-| Kimi Code | `kimi` | [安装指南](https://moonshotai.github.io/kimi-code/) |
-| Grok | `grok` | [安装指南](https://x.ai/cli) |
+| 连接器 | Coppice 查找的命令 | 安装 | 已测试版本 |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | [安装指南](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
+| Codex | `codex` | [安装指南](https://developers.openai.com/codex/cli) | 0.163.0 |
+| Cursor | `cursor-agent` | [安装指南](https://cursor.com/docs/cli/installation) | 2026.10.01 |
+| OpenCode | `opencode` | [安装指南](https://opencode.ai/docs/) | 1.x, 2.x |
+| Kilo Code | `kilo` | [安装指南](https://kilo.ai/docs/cli) | 7.8.3 |
+| GitHub Copilot | `copilot` | [安装指南](https://docs.github.com/en/copilot/how-tos/copilot-cli) | 1.0.98 |
+| Qwen Code | `qwen` | [安装指南](https://github.com/QwenLM/qwen-code) | 0.25.2 |
+| Kimi Code | `kimi` | [安装指南](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
+| Grok | `grok` | [安装指南](https://x.ai/cli) | 1.0.62 |
+
+兼容性信息会随着我们测试更多 CLI 版本而持续更新。
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="智能体上的模型选择器，列出该智能体 CLI 提供的模型。">
