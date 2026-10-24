@@ -72,6 +72,11 @@ function dispatchMessage(raw: string) {
     void queryClient.invalidateQueries({
       queryKey: ['agent-runs', payload.ticket_id],
     });
+    // The ticket's hasActiveRun gates Run Agent; a run can end without a
+    // ticket.updated (worker failure), so refresh it here too.
+    void queryClient.invalidateQueries({
+      queryKey: ['ticket', payload.ticket_id],
+    });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     for (const listener of listeners) {
       listener.onRunFinished?.(payload);
@@ -83,6 +88,10 @@ function dispatchMessage(raw: string) {
     if (msg.ticket_id) {
       void queryClient.invalidateQueries({
         queryKey: ['ticket', msg.ticket_id],
+      });
+      // A status change often comes with a run queued for the ticket.
+      void queryClient.invalidateQueries({
+        queryKey: ['agent-runs', msg.ticket_id],
       });
     }
   }

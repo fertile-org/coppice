@@ -52,6 +52,7 @@ async fn mark_recovery_interrupted(
         Ok(interrupted) => {
             if let Some(pool) = state.db.as_ref() {
                 RunOrchestrator::new(pool, &state.config.workflow)
+                    .with_event_bus(&state.event_bus)
                     .handle_terminal_run(&interrupted)
                     .await;
             }

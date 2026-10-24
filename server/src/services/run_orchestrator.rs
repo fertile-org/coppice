@@ -604,7 +604,18 @@ impl<'a> RunOrchestrator<'a> {
         Ok(None)
     }
 
+    /// Start follow-up work a terminal run unblocks, then announce every run
+    /// now queued on the ticket. Hand-offs, consultation replies and deferred
+    /// work commit inside `RunService`, so this publish is after commit and
+    /// covers runs the worker pool has not picked up yet.
     pub async fn handle_terminal_run(&self, run: &AgentRun) {
+        self.start_follow_up_work(run).await;
+        if let (Some(event_bus), Some(ticket_id)) = (self.event_bus, run.ticket_id) {
+            crate::events::publish_ticket_active_runs(event_bus, self.pool, ticket_id).await;
+        }
+    }
+
+    async fn start_follow_up_work(&self, run: &AgentRun) {
         let Some(ticket_id) = run.ticket_id else {
             return;
         };

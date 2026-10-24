@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
 import { ticketsQueryKey } from '../board/useTickets';
+import { agentRunsQueryKey } from '../tickets/useAgentRuns';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
 import { PLAN_COPY } from './copy';
 
@@ -28,6 +29,7 @@ export function VerifyParentAction({ ticketId, boardId }: { ticketId: string; bo
       void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
+      void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
     },
     onError: (err: unknown) => setError(parseApiErrorMessage(err)),
   });

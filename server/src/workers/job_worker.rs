@@ -172,6 +172,7 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
             job_svc.mark_cancelled(job.id).await?;
             if let Ok(cancelled_run) = run_svc.get(run.id).await {
                 RunOrchestrator::new(pool, &state.config.workflow)
+                    .with_event_bus(&state.event_bus)
                     .handle_terminal_run(&cancelled_run)
                     .await;
             }
@@ -196,6 +197,7 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                 job_svc.mark_cancelled(job.id).await?;
                 if let Ok(cancelled_run) = run_svc.get(run.id).await {
                     RunOrchestrator::new(pool, &state.config.workflow)
+                        .with_event_bus(&state.event_bus)
                         .handle_terminal_run(&cancelled_run)
                         .await;
                 }
@@ -206,6 +208,7 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                 match fail_job(pool, run.id, job.id, &message).await {
                     Ok(failed_run) => {
                         RunOrchestrator::new(pool, &state.config.workflow)
+                            .with_event_bus(&state.event_bus)
                             .handle_terminal_run(&failed_run)
                             .await;
                         // finish_failed does not return chat_session_id.
@@ -228,6 +231,7 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                             job_svc.mark_cancelled(job.id).await?;
                             if let Ok(cancelled_run) = run_svc.get(run.id).await {
                                 RunOrchestrator::new(pool, &state.config.workflow)
+                                    .with_event_bus(&state.event_bus)
                                     .handle_terminal_run(&cancelled_run)
                                     .await;
                             }

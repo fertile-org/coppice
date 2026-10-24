@@ -36,6 +36,7 @@ async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &s
             block_working_ticket(state, &interrupted).await;
             if let Some(pool) = state.db.as_ref() {
                 RunOrchestrator::new(pool, &state.config.workflow)
+                    .with_event_bus(&state.event_bus)
                     .handle_terminal_run(&interrupted)
                     .await;
             }

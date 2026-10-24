@@ -83,3 +83,14 @@ describe('agent runs polling reconciliation', () => {
     expect(agentRunsRefetchInterval([finishedRun])).toBe(false);
   });
 });
+
+describe('agent runs polling when the ticket says a run is active', () => {
+  it('polls an empty list while the ticket reports an active run', () => {
+    expect(agentRunsRefetchInterval([], true)).toBe(3000);
+    expect(agentRunsRefetchInterval(undefined, true)).toBe(3000);
+  });
+
+  it('stays idle when neither the list nor the ticket has an active run', () => {
+    expect(agentRunsRefetchInterval([], false)).toBe(false);
+  });
+});

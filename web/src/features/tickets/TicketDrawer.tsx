@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type AnimationEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import { useConnectors } from '../agents/useAgents';
 import { LiveRunView } from '../runs/LiveRunView';
@@ -7,6 +8,7 @@ import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
 import { useRepos } from '../repos/useRepos';
 import {
+  agentRunsQueryKey,
   isActiveRunStatus,
   shouldPollRunForReconciliation,
   useAgentRuns,
@@ -30,6 +32,7 @@ import { AcceptTicketDialog } from './AcceptTicketDialog';
 import {
   useArchiveTicket,
   useFinalApprove,
+  ticketQueryKey,
   useTicket,
   useUnarchiveTicket,
 } from './useTicket';
@@ -134,7 +137,10 @@ function TicketDrawerPanel({
   // List data lacks the description and detail fields: show the header only.
   const detailLoaded = Boolean(ticket) && !isPlaceholderData;
   const { data: repos } = useRepos();
-  const { data: runs } = useAgentRuns(ticketId);
+  const { data: runs } = useAgentRuns(ticketId, {
+    ticketSaysActive: Boolean(ticket?.hasActiveRun),
+  });
+  const queryClient = useQueryClient();
   const { data: connectors } = useConnectors();
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
@@ -169,6 +175,12 @@ function TicketDrawerPanel({
       !isArchived,
   );
   const activeRun = runs?.find((run) => isActiveRunStatus(run.status));
+  const hasActiveRun = Boolean(activeRun || ticket?.hasActiveRun);
+  // The ticket and the cached runs disagree: either the list missed a run (a
+  // dropped or early event) or the ticket kept a stale hasActiveRun after the
+  // run ended. Refetch both once on the mismatch; the 3s poll covers the rest
+  // and stops once the ticket reports no active run.
+  const runsMissActiveRun = Boolean(ticket?.hasActiveRun && runs && !activeRun);
   const reconnectableRun = runs?.find(shouldPollRunForReconciliation);
   const latestRun = runs?.[0] ?? null;
   const liveRun = activeRun ?? reconnectableRun ?? latestRun;
@@ -187,7 +199,15 @@ function TicketDrawerPanel({
         ? 'Link a repository before running.'
         : repoNotReady
           ? 'Repository path is not ready. Ask an admin to verify in Settings → Repositories.'
-          : null;
+          : hasActiveRun
+            ? 'An agent run is already queued or running.'
+            : null;
+
+  useEffect(() => {
+    if (!runsMissActiveRun) return;
+    void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
+    void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
+  }, [runsMissActiveRun, queryClient, ticketId]);
 
   function moveSection(direction: 1 | -1) {
     setTab((current) => stepDrawerSection(current, direction));
@@ -215,7 +235,7 @@ function TicketDrawerPanel({
   });
 
   async function handleRunAgent() {
-    if (!canRunAgent) return;
+    if (!canRunAgent || hasActiveRun) return;
     setActionError(null);
     try {
       await runAgent.mutateAsync();
@@ -317,7 +337,7 @@ function TicketDrawerPanel({
               <button
                 type="button"
                 onClick={() => void handleRunAgent()}
-                disabled={!canRunAgent || headerBusy}
+                disabled={!canRunAgent || hasActiveRun || headerBusy}
                 title={runAgentDisabledReason ?? undefined}
                 className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >

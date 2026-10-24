@@ -29,6 +29,10 @@ describe('useEventSocket dispatch', () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-123'] });
+    // A run queued with the status change must show up without a reload.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-runs', 'ticket-123'],
+    });
   });
 
   it('invalidates agent runs on agent_run.started', async () => {
@@ -50,6 +54,26 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-runs', 'ticket-456'],
     });
+  });
+
+  it('refreshes the ticket when a run finishes so hasActiveRun clears', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'agent_run.finished',
+        run_id: 'run-2',
+        ticket_id: 'ticket-789',
+        agent_id: 'agent-1',
+        status: 'failed',
+        error_message: 'boom',
+      }),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-runs', 'ticket-789'],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-789'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
   });
 
   it('refetches only the event-driven families on resync', async () => {
