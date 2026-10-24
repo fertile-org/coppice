@@ -1,3 +1,4 @@
+use super::models::{ModelInfo, ModelListCache};
 use super::{
     mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
     AgentRunResult, ProviderError,
@@ -15,11 +16,55 @@ use std::time::Duration;
 pub struct OpenCodeProvider {
     servers: Arc<OpenCodeRunServers>,
     config: OpenCodeProviderConfig,
+    /// Models `opencode acp` offers, keyed by command.
+    acp_models: ModelListCache,
+    acp_models_gate: tokio::sync::Mutex<()>,
 }
 
 impl OpenCodeProvider {
     pub fn new(servers: Arc<OpenCodeRunServers>, config: OpenCodeProviderConfig) -> Self {
-        Self { servers, config }
+        Self {
+            servers,
+            config,
+            acp_models: ModelListCache::new(),
+            acp_models_gate: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// The `provider/model` to run with `opencode run`, when ACP does not
+    /// offer it. `None` keeps the run on ACP, including when the list cannot
+    /// be read: ACP then reports the model problem itself.
+    async fn model_outside_acp(&self, input: &AgentRunInput) -> Option<String> {
+        let model = super::opencode_acp::model_value(
+            input.model_provider.as_deref(),
+            input.model.as_deref(),
+        )?;
+        let command = &self.config.command;
+        let offered = {
+            let _gate = self.acp_models_gate.lock().await;
+            match self.acp_models.get(command, false) {
+                Some(hit) => hit,
+                None => match super::opencode_acp::offered_models(command).await {
+                    Ok(ids) if !ids.is_empty() => {
+                        let models: Vec<ModelInfo> = ids
+                            .into_iter()
+                            .map(|id| ModelInfo {
+                                name: id.clone(),
+                                id,
+                            })
+                            .collect();
+                        self.acp_models.store(command, models.clone());
+                        models
+                    }
+                    Ok(_) => return None,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "could not list the models opencode acp offers");
+                        return None;
+                    }
+                },
+            }
+        };
+        (!offered.iter().any(|m| m.id == model)).then_some(model)
     }
 }
 
@@ -57,18 +102,44 @@ impl AgentProvider for OpenCodeProvider {
                 ))
             })?;
         let acp = super::opencode_acp::uses_acp(&version);
+        let cli_model = if acp {
+            self.model_outside_acp(&input).await
+        } else {
+            None
+        };
+        // Over ACP the gateway is passed in session/new, not this file.
+        let gateway_in_config = !acp || cli_model.is_some();
         std::fs::write(
             &config_path,
             ticket_attachments::with_attachment_read(
-                // Over ACP the gateway is passed in session/new, not this file.
                 &opencode_run_config(
-                    if acp { None } else { input.mcp.as_ref() },
+                    if gateway_in_config {
+                        input.mcp.as_ref()
+                    } else {
+                        None
+                    },
                     input.read_only_tools,
                 ),
                 ticket_attachments::external_read_dir(&staged).as_deref(),
             ),
         )?;
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
+        if let Some(model) = cli_model {
+            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+            return super::opencode_cli::run(
+                input,
+                super::opencode_cli::RunSpec {
+                    program: &self.config.command,
+                    version: &version,
+                    config_path: &config_path,
+                    worktree: &worktree,
+                    prompt: &prompt,
+                    run_timeout,
+                    model: &model,
+                },
+            )
+            .await;
+        }
         if acp {
             let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
             return super::opencode_acp::run(

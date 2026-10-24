@@ -7,6 +7,7 @@
 //! `opencode acp` 2.0.20), and gets updates it turns into the structured live
 //! console the other connectors use.
 
+use super::acp::{self, AcpLaunch, AcpLimits, AcpTurn, NoObserver, ToolPolicy};
 use super::acp_connector::AcpRun;
 use super::{AgentRunInput, AgentRunResult, ProviderError};
 use std::path::Path;
@@ -14,6 +15,7 @@ use std::time::Duration;
 
 const DISPLAY_NAME: &str = "OpenCode";
 const CONSOLE_PREFIX: &str = "opencode";
+const SIGN_IN_HINT: &str = "Run `opencode auth login`, then try again.";
 
 /// OpenCode 2 and later speak ACP here; 1.x keeps `opencode serve`.
 pub fn uses_acp(version: &str) -> bool {
@@ -29,6 +31,44 @@ pub fn model_value(model_provider: Option<&str>, model: Option<&str>) -> Option<
         }
         _ => Some(model.to_string()),
     }
+}
+
+/// Models `opencode acp` lets a session choose: one handshake, no prompt.
+/// On 2.0.20 this is only the `opencode/*` catalog, without providers such as
+/// `opencode-go` that `opencode models` and `opencode run` do offer.
+pub async fn offered_models(program: &str) -> anyhow::Result<Vec<String>> {
+    let dir = tempfile::tempdir()?;
+    let launch = AcpLaunch {
+        display_name: DISPLAY_NAME.to_string(),
+        program: program.to_string(),
+        args: vec!["acp".into()],
+        env: Vec::new(),
+        cwd: dir.path().to_path_buf(),
+        run_id: None,
+        ticket_id: None,
+        task_log_dir: None,
+        sign_in_hint: Some(SIGN_IN_HINT.to_string()),
+    };
+    let turn = AcpTurn {
+        cwd: dir.path(),
+        mcp: None,
+        model: None,
+        resume_session_id: None,
+        prompt: "",
+        policy: ToolPolicy::ReadOnly,
+        session_mode: None,
+    };
+    let outcome = acp::run_turn(
+        launch,
+        turn,
+        AcpLimits::for_run(Duration::from_secs(60)),
+        &mut NoObserver,
+        None,
+        None,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("{err}"))?;
+    Ok(outcome.models.into_iter().map(|(id, _)| id).collect())
 }
 
 pub struct RunSpec<'a> {
@@ -61,7 +101,7 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
             prompt: spec.prompt,
             run_timeout: spec.run_timeout,
             model,
-            sign_in_hint: Some("Run `opencode auth login`, then try again.".into()),
+            sign_in_hint: Some(SIGN_IN_HINT.into()),
             session_mode: None,
         },
     )

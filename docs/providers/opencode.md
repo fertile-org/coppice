@@ -2,7 +2,7 @@
 
 Use [OpenCode](https://opencode.ai) as a Coppice connector. How Coppice drives it depends on the installed version:
 
-- **OpenCode 2.x:** one `opencode acp` per run, over the Agent Client Protocol (below). The ticket drawer shows the structured live console the other connectors use.
+- **OpenCode 2.x:** one `opencode acp` per run, over the Agent Client Protocol (below). A model ACP doesn't offer, such as `opencode-go/*`, runs with `opencode run` instead ([below](#opencode-2x-models-acp-doesnt-offer)). Either way the ticket drawer shows the structured live console the other connectors use.
 - **OpenCode 1.x:** a dedicated `opencode serve` per run, driven through OpenCode’s HTTP/SSE API. The ticket drawer shows a **Live Session** (messages and tools).
 
 Each run records which console it used, so runs from before an upgrade still replay.
@@ -17,6 +17,24 @@ OpenCode 2 moved its HTTP API under `/api/` behind a server password and changed
 - OpenCode's default `build` mode asks for no permission, so read-only can't rely on permission requests. When OpenCode does ask, Coppice approves tools that read (`read`, `search`, `fetch`, `think`) and refuses the rest in read-only runs. A refusal ends the whole turn (`stopReason: cancelled`), and the run error names the refused tool.
 - Resume uses `session/resume` when offered, otherwise `session/load` (its replayed history is not shown again). Only an answer that says the session is gone starts a fresh session; a gateway or sign-in failure doesn't.
 - A turn with no update for 10 minutes, and no tool still running, is stopped. Startup requests get 60 seconds each. Cancel sends `session/cancel` and stops the process if the turn hasn't ended within 5 seconds.
+
+## OpenCode 2.x: models ACP doesn't offer
+
+OpenCode 2.0.20's `opencode acp` lists only the `opencode/*` catalog. Providers you are signed in to, such as `opencode-go`, appear in `opencode models` (the model picker) and work with `opencode run -m`, but `session/set_config_option` answers "model not found". Setting `model` or `enabled_providers` in `OPENCODE_CONFIG` doesn't change the ACP list. The ACP `opencode/` catalog is not the Go catalog under another name (several Go models are missing from it), so Coppice does not rewrite `opencode-go/x` to `opencode/x`.
+
+Before a run, Coppice opens one ACP session with no prompt to read the models ACP offers (cached 10 minutes). When the agent's `provider/model` is not among them, the run uses:
+
+```
+opencode run --standalone --format json --auto --model <provider/model> [--session <id>] -- <prompt>
+```
+
+- `--standalone` starts a private server for the run. Without it, `opencode run` attaches to OpenCode's shared background service, which never sees this run's `OPENCODE_CONFIG`.
+- The gateway is the `mcp` entry in `OPENCODE_CONFIG`, with the token interpolated from `{env:COPPICE_MCP_TOKEN}`, as on 1.x. Checked against a stub gateway: OpenCode sent the bearer header, listed the tools, and called `result_submit` through its `execute` tool.
+- `--auto` approves permissions that aren't denied, so the run never waits on a prompt. Read-only runs keep the same deny rules and `OPENCODE_DISABLE_PROJECT_CONFIG=1`; with them a shell command and a file write did not run.
+- JSON lines (`step_start`, `text`, `reasoning`, `tool_use`, `step_finish`, `error`) become the same console events as an ACP run. `--session` resumes; OpenCode creates the session if the id is unknown.
+- OpenCode's `execute` tool runs scripts that can `fetch` URLs, and the read-only rules do not cover it. This is the same on the ACP path.
+
+If ACP's model list can't be read, the run stays on ACP and reports the model problem there.
 
 **Connector id:** `opencode`
 

@@ -24,6 +24,7 @@ pub mod model_flag;
 pub mod models;
 pub mod opencode;
 pub mod opencode_acp;
+pub mod opencode_cli;
 pub mod opencode_models;
 pub mod registry;
 pub mod reported_model;
