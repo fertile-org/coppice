@@ -66,11 +66,20 @@ impl AgentProvider for CursorProvider {
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
 
+        // The write deny lives in the per-run config, which only `cursor_mcp_setup`
+        // writes. Without it a read-only run would use the host's Cursor config.
+        if input.read_only_tools && input.mcp.is_none() {
+            return Err(mcp_unavailable(
+                "cursor read-only runs need MCP access for their per-run permission config",
+            ));
+        }
+
         let mut env = Vec::new();
         let _mcp_worktree;
         if let Some(access) = &input.mcp {
             let state_dir = cursor_state_dir(&input)?;
-            let (mcp_env, guard) = cursor_mcp_setup(access, &state_dir, &worktree)?;
+            let (mcp_env, guard) =
+                cursor_mcp_setup(access, &state_dir, &worktree, input.read_only_tools)?;
             env.extend(mcp_env);
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
             args.push(APPROVE_MCPS_FLAG.to_string());
@@ -364,13 +373,17 @@ fn cursor_mcp_setup(
     access: &McpAccess,
     state_dir: &Path,
     worktree: &Path,
+    read_only: bool,
 ) -> std::io::Result<(Vec<(String, String)>, CursorWorktreeMcp)> {
     let config_dir = state_dir.join("cursor-config");
     std::fs::create_dir_all(&config_dir)?;
 
     let spec = McpServerSpec::from_access(access);
     // Without this allow rule `-p` denies every gateway call at the approval prompt.
-    std::fs::write(config_dir.join("cli-config.json"), spec.cursor_cli_config())?;
+    std::fs::write(
+        config_dir.join("cli-config.json"),
+        spec.cursor_cli_config(read_only),
+    )?;
 
     let cursor_dir = worktree.join(".cursor");
     let mcp_path = cursor_dir.join("mcp.json");
@@ -714,7 +727,8 @@ mod tests {
         let run_dir = tmp.path().join("runs").join("run-1");
         std::fs::create_dir_all(&worktree).expect("worktree");
 
-        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree).expect("setup");
+        let (env, guard) =
+            cursor_mcp_setup(&access(), &run_dir, &worktree, false).expect("setup");
         let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, ["CURSOR_CONFIG_DIR"]);
         assert_eq!(
@@ -730,11 +744,47 @@ mod tests {
 
         let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
             .expect("cli config");
-        assert_eq!(cli_raw, spec.cursor_cli_config());
+        assert_eq!(cli_raw, spec.cursor_cli_config(false));
         assert!(!run_dir.join("cursor-home").exists());
 
         drop(guard);
         assert!(!mcp_path.exists(), "created mcp.json must be removed");
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_denies_shell_and_write() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let run_dir = tmp.path().join("runs").join("run-ro");
+        std::fs::create_dir_all(worktree.join(".cursor")).expect("project cursor dir");
+        std::fs::write(
+            worktree.join(".cursor").join("cli.json"),
+            r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#,
+        )
+        .expect("project allow");
+
+        let spec = McpServerSpec::from_access(&access());
+        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree, true).expect("setup");
+        assert!(env.iter().all(|(k, _)| k != "HOME"), "{env:?}");
+        let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
+            .expect("cli config");
+        let parsed: serde_json::Value = serde_json::from_str(&cli_raw).expect("cli json");
+        assert_eq!(
+            parsed["permissions"]["allow"],
+            serde_json::json!(["Mcp(coppice:*)"])
+        );
+        assert_eq!(
+            parsed["permissions"]["deny"],
+            serde_json::json!(["Shell(*)", "Write(**)"])
+        );
+        // Per-run config only. A project `.cursor/cli.json` that allows writes
+        // is not copied into CURSOR_CONFIG_DIR.
+        assert!(!run_dir.join("cursor-config").join("cli.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor").join("cli.json")).expect("project"),
+            r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#
+        );
+        drop(guard);
     }
 
     #[test]
@@ -748,7 +798,7 @@ mod tests {
         std::fs::write(&mcp_path, existing).expect("existing mcp");
 
         let (env, guard) =
-            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree).expect("setup");
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, false).expect("setup");
         assert!(env.iter().all(|(k, _)| k != "HOME"));
 
         let merged: serde_json::Value =

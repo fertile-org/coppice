@@ -267,9 +267,10 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            // `--mode ask` blocks edit/apply, not shell writes, so compaction
-            // cannot treat Cursor as read-only. Chat still launches in ask
-            // mode and shows the untested banner. Plan runs pass `--mode plan`.
+            // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
+            // also write a per-run deny for Shell(*) and Write(**), but the live
+            // probe (server/tests/real_cursor.rs) has not passed yet (cursor-agent
+            // 2026.10.01 hit the account usage limit), so compaction stays refused.
             read_only_tools: false,
             chat_resume: true,
             session_events: true,
