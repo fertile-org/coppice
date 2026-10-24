@@ -9,11 +9,26 @@ pub fn spawn_health_worker(state: Arc<AppState>) {
     let interval_secs = state.config.agent.health_check_interval_secs.max(10);
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
+        // Before the startup connector check, Automatic connectors look off.
+        state
+            .connectors
+            .wait_readiness_checked(crate::connectors_runtime::READINESS_WAIT)
+            .await;
+        let mut changes = state.connectors.subscribe_changes();
+        changes.mark_unchanged();
         run_health_pass_once(&state).await;
 
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs as u64));
+        interval.tick().await;
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {}
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
             run_health_pass_once(&state).await;
         }
     });

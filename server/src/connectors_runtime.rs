@@ -1,9 +1,16 @@
 //! Live connector config and registry. Enabling or disabling rebuilds the
 //! registry in this process and, when a config path is set, patches that file.
+//!
+//! At startup an Automatic connector is off until its sign-in check passes,
+//! which takes a few seconds. Code that would refuse a run for a missing
+//! connector waits for that check first ([`ConnectorsRuntime::registry_for`]).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+use tokio::sync::watch;
 
 use coppice_config::connector_file::{write_toml_atomic, ConnectorFilePatch};
 use coppice_config::settings_file::{self, ConfigDocument, ConfigTextError, SaveError};
@@ -80,9 +87,17 @@ struct Inner {
     ready: HashSet<String>,
 }
 
+/// Longest a run waits for the startup connector check before it is refused.
+pub const READINESS_WAIT: Duration = Duration::from_secs(30);
+
 pub struct ConnectorsRuntime {
     opencode_runs: Arc<OpenCodeRunServers>,
     inner: RwLock<Inner>,
+    /// False while the startup connector check runs.
+    checked: watch::Sender<bool>,
+    /// Bumped whenever the registry may have changed, so agent health can be
+    /// checked again.
+    generation: watch::Sender<u64>,
 }
 
 impl ConnectorsRuntime {
@@ -103,6 +118,8 @@ impl ConnectorsRuntime {
                 path,
                 ready: HashSet::new(),
             }),
+            checked: watch::Sender::new(true),
+            generation: watch::Sender::new(0),
         }
     }
 
@@ -110,8 +127,66 @@ impl ConnectorsRuntime {
     /// stays off. A missing key is on when `ready` contains that id.
     pub fn sync_readiness(&self, ready_ids: impl IntoIterator<Item = impl Into<String>>) {
         let mut guard = self.inner.write().unwrap_or_else(|err| err.into_inner());
-        guard.ready = ready_ids.into_iter().map(Into::into).collect();
+        let ready: HashSet<String> = ready_ids.into_iter().map(Into::into).collect();
+        if ready == guard.ready {
+            return;
+        }
+        guard.ready = ready;
         rebuild(&mut guard, &self.opencode_runs);
+        drop(guard);
+        self.bump();
+    }
+
+    /// The startup connector check has begun; [`Self::registry_for`] waits for
+    /// [`Self::finish_readiness_check`]. Other `sync_readiness` calls (such as
+    /// opening Connectors) use partial results and do not end the wait.
+    pub fn begin_readiness_check(&self) {
+        self.checked.send_replace(false);
+    }
+
+    pub fn finish_readiness_check(&self, ready_ids: impl IntoIterator<Item = impl Into<String>>) {
+        self.sync_readiness(ready_ids);
+        self.checked.send_replace(true);
+    }
+
+    pub fn readiness_checked(&self) -> bool {
+        *self.checked.borrow()
+    }
+
+    /// Waits up to `limit` for the startup connector check. `true` when it is done.
+    pub async fn wait_readiness_checked(&self, limit: Duration) -> bool {
+        let mut checked = self.checked.subscribe();
+        tokio::time::timeout(limit, checked.wait_for(|done| *done))
+            .await
+            .is_ok_and(|done| done.is_ok())
+    }
+
+    /// The registry to run `id` with. When `id` is missing only because the
+    /// startup check hasn't finished, waits for it (up to `limit`) first.
+    pub async fn registry_for(&self, id: &str, limit: Duration) -> Arc<ConnectorRegistry> {
+        let registry = self.registry();
+        let automatic = matches!(
+            self.config().agent.connectors.switch(id),
+            coppice_config::ConnectorSwitch::Automatic
+        );
+        if registry.has(id)
+            || !automatic
+            || coppice_connectors::get(id).is_none()
+            || self.readiness_checked()
+        {
+            return registry;
+        }
+        self.wait_readiness_checked(limit).await;
+        self.registry()
+    }
+
+    /// Changes whenever the registry may have changed.
+    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
+        self.generation.subscribe()
+    }
+
+    fn bump(&self) {
+        self.generation.send_modify(|generation| *generation += 1);
     }
 
     /// Shared on/off used by the picker, Ready, and the registry.
@@ -192,6 +267,8 @@ impl ConnectorsRuntime {
         guard.config.agent.connectors = outcome.parsed.agent.connectors;
         guard.config.keybindings = outcome.parsed.keybindings;
         rebuild(&mut guard, &self.opencode_runs);
+        drop(guard);
+        self.bump();
         Ok(SavedConfigFile {
             revision: outcome.revision,
             restart_required: outcome.restart_required,
@@ -231,6 +308,8 @@ impl ConnectorsRuntime {
             .set_enabled_flag(descriptor.id, enabled, descriptor.default_model_providers)
             .map_err(|_| ConnectorConfigError::Unknown)?;
         rebuild(&mut guard, &self.opencode_runs);
+        drop(guard);
+        self.bump();
         Ok(change)
     }
 }
@@ -302,6 +381,70 @@ mod tests {
         let config = AppConfig::load_defaults().expect("defaults");
         let runs = OpenCodeRunServers::new("opencode".into(), "127.0.0.1".into());
         ConnectorsRuntime::new(config, runs, path)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_waits_for_the_startup_check_and_then_has_the_connector() {
+        let rt = Arc::new(runtime(None));
+        let id = coppice_connectors::CLAUDE_CODE;
+        rt.begin_readiness_check();
+        let waiter = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.registry_for(id, READINESS_WAIT).await.has(id) }
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Opening Connectors mid-check syncs partial results; still waiting.
+        rt.sync_readiness(Vec::<String>::new());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!waiter.is_finished());
+
+        rt.finish_readiness_check([id]);
+        assert!(waiter.await.unwrap());
+        assert!(rt.readiness_checked());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_explicitly_off_connector_is_refused_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "").unwrap();
+        let rt = runtime(Some(path));
+        let id = coppice_connectors::CLAUDE_CODE;
+        rt.set_enabled(id, true).unwrap();
+        rt.set_enabled(id, false).unwrap();
+        assert!(rt.explicitly_off(id));
+        rt.begin_readiness_check();
+        let started = tokio::time::Instant::now();
+        assert!(!rt.registry_for(id, READINESS_WAIT).await.has(id));
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_check_that_never_finishes_stops_the_wait_at_the_limit() {
+        let rt = runtime(None);
+        let id = coppice_connectors::CLAUDE_CODE;
+        rt.begin_readiness_check();
+        let started = tokio::time::Instant::now();
+        assert!(!rt.registry_for(id, READINESS_WAIT).await.has(id));
+        assert_eq!(started.elapsed(), READINESS_WAIT);
+    }
+
+    #[tokio::test]
+    async fn a_new_runtime_does_not_wait() {
+        let rt = runtime(None);
+        assert!(rt.readiness_checked());
+        assert!(rt.wait_readiness_checked(Duration::ZERO).await);
+    }
+
+    #[test]
+    fn registry_changes_are_announced_once_per_change() {
+        let rt = runtime(None);
+        let mut changes = rt.subscribe_changes();
+        rt.sync_readiness([coppice_connectors::CLAUDE_CODE]);
+        assert!(changes.has_changed().unwrap());
+        changes.mark_unchanged();
+        rt.sync_readiness([coppice_connectors::CLAUDE_CODE]);
+        assert!(!changes.has_changed().unwrap());
     }
 
     #[test]

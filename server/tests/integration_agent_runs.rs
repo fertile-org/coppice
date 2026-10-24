@@ -411,6 +411,78 @@ async fn reject_run_when_agent_provider_missing_config() {
     );
 }
 
+#[tokio::test]
+async fn run_agent_waits_for_the_startup_connector_check() {
+    use coppice_server::services::agent_health::AgentHealthStatus;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    // No `enabled` key, whatever a local config.toml says: Automatic.
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.agent.connectors.claude_code.enabled = None;
+    })
+    .await;
+    let create_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            r#"{"name":"Claude Bot","role":"Developer","systemPrompt":"You are a developer","connector":"mock"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+    let agent: serde_json::Value = common::json_body(create_res).await;
+    let agent_id = agent["id"].as_str().unwrap();
+    let agent_uuid = uuid::Uuid::parse_str(agent_id).unwrap();
+    // Saving an agent turns its connector on; an older agent can still be
+    // on an Automatic one.
+    sqlx::query("UPDATE agents SET connector = 'claude-code' WHERE id = $1")
+        .bind(agent_uuid)
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, agent_id, &cookie, &csrf).await;
+
+    // Startup: Claude Code has no `enabled` key, so it is off until checked,
+    // and a health pass made now saves "turned off".
+    state.connectors.begin_readiness_check();
+    coppice_server::workers::health_worker::run_health_pass_once(&state).await;
+    assert_eq!(
+        state.agent_health.get(agent_uuid).status,
+        AgentHealthStatus::MissingConfig
+    );
+
+    let run = tokio::spawn({
+        let app = app.clone();
+        let (ticket_id, cookie, csrf) = (ticket_id.clone(), cookie.clone(), csrf.clone());
+        async move { post_run_agent(&app, &ticket_id, &cookie, &csrf).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!run.is_finished(), "Run Agent answered before the check finished");
+    state
+        .connectors
+        .finish_readiness_check([coppice_connectors::CLAUDE_CODE]);
+
+    let (status, body) = run.await.unwrap();
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    assert_eq!(
+        state.agent_health.get(agent_uuid).status,
+        AgentHealthStatus::Healthy
+    );
+}
+
 fn process_rss_kb() -> u64 {
     let status = std::fs::read_to_string("/proc/self/status").expect("status");
     for line in status.lines() {

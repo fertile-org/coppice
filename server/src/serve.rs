@@ -395,13 +395,16 @@ pub async fn serve(
         db: Some(db),
     });
     {
+        // Runs and agent health wait for this instead of calling an
+        // Automatic connector turned off (`ConnectorsRuntime::registry_for`).
+        state.connectors.begin_readiness_check();
         let state = state.clone();
         tokio::spawn(async move {
             state
                 .connector_probes
                 .refresh_all(&state.connectors.config())
                 .await;
-            state.connectors.sync_readiness(
+            state.connectors.finish_readiness_check(
                 crate::services::connector_probe_service::automatic_on_connector_ids(
                     &state.connector_probes,
                 ),

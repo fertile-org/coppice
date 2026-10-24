@@ -1318,13 +1318,24 @@ async fn run_agent(
                 RunAgentError::Status(StatusCode::INTERNAL_SERVER_ERROR)
             }
         })?;
-        if !state.connectors.registry().has(&agent.connector) {
+        let registry = state
+            .connectors
+            .registry_for(&agent.connector, crate::connectors_runtime::READINESS_WAIT)
+            .await;
+        if !registry.has(&agent.connector) {
             return Err(RunAgentError::Message(
                 StatusCode::BAD_REQUEST,
                 missing_connector_detail(&agent.connector),
             ));
         }
-        let health = state.agent_health.get(agent_id);
+        let mut health = state.agent_health.get(agent_id);
+        if health.status == AgentHealthStatus::MissingConfig {
+            // Saved before the registry last changed, perhaps; check again.
+            let (status, detail) =
+                crate::services::agent_health::evaluate_agent_health(&agent, &registry).await;
+            state.agent_health.set(agent_id, status, detail);
+            health = state.agent_health.get(agent_id);
+        }
         if health.status == AgentHealthStatus::MissingConfig {
             return Err(RunAgentError::Message(
                 StatusCode::BAD_REQUEST,

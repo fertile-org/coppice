@@ -633,7 +633,8 @@ async fn execute_job(
     let connector_name = &agent.connector;
     let connector = state
         .connectors
-        .registry()
+        .registry_for(connector_name, crate::connectors_runtime::READINESS_WAIT)
+        .await
         .get(connector_name)
         .ok_or_else(|| {
             anyhow::anyhow!(crate::connectors_runtime::connector_unavailable_message(
@@ -979,7 +980,8 @@ async fn invoke_chat_provider(
 ) -> Result<AgentRunResult, ProviderError> {
     let connector = state
         .connectors
-        .registry()
+        .registry_for(connector_name, crate::connectors_runtime::READINESS_WAIT)
+        .await
         .get(connector_name)
         .ok_or_else(|| {
             ProviderError::InvalidInput(crate::connectors_runtime::connector_unavailable_message(

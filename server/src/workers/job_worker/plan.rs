@@ -57,7 +57,8 @@ pub(super) async fn execute_plan(
     let connector_name = agent.connector.as_str();
     let connector = state
         .connectors
-        .registry()
+        .registry_for(connector_name, crate::connectors_runtime::READINESS_WAIT)
+        .await
         .get(connector_name)
         .with_context(|| {
             crate::connectors_runtime::connector_unavailable_message(connector_name)
