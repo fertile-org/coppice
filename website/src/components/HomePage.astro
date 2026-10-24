@@ -2,13 +2,15 @@
 import { pagesFor } from '../i18n/pages';
 import { useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
+import { softwareSchema } from '../lib/page-schema';
 import DownloadLinks from './DownloadLinks.astro';
 import HeroMedia from './HeroMedia.astro';
 
-const copy = pagesFor(useI18n(Astro).locale).home;
+const ctx = useI18n(Astro);
+const copy = pagesFor(ctx.locale).home;
 ---
 
-<Base title="Coppice" description={copy.description}>
+<Base title="Coppice" description={copy.description} structuredData={softwareSchema(Astro, ctx, copy.description)}>
   <div class="shell landing">
     <header class="promise">
       <h1>{copy.h1}</h1>
