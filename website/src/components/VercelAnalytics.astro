@@ -1,0 +1,13 @@
+---
+/**
+ * Vercel Web Analytics. `inject()` tracks `location.pathname`, the clean URL visitors see
+ * (`/docs/install`). The package's Astro component reports the build file path instead
+ * (`/docs/install.html`, because of `build.format: 'file'`), so it is not used.
+ */
+---
+
+<script>
+  import { inject } from '@vercel/analytics';
+
+  inject({ framework: 'astro' });
+</script>

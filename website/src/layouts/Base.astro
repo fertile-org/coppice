@@ -3,6 +3,7 @@ import '../styles/global.css';
 import BetaBanner from '../components/BetaBanner.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
+import VercelAnalytics from '../components/VercelAnalytics.astro';
 import { LOCALES, ogLocale } from '../i18n/paths';
 import { useI18n } from '../i18n/runtime';
 import { ogCard } from '../lib/hero-assets';
@@ -45,6 +46,9 @@ const siteRef = Astro.site ? { site: Astro.site.href, base: import.meta.env.BASE
 const graph = siteRef && !noindex
   ? jsonLd([organization(siteRef), website(siteRef, LOCALES.map((locale) => locale.code)), ...structuredData])
   : null;
+// Vercel Web Analytics is cookieless, so there is no consent banner. Its script is served
+// by the Vercel deployment itself, so only builds on Vercel include it.
+const vercelAnalytics = process.env.VERCEL === '1';
 ---
 
 <!doctype html>
@@ -97,5 +101,6 @@ const graph = siteRef && !noindex
       <slot />
     </main>
     <SiteFooter />
+    {vercelAnalytics && <VercelAnalytics />}
   </body>
 </html>
