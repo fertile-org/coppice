@@ -12,7 +12,14 @@ const downloadActive = ctx.englishPath === '/download';
 <header class="site-header" data-pagefind-ignore>
   <div class="shell header-inner">
     <a class:list={['brand', { active: homeActive }]} href={hrefFor(ctx.locale, '/')}>
-      <img class="mark" src={withBase('/logo.svg')} width="34" height="36" alt="" />
+      <img
+        class="mark"
+        src={withBase('/logo-72.webp')}
+        srcset={`${withBase('/logo-72.webp')} 2x, ${withBase('/logo-108.webp')} 3x`}
+        width="34"
+        height="36"
+        alt=""
+      />
       <span>Coppice</span>
     </a>
     <nav class="primary-nav" data-pagefind-ignore aria-label="Primary">

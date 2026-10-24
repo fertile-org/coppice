@@ -18,17 +18,20 @@
     "check:code": "node scripts/check-code-blocks.mjs",
     "check:placeholders": "node scripts/check-doc-placeholders.mjs",
     "check:i18n": "node --experimental-strip-types --test src/i18n/i18n.test.ts && node scripts/check-i18n.mjs",
-    "og:image": "node scripts/make-og-image.mjs"
+    "og:image": "node scripts/make-og-image.mjs",
+    "web:images": "node scripts/make-web-images.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.1",
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/source-sans-3": "^5.3.0",
+    "@vercel/analytics": "^2.0.1",
     "astro": "^7.3.5",
     "astro-pagefind": "^2.0.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "playwright": "^1.55.1"
+    "playwright": "^1.55.1",
+    "sharp": "^0.35.5"
   }
 }

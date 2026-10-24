@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 /** Public hero files and the social card. Filenames stay stable; the query changes with the bytes. */
 const HERO_FILES = [
   'hero-screenshot.png',
+  'hero-screenshot-720.webp',
+  'hero-screenshot-1440.webp',
+  'hero-screenshot-720.avif',
+  'hero-screenshot-1440.avif',
   'marketing.webm',
   'marketing.mp4',
   'marketing.gif',
@@ -36,6 +40,10 @@ export function heroAsset(filename: HeroFile): string {
 }
 
 export const heroScreenshot = heroAsset('hero-screenshot.png');
+/** The video poster is what visitors see first (the LCP image), so it is the small WebP. */
+export const heroPoster = heroAsset('hero-screenshot-1440.webp');
+export const heroStillAvif = `${heroAsset('hero-screenshot-720.avif')} 720w, ${heroAsset('hero-screenshot-1440.avif')} 1440w`;
+export const heroStillWebp = `${heroAsset('hero-screenshot-720.webp')} 720w, ${heroAsset('hero-screenshot-1440.webp')} 1440w`;
 export const marketingWebm = heroAsset('marketing.webm');
 export const marketingMp4 = heroAsset('marketing.mp4');
 export const marketingGif = heroAsset('marketing.gif');

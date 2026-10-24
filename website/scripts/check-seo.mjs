@@ -1,6 +1,7 @@
 // SEO checks on the built site. Run after `npm run build`.
 // Every page: one title, one description, one canonical on `site`, Open Graph and
 // Twitter tags that agree with it, and an og:image that exists in dist.
+// Every page: no image over 200 KB without loading="lazy".
 // Indexable pages (self canonical, no noindex): one h1, a title unique within
 // their language, and title / description lengths that fit a search result.
 // Lengths are display width: CJK and fullwidth characters count as two, since
@@ -14,6 +15,7 @@ const failures = [];
 const TITLE_MAX = 60;
 const DESCRIPTION_MIN = 100;
 const DESCRIPTION_MAX = 160;
+const HEAVY_IMAGE = 200 * 1024;
 
 const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
 
@@ -121,6 +123,16 @@ for (const file of walk(dist)) {
   if (titles.length !== 1 || !titles[0]) where(`expected one non-empty <title>, found ${titles.length}`);
   if (descriptions.length !== 1 || !descriptions[0].trim()) where('expected one non-empty meta description');
   if (route === '/404' && !noindex) where('404 must be noindex');
+
+  // A heavy eager image costs every visitor, even hidden or as <video> fallback content.
+  for (const img of tags(html, 'img')) {
+    const src = attrOf(img, 'src');
+    if (!src?.startsWith('/') || attrOf(img, 'loading') === 'lazy') continue;
+    const file = path.join(dist, decodeURIComponent(src.split(/[?#]/)[0]));
+    if (fs.existsSync(file) && fs.statSync(file).size > HEAVY_IMAGE) {
+      where(`${src} is ${Math.round(fs.statSync(file).size / 1024)} KB and loads eagerly; add loading="lazy" or shrink it`);
+    }
+  }
   if (noindex) continue;
 
   if (canonicals.length !== 1) {

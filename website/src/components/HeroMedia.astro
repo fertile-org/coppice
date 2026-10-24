@@ -1,5 +1,13 @@
 ---
-import { heroScreenshot, marketingGif, marketingMp4, marketingWebm } from '../lib/hero-assets';
+import {
+  heroPoster,
+  heroScreenshot,
+  heroStillAvif,
+  heroStillWebp,
+  marketingGif,
+  marketingMp4,
+  marketingWebm,
+} from '../lib/hero-assets';
 import { withBase } from '../lib/url';
 
 interface Props {
@@ -9,17 +17,33 @@ interface Props {
 }
 
 const { stillAlt, videoAlt, captions } = Astro.props;
+const sizes = '(min-width: 1112px) 1080px, calc(100vw - 2rem)';
+const srcset = (list: string) =>
+  list
+    .split(', ')
+    .map((item) => {
+      const [url, width] = item.split(' ');
+      return `${withBase(url)} ${width}`;
+    })
+    .join(', ');
 ---
 
 <figure class="hero-shot">
   <div class="hero-frame">
-    <img
-      class="hero-still"
-      src={withBase(heroScreenshot)}
-      width="1440"
-      height="900"
-      alt={stillAlt}
-    />
+    <!-- Shown only with reduced motion. Lazy, so a hidden still is never fetched. -->
+    <picture>
+      <source type="image/avif" srcset={srcset(heroStillAvif)} sizes={sizes} />
+      <source type="image/webp" srcset={srcset(heroStillWebp)} sizes={sizes} />
+      <img
+        class="hero-still"
+        src={withBase(heroScreenshot)}
+        width="1440"
+        height="900"
+        alt={stillAlt}
+        loading="lazy"
+        decoding="async"
+      />
+    </picture>
     <video
       class="hero-video"
       width="1440"
@@ -28,12 +52,13 @@ const { stillAlt, videoAlt, captions } = Astro.props;
       loop
       playsinline
       preload="none"
-      poster={withBase(heroScreenshot)}
+      poster={withBase(heroPoster)}
       aria-label={videoAlt}
     >
       <source src={withBase(marketingWebm)} type="video/webm" />
       <source src={withBase(marketingMp4)} type="video/mp4" />
-      <img src={withBase(marketingGif)} width="960" height="600" alt={videoAlt} />
+      <!-- Fallback for browsers without <video>. Lazy, or every visitor downloads the 2.5 MB GIF. -->
+      <img src={withBase(marketingGif)} width="960" height="600" alt={videoAlt} loading="lazy" />
     </video>
     <div class="hero-progress" aria-hidden="true">
       <span class="hero-progress-fill"></span>
