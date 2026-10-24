@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
+import { useConfirm, type ConfirmFn } from '../../components/ui/confirm-dialog';
 import type {
   Plugin,
   PluginMcpServerHealth,
@@ -33,14 +34,17 @@ function envRisk(keys: string[]): string {
 }
 
 /** Starting a disabled plugin's servers (enable or Test) needs the admin's consent. */
-function confirmStart(plugin: Plugin): boolean {
+async function confirmStart(plugin: Plugin, confirm: ConfirmFn): Promise<boolean> {
   if (plugin.enabled) return true;
   const envKeys = plugin.settings.filter((s) => s.source === 'env').map((s) => s.key);
   const risks = [
     plugin.mcpServers.some((server) => server.kind === 'stdio') ? STDIO_RISK : null,
     envKeys.length > 0 ? envRisk(envKeys) : null,
   ].filter((risk): risk is string => risk !== null);
-  return risks.length === 0 || window.confirm(`${risks.join(' ')} Enable anyway?`);
+  return (
+    risks.length === 0 ||
+    confirm({ title: `${risks.join(' ')} Enable anyway?`, danger: true })
+  );
 }
 
 const STATUS_HINTS: Record<PluginStatus, string> = {
@@ -78,9 +82,10 @@ function healthClass(health: PluginMcpServerHealth): string {
 function McpServersSection({ plugin }: { plugin: Plugin }) {
   const [error, setError] = useState<string | null>(null);
   const testPlugin = useTestPlugin(plugin.id);
+  const confirm = useConfirm();
 
   async function handleTest() {
-    if (!confirmStart(plugin)) return;
+    if (!(await confirmStart(plugin, confirm))) return;
     setError(null);
     testPlugin.reset();
     try {
@@ -405,6 +410,7 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
   const [error, setError] = useState<string | null>(null);
   const setEnabled = useSetPluginEnabled();
   const updatePlugin = useUpdatePlugin();
+  const confirm = useConfirm();
   const { data: update } = usePluginInstall(updateId);
   const isExternal = plugin.status === 'external';
   const canToggle = plugin.enabled || plugin.status === 'ok';
@@ -412,7 +418,7 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
 
   async function handleToggle() {
     setError(null);
-    if (!confirmStart(plugin)) return;
+    if (!(await confirmStart(plugin, confirm))) return;
     try {
       await setEnabled.mutateAsync({ id: plugin.id, enabled: !plugin.enabled });
     } catch (err) {

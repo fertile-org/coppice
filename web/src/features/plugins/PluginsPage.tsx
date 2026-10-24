@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
@@ -44,6 +45,7 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
   const moveDir = useMovePluginDir();
   const removeDir = useRemovePluginDir();
   const rescan = useRescanPlugins();
+  const confirm = useConfirm();
 
   async function run(action: () => Promise<unknown>, fallback: string) {
     setError(null);
@@ -73,8 +75,15 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
     if (selected) setPath(selected);
   }
 
-  function handleRemove(dir: PluginDir) {
-    if (!window.confirm(`Remove plugin directory "${dir.path}"?`)) return;
+  async function handleRemove(dir: PluginDir) {
+    if (
+      !(await confirm({
+        title: `Remove plugin directory "${dir.path}"?`,
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     void run(() => removeDir.mutateAsync(dir.id), 'Unable to remove directory.');
   }
 

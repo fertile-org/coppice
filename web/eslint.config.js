@@ -18,5 +18,40 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'confirm',
+          message: 'Use useConfirm() instead of the native confirm dialog.',
+        },
+        {
+          name: 'alert',
+          message: 'Use an in-app dialog or toast instead of alert().',
+        },
+        {
+          name: 'prompt',
+          message: 'Use an in-app dialog instead of prompt().',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'window',
+          property: 'confirm',
+          message: 'Use useConfirm() instead of window.confirm.',
+        },
+        {
+          object: 'window',
+          property: 'alert',
+          message: 'Use an in-app dialog or toast instead of window.alert.',
+        },
+        {
+          object: 'window',
+          property: 'prompt',
+          message: 'Use an in-app dialog instead of window.prompt.',
+        },
+      ],
+    },
   },
 ])

@@ -9,6 +9,8 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
+import { useToast } from '../../components/ToastProvider';
+import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import {
   columnAccentClass,
   columnBgClass,
@@ -65,6 +67,9 @@ export const BoardColumn = memo(function BoardColumn({
   onHeadingFocus,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
+  const addingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
   const { setNodeRef, isOver } = useDroppable({
     id: column.status,
     data: { status: column.status, type: 'column' },
@@ -73,9 +78,21 @@ export const BoardColumn = memo(function BoardColumn({
   async function handleQuickAdd(e: FormEvent) {
     e.preventDefault();
     const trimmed = title.trim();
-    if (!trimmed || !onQuickAdd) return;
-    await onQuickAdd(trimmed);
-    setTitle('');
+    if (!trimmed || !onQuickAdd || addingRef.current) return;
+    addingRef.current = true;
+    try {
+      await onQuickAdd(trimmed);
+      setTitle('');
+    } catch (err: unknown) {
+      toast.error(
+        apiErrorToastMessage(
+          parseApiErrorMessage(err, 'Unable to create ticket.'),
+        ),
+      );
+    } finally {
+      addingRef.current = false;
+      inputRef.current?.focus();
+    }
   }
 
   const headingFocusable = tickets.length === 0;
@@ -126,14 +143,15 @@ export const BoardColumn = memo(function BoardColumn({
         {showQuickAdd && onQuickAdd && (
           <form
             onSubmit={(e) => void handleQuickAdd(e)}
+            aria-busy={isAdding || undefined}
             className="mb-1 border-b border-border/60 pb-2"
           >
             <input
+              ref={inputRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Add ticket…"
-              disabled={isAdding}
               data-add-ticket=""
               data-column-index={columnIndex}
               className="field-control w-full px-2 py-1.5 font-body text-sm placeholder:text-text-muted"

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { ApiError } from '../../lib/api';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import {
@@ -434,6 +435,7 @@ interface EditRepoActionsProps {
 function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
   const verifyRepo = useVerifyRepo();
   const deleteRepo = useDeleteRepo();
+  const confirm = useConfirm();
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleVerify() {
@@ -446,7 +448,9 @@ function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Remove repository "${repo.name}"?`)) return;
+    if (!(await confirm({ title: `Remove repository "${repo.name}"?`, danger: true }))) {
+      return;
+    }
     setActionError(null);
     try {
       await deleteRepo.mutateAsync(repo.id);

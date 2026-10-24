@@ -15,6 +15,7 @@ import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/upda
 import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
 import { disposeWindow } from './src/disposeWindow.mjs';
+import { focusBrowserWindow } from './src/windowFocus.mjs';
 import { createErrorWindow, createMainWindow, createSplashWindow } from './src/windows.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -297,6 +298,7 @@ function openMainWindow(url) {
   win.once('ready-to-show', () => {
     disposeWindow(splashWindow);
     splashWindow = null;
+    win.focus();
   });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
@@ -389,10 +391,7 @@ function startDevMode() {
 }
 
 function focusExistingWindow() {
-  const win = mainWindow ?? errorWindow ?? splashWindow;
-  if (!win || win.isDestroyed()) return;
-  if (win.isMinimized()) win.restore();
-  win.focus();
+  focusBrowserWindow(mainWindow ?? errorWindow ?? splashWindow);
 }
 
 app.on('window-all-closed', () => {

@@ -3,6 +3,7 @@ import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import {
   Dialog,
@@ -393,6 +394,7 @@ function RebaseBranchDialog({
 
 export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   const toast = useToast();
+  const confirm = useConfirm();
   const showFinalActions = isFinalReviewOrDone(ticket.status);
   const { data: gitInfo, isLoading } = useTicketGitInfo(
     ticket.id,
@@ -439,9 +441,10 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
 
   async function handleRemoveWorktree() {
     if (!gitInfo?.worktreeExists) return;
-    const confirmed = window.confirm(
-      `Remove worktree at:\n${gitInfo.worktreePath}\n\nThe ticket branch and commits are kept in git. This cannot be undone from the UI.`,
-    );
+    const confirmed = await confirm({
+      title: `Remove worktree at:\n${gitInfo.worktreePath}\n\nThe ticket branch and commits are kept in git. This cannot be undone from the UI.`,
+      danger: true,
+    });
     if (!confirmed) return;
 
     setGitError(null);

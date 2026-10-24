@@ -3,6 +3,7 @@ import { DndContext } from '@dnd-kit/core';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../../components/ToastProvider';
 import { BoardColumn, VIRTUALIZE_AFTER } from './BoardColumn';
 import { BOARD_COLUMNS } from './columns';
 import type { Ticket } from './useTickets';
@@ -23,15 +24,17 @@ function tickets(count: number): Ticket[] {
 function renderColumn(list: Ticket[]) {
   return render(
     <MemoryRouter>
-      <DndContext>
-        <BoardColumn
-          column={BOARD_COLUMNS[0]}
-          tickets={list}
-          hierarchyIndex={new Map()}
-          agentsById={new Map()}
-          onOpenTicket={() => {}}
-        />
-      </DndContext>
+      <ToastProvider>
+        <DndContext>
+          <BoardColumn
+            column={BOARD_COLUMNS[0]}
+            tickets={list}
+            hierarchyIndex={new Map()}
+            agentsById={new Map()}
+            onOpenTicket={() => {}}
+          />
+        </DndContext>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }

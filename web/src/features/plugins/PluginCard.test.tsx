@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { setCsrfToken } from '../../lib/api';
 import { pluginSchema, type Plugin, type PluginTestResult } from '../../lib/schemas/plugin';
 import { PluginCard } from './PluginCard';
@@ -80,7 +81,9 @@ function renderCard(
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PluginCard plugin={target} {...props} />
+        <ConfirmProvider>
+          <PluginCard plugin={target} {...props} />
+        </ConfirmProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -221,41 +224,37 @@ describe('PluginCard', () => {
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
   });
 
-  it('testing a disabled stdio plugin asks first; cancel sends nothing', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('testing a disabled stdio plugin asks first; cancel sends nothing', async () => {
     renderCard({ ...plugin, enabled: false });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
-    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       `/api/plugins/${plugin.id}/test`,
       expect.anything(),
     );
-    confirm.mockRestore();
   });
 
   it('testing a disabled stdio plugin posts after confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderCard({ ...plugin, enabled: false });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
     expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
-    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
     expect(callFor(`/api/plugins/${plugin.id}/test`).method).toBe('POST');
-    confirm.mockRestore();
   });
 
   it('testing an enabled plugin does not confirm', async () => {
-    const confirm = vi.spyOn(window, 'confirm');
     renderCard();
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
-    expect(confirm).not.toHaveBeenCalled();
-    confirm.mockRestore();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows where unset settings come from', () => {
@@ -287,7 +286,6 @@ describe('PluginCard', () => {
   });
 
   it('enabling a plugin with env-sourced settings names those keys', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderCard({
       ...plugin,
       enabled: false,
@@ -299,16 +297,15 @@ describe('PluginCard', () => {
     });
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable mcp-fake' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: "Setting GITHUB_TOKEN is not set here, so your computer's environment value for it will be sent to the plugin. Enable anyway?",
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(callFor(`/api/plugins/${plugin.id}`).method).toBe('PATCH'));
-    expect(confirm).toHaveBeenCalledWith(
-      "Setting GITHUB_TOKEN is not set here, so your computer's environment value for it will be sent to the plugin. Enable anyway?",
-    );
-    confirm.mockRestore();
   });
 
-  it('stdio and env risks share one confirmation; cancel sends nothing', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('stdio and env risks share one confirmation; cancel sends nothing', async () => {
     renderCard({
       ...plugin,
       enabled: false,
@@ -319,20 +316,17 @@ describe('PluginCard', () => {
     });
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable mcp-fake' }));
-
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm).toHaveBeenCalledWith(
-      "Local MCP servers run on your computer with your computer's privileges. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
-    );
+    const dialog = await screen.findByRole('dialog', {
+      name: "Local MCP servers run on your computer with your computer's privileges. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       `/api/plugins/${plugin.id}`,
       expect.anything(),
     );
-    confirm.mockRestore();
   });
 
-  it('testing a disabled http plugin with env-sourced settings asks first', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('testing a disabled http plugin with env-sourced settings asks first', async () => {
     renderCard({
       ...plugin,
       enabled: false,
@@ -341,17 +335,16 @@ describe('PluginCard', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('GITHUB_TOKEN'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveAccessibleName(/GITHUB_TOKEN/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       `/api/plugins/${plugin.id}/test`,
       expect.anything(),
     );
-    confirm.mockRestore();
   });
 
   it('testing a disabled http plugin without env-sourced settings does not confirm', async () => {
-    const confirm = vi.spyOn(window, 'confirm');
     renderCard({
       ...plugin,
       enabled: false,
@@ -361,8 +354,7 @@ describe('PluginCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
-    expect(confirm).not.toHaveBeenCalled();
-    confirm.mockRestore();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows unsupported servers and test conflicts', async () => {
