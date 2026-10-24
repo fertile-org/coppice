@@ -136,12 +136,16 @@ for (const file of walk(dist)) {
   if (image && one('twitter:image') !== image) where('twitter:image does not match og:image');
   if (one('og:image:width') !== '1200' || one('og:image:height') !== '630') where('og:image should be 1200×630');
 
+  const schema = new Map();
   for (const [index, match] of [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].entries()) {
     try {
       const data = JSON.parse(match[1]);
       const items = Array.isArray(data) ? data : data['@graph'] ?? [data];
       if (!JSON.stringify(data).includes('https://schema.org')) where(`JSON-LD #${index + 1} has no schema.org @context`);
-      for (const item of items) if (!item['@type']) where(`JSON-LD #${index + 1} has an item without @type`);
+      for (const item of items) {
+        if (!item['@type']) where(`JSON-LD #${index + 1} has an item without @type`);
+        else schema.set(item['@type'], item);
+      }
     } catch (error) {
       where(`JSON-LD #${index + 1} does not parse: ${error.message}`);
     }
@@ -151,6 +155,26 @@ for (const file of walk(dist)) {
   const selfCanonical = distFileFor(canonical, site) === file;
   if (!selfCanonical) continue;
   indexable.add(canonical);
+
+  const englishRoute = route.replace(/^\/(vi|zh-cn|zh-tw|zh-hk|ja|fr)(?=\/|$)/, '') || '/';
+  const required = ['Organization', 'WebSite'];
+  if (englishRoute === '/' || englishRoute === '/download') required.push('SoftwareApplication');
+  if (englishRoute === '/docs' || englishRoute.startsWith('/docs/')) required.push('TechArticle', 'BreadcrumbList');
+  for (const type of required) if (!schema.has(type)) where(`JSON-LD is missing ${type}`);
+  const app = schema.get('SoftwareApplication');
+  if (app) {
+    for (const key of ['name', 'operatingSystem', 'applicationCategory', 'offers']) {
+      if (!app[key]) where(`SoftwareApplication is missing ${key}`);
+    }
+    if (app.offers && app.offers.price === undefined) where('SoftwareApplication offers has no price');
+  }
+  const article = schema.get('TechArticle');
+  if (article && article.url !== canonical) where(`TechArticle url ${article.url} is not the canonical ${canonical}`);
+  if (article && article.inLanguage !== lang) where(`TechArticle inLanguage ${article.inLanguage} is not <html lang> ${lang}`);
+  const crumbs = schema.get('BreadcrumbList')?.itemListElement ?? [];
+  for (const crumb of crumbs) {
+    if (!crumb.item || !distFileFor(crumb.item, site)) where(`breadcrumb ${crumb.name} points at ${crumb.item}, which is not a page`);
+  }
 
   if (titles[0] && titles[0].length > TITLE_MAX) where(`title is ${titles[0].length} characters (max ${TITLE_MAX}): ${titles[0]}`);
   const h1s = (html.match(/<h1\b/gi) ?? []).length;

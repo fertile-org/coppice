@@ -53,7 +53,7 @@ npm run check:links
 npm run check:seo
 ```
 
-`check:seo` reads `dist`: one title, description, and canonical per page, Open Graph and Twitter tags that match them, `robots.txt`, `sitemap.xml` (only indexable pages, `lastmod` from git, left out on shallow clones), the manifest, and any JSON-LD. The social card is `public/assets/og-card.png` (1200×630). Rebuild it with `npm run og:image` after changing the logo, the hero screenshot, or the card copy in `scripts/make-og-image.mjs`.
+`check:seo` reads `dist`: one title, description, and canonical per page, Open Graph and Twitter tags that match them, `robots.txt`, `sitemap.xml` (only indexable pages, `lastmod` from git, left out on shallow clones), the manifest, and JSON-LD. Every page carries one JSON-LD `@graph` (`src/lib/structured-data.ts`): Organization and WebSite everywhere, SoftwareApplication on the homepage and download page, TechArticle and BreadcrumbList on docs. The agent CLI names in it come from `src/content/agents.ts`. Keep that list in step with the Providers doc. The social card is `public/assets/og-card.png` (1200×630). Rebuild it with `npm run og:image` after changing the logo, the hero screenshot, or the card copy in `scripts/make-og-image.mjs`.
 
 Vercel should use `website/` as the project root. `website/vercel.json` turns on clean URLs so `/docs` serves `docs.html`.
 

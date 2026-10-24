@@ -50,6 +50,9 @@ jobs:
       - name: Check hero asset hashes
         working-directory: website
         run: node --experimental-strip-types --test src/lib/hero-assets.test.ts
+      - name: Check structured data
+        working-directory: website
+        run: node --experimental-strip-types --test src/lib/structured-data.test.ts
       - name: Install and build
         working-directory: website
         run: npm ci && npm run build

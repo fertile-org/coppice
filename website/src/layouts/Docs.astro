@@ -2,6 +2,7 @@
 import DocsSearch from '../components/DocsSearch.astro';
 import { docOverride } from '../i18n/translations';
 import { hrefFor, useI18n } from '../i18n/runtime';
+import { docsSchema } from '../lib/page-schema';
 import Base from './Base.astro';
 
 interface Props {
@@ -37,7 +38,12 @@ const advanced = [
 const advancedOpen = advanced.some((link) => ctx.englishPath === link.href);
 ---
 
-<Base title={title} description={description} ogType="article">
+<Base
+  title={title}
+  description={description}
+  ogType="article"
+  structuredData={docsSchema(Astro, ctx, title, description)}
+>
   <div class="shell docs-shell">
     <header class="docs-header" data-pagefind-ignore>
       <DocsSearch
