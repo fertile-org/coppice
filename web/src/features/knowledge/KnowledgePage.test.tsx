@@ -308,7 +308,7 @@ describe('KnowledgePage', () => {
 
     const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
     expect(within(assist).getByText(neighbor.title)).toBeVisible();
-    expect(within(assist).getByText(/0.981/)).toBeVisible();
+    expect(within(assist).getByText(/match 98%/)).toBeVisible();
 
     mocks.items = [approvedNeighbor];
     fireEvent.click(within(assist).getByRole('button', { name: /Open/i }));

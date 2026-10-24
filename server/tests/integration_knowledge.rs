@@ -2029,7 +2029,7 @@ async fn similar_returns_identical_approved_neighbor_for_pending() {
     assert_eq!(items[0]["knowledgeType"], "test_command");
     assert_eq!(items[0]["scope"], "board");
     assert_eq!(items[0]["status"], "approved");
-    assert!(items[0]["score"].as_f64().unwrap() > 0.0);
+    assert_eq!(items[0]["score"].as_f64().unwrap(), 1.0);
 }
 
 #[tokio::test]
@@ -2064,6 +2064,67 @@ async fn similar_returns_empty_for_dissimilar_pending() {
     let (status, body) = get_similar(&app, pending_id, "", &cookie, &csrf).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn similar_ignores_neighbors_sharing_only_common_terms() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    for (title, content) in [
+        (
+            "Connector run_timeout_secs defaults",
+            "Each connector has a run_timeout_secs setting in config.toml. The default is 3600 \
+             seconds; a run that goes past it is cancelled and the ticket moves back to Ready. \
+             Raise it for long test runs or long reviews.",
+        ),
+        (
+            "Server checks: scoped cargo test before review",
+            "Before review, run make test-smoke or a scoped cargo test -p coppice-server \
+             --features embedded-test-db <filter>. Run make test only for final acceptance, \
+             then make clean.",
+        ),
+    ] {
+        let neighbor =
+            create_candidate_with_content(&app, &board_id, &cookie, &csrf, title, content).await;
+        approve_item(&app, neighbor["id"].as_str().unwrap(), 1, &cookie, &csrf).await;
+    }
+
+    let pending = create_candidate_with_content(
+        &app,
+        &board_id,
+        &cookie,
+        &csrf,
+        "Active-run check on drag into review",
+        "Dragging a ticket into In Review is refused while the ticket has an active run. The \
+         server checks hasActiveRun and answers 409; cancel the run or wait for it to finish, \
+         then make the move again.",
+    )
+    .await;
+    let pending_id = pending["id"].as_str().unwrap();
+
+    let (status, body) = get_similar(&app, pending_id, "limit=10", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().unwrap().len(), 0, "{body}");
+}
+
+#[tokio::test]
+async fn folded_stopwords_match_coppice_unaccent() {
+    use coppice_server::knowledge::fts::FOLDED_STOPWORDS;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let accented = [
+        "và", "của", "là", "các", "cho", "với", "trong", "được", "có", "không", "này", "một",
+        "những", "để", "khi", "thì", "đã", "sẽ", "từ", "theo", "cũng", "như", "nếu", "vào", "ra",
+    ];
+    let folded: Vec<String> =
+        sqlx::query_scalar("SELECT coppice_unaccent(w) FROM unnest($1::text[]) WITH ORDINALITY AS t(w, n) ORDER BY n")
+            .bind(&accented[..])
+            .fetch_all(state.db.as_ref().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(folded, FOLDED_STOPWORDS);
 }
 
 #[tokio::test]

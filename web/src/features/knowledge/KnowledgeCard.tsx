@@ -101,7 +101,7 @@ function NearDuplicateAssist({
                   <p className="mt-0.5 font-body text-xs text-text-muted">
                     {TYPE_LABELS[neighbor.knowledgeType] ??
                       humanize(neighbor.knowledgeType)}{' '}
-                    · {humanize(neighbor.scope)} · match {neighbor.score.toFixed(3)}
+                    · {humanize(neighbor.scope)} · match {Math.round(neighbor.score * 100)}%
                   </p>
                 </div>
                 <button

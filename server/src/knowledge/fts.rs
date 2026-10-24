@@ -4,6 +4,9 @@
 //! (`plainto_tsquery` / `websearch_to_tsquery`) would almost never match.
 //! Accent folding happens in SQL via `coppice_unaccent`, matching the
 //! generated `search_vector` column.
+//!
+//! [`terms`] is the same tokenizer as a set, for comparing two notes word by
+//! word (inbox near-duplicates).
 
 use std::collections::HashSet;
 
@@ -23,29 +26,47 @@ const STOPWORDS: &[&str] = &[
     "để", "khi", "thì", "đã", "sẽ", "từ", "theo", "cũng", "như", "nếu", "vào", "ra",
 ];
 
+/// The Vietnamese stopwords above as `coppice_unaccent` prints them, for text
+/// that was folded in SQL before it reached [`terms`].
+pub const FOLDED_STOPWORDS: &[&str] = &[
+    "va", "cua", "la", "cac", "cho", "voi", "trong", "duoc", "co", "khong", "nay", "mot", "nhung",
+    "de", "khi", "thi", "da", "se", "tu", "theo", "cung", "nhu", "neu", "vao", "ra",
+];
+
+/// Lowercased words of `text` in order, without stopwords or words outside
+/// the length limits.
+fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|term| {
+            let chars = term.chars().count();
+            (MIN_TERM_CHARS..=MAX_TERM_CHARS).contains(&chars)
+                && !STOPWORDS.contains(&term.as_str())
+        })
+}
+
 /// Build an OR-joined `to_tsquery('simple', …)` expression, title terms first.
 /// Returns `None` when no usable terms remain.
 pub fn build_tsquery(title: &str, body: &str) -> Option<String> {
     let mut seen = HashSet::new();
     let mut terms = Vec::new();
-    for text in [title, body] {
-        for raw in text.split(|c: char| !c.is_alphanumeric()) {
-            if terms.len() >= MAX_QUERY_TERMS {
-                break;
-            }
-            let term = raw.to_lowercase();
-            let chars = term.chars().count();
-            if !(MIN_TERM_CHARS..=MAX_TERM_CHARS).contains(&chars)
-                || STOPWORDS.contains(&term.as_str())
-            {
-                continue;
-            }
-            if seen.insert(term.clone()) {
-                terms.push(term);
-            }
+    for term in words(title).chain(words(body)) {
+        if terms.len() >= MAX_QUERY_TERMS {
+            break;
+        }
+        if seen.insert(term.clone()) {
+            terms.push(term);
         }
     }
     (!terms.is_empty()).then(|| terms.join(" | "))
+}
+
+/// Every distinct word of `text` that [`build_tsquery`] would use, with no
+/// cap. Expects text already folded by `coppice_unaccent`.
+pub fn terms(text: &str) -> HashSet<String> {
+    words(text)
+        .filter(|term| !FOLDED_STOPWORDS.contains(&term.as_str()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -84,6 +105,19 @@ mod tests {
     fn drops_stopwords_and_short_tokens() {
         assert_eq!(build_tsquery("the and of", "a x"), None);
         assert_eq!(build_tsquery("", "   "), None);
+    }
+
+    #[test]
+    fn terms_are_uncapped_and_drop_folded_stopwords() {
+        let body = (0..100)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(terms(&body).len(), 100);
+        let folded = terms("Kiem thu va trien khai cua the CSRF");
+        let mut expected: Vec<_> = folded.into_iter().collect();
+        expected.sort();
+        assert_eq!(expected, ["csrf", "khai", "kiem", "thu", "trien"]);
     }
 
     #[test]
