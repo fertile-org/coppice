@@ -149,16 +149,19 @@ describe('AppShell', () => {
     expect(main).toHaveClass('min-h-0');
   });
 
-  it('does not viewport-clamp non-chat routes', () => {
+  it('scrolls non-chat pages inside main, not the window', () => {
     renderShell(['/boards']);
 
     const root = screen.getByTestId('app-shell-root');
-    expect(root).toHaveClass('min-h-screen');
-    expect(root).not.toHaveClass('h-svh');
-    expect(root).not.toHaveClass('overflow-hidden');
+    const main = screen.getByTestId('app-shell-main');
+    expect(root).toHaveClass('h-svh');
+    expect(root).toHaveClass('overflow-hidden');
+    expect(main).toHaveClass('overflow-y-auto');
+    expect(main).toHaveClass('min-h-0');
+    expect(main).toHaveClass('flex-1');
   });
 
-  it('uses full-width main on board routes without chat viewport clamp', () => {
+  it('uses full-width scrolling main on board routes', () => {
     renderShell(['/boards/00000000-0000-4000-8000-000000000001']);
 
     const main = screen.getByTestId('app-shell-main');
@@ -168,11 +171,9 @@ describe('AppShell', () => {
     expect(main).not.toHaveClass('mx-auto');
     expect(main).toHaveClass('px-8');
     expect(main).toHaveClass('py-8');
-    expect(main).not.toHaveClass('flex-1');
+    expect(main).toHaveClass('overflow-y-auto');
     expect(main).not.toHaveClass('overflow-hidden');
-    expect(root).toHaveClass('min-h-screen');
-    expect(root).not.toHaveClass('h-svh');
-    expect(root).not.toHaveClass('overflow-hidden');
+    expect(root).toHaveClass('h-svh');
   });
 
   it('uses full-width main on non-board routes nested under a board', () => {

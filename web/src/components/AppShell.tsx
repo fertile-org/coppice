@@ -19,7 +19,7 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
@@ -124,6 +124,14 @@ export function AppShell() {
   const chatLayout = isChatRoute(pathname);
   const boardLayout = isBoardRoute(pathname);
 
+  // The shell is viewport-height; `main` is the page scroller, so the
+  // sidebar stays put and drawers' scroll lock has no window scrollbar to
+  // remove (which used to shift the layout when a drawer opened).
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo?.({ top: 0 });
+  }, [pathname]);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const onSystemRoute = isSystemRoute(pathname);
   const [systemOpen, setSystemOpen] = useState(onSystemRoute);
@@ -158,10 +166,7 @@ export function AppShell() {
   return (
     <div
       data-testid="app-shell-root"
-      className={cn(
-        'coppice-grain flex bg-background',
-        chatLayout ? 'h-svh overflow-hidden' : 'min-h-screen',
-      )}
+      className="coppice-grain flex h-svh overflow-hidden bg-background"
     >
       {boardLayout && <SkipToBoard />}
       <aside
@@ -263,12 +268,7 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div
-        className={cn(
-          'flex min-h-0 min-w-0 flex-1 flex-col',
-          chatLayout && 'overflow-hidden',
-        )}
-      >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DesktopUpdateBanner />
         <header
           data-testid="app-shell-topbar"
@@ -301,10 +301,11 @@ export function AppShell() {
         </header>
 
         <main
+          ref={mainRef}
           className={cn(
             chatLayout
               ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
-              : 'w-full px-8 py-8',
+              : 'min-h-0 w-full flex-1 overflow-y-auto px-8 py-8',
           )}
           data-testid="app-shell-main"
           data-layout={chatLayout ? 'chat' : boardLayout ? 'board' : 'default'}
