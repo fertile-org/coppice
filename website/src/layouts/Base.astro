@@ -3,20 +3,28 @@ import '../styles/global.css';
 import BetaBanner from '../components/BetaBanner.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
+import { ogLocale } from '../i18n/paths';
 import { useI18n } from '../i18n/runtime';
-import { heroScreenshot } from '../lib/hero-assets';
+import { ogCard } from '../lib/hero-assets';
 import { withBase } from '../lib/url';
 
 interface Props {
   title: string;
   description: string;
+  /** `article` for docs pages. */
+  ogType?: 'website' | 'article';
+  /** Keep the page out of search results (404). */
+  noindex?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, ogType = 'website', noindex = false } = Astro.props;
 const ctx = useI18n(Astro);
 const fullTitle = title === 'Coppice' ? 'Coppice' : `${title} · Coppice`;
-const image = Astro.site ? new URL(withBase(heroScreenshot), Astro.site).href : undefined;
-const imageAlt = 'Coppice board with tickets from Backlog through In Review';
+const image = Astro.site ? new URL(withBase(ogCard), Astro.site).href : undefined;
+const imageAlt = 'Coppice, the AI coding agent board: agents plan, build and review on one board.';
+const alternateOgLocales = ctx.alternates
+  .filter((link) => link.hreflang !== 'x-default' && link.hreflang !== ctx.code)
+  .map((link) => ogLocale(link.hreflang));
 ---
 
 <!doctype html>
@@ -26,11 +34,13 @@ const imageAlt = 'Coppice board with tickets from Backlog through In Review';
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <meta name="theme-color" content="#faf7f2" />
     <link rel="icon" href={withBase('/favicon.ico')} sizes="any" />
     <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
     <link rel="icon" href={withBase('/favicon-32x32.png')} type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href={withBase('/apple-touch-icon.png')} />
+    <link rel="manifest" href={withBase('/site.webmanifest')} />
     <link rel="canonical" href={ctx.canonical} />
     {
       ctx.alternates.map((link) => (
@@ -38,11 +48,23 @@ const imageAlt = 'Coppice board with tickets from Backlog through In Review';
       ))
     }
     <link rel="sitemap" type="application/xml" href={new URL(withBase('/sitemap.xml'), Astro.site).href} />
+    <meta property="og:site_name" content="Coppice" />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={ctx.canonical} />
+    <meta property="og:locale" content={ogLocale(ctx.translated ? ctx.locale : 'en')} />
+    {alternateOgLocales.map((locale) => <meta property="og:locale:alternate" content={locale} />)}
     {image && <meta property="og:image" content={image} />}
+    {image && <meta property="og:image:type" content="image/png" />}
+    {image && <meta property="og:image:width" content="1200" />}
+    {image && <meta property="og:image:height" content="630" />}
     {image && <meta property="og:image:alt" content={imageAlt} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    {image && <meta name="twitter:image" content={image} />}
+    {image && <meta name="twitter:image:alt" content={imageAlt} />}
   </head>
   <body>
     <a class="skip" href="#content">{ctx.ui.skip}</a>

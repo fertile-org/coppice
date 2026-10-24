@@ -3,12 +3,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Public hero files. Filenames stay stable; the query changes with the bytes. */
+/** Public hero files and the social card. Filenames stay stable; the query changes with the bytes. */
 const HERO_FILES = [
   'hero-screenshot.png',
   'marketing.webm',
   'marketing.mp4',
   'marketing.gif',
+  'og-card.png',
 ] as const;
 
 export type HeroFile = (typeof HERO_FILES)[number];
@@ -38,3 +39,4 @@ export const heroScreenshot = heroAsset('hero-screenshot.png');
 export const marketingWebm = heroAsset('marketing.webm');
 export const marketingMp4 = heroAsset('marketing.mp4');
 export const marketingGif = heroAsset('marketing.gif');
+export const ogCard = heroAsset('og-card.png');

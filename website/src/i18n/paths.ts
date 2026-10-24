@@ -15,6 +15,12 @@ export function localeCode(locale: string): string {
   return LOCALE_BY_PATH.get(locale)?.code ?? locale;
 }
 
+/** Open Graph locale (`ja_JP`) for a URL prefix or a BCP 47 code. */
+export function ogLocale(locale: string): string {
+  const found = LOCALE_BY_PATH.get(locale) ?? LOCALES.find((item) => item.code === locale);
+  return found?.og ?? 'en_US';
+}
+
 export function normalizeBase(base: string | undefined): string {
   if (!base || base === '/') return '';
   let root = String(base).trim();
@@ -131,18 +137,21 @@ export function sitemapXml(options: {
   catalog: ReadonlyMap<string, ReadonlySet<string>>;
   base?: string;
   site?: string;
+  /** `YYYY-MM-DD` for a page, or undefined to leave out `<lastmod>`. */
+  lastmod?: (locale: LocalePath, englishPath: string) => string | undefined;
 }): string {
   const urls: string[] = [];
   for (const englishPath of options.englishRoutes) {
     const locales = translatedLocales(options.catalog, englishPath);
     const alternates = alternateLinks(englishPath, locales, options.base, options.site);
-    const pages = locales.map((locale) => localizedPath(locale, englishPath));
-    for (const page of pages) {
-      const loc = publicHref(page, options.base, options.site);
-      const links = alternates
-        .map((link) => `    <xhtml:link rel="alternate" hreflang="${xmlEscape(link.hreflang)}" href="${xmlEscape(link.href)}" />`)
-        .join('\n');
-      urls.push(`  <url>\n    <loc>${xmlEscape(loc)}</loc>\n${links}\n  </url>`);
+    const links = alternates
+      .map((link) => `    <xhtml:link rel="alternate" hreflang="${xmlEscape(link.hreflang)}" href="${xmlEscape(link.href)}" />`)
+      .join('\n');
+    for (const locale of locales) {
+      const loc = publicHref(localizedPath(locale, englishPath), options.base, options.site);
+      const date = options.lastmod?.(locale, englishPath);
+      const lastmod = date ? `\n    <lastmod>${xmlEscape(date)}</lastmod>` : '';
+      urls.push(`  <url>\n    <loc>${xmlEscape(loc)}</loc>${lastmod}\n${links}\n  </url>`);
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join('\n')}\n</urlset>\n`;
