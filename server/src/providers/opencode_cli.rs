@@ -12,6 +12,9 @@
 //!   on a prompt. Read-only runs keep `edit`, `bash`, and `write` denied in the
 //!   config; verified on 2.0.20 that `--auto` does not override a deny.
 //! - The gateway is the `mcp` entry in `OPENCODE_CONFIG`, as on 1.x.
+//! - The project folder comes from `PWD`, not the process's working
+//!   directory, and `opencode run` has no `--dir` flag; `cli_runner` sets
+//!   `PWD` to the worktree (`env_hygiene::work_in`).
 //!
 //! Events are JSON lines (`step_start`, `text`, `reasoning`, `tool_use`,
 //! `step_finish`, `error`), each with `sessionID` and a `part`. They are turned

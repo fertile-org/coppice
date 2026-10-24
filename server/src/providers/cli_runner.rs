@@ -274,15 +274,15 @@ async fn run_cli_inner(
     }
     super::env_hygiene::scrub(&mut cmd);
     cmd.args(&inv.args)
-        .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .current_dir(&inv.cwd)
-        .stdin(if matches!(stdin, StdinMode::Null) {
-            Stdio::null()
-        } else {
-            Stdio::piped()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    super::env_hygiene::work_in(&mut cmd, &inv.cwd);
+    cmd.stdin(if matches!(stdin, StdinMode::Null) {
+        Stdio::null()
+    } else {
+        Stdio::piped()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
 
     let mut tracked = active()
         .spawn(

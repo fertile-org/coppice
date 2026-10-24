@@ -163,9 +163,9 @@ pub async fn run_turn(
     }
     super::env_hygiene::scrub(&mut cmd);
     cmd.args(&launch.args)
-        .envs(launch.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .current_dir(&launch.cwd)
-        .stdin(Stdio::piped())
+        .envs(launch.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    super::env_hygiene::work_in(&mut cmd, &launch.cwd);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut tracked = crate::process_tree::active()
