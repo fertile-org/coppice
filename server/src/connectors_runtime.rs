@@ -44,6 +44,9 @@ pub enum ConfigFileError {
     Conflict { text: String, revision: String },
     #[error("config backup is missing")]
     BackupMissing,
+    /// A Settings UI value that isn't a known setting or doesn't fit it.
+    #[error("{0}")]
+    Setting(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -241,6 +244,33 @@ impl ConnectorsRuntime {
     pub fn read_backup_text(&self) -> Result<String, ConfigFileError> {
         let path = self.config_path().ok_or(ConfigFileError::NoPath)?;
         settings_file::read_backup_text(&path)?.ok_or(ConfigFileError::BackupMissing)
+    }
+
+    /// Set one setting from the Settings UI, or remove it when `value` is
+    /// `None` so the default applies. Saved like the text editor's Save.
+    pub fn save_setting(
+        &self,
+        path: &[String],
+        value: Option<&toml::Value>,
+        base_revision: &str,
+    ) -> Result<SavedConfigFile, ConfigFileError> {
+        let desktop = self.config().auth.desktop_mode;
+        let spec = coppice_config::settings_catalog::catalog(desktop)
+            .into_iter()
+            .find(|spec| spec.path == path)
+            .ok_or_else(|| ConfigFileError::Setting("That isn't a setting Coppice knows.".into()))?;
+        if let Some(value) = value {
+            spec.check(value).map_err(ConfigFileError::Setting)?;
+        }
+        let (_, document) = self.read_config_document()?;
+        if document.revision != base_revision {
+            return Err(ConfigFileError::Conflict {
+                text: document.text,
+                revision: document.revision,
+            });
+        }
+        let text = settings_file::set_setting(&document.text, path, value)?;
+        self.save_config_text(&text, base_revision)
     }
 
     /// Write `text` exactly, then rebuild the connector registry from it.
@@ -557,6 +587,76 @@ mod tests {
         );
         assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
         assert_eq!(rt.config().agent.connectors.claude_code.enabled, Some(true));
+    }
+
+    fn key(text: &str) -> Vec<String> {
+        text.split('.').map(str::to_string).collect()
+    }
+
+    #[test]
+    fn one_setting_is_written_and_reset_without_touching_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep me\n[agent.connectors.claude-code]\nenabled = false\n";
+        std::fs::write(&path, original).unwrap();
+        let rt = runtime(Some(path.clone()));
+        let revision = coppice_config::settings_file::content_revision(original.as_bytes());
+
+        let mut enabled = key("agent.connectors.claude-code");
+        enabled.push("enabled".into());
+        let saved = rt
+            .save_setting(&enabled, Some(&toml::Value::Boolean(true)), &revision)
+            .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text, "# keep me\n[agent.connectors.claude-code]\nenabled = true\n");
+        assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
+
+        // Same as the default, still written: the user chose it.
+        let saved = rt
+            .save_setting(
+                &key("logs.retention_days"),
+                Some(&toml::Value::Integer(14)),
+                &saved.revision,
+            )
+            .unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("[logs]\nretention_days = 14\n"));
+
+        rt.save_setting(&enabled, None, &saved.revision).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("enabled"), "{text}");
+        assert!(text.starts_with("# keep me\n"), "{text}");
+        assert_eq!(rt.config().agent.connectors.claude_code.enabled, None);
+    }
+
+    #[test]
+    fn a_setting_that_is_unknown_wrong_or_stale_is_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "").unwrap();
+        let rt = runtime(Some(path.clone()));
+        let revision = coppice_config::settings_file::content_revision(b"");
+
+        let unknown = rt.save_setting(&key("server.port"), Some(&toml::Value::Integer(1)), &revision);
+        assert!(matches!(unknown, Err(ConfigFileError::Setting(_))));
+        let wrong = rt.save_setting(
+            &key("logs.retention_days"),
+            Some(&toml::Value::Integer(5)),
+            &revision,
+        );
+        assert!(
+            matches!(&wrong, Err(ConfigFileError::Setting(m)) if m == "Set logs.retention_days to 3, 7, 14, or 30."),
+            "{wrong:?}"
+        );
+        std::fs::write(&path, "# edited elsewhere\n").unwrap();
+        let stale = rt.save_setting(
+            &key("git.push_enabled"),
+            Some(&toml::Value::Boolean(true)),
+            &revision,
+        );
+        assert!(matches!(stale, Err(ConfigFileError::Conflict { .. })), "{stale:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# edited elsewhere\n");
     }
 
     #[test]

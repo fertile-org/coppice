@@ -703,6 +703,17 @@ fn is_reserved(binding: &ParsedBinding) -> bool {
     )
 }
 
+/// Every command id with its default keys as written in the defaults file,
+/// in [`COMMAND_ORDER`].
+pub fn default_commands() -> Vec<(String, Vec<String>)> {
+    let mut raw: BTreeMap<String, Vec<String>> =
+        toml::from_str(DEFAULTS_TOML).expect("default keybindings toml");
+    COMMAND_ORDER
+        .iter()
+        .filter_map(|id| raw.remove(*id).map(|keys| (id.to_string(), keys)))
+        .collect()
+}
+
 fn default_bindings() -> BTreeMap<String, Vec<ParsedBinding>> {
     let raw: BTreeMap<String, Vec<String>> =
         toml::from_str(DEFAULTS_TOML).expect("default keybindings toml");

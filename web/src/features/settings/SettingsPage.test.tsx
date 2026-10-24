@@ -69,10 +69,13 @@ function renderPage() {
 describe('SettingsPage', () => {
   afterEach(() => {
     delete window.coppiceDesktop;
+    localStorage.clear();
   });
 
   beforeEach(() => {
     delete window.coppiceDesktop;
+    // These cover the text editor; UI mode is in SettingsUi.test.tsx.
+    localStorage.setItem('coppice.settings.mode', 'toml');
     mocks.apiFetch.mockReset();
     mocks.apiFetch.mockImplementation((path: string) => {
       if (path === '/api/settings/config') {

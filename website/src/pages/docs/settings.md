@@ -16,12 +16,18 @@ Coppice keeps its settings in one file, `config.toml`:
 On Linux, if `XDG_CONFIG_HOME` is set, the file is at `$XDG_CONFIG_HOME/Coppice/config.toml`.
 
 ## Edit it in the app
-Open **Settings** in the sidebar. The page shows the file as text, and your comments are kept.
+Open **Settings** in the sidebar. It lists every setting below, grouped like this page, with a search box.
+
+- A setting your file doesn't have shows its default. Change it, and Coppice writes that one line to `config.toml`. It is then **Modified**, even if you picked the default value.
+- **Reset** removes the line again, so the default applies.
+- Each change is saved right away and checked first. A bad value isn't saved, and the setting says why.
+
+Turn on **Edit as TOML** to see the file as text instead. Your comments are kept in both modes.
 
 - **Save** checks the file before writing it. A bad value isn't saved.
 - **Restore last good version** undoes a bad change.
 
-Some changes apply right away. Others show "Saved. Restart Coppice to apply."
+Settings remembers which mode you used last. Some changes apply right away. Others show "Saved. Restart Coppice to apply."
 
 You can also edit the file in any text editor. Your edits survive upgrades.
 

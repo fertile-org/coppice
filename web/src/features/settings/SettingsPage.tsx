@@ -3,11 +3,14 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
 import { publishKeybindings, readKeybindings } from '../keyboard/keybindings';
 import { DesktopUpdatesSection } from './DesktopUpdatesSection';
+import { SettingsUi } from './SettingsUi';
+import { SETTINGS_UI_QUERY_KEY } from './settingsUiModel';
 import { TomlEditor } from './TomlEditor';
 
 const SAVED = 'Saved.';
@@ -49,6 +52,25 @@ type ConfigFile = z.infer<typeof configFileSchema>;
 
 const CONFIG_QUERY_KEY = ['settings-config'] as const;
 
+type SettingsMode = 'ui' | 'toml';
+const MODE_KEY = 'coppice.settings.mode';
+
+function storedMode(): SettingsMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'toml' ? 'toml' : 'ui';
+  } catch {
+    return 'ui';
+  }
+}
+
+function storeMode(mode: SettingsMode) {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    /* private mode or quota */
+  }
+}
+
 function invalidSaveMessage(line: number, message: string): string {
   const detail = message.endsWith('.') ? message.slice(0, -1) : message;
   return `Not saved. Line ${line}: ${detail}. Your file is unchanged.`;
@@ -71,15 +93,18 @@ export function SettingsPage() {
   const { user, loading } = useSession();
   const [desktop] = useState(isDesktopShell);
   const queryClient = useQueryClient();
+  const [mode, setMode] = useState<SettingsMode>(storedMode);
   const configQuery = useQuery({
     queryKey: CONFIG_QUERY_KEY,
     queryFn: readConfig,
-    refetchInterval: 2000,
+    refetchInterval: mode === 'toml' ? 2000 : false,
     enabled: user?.role === 'admin',
   });
 
   const [editor, setEditor] = useState<{
     text: string;
+    /** The disk text the edits started from. */
+    loadedText: string;
     baseRevision: string;
     staleRevision: string | null;
   } | null>(null);
@@ -93,6 +118,7 @@ export function SettingsPage() {
   if (disk && editor === null) {
     setEditor({
       text: disk.text,
+      loadedText: disk.text,
       baseRevision: disk.revision,
       staleRevision: null,
     });
@@ -139,11 +165,34 @@ export function SettingsPage() {
     }
     setEditor({
       text: disk.text,
+      loadedText: disk.text,
       baseRevision: disk.revision,
       staleRevision: null,
     });
     setStatus(null);
     setErrorLine(null);
+  }
+
+  async function changeMode(next: SettingsMode) {
+    setMode(next);
+    storeMode(next);
+    setStatus(null);
+    if (next === 'ui') {
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_UI_QUERY_KEY });
+      return;
+    }
+    // UI mode may have saved since; take the new file unless there are edits.
+    const fresh = await queryClient.fetchQuery({ queryKey: CONFIG_QUERY_KEY, queryFn: readConfig });
+    setEditor((current) =>
+      current == null || current.text === current.loadedText
+        ? {
+            text: fresh.text,
+            loadedText: fresh.text,
+            baseRevision: fresh.revision,
+            staleRevision: null,
+          }
+        : current,
+    );
   }
 
   function keepEdits() {
@@ -174,6 +223,7 @@ export function SettingsPage() {
         current
           ? {
               ...current,
+              loadedText: text,
               baseRevision: saved.revision,
               staleRevision: current.baseRevision,
             }
@@ -256,15 +306,63 @@ export function SettingsPage() {
     <div className="space-y-6">
       <header className="border-b border-border pb-6">
         <h1 className="font-display text-2xl font-semibold text-text-primary">Settings</h1>
-        <p className="mt-2 font-body text-sm text-text-secondary">
-          This is your <code className="font-mono text-[0.95em]">config.toml</code>. Comments are
-          kept.
-        </p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <p className="font-body text-sm text-text-secondary">
+            {mode === 'ui' ? (
+              <>
+                Every setting in your <code className="font-mono text-[0.95em]">config.toml</code>.
+                A change is saved right away; Reset goes back to the default.
+              </>
+            ) : (
+              <>
+                This is your <code className="font-mono text-[0.95em]">config.toml</code>. Comments
+                are kept.
+              </>
+            )}
+          </p>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="settings-toml-mode"
+              checked={mode === 'toml'}
+              onCheckedChange={(checked) => void changeMode(checked ? 'toml' : 'ui')}
+            />
+            <label
+              htmlFor="settings-toml-mode"
+              className="font-body text-sm font-medium text-text-secondary"
+            >
+              Edit as TOML
+            </label>
+          </div>
+        </div>
       </header>
 
       {desktop ? <DesktopUpdatesSection /> : null}
 
-      {text == null && configQuery.isLoading ? (
+      {disk && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p
+            data-testid="config-path"
+            className="break-all font-mono text-xs text-text-secondary"
+          >
+            {disk.path}
+          </p>
+          {desktop && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto px-1 py-0 text-xs"
+              onClick={() => void revealFileInFolder(disk.path)}
+            >
+              {revealFileLabel(window.coppiceDesktop?.platform)}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {mode === 'ui' ? (
+        <SettingsUi />
+      ) : text == null && configQuery.isLoading ? (
         <p className="font-body text-sm text-text-muted">Loading…</p>
       ) : text == null && configQuery.isError ? (
         <p role="alert" className={ERROR_CLASS}>
@@ -272,28 +370,6 @@ export function SettingsPage() {
         </p>
       ) : (
         <>
-          {disk && (
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <p
-                data-testid="config-path"
-                className="break-all font-mono text-xs text-text-secondary"
-              >
-                {disk.path}
-              </p>
-              {desktop && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto px-1 py-0 text-xs"
-                  onClick={() => void revealFileInFolder(disk.path)}
-                >
-                  {revealFileLabel(window.coppiceDesktop?.platform)}
-                </Button>
-              )}
-            </div>
-          )}
-
           {conflict && (
             <div
               role="status"

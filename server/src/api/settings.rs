@@ -11,7 +11,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/settings/config",
             get(get_config_file).put(put_config_file),
         )
+        .route("/api/settings/config/ui", get(get_config_ui))
+        .route("/api/settings/config/value", put(put_config_value))
         .route("/api/keybindings", get(get_keybindings))
         .route("/api/settings/config/backup", get(get_config_backup))
 }
@@ -164,6 +166,36 @@ struct SaveConfigResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigUiResponse {
+    path: String,
+    revision: String,
+    backup_available: bool,
+    /// Set when the file can't be read as TOML; the values then show defaults.
+    file_error: Option<String>,
+    settings: Vec<SettingResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingResponse {
+    key: String,
+    #[serde(flatten)]
+    spec: coppice_config::settings_catalog::SettingSpec,
+    /// The value the file sets, or `None` when the default applies.
+    value: Option<toml::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveValueBody {
+    path: Vec<String>,
+    /// `null` removes the key so the default applies.
+    value: Option<serde_json::Value>,
+    base_revision: String,
+}
+
+#[derive(Serialize)]
 struct BackupResponse {
     text: String,
 }
@@ -198,6 +230,9 @@ impl IntoResponse for ConfigApiError {
                 Json(json!({ "text": text, "revision": revision })),
             )
                 .into_response(),
+            ConfigFileError::Setting(message) => {
+                (StatusCode::BAD_REQUEST, Json(json!({ "message": message }))).into_response()
+            }
             ConfigFileError::BackupMissing => (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "message": "No backup yet." })),
@@ -269,6 +304,54 @@ async fn put_config_file(
     let saved = state
         .connectors
         .save_config_text(&body.text, &body.base_revision)?;
+    Ok(Json(SaveConfigResponse {
+        revision: saved.revision,
+        restart_required: saved.restart_required,
+        backup_available: saved.backup_available,
+    }))
+}
+
+async fn get_config_ui(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+) -> Result<Json<ConfigUiResponse>, ConfigApiError> {
+    let (path, document) = state.connectors.read_config_document()?;
+    let (table, file_error) = match document.text.parse::<toml::Table>() {
+        Ok(table) => (table, None),
+        Err(error) => (toml::Table::new(), Some(error.message().to_string())),
+    };
+    let desktop = state.connectors.config().auth.desktop_mode;
+    let settings = coppice_config::settings_catalog::catalog(desktop)
+        .into_iter()
+        .map(|spec| SettingResponse {
+            key: spec.key(),
+            value: coppice_config::settings_catalog::file_value(&table, &spec.path),
+            spec,
+        })
+        .collect();
+    Ok(Json(ConfigUiResponse {
+        path: display_path(&path),
+        revision: document.revision,
+        backup_available: document.backup_available,
+        file_error,
+        settings,
+    }))
+}
+
+async fn put_config_value(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+    Json(body): Json<SaveValueBody>,
+) -> Result<Json<SaveConfigResponse>, ConfigApiError> {
+    let value = match body.value {
+        None | Some(serde_json::Value::Null) => None,
+        Some(json) => Some(toml::Value::try_from(json).map_err(|_| {
+            ConfigFileError::Setting("That isn't a value a setting can hold.".into())
+        })?),
+    };
+    let saved = state
+        .connectors
+        .save_setting(&body.path, value.as_ref(), &body.base_revision)?;
     Ok(Json(SaveConfigResponse {
         revision: saved.revision,
         restart_required: saved.restart_required,

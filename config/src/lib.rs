@@ -1,5 +1,6 @@
 pub mod connector_file;
 pub mod keybindings;
+pub mod settings_catalog;
 pub mod settings_file;
 
 use figment::{
@@ -1547,7 +1548,7 @@ impl AppConfig {
             )
     }
 
-    fn default_values() -> Self {
+    pub(crate) fn default_values() -> Self {
         Self {
             server: ServerConfig { port: 5000 },
             database: DatabaseConfig {

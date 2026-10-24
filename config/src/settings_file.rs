@@ -91,6 +91,85 @@ pub fn read_backup_text(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(std::fs::read_to_string(backup)?))
 }
 
+/// `text` with the key at `path` set to `value`, or removed when `value` is
+/// `None`. Missing tables are added; comments and the rest of the file stay.
+pub fn set_setting(
+    text: &str,
+    path: &[String],
+    value: Option<&toml::Value>,
+) -> Result<String, ConfigTextError> {
+    let mut doc = text
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|error| error_from_toml_edit(text, &error))?;
+    let Some((key, parents)) = path.split_last() else {
+        return Ok(text.to_string());
+    };
+    let mut table = doc.as_table_mut();
+    for (depth, segment) in parents.iter().enumerate() {
+        if value.is_none() && !table.contains_key(segment) {
+            return Ok(doc.to_string());
+        }
+        let item = table.entry(segment).or_insert_with(|| {
+            let mut new = toml_edit::Table::new();
+            // `[agent.connectors.x]` rather than an empty `[agent]` header.
+            new.set_implicit(depth + 1 < parents.len());
+            Item::Table(new)
+        });
+        let Some(next) = item.as_table_mut() else {
+            return Err(ConfigTextError {
+                line: 1,
+                column: 1,
+                message: format!(
+                    "Settings can't edit {} here because the file doesn't use a [table] for it.",
+                    parents[..=depth].join(".")
+                ),
+            });
+        };
+        table = next;
+    }
+    match value {
+        Some(value) => {
+            table.insert(key, Item::Value(edit_value(value)));
+        }
+        None => {
+            table.remove(key);
+        }
+    }
+    Ok(doc.to_string())
+}
+
+fn edit_value(value: &toml::Value) -> toml_edit::Value {
+    match value {
+        toml::Value::String(text) => text.as_str().into(),
+        toml::Value::Integer(number) => (*number).into(),
+        toml::Value::Float(number) => (*number).into(),
+        toml::Value::Boolean(flag) => (*flag).into(),
+        toml::Value::Datetime(datetime) => datetime.to_string().into(),
+        toml::Value::Array(items) => {
+            toml_edit::Value::Array(items.iter().map(edit_value).collect())
+        }
+        toml::Value::Table(table) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (key, item) in table {
+                inline.insert(key, edit_value(item));
+            }
+            toml_edit::Value::InlineTable(inline)
+        }
+    }
+}
+
+fn error_from_toml_edit(text: &str, error: &toml_edit::TomlError) -> ConfigTextError {
+    let (line, column) = error
+        .span()
+        .map(|span| offset_line_col(text, span.start))
+        .unwrap_or((1, 1));
+    ConfigTextError {
+        line,
+        column,
+        message: single_line(error.message()),
+    }
+}
+
 /// Same parser and checks as startup, and Save rejects a `retention_days` outside 3, 7, 14, and 30.
 ///
 /// A `[keybindings]` line Coppice cannot use does not fail the file. It is
@@ -643,5 +722,53 @@ port = 5000
         assert!(outcome.restart_required);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
         assert_eq!(std::fs::read_to_string(backup_path(&path)).unwrap(), good);
+    }
+
+    #[test]
+    fn set_setting_keeps_comments_and_adds_tables() {
+        let path = |key: &str| -> Vec<String> { key.split('.').map(str::to_string).collect() };
+        let text = "# my settings\n[git]\n# who commits\nauthor_name = \"Me\"\n";
+        let next = set_setting(
+            text,
+            &path("git.push_enabled"),
+            Some(&toml::Value::Boolean(true)),
+        )
+        .unwrap();
+        assert_eq!(
+            next,
+            "# my settings\n[git]\n# who commits\nauthor_name = \"Me\"\npush_enabled = true\n"
+        );
+
+        let mut connector = path("agent.connectors.claude-code");
+        connector.push("enabled".into());
+        let added = set_setting(&next, &connector, Some(&toml::Value::Boolean(false))).unwrap();
+        assert!(
+            added.contains("[agent.connectors.claude-code]\nenabled = false"),
+            "{added}"
+        );
+        assert!(!added.contains("[agent]\n"), "{added}");
+        validate_config_text(&added).unwrap();
+
+        let shortcut = vec!["keybindings".to_string(), "palette.open".to_string()];
+        let keys = set_setting("", &shortcut, Some(&toml::Value::String("Mod+P".into()))).unwrap();
+        assert_eq!(keys, "[keybindings]\n\"palette.open\" = \"Mod+P\"\n");
+
+        let reset = set_setting(&next, &path("git.author_name"), None).unwrap();
+        assert_eq!(reset, "# my settings\n[git]\npush_enabled = true\n");
+        assert_eq!(
+            set_setting(text, &path("mcp.call_timeout_secs"), None).unwrap(),
+            text
+        );
+    }
+
+    #[test]
+    fn set_setting_refuses_a_key_where_the_file_has_a_value() {
+        let path: Vec<String> = ["git", "push_enabled"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let err = set_setting("git = 1\n", &path, Some(&toml::Value::Boolean(true))).unwrap_err();
+        assert!(err.message.contains("git"), "{err:?}");
+        assert!(set_setting("[git\n", &path, None).is_err());
     }
 }
