@@ -1,6 +1,7 @@
 ---
 title: Nhà cung cấp
-description: "Các agent CLI mà Coppice chạy: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok."
+metaTitle: "Agent CLI được hỗ trợ: Claude Code, Codex, Cursor"
+description: "Coppice chạy các agent CLI bạn đang dùng: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok."
 ---
 
 # Nhà cung cấp

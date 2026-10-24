@@ -1,6 +1,7 @@
 ---
 title: 備份資料
-description: "備份 Coppice、把它遷移到新電腦，以及在備份泄露時更換金鑰。"
+metaTitle: "備份和遷移 Coppice 資料"
+description: "下載 Coppice 備份並在新電腦上匯入，或者手動複製資料夾，把它遷移到另一台電腦；如果備份不慎泄露，還可以更換金鑰。"
 ---
 
 # 備份資料

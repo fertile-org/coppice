@@ -1,6 +1,7 @@
 ---
 title: Phím tắt
-description: "Thao tác trong Coppice bằng bàn phím: bảng, ticket và review."
+metaTitle: "Phím tắt bàn phím"
+description: "Dùng Coppice bằng bàn phím: di chuyển trên bảng, mở và chuyển ticket, review diff không cần chuột, và tự đặt phím tắt riêng."
 ---
 
 # Phím tắt

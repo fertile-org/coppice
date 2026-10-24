@@ -1,6 +1,7 @@
 ---
 title: 提供商
-description: "Coppice 執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。"
+metaTitle: "支援的代理 CLI：Claude Code、Codex、Cursor"
+description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。"
 ---
 
 # 提供商

@@ -1,6 +1,7 @@
 ---
 title: よくある質問
-description: "Beta の範囲、今後の予定、Coppice ではないもの。"
+metaTitle: "Coppice のよくある質問：Beta、Docker、Windows"
+description: "Coppice は本番で使える？Docker やアカウントは必要？エージェントが勝手にマージする？Beta、Windows、コンフリクトなどへの回答。"
 ---
 
 # よくある質問

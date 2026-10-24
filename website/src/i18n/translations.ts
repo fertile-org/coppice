@@ -3,7 +3,7 @@ import type { LocalePath } from './paths';
 
 type DocModule = {
   Content: (props: Record<string, unknown>) => unknown;
-  frontmatter?: { title?: string; description?: string };
+  frontmatter?: { title?: string; metaTitle?: string; description?: string };
 };
 
 const docModules = import.meta.glob('../content/docs/*/**/*.{md,mdx}', { eager: true }) as Record<string, DocModule>;
@@ -23,13 +23,18 @@ function findModule<T>(modules: Record<string, T>, suffix: string): T | null {
 export function docOverride(
   locale: string,
   englishPath: string,
-): { Content: DocModule['Content']; title?: string; description?: string } | null {
+): { Content: DocModule['Content']; title?: string; metaTitle?: string; description?: string } | null {
   if (locale === 'en' || !englishPath.startsWith('/docs')) return null;
   const slug = englishPath === '/docs' ? 'index' : englishPath.slice('/docs/'.length);
   for (const ext of ['.md', '.mdx']) {
     const mod = findModule(docModules, `/content/docs/${locale}/${slug}${ext}`);
     if (mod?.Content) {
-      return { Content: mod.Content, title: mod.frontmatter?.title, description: mod.frontmatter?.description };
+      return {
+        Content: mod.Content,
+        title: mod.frontmatter?.title,
+        metaTitle: mod.frontmatter?.metaTitle,
+        description: mod.frontmatter?.description,
+      };
     }
   }
   return null;

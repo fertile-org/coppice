@@ -1,6 +1,7 @@
 ---
 title: 常見問題
-description: "Beta 範圍、後續計劃，以及 Coppice 不是什麼。"
+metaTitle: "Coppice 常見問題：Beta、Docker、Windows 與合併"
+description: "Coppice 能用於正式環境嗎？需要 Docker 或帳號嗎？代理會不經你同意就合併嗎？關於 Beta、Windows、衝突等問題的解答。"
 ---
 
 # 常見問題

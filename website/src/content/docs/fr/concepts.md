@@ -1,6 +1,7 @@
 ---
 title: Concepts
-description: "Comment un ticket passe de Backlog à Done, et qui fait quoi."
+metaTitle: "Concepts : tickets, agents, chat et revue"
+description: "Comment un ticket Coppice passe de Backlog à Done, ce que fait chaque agent, comment marchent le chat et la base de connaissances, et où relire le diff."
 ---
 
 # Concepts

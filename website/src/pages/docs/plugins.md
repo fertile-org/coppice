@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Plugins
-description: "Plugins give agents skills and MCP tools. Add one, enable it, and choose which agents can use it."
+metaTitle: "Plugins: Agent Skills and MCP Tools"
+description: "Plugins give Coppice agents skills and MCP tools. Install one from git or a folder, enable it, choose which agents can use it, or write your own."
 ---
 
 # Plugins

@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Keyboard shortcuts
-description: "Move around Coppice from the keyboard: the board, tickets, and review."
+metaTitle: "Keyboard Shortcuts"
+description: "Use Coppice from the keyboard: move around the board, open and move tickets, review diffs without the mouse, and set your own custom shortcuts."
 ---
 
 # Keyboard shortcuts

@@ -1,6 +1,7 @@
 ---
 title: Premiers pas
-description: "D’une installation neuve à votre premier lancement d’agent en cinq étapes."
+metaTitle: "Premiers pas : votre premier agent de code"
+description: "D’une installation neuve à votre premier lancement d’agent en cinq étapes : connexion à une CLI d’agent, un agent, un dépôt, un tableau, puis un ticket."
 ---
 
 # Premiers pas

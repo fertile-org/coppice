@@ -3,9 +3,10 @@ import '../styles/global.css';
 import BetaBanner from '../components/BetaBanner.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
-import { ogLocale } from '../i18n/paths';
+import { LOCALES, ogLocale } from '../i18n/paths';
 import { useI18n } from '../i18n/runtime';
 import { ogCard } from '../lib/hero-assets';
+import { jsonLd, organization, website, type Thing } from '../lib/structured-data';
 import { withBase } from '../lib/url';
 
 interface Props {
@@ -15,16 +16,35 @@ interface Props {
   ogType?: 'website' | 'article';
   /** Keep the page out of search results (404). */
   noindex?: boolean;
+  /** schema.org items for this page, added after the site's Organization and WebSite. */
+  structuredData?: Thing[];
+  /** `<meta name="keywords">`. Search engines barely weigh it; keep it short and true. */
+  keywords?: readonly string[];
+  /** `article:tag`, one per entry (docs). */
+  tags?: readonly string[];
 }
 
-const { title, description, ogType = 'website', noindex = false } = Astro.props;
+const {
+  title,
+  description,
+  ogType = 'website',
+  noindex = false,
+  structuredData = [],
+  keywords = [],
+  tags = [],
+} = Astro.props;
 const ctx = useI18n(Astro);
-const fullTitle = title === 'Coppice' ? 'Coppice' : `${title} · Coppice`;
+// Titles that already name the product keep their wording.
+const fullTitle = title.includes('Coppice') ? title : `${title} · Coppice`;
 const image = Astro.site ? new URL(withBase(ogCard), Astro.site).href : undefined;
 const imageAlt = 'Coppice, the AI coding agent board: agents plan, build and review on one board.';
 const alternateOgLocales = ctx.alternates
   .filter((link) => link.hreflang !== 'x-default' && link.hreflang !== ctx.code)
   .map((link) => ogLocale(link.hreflang));
+const siteRef = Astro.site ? { site: Astro.site.href, base: import.meta.env.BASE_URL } : null;
+const graph = siteRef && !noindex
+  ? jsonLd([organization(siteRef), website(siteRef, LOCALES.map((locale) => locale.code)), ...structuredData])
+  : null;
 ---
 
 <!doctype html>
@@ -35,6 +55,7 @@ const alternateOgLocales = ctx.alternates
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
+    {keywords.length > 0 && <meta name="keywords" content={keywords.join(', ')} />}
     <meta name="theme-color" content="#faf7f2" />
     <link rel="icon" href={withBase('/favicon.ico')} sizes="any" />
     <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
@@ -53,6 +74,7 @@ const alternateOgLocales = ctx.alternates
     <meta property="og:description" content={description} />
     <meta property="og:type" content={ogType} />
     <meta property="og:url" content={ctx.canonical} />
+    {ogType === 'article' && tags.map((tag) => <meta property="article:tag" content={tag} />)}
     <meta property="og:locale" content={ogLocale(ctx.translated ? ctx.locale : 'en')} />
     {alternateOgLocales.map((locale) => <meta property="og:locale:alternate" content={locale} />)}
     {image && <meta property="og:image" content={image} />}
@@ -65,6 +87,7 @@ const alternateOgLocales = ctx.alternates
     <meta name="twitter:description" content={description} />
     {image && <meta name="twitter:image" content={image} />}
     {image && <meta name="twitter:image:alt" content={imageAlt} />}
+    {graph && <script type="application/ld+json" set:html={graph} />}
   </head>
   <body>
     <a class="skip" href="#content">{ctx.ui.skip}</a>

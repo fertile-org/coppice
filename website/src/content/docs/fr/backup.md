@@ -1,6 +1,7 @@
 ---
 title: Sauvegarder les données
-description: "Sauvegarder Coppice, le déplacer sur un nouvel ordinateur, et remplacer les clés si une sauvegarde fuit."
+metaTitle: "Sauvegarder et déplacer vos données Coppice"
+description: "Téléchargez une sauvegarde de Coppice, importez-la sur un nouvel ordinateur, copiez les dossiers de données à la main, et remplacez les clés en cas de fuite."
 ---
 
 # Sauvegarder les données

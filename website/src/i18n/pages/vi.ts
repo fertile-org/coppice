@@ -5,8 +5,10 @@ export const locale = 'vi';
 /** Tiếng Việt homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
+    title: 'Coppice: Bảng điều phối AI coding agent, mã nguồn mở',
     description:
-      'Mỗi coding agent đảm nhận một vai trò, cùng lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong. Chạy ngay trên máy bạn, mã nguồn mở, dùng luôn các agent CLI bạn đang trả phí.',
+      'Coppice là bảng điều phối AI coding agent chạy ngay trên máy bạn. Claude Code, Codex, Cursor… cùng lên kế hoạch, viết code và review; bạn duyệt từng diff.',
+    worksWith: 'Dùng được với',
     h1: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',
     lede: 'Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
     hero: {
@@ -72,6 +74,9 @@ export const pages: Pages = {
   },
   download: {
     title: 'Tải Coppice',
+    metaTitle: 'Tải Coppice cho macOS và Linux',
+    description:
+      'Tải Coppice, bảng điều phối AI coding agent miễn phí và mã nguồn mở, cho macOS (Apple Silicon hoặc Intel) và Linux. Chạy trên máy bạn, không cần tài khoản.',
     intro: 'Miễn phí, chạy ngay trên máy bạn, không cần tài khoản Coppice.',
     groups: [
       {

@@ -1,8 +1,10 @@
 // SEO checks on the built site. Run after `npm run build`.
 // Every page: one title, one description, one canonical on `site`, Open Graph and
 // Twitter tags that agree with it, and an og:image that exists in dist.
-// Indexable pages (self canonical, no noindex): one h1 and a title unique within
-// their language. Also robots.txt, the sitemap, the manifest, and any JSON-LD.
+// Indexable pages (self canonical, no noindex): one h1, a title unique within
+// their language, and title / description lengths that fit a search result.
+// Lengths are display width: CJK and fullwidth characters count as two, since
+// search engines truncate by pixels, not characters. Also robots.txt, the sitemap, the manifest, and any JSON-LD.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -10,6 +12,16 @@ const root = process.cwd();
 const dist = path.resolve('dist');
 const failures = [];
 const TITLE_MAX = 60;
+const DESCRIPTION_MIN = 100;
+const DESCRIPTION_MAX = 160;
+
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
+
+function width(text) {
+  let total = 0;
+  for (const char of text) total += WIDE.test(char) ? 2 : 1;
+  return total;
+}
 
 function fail(message) {
   failures.push(message);
@@ -136,12 +148,16 @@ for (const file of walk(dist)) {
   if (image && one('twitter:image') !== image) where('twitter:image does not match og:image');
   if (one('og:image:width') !== '1200' || one('og:image:height') !== '630') where('og:image should be 1200×630');
 
+  const schema = new Map();
   for (const [index, match] of [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].entries()) {
     try {
       const data = JSON.parse(match[1]);
       const items = Array.isArray(data) ? data : data['@graph'] ?? [data];
       if (!JSON.stringify(data).includes('https://schema.org')) where(`JSON-LD #${index + 1} has no schema.org @context`);
-      for (const item of items) if (!item['@type']) where(`JSON-LD #${index + 1} has an item without @type`);
+      for (const item of items) {
+        if (!item['@type']) where(`JSON-LD #${index + 1} has an item without @type`);
+        else schema.set(item['@type'], item);
+      }
     } catch (error) {
       where(`JSON-LD #${index + 1} does not parse: ${error.message}`);
     }
@@ -152,7 +168,31 @@ for (const file of walk(dist)) {
   if (!selfCanonical) continue;
   indexable.add(canonical);
 
-  if (titles[0] && titles[0].length > TITLE_MAX) where(`title is ${titles[0].length} characters (max ${TITLE_MAX}): ${titles[0]}`);
+  const englishRoute = route.replace(/^\/(vi|zh-cn|zh-tw|zh-hk|ja|fr)(?=\/|$)/, '') || '/';
+  const required = ['Organization', 'WebSite'];
+  if (englishRoute === '/' || englishRoute === '/download') required.push('SoftwareApplication');
+  if (englishRoute === '/docs' || englishRoute.startsWith('/docs/')) required.push('TechArticle', 'BreadcrumbList');
+  for (const type of required) if (!schema.has(type)) where(`JSON-LD is missing ${type}`);
+  const app = schema.get('SoftwareApplication');
+  if (app) {
+    for (const key of ['name', 'operatingSystem', 'applicationCategory', 'offers']) {
+      if (!app[key]) where(`SoftwareApplication is missing ${key}`);
+    }
+    if (app.offers && app.offers.price === undefined) where('SoftwareApplication offers has no price');
+  }
+  const article = schema.get('TechArticle');
+  if (article && article.url !== canonical) where(`TechArticle url ${article.url} is not the canonical ${canonical}`);
+  if (article && article.inLanguage !== lang) where(`TechArticle inLanguage ${article.inLanguage} is not <html lang> ${lang}`);
+  const crumbs = schema.get('BreadcrumbList')?.itemListElement ?? [];
+  for (const crumb of crumbs) {
+    if (!crumb.item || !distFileFor(crumb.item, site)) where(`breadcrumb ${crumb.name} points at ${crumb.item}, which is not a page`);
+  }
+
+  if (titles[0] && width(titles[0]) > TITLE_MAX) where(`title is ${width(titles[0])} wide (max ${TITLE_MAX}): ${titles[0]}`);
+  const descriptionWidth = width(descriptions[0] ?? '');
+  if (descriptionWidth < DESCRIPTION_MIN || descriptionWidth > DESCRIPTION_MAX) {
+    where(`description is ${descriptionWidth} wide (${DESCRIPTION_MIN}–${DESCRIPTION_MAX}): ${descriptions[0]}`);
+  }
   const h1s = (html.match(/<h1\b/gi) ?? []).length;
   if (h1s !== 1) where(`expected one <h1>, found ${h1s}`);
   const seen = titlesByLang.get(lang) ?? new Map();

@@ -25,6 +25,10 @@ export const ui: Ui = {
   },
   docs: {
     navLabel: 'Tài liệu',
+    breadcrumbLabel: 'Đường dẫn',
+    pagerLabel: 'Tài liệu khác',
+    previous: 'Trang trước',
+    next: 'Trang sau',
     install: 'Cài đặt',
     gettingStarted: 'Bắt đầu',
     concepts: 'Khái niệm',

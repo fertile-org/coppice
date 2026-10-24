@@ -5,8 +5,10 @@ export const locale = 'ja';
 /** 日本語 homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
+    title: 'Coppice：オープンソースの AI コーディングエージェントボード',
     description:
-      '役割を持ったコーディングエージェントが、1 つのボードで計画し、作り、レビューします。あなたが diff を承認するまで、何も完了にはなりません。ローカルで動くオープンソースで、すでに契約しているエージェント CLI を使います。',
+      'Coppice はローカルで動くオープンソースの AI コーディングエージェントボード。Claude Code、Codex、Cursor などが並行して計画・実装・レビュー。diff はあなたが承認。',
+    worksWith: '対応 CLI：',
     h1: '専門家を雇い、最終判断はあなたに。',
     lede: 'PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
     hero: {
@@ -72,6 +74,9 @@ export const pages: Pages = {
   },
   download: {
     title: 'Coppice をダウンロード',
+    metaTitle: 'Coppice をダウンロード（macOS・Linux）',
+    description:
+      '無料でオープンソースの AI コーディングエージェントボード Coppice を、macOS（Apple Silicon・Intel）と Linux 向けに配布しています。アカウント不要。',
     intro: '無料で、あなたのマシンで動きます。Coppice アカウントは不要です。',
     groups: [
       {

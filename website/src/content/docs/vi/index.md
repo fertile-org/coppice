@@ -1,6 +1,7 @@
 ---
 title: Tài liệu
-description: "Coppice gom cả một đội coding agent lên cùng một bảng: chia việc thành ticket, để agent làm trên branch riêng, và review từng diff trước khi tính là xong. Bắt đầu từ trang Cài đặt để chạy ticket đầu tiên."
+metaTitle: "Tài liệu Coppice: chạy AI coding agent trên một bảng"
+description: "Coppice gom cả đội coding agent lên một bảng: chia việc thành ticket, để agent làm trên branch riêng, và review từng diff. Bắt đầu từ trang Cài đặt."
 ---
 
 # Tài liệu

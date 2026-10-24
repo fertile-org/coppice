@@ -1,6 +1,7 @@
 ---
 title: 设置参考
-description: "config.toml 中所有可修改的字段，以及它们的类型和默认值。"
+metaTitle: "设置参考：config.toml"
+description: "Coppice 的 config.toml 中每个字段的类型和默认值：日志、存储、智能体与连接器、工作流、知识库、git、插件、MCP 和密钥。"
 ---
 
 # 设置参考

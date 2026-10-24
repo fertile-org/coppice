@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Install
-description: "Coppice Beta ships as a desktop app. No Docker, no server, no Coppice account."
+metaTitle: "Install Coppice on macOS, Linux and Windows (WSL)"
+description: "Install the Coppice desktop app on macOS or Linux, or on Windows 11 through WSL. No Docker, no server, no account. Covers updates, requirements and fixes."
 ---
 
 # Install
