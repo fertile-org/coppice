@@ -29,7 +29,7 @@ Vous pouvez aussi modifier le fichier dans n’importe quel éditeur de texte. V
 <a id="updates"></a>
 
 ## Mises à jour
-Ouvrez **Settings → Updates** pour voir votre version et choisir **Check for updates**. **Automatic updates** est activé par défaut. Désactivez-le, et Coppice arrête de chercher les nouvelles versions en arrière-plan.
+Ouvrez **System → Updates** pour voir votre version et choisir **Check for updates**. **Automatic updates** est activé par défaut. Désactivez-le, et Coppice arrête de chercher les nouvelles versions en arrière-plan.
 
 Cet interrupteur n’est pas dans `config.toml`. Coppice l’enregistre sous `automaticUpdates` dans `update-settings.json`, dans le même dossier.
 

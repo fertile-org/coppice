@@ -29,7 +29,7 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 <a id="updates"></a>
 
 ## 更新
-開啓 **Settings → Updates**（設定 → 更新）可以檢視當前版本，並選擇 **Check for updates**（檢查更新）。**Automatic updates**（自動更新）預設開啓。關閉後，Coppice 將不再在後台檢查新版本。
+開啓 **System → Updates**（系統 → 更新）可以檢視當前版本，並選擇 **Check for updates**（檢查更新）。**Automatic updates**（自動更新）預設開啓。關閉後，Coppice 將不再在後台檢查新版本。
 
 這個開關不在 `config.toml` 中。Coppice 把它以 `automaticUpdates` 儲存在同一資料夾下的 `update-settings.json` 中。
 

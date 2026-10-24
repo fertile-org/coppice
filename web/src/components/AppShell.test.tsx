@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '../features/theme/ThemeProvider';
@@ -245,6 +245,23 @@ describe('AppShell', () => {
       '/system/connectors',
     );
     expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/system/logs');
+  });
+
+  it('lists Updates under System only inside the desktop app', () => {
+    renderShell(['/system/logs']);
+    expect(screen.queryByRole('link', { name: 'Updates' })).not.toBeInTheDocument();
+    cleanup();
+
+    window.coppiceDesktop = { pickDirectory: vi.fn(async () => null), platform: 'linux' };
+    try {
+      renderShell(['/system/logs']);
+      expect(screen.getByRole('link', { name: 'Updates' })).toHaveAttribute(
+        'href',
+        '/system/updates',
+      );
+    } finally {
+      delete window.coppiceDesktop;
+    }
   });
 
   it('opens the System group on a System page', () => {

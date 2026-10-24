@@ -29,6 +29,7 @@ import {
   ConnectorsPage,
   LegacyLogsRedirect,
   LegacyToolsRedirect,
+  UpdatesPage,
 } from './features/system/SystemPages';
 import { KeyboardProvider } from './features/keyboard/KeyboardProvider';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
@@ -101,6 +102,7 @@ function App() {
                 <Route path="/system/backup" element={<BackupPage />} />
                 <Route path="/system/connectors" element={<ConnectorsPage />} />
                 <Route path="/system/logs" element={<LogsPage />} />
+                <Route path="/system/updates" element={<UpdatesPage />} />
                 <Route path="/logs" element={<LegacyLogsRedirect />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/tools" element={<LegacyToolsRedirect />} />

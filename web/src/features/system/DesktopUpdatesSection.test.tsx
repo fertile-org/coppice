@@ -69,7 +69,7 @@ describe('DesktopUpdatesSection', () => {
     };
 
     const first = render(<DesktopUpdatesSection />);
-    expect(await screen.findByRole('heading', { name: 'Updates' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Updates' })).toBeInTheDocument();
     expect(screen.getByText('Version 0.1.0-rc.7')).toBeInTheDocument();
     expect(screen.getByText('Tell me when a new version is out. Updates install through apt.')).toBeInTheDocument();
     const sw = screen.getByRole('switch', { name: 'Automatic updates' });

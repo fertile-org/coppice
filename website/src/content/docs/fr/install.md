@@ -31,7 +31,7 @@ Toutes les versions sont aussi sur [GitHub Releases](https://github.com/fertile-
 
 ## Mises à jour
 
-Coppice cherche les nouvelles versions en arrière-plan. Pour désactiver ça, ouvrez **Settings → Updates** et désactivez **Automatic updates**. Vos tableaux et paramètres restent en place lors d’une mise à jour.
+Coppice cherche les nouvelles versions en arrière-plan. Pour désactiver ça, ouvrez **System → Updates** et désactivez **Automatic updates**. Vos tableaux et paramètres restent en place lors d’une mise à jour.
 
 - **macOS :** Coppice télécharge la mise à jour pour vous. Choisissez **Restart to update** dans le bandeau, ou elle s’installe la prochaine fois que vous quittez Coppice.
 - **Linux :** installer le `.deb` ajoute la source de paquets de Coppice, donc les nouvelles versions arrivent avec vos autres mises à jour dans le gestionnaire de mises à jour, ou lancez `sudo apt update && sudo apt upgrade`.

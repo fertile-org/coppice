@@ -32,7 +32,7 @@ Settings remembers which mode you used last. Some changes apply right away. Othe
 You can also edit the file in any text editor. Your edits survive upgrades.
 
 ## Updates
-Open **Settings → Updates** to see your version and choose **Check for updates**. **Automatic updates** is on by default. Turn it off, and Coppice stops checking for new versions in the background.
+Open **System → Updates** to see your version and choose **Check for updates**. **Automatic updates** is on by default. Turn it off, and Coppice stops checking for new versions in the background.
 
 This switch isn't in `config.toml`. Coppice saves it as `automaticUpdates` in `update-settings.json`, in the same folder.
 

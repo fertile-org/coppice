@@ -29,7 +29,7 @@ Bạn cũng có thể sửa file bằng trình soạn thảo bất kỳ. Nâng c
 <a id="updates"></a>
 
 ## Cập nhật
-Mở **Settings → Updates** để xem phiên bản và chọn **Check for updates**. **Automatic updates** bật sẵn. Tắt đi thì Coppice sẽ không tự kiểm tra phiên bản mới nữa.
+Mở **System → Updates** để xem phiên bản và chọn **Check for updates**. **Automatic updates** bật sẵn. Tắt đi thì Coppice sẽ không tự kiểm tra phiên bản mới nữa.
 
 Công tắc này không nằm trong `config.toml`. Coppice lưu nó dưới tên `automaticUpdates` trong `update-settings.json`, cùng thư mục.
 

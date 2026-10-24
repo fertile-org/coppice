@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  RefreshCw,
   Puzzle,
   ScrollText,
   Settings,
@@ -24,6 +25,7 @@ import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
+import { isDesktopShell } from '../lib/desktop';
 import { cn } from '../lib/utils';
 import { LOGS_COPY } from '../features/logs/copy';
 import { SYSTEM_LABEL, SYSTEM_PATHS } from '../features/system/paths';
@@ -38,6 +40,8 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  /** Only inside the desktop app, which provides it. */
+  desktopOnly?: boolean;
   end?: boolean;
 };
 
@@ -57,6 +61,7 @@ const SYSTEM_ITEMS: NavItem[] = [
   { to: SYSTEM_PATHS.backup, label: 'Backup', icon: DatabaseBackup, adminOnly: true },
   { to: SYSTEM_PATHS.connectors, label: 'Connectors', icon: Plug, adminOnly: true },
   { to: SYSTEM_PATHS.logs, label: LOGS_COPY.nav, icon: ScrollText, adminOnly: true },
+  { to: SYSTEM_PATHS.updates, label: 'Updates', icon: RefreshCw, adminOnly: true, desktopOnly: true },
 ];
 
 function isSystemRoute(pathname: string): boolean {
@@ -142,6 +147,7 @@ export function AppShell() {
   }, []);
 
   const showSystem = user?.role === 'admin';
+  const systemItems = SYSTEM_ITEMS.filter((item) => !item.desktopOnly || isDesktopShell());
   const visibleNavItems = NAV_ITEMS.filter((item) => {
     if (desktopMode && item.to === '/settings/users') {
       return false;
@@ -190,7 +196,7 @@ export function AppShell() {
             <Fragment key={item.to}>
               {item.to === '/settings' && showSystem ? (
                 sidebarCollapsed ? (
-                  SYSTEM_ITEMS.map((child) => (
+                  systemItems.map((child) => (
                     <SidebarLink key={child.to} item={child} collapsed />
                   ))
                 ) : (
@@ -219,7 +225,7 @@ export function AppShell() {
                         id="nav-group-system-items"
                         className="mt-0.5 flex flex-col gap-0.5 pl-4"
                       >
-                        {SYSTEM_ITEMS.map((child) => (
+                        {systemItems.map((child) => (
                           <SidebarLink key={child.to} item={child} collapsed={false} />
                         ))}
                       </div>

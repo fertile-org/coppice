@@ -8,7 +8,6 @@ import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
 import { publishKeybindings, readKeybindings } from '../keyboard/keybindings';
-import { DesktopUpdatesSection } from './DesktopUpdatesSection';
 import { SettingsUi } from './SettingsUi';
 import { SETTINGS_UI_QUERY_KEY } from './settingsUiModel';
 import { TomlEditor } from './TomlEditor';
@@ -335,8 +334,6 @@ export function SettingsPage() {
           </div>
         </div>
       </header>
-
-      {desktop ? <DesktopUpdatesSection /> : null}
 
       {disk && (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

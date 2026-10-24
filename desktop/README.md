@@ -68,7 +68,7 @@ If `pg_app_password` is missing or unreadable at startup, Coppice generates a ne
 
 ## Updates
 
-The shell checks GitHub releases in the background (prereleases included) and shows a banner. **Settings → Updates** remembers `automaticUpdates` in `update-settings.json` inside the user-data directory. Default is on.
+The shell checks GitHub releases in the background (prereleases included) and shows a banner. **System → Updates** remembers `automaticUpdates` in `update-settings.json` inside the user-data directory. Default is on.
 
 Linux packages copy the committed public keyring `build/linux/coppice-archive-keyring.gpg` and add its apt source on install. The private key is used only by `.github/workflows/apt-repo.yml`, which publishes the signed repository after a release is published. The apt origin and the macOS feed origin are `COPPICE_UPDATE_BASE`, or `https://apt.getcoppice.app` when that variable is empty. That value has to be an https origin with a host and no path, or the package build fails. The macOS feed is that origin plus `/updates/`. A release's Linux package also checks that the committed keyring holds exactly one primary key, and that its fingerprint is the repository variable `COPPICE_APT_KEY_FINGERPRINT`.
 

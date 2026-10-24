@@ -31,7 +31,7 @@ Coppice Beta 以桌面应用的形式发布。不需要 Docker，不需要服务
 
 ## 更新
 
-Coppice 会在后台检查新版本。如果想关闭，打开 **Settings → Updates**（设置 → 更新），关掉 **Automatic updates**（自动更新）。更新后，你的看板和设置都会保留。
+Coppice 会在后台检查新版本。如果想关闭，打开 **System → Updates**（系统 → 更新），关掉 **Automatic updates**（自动更新）。更新后，你的看板和设置都会保留。
 
 - **macOS：** Coppice 会替你下载更新。在横幅中选择 **Restart to update**（重启以更新），或者在你下次退出 Coppice 时自动安装。
 - **Linux：** 安装 `.deb` 时会添加 Coppice 的软件源，所以新版本会和其他更新一起出现在“软件更新器”里；也可以运行 `sudo apt update && sudo apt upgrade`。

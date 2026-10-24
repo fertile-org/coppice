@@ -31,7 +31,7 @@ Mọi bản build đều có trên [GitHub Releases](https://github.com/fertile-
 
 ## Cập nhật
 
-Coppice tự kiểm tra phiên bản mới ở chế độ nền. Muốn tắt thì vào **Settings → Updates** và tắt **Automatic updates**. Cập nhật xong, các bảng và thiết lập vẫn còn nguyên.
+Coppice tự kiểm tra phiên bản mới ở chế độ nền. Muốn tắt thì vào **System → Updates** và tắt **Automatic updates**. Cập nhật xong, các bảng và thiết lập vẫn còn nguyên.
 
 - **macOS:** Coppice tự tải bản cập nhật về. Bấm **Restart to update** trên banner, hoặc để nó tự cài vào lần tới bạn thoát Coppice.
 - **Linux:** khi cài file `.deb`, nguồn gói của Coppice được thêm vào máy, nên bản mới sẽ đến cùng các bản cập nhật khác trong Software Updater. Hoặc chạy `sudo apt update && sudo apt upgrade`.

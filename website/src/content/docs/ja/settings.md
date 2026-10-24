@@ -29,7 +29,7 @@ Linux で `XDG_CONFIG_HOME` が設定されている場合、ファイルは `$X
 <a id="updates"></a>
 
 ## アップデート
-**Settings → Updates** を開くと、バージョンを確認して **Check for updates** を選べます。**Automatic updates** は既定でオンです。オフにすると、Coppice はバックグラウンドで新しいバージョンを確認しなくなります。
+**System → Updates** を開くと、バージョンを確認して **Check for updates** を選べます。**Automatic updates** は既定でオンです。オフにすると、Coppice はバックグラウンドで新しいバージョンを確認しなくなります。
 
 このスイッチは `config.toml` にはありません。Coppice は同じフォルダーの `update-settings.json` に `automaticUpdates` として保存します。
 

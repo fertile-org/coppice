@@ -9,6 +9,8 @@ import { setInitWizardFlag } from '../init/storage';
 import { BackupTab } from '../tools/BackupTab';
 import { ConnectorsTab } from '../tools/ConnectorsTab';
 import { turnedOnToast } from '../tools/connectorCopy';
+import { isDesktopShell } from '../../lib/desktop';
+import { DesktopUpdatesSection } from './DesktopUpdatesSection';
 import { SYSTEM_PATHS } from './paths';
 
 function SystemPageHeader({
@@ -41,6 +43,23 @@ export function BackupPage() {
         description="Download a backup of this Coppice install, or restore one."
       />
       <BackupTab />
+    </div>
+  );
+}
+
+export function UpdatesPage() {
+  const { user } = useSession();
+  if (user?.role !== 'admin') return <Navigate to="/boards" replace />;
+  return (
+    <div className="space-y-6">
+      <SystemPageHeader title="Updates" description="See your version and check for new ones." />
+      {isDesktopShell() ? (
+        <DesktopUpdatesSection />
+      ) : (
+        <p className="font-body text-sm text-text-secondary">
+          Updates are part of the Coppice desktop app. Open this page there to check for them.
+        </p>
+      )}
     </div>
   );
 }

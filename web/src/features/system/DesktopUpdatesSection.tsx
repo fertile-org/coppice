@@ -55,7 +55,7 @@ export function DesktopUpdatesSection() {
         setReady(true);
       })
       .catch(() => {
-        /* The rest of Settings still works. */
+        /* The page shows nothing to change. */
       });
     return () => {
       cancelled = true;
@@ -90,10 +90,7 @@ export function DesktopUpdatesSection() {
   const status = checkText(check);
 
   return (
-    <section aria-labelledby="desktop-updates-heading" className="space-y-3">
-      <h2 id="desktop-updates-heading" className="font-display text-lg font-semibold text-text-primary">
-        Updates
-      </h2>
+    <section aria-label="Updates" className="space-y-3">
       <p className="font-body text-sm text-text-primary">Version {version}</p>
       <div className="flex flex-wrap items-center gap-3">
         <button

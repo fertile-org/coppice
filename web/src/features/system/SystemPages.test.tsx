@@ -10,6 +10,7 @@ import {
   ConnectorsPage,
   LegacyLogsRedirect,
   LegacyToolsRedirect,
+  UpdatesPage,
 } from './SystemPages';
 
 const sessionState = vi.hoisted(() => ({ desktopMode: false }));
@@ -41,6 +42,7 @@ function renderPage(initialEntry = '/system/backup') {
             <Route path="/system/logs" element={<p>Logs page</p>} />
             <Route path="/tools" element={<LegacyToolsRedirect />} />
             <Route path="/logs" element={<LegacyLogsRedirect />} />
+            <Route path="/system/updates" element={<UpdatesPage />} />
           </Routes>
           <LocationProbe />
         </MemoryRouter>
@@ -195,4 +197,37 @@ describe('System pages', () => {
     expect(screen.queryByText(/mock|fake/i)).not.toBeInTheDocument();
   });
 
+  it('shows the version and update switch on the Updates page in the desktop app', async () => {
+    window.coppiceDesktop = {
+      pickDirectory: vi.fn(async () => null),
+      platform: 'linux',
+      appInfo: vi.fn(async () => ({
+        version: '1.2.3',
+        platform: 'linux',
+        arch: 'x64',
+        macInPlaceUpdates: false,
+      })),
+      getUpdateSettings: vi.fn(async () => ({ automaticUpdates: true })),
+      setUpdateSettings: vi.fn(async (next: { automaticUpdates: boolean }) => next),
+      checkForUpdates: vi.fn(async () => ({ status: 'up-to-date' as const })),
+    };
+    try {
+      renderPage('/system/updates');
+      expect(screen.getByRole('heading', { name: 'Updates' })).toBeInTheDocument();
+      expect(await screen.findByText('Version 1.2.3')).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'Automatic updates' })).toBeInTheDocument();
+    } finally {
+      delete window.coppiceDesktop;
+    }
+  });
+
+  it('says Updates belong to the desktop app in a browser', () => {
+    renderPage('/system/updates');
+    expect(screen.getByRole('heading', { name: 'Updates' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Updates are part of the Coppice desktop app. Open this page there to check for them.',
+      ),
+    ).toBeInTheDocument();
+  });
 });
