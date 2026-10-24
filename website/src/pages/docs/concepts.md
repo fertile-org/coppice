@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Concepts
-description: "How a ticket moves from Backlog to Done, and who does what."
+metaTitle: "Concepts: Tickets, Agents, Chat and Review"
+description: "How a Coppice ticket moves from Backlog to Done, what each agent does, how chat and knowledge work, and where you review and accept the diff."
 ---
 
 # Concepts

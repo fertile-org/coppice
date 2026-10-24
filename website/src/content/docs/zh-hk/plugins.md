@@ -1,6 +1,7 @@
 ---
 title: 外掛
-description: "外掛為代理提供技能和 MCP 工具。新增外掛、啓用它，再選擇哪些代理可以使用。"
+metaTitle: "外掛：代理技能與 MCP 工具"
+description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git 或資料夾安裝，啓用後選擇哪些代理可以使用，也可以自己撰寫外掛。"
 ---
 
 # 外掛

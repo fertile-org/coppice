@@ -1,6 +1,7 @@
 ---
 title: Plugin
-description: "Plugin bổ sung skill và công cụ MCP cho agent. Thêm plugin, bật lên, rồi chọn agent nào được dùng."
+metaTitle: "Plugin: skill và công cụ MCP cho agent"
+description: "Plugin bổ sung skill và công cụ MCP cho agent trong Coppice. Cài từ git hoặc thư mục, bật lên, chọn agent nào được dùng, hoặc tự viết plugin."
 ---
 
 # Plugin

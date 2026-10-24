@@ -1,6 +1,7 @@
 ---
 title: Bắt đầu
-description: "Năm bước từ lúc cài xong đến lần chạy agent đầu tiên."
+metaTitle: "Bắt đầu: lần chạy coding agent đầu tiên"
+description: "Năm bước từ lúc cài xong đến lần chạy agent đầu tiên: đăng nhập agent CLI, tạo agent, thêm repository và bảng, rồi chạy một ticket."
 ---
 
 # Bắt đầu

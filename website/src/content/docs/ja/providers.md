@@ -1,6 +1,7 @@
 ---
 title: プロバイダー
-description: "Coppice が動かすエージェント CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok。"
+metaTitle: "対応エージェント CLI：Claude Code、Codex、Cursor"
+description: "Coppice は手元のエージェント CLI を動かします：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok。"
 ---
 
 # プロバイダー

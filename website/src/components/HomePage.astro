@@ -1,6 +1,7 @@
 ---
+import { AGENT_CLIS, PRIMARY_KEYWORD } from '../content/agents';
 import { pagesFor } from '../i18n/pages';
-import { useI18n } from '../i18n/runtime';
+import { hrefFor, useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
 import { softwareSchema } from '../lib/page-schema';
 import DownloadLinks from './DownloadLinks.astro';
@@ -10,7 +11,12 @@ const ctx = useI18n(Astro);
 const copy = pagesFor(ctx.locale).home;
 ---
 
-<Base title="Coppice" description={copy.description} structuredData={softwareSchema(Astro, ctx, copy.description)}>
+<Base
+  title={copy.title}
+  description={copy.description}
+  structuredData={softwareSchema(Astro, ctx, copy.description)}
+  keywords={[PRIMARY_KEYWORD, ...AGENT_CLIS]}
+>
   <div class="shell landing">
     <header class="promise">
       <h1>{copy.h1}</h1>
@@ -24,6 +30,10 @@ const copy = pagesFor(ctx.locale).home;
     <div id="download">
       <DownloadLinks showDocs mac={copy.downloads.mac} linux={copy.downloads.linux} docs={copy.downloads.docs} />
     </div>
+
+    <p class="works-with">
+      {copy.worksWith} <a href={hrefFor(ctx.locale, '/docs/providers')}>{AGENT_CLIS.join(' · ')}</a>
+    </p>
 
     <section class="block" aria-labelledby="how-it-works">
       <h2 id="how-it-works">{copy.howTitle}</h2>

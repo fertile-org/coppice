@@ -1,6 +1,7 @@
 ---
 title: 安裝
-description: "Coppice Beta 以桌面應用的形式釋出。不需要 Docker，不需要伺服器，也不需要 Coppice 帳號。"
+metaTitle: "在 macOS、Linux 和 Windows（WSL）上安裝 Coppice"
+description: "在 macOS、Linux 或透過 WSL 在 Windows 11 上安裝 Coppice 桌面應用。無需 Docker、伺服器或帳號。包括更新、系統需求和疑難排解。"
 ---
 
 # 安裝

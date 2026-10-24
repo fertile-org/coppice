@@ -1,6 +1,7 @@
 ---
 title: 設定參考
-description: "config.toml 中所有可修改的欄位，以及它們的型別和預設值。"
+metaTitle: "設定參考：config.toml"
+description: "Coppice 的 config.toml 中每個欄位的型別和預設值：日誌、儲存、代理與連接器、工作流程、知識庫、git、外掛、MCP 和金鑰。"
 ---
 
 # 設定參考

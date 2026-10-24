@@ -1,6 +1,7 @@
 ---
 title: 备份数据
-description: "备份 Coppice、把它迁移到新电脑，以及在备份泄露时更换密钥。"
+metaTitle: "备份和迁移 Coppice 数据"
+description: "下载 Coppice 备份并在新电脑上导入，或者手动复制数据文件夹，把它迁移到另一台电脑；如果备份不慎泄露，还可以更换密钥。"
 ---
 
 # 备份数据

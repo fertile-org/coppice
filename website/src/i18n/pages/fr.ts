@@ -5,8 +5,10 @@ export const locale = 'fr';
 /** Français homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
+    title: 'Coppice : tableau d’agents de code IA, local et open source',
     description:
-      'Des agents de code, chacun avec son rôle, planifient, construisent et relisent sur un seul tableau, et rien n’est terminé tant que vous n’avez pas accepté le diff. Local, open source, avec les CLI d’agents que vous payez déjà.',
+      'Coppice est un tableau d’agents de code IA, local et open source. Claude Code, Codex, Cursor et d’autres planifient, codent et relisent ; vous validez le diff.',
+    worksWith: 'Fonctionne avec',
     h1: 'Recrutez des spécialistes. Gardez le dernier mot.',
     lede: 'Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
     hero: {
@@ -72,6 +74,9 @@ export const pages: Pages = {
   },
   download: {
     title: 'Télécharger Coppice',
+    metaTitle: 'Télécharger Coppice pour macOS et Linux',
+    description:
+      'Téléchargez Coppice, le tableau d’agents de code IA gratuit et open source, pour macOS (Apple Silicon ou Intel) et Linux. Tourne en local, sans compte.',
     intro: 'Gratuit, tourne sur votre propre machine, sans compte Coppice.',
     groups: [
       {

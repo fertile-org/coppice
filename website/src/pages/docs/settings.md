@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Settings reference
-description: "Every field you can change in config.toml, with its type and default."
+metaTitle: "Settings Reference: config.toml"
+description: "Every field in the Coppice config.toml, with its type and default: logs, storage, agents and connectors, workflow, knowledge, git, plugins, MCP and keys."
 ---
 
 # Settings reference

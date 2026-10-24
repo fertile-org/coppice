@@ -1,6 +1,7 @@
 ---
 title: インストール
-description: "Coppice Beta はデスクトップアプリとして配布しています。Docker もサーバーも Coppice アカウントも要りません。"
+metaTitle: "Coppice のインストール（macOS・Linux・WSL）"
+description: "Coppice デスクトップアプリを macOS、Linux、または WSL 経由で Windows 11 にインストール。Docker もサーバーも不要。更新、要件、トラブル対処も。"
 ---
 
 # インストール

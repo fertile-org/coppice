@@ -25,6 +25,10 @@ export const ui: Ui = {
   },
   docs: {
     navLabel: 'Documentation',
+    breadcrumbLabel: 'Fil d’Ariane',
+    pagerLabel: 'Autres pages',
+    previous: 'Précédent',
+    next: 'Suivant',
     install: 'Installer',
     gettingStarted: 'Premiers pas',
     concepts: 'Concepts',

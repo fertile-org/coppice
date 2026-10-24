@@ -18,11 +18,24 @@ interface Props {
   noindex?: boolean;
   /** schema.org items for this page, added after the site's Organization and WebSite. */
   structuredData?: Thing[];
+  /** `<meta name="keywords">`. Search engines barely weigh it; keep it short and true. */
+  keywords?: readonly string[];
+  /** `article:tag`, one per entry (docs). */
+  tags?: readonly string[];
 }
 
-const { title, description, ogType = 'website', noindex = false, structuredData = [] } = Astro.props;
+const {
+  title,
+  description,
+  ogType = 'website',
+  noindex = false,
+  structuredData = [],
+  keywords = [],
+  tags = [],
+} = Astro.props;
 const ctx = useI18n(Astro);
-const fullTitle = title === 'Coppice' ? 'Coppice' : `${title} · Coppice`;
+// Titles that already name the product keep their wording.
+const fullTitle = title.includes('Coppice') ? title : `${title} · Coppice`;
 const image = Astro.site ? new URL(withBase(ogCard), Astro.site).href : undefined;
 const imageAlt = 'Coppice, the AI coding agent board: agents plan, build and review on one board.';
 const alternateOgLocales = ctx.alternates
@@ -42,6 +55,7 @@ const graph = siteRef && !noindex
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
+    {keywords.length > 0 && <meta name="keywords" content={keywords.join(', ')} />}
     <meta name="theme-color" content="#faf7f2" />
     <link rel="icon" href={withBase('/favicon.ico')} sizes="any" />
     <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
@@ -60,6 +74,7 @@ const graph = siteRef && !noindex
     <meta property="og:description" content={description} />
     <meta property="og:type" content={ogType} />
     <meta property="og:url" content={ctx.canonical} />
+    {ogType === 'article' && tags.map((tag) => <meta property="article:tag" content={tag} />)}
     <meta property="og:locale" content={ogLocale(ctx.translated ? ctx.locale : 'en')} />
     {alternateOgLocales.map((locale) => <meta property="og:locale:alternate" content={locale} />)}
     {image && <meta property="og:image" content={image} />}

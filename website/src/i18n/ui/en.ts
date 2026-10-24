@@ -31,6 +31,10 @@ export const ui = {
   },
   docs: {
     navLabel: 'Documentation',
+    breadcrumbLabel: 'Breadcrumb',
+    pagerLabel: 'More docs',
+    previous: 'Previous',
+    next: 'Next',
     install: 'Install',
     gettingStarted: 'Getting started',
     concepts: 'Concepts',

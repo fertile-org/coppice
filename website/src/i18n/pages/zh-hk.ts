@@ -5,8 +5,10 @@ export const locale = 'zh-hk';
 /** 繁體中文（香港） homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
+    title: 'Coppice：本地開源的 AI 程式設計代理看板',
     description:
-      '各有分工的程式設計代理在同一塊看板上規劃、構建和審查，你接受 diff 之前，什麼都不算完成。本地執行，開源，用的是你已經付費的代理 CLI。',
+      'Coppice 是在本地執行的開源 AI 程式設計代理看板。Claude Code、Codex、Cursor 等代理並行規劃、構建和審查，每個 diff 都由你接受。',
+    worksWith: '支援',
     h1: '僱用專家，你來拍板。',
     lede: '你的 PM 代理起草計劃，由你批准。專業代理並行構建。你接受 diff 之前，什麼都不算完成。',
     hero: {
@@ -68,6 +70,9 @@ export const pages: Pages = {
   },
   download: {
     title: '下載 Coppice',
+    metaTitle: '下載 Coppice（macOS 和 Linux）',
+    description:
+      '下載 Coppice：免費開源的 AI 程式設計代理看板，支援 macOS（Apple Silicon 或 Intel）和 Linux。本地執行，無需 Coppice 帳號。',
     intro: '免費，在你自己的電腦上執行，無需 Coppice 帳號。',
     groups: [
       {

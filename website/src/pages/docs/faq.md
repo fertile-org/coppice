@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: FAQ
-description: "Beta scope, what’s next, and what Coppice is not."
+metaTitle: "Coppice FAQ: Beta, Docker, Windows and Merging"
+description: "Is Coppice production-ready? Do you need Docker or an account? Will agents merge without you? Answers about the Beta, Windows, conflicts and more."
 ---
 
 # FAQ

@@ -1,6 +1,7 @@
 ---
 title: 键盘快捷键
-description: "用键盘在 Coppice 中操作：看板、工单和审核。"
+metaTitle: "键盘快捷键"
+description: "用键盘操作 Coppice：在看板上移动，打开和移动工单，不用鼠标就能审核 diff，还能按自己的习惯自定义快捷键。"
 ---
 
 # 键盘快捷键

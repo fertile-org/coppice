@@ -5,8 +5,10 @@ export const locale = 'zh-cn';
 /** 简体中文 homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
+    title: 'Coppice：本地开源的 AI 编程智能体看板',
     description:
-      '各有分工的编程智能体在同一块看板上规划、构建和审查，你接受 diff 之前，什么都不算完成。本地运行，开源，用的是你已经付费的智能体 CLI。',
+      'Coppice 是在本地运行的开源 AI 编程智能体看板。Claude Code、Codex、Cursor 等智能体并行规划、构建和审核，每个 diff 都由你接受。',
+    worksWith: '支持',
     h1: '雇用专家，你来拍板。',
     lede: '你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
     hero: {
@@ -68,6 +70,9 @@ export const pages: Pages = {
   },
   download: {
     title: '下载 Coppice',
+    metaTitle: '下载 Coppice（macOS 和 Linux）',
+    description:
+      '下载 Coppice：免费开源的 AI 编程智能体看板，支持 macOS（Apple Silicon 或 Intel）和 Linux。本地运行，无需 Coppice 账号。',
     intro: '免费，在你自己的电脑上运行，无需 Coppice 账号。',
     groups: [
       {

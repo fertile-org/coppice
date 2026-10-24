@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Providers
-description: "The agent CLIs Coppice runs: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok."
+metaTitle: "Supported Agent CLIs: Claude Code, Codex, Cursor"
+description: "Coppice runs the agent CLIs you already use: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok."
 ---
 
 # Providers

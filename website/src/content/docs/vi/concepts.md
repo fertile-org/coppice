@@ -1,6 +1,7 @@
 ---
 title: Khái niệm
-description: "Ticket đi từ Backlog đến Done ra sao, và ai làm việc gì."
+metaTitle: "Khái niệm: ticket, agent, chat và review"
+description: "Ticket trong Coppice đi từ Backlog đến Done ra sao, mỗi agent làm gì, chat và knowledge hoạt động thế nào, và bạn review rồi chấp nhận diff ở đâu."
 ---
 
 # Khái niệm

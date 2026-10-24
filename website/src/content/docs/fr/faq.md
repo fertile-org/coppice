@@ -1,6 +1,7 @@
 ---
 title: FAQ
-description: "Périmètre de la Beta, la suite, et ce que Coppice n’est pas."
+metaTitle: "FAQ Coppice : Beta, Docker, Windows et merge"
+description: "Coppice est-il prêt pour la production ? Faut-il Docker ou un compte ? Les agents fusionnent-ils sans vous ? Réponses sur la Beta, Windows, les conflits, etc."
 ---
 
 # FAQ

@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Getting started
-description: "Go from a fresh install to your first agent run in five steps."
+metaTitle: "Getting Started: Your First Coding Agent Run"
+description: "Go from a fresh install to your first agent run in five steps: sign in to an agent CLI, set up an agent, add a repository and a board, then run a ticket."
 ---
 
 # Getting started

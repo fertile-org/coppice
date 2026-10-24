@@ -1,6 +1,7 @@
 ---
 title: Tham chiếu thiết lập
-description: "Mọi trường bạn có thể đổi trong config.toml, kèm kiểu dữ liệu và giá trị mặc định."
+metaTitle: "Tham chiếu thiết lập: config.toml"
+description: "Mọi trường trong config.toml của Coppice, kèm kiểu và giá trị mặc định: log, lưu trữ, agent và connector, workflow, knowledge, git, plugin, MCP và khóa."
 ---
 
 # Tham chiếu thiết lập

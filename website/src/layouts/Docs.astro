@@ -1,5 +1,6 @@
 ---
 import DocsSearch from '../components/DocsSearch.astro';
+import { AGENT_CLIS } from '../content/agents';
 import { docOverride } from '../i18n/translations';
 import { hrefFor, useI18n } from '../i18n/runtime';
 import { docsSchema } from '../lib/page-schema';
@@ -8,6 +9,8 @@ import Base from './Base.astro';
 interface Props {
   frontmatter: {
     title: string;
+    /** Longer `<title>` for search results. `title` stays the heading in breadcrumbs. */
+    metaTitle?: string;
     description: string;
   };
 }
@@ -17,6 +20,7 @@ const ctx = useI18n(Astro);
 const translation = ctx.rewritten ? docOverride(ctx.locale, ctx.englishPath) : null;
 const Translation = translation?.Content;
 const title = translation?.title || frontmatter.title;
+const metaTitle = (translation ? translation.metaTitle : frontmatter.metaTitle) || title;
 const description = translation?.description || frontmatter.description;
 const indexed = ctx.translated;
 
@@ -36,13 +40,22 @@ const advanced = [
 ];
 
 const advancedOpen = advanced.some((link) => ctx.englishPath === link.href);
+
+// Reading order for previous / next: the docs home, then the sidebar from top to bottom.
+const sequence = [{ href: '/docs', label: ctx.ui.nav.docs }, ...topLevel, ...advanced];
+const position = sequence.findIndex((link) => link.href === ctx.englishPath);
+const previous = position > 0 ? sequence[position - 1] : null;
+const next = position >= 0 && position < sequence.length - 1 ? sequence[position + 1] : null;
+const agentTags = ctx.englishPath === '/docs/providers' ? AGENT_CLIS : [];
 ---
 
 <Base
-  title={title}
+  title={metaTitle}
   description={description}
   ogType="article"
   structuredData={docsSchema(Astro, ctx, title, description)}
+  keywords={agentTags}
+  tags={agentTags}
 >
   <div class="shell docs-shell">
     <header class="docs-header" data-pagefind-ignore>
@@ -90,17 +103,52 @@ const advancedOpen = advanced.some((link) => ctx.englishPath === link.href);
         </div>
       </div>
     </nav>
-    {
-      indexed ? (
-        <article class="prose" data-pagefind-body>
-          {Translation ? <Translation /> : <slot />}
-        </article>
-      ) : (
-        <article class="prose" lang="en">
-          <slot />
-        </article>
-      )
-    }
+    <div class="docs-content">
+      <nav class="docs-breadcrumbs" data-pagefind-ignore aria-label={ctx.ui.docs.breadcrumbLabel}>
+        <ol>
+          <li><a href={hrefFor(ctx.locale, '/')}>Coppice</a></li>
+          {
+            ctx.englishPath === '/docs' ? (
+              <li aria-current="page">{ctx.ui.nav.docs}</li>
+            ) : (
+              <>
+                <li><a href={hrefFor(ctx.locale, '/docs')}>{ctx.ui.nav.docs}</a></li>
+                <li aria-current="page">{title}</li>
+              </>
+            )
+          }
+        </ol>
+      </nav>
+      {
+        indexed ? (
+          <article class="prose" data-pagefind-body>
+            {Translation ? <Translation /> : <slot />}
+          </article>
+        ) : (
+          <article class="prose" lang="en">
+            <slot />
+          </article>
+        )
+      }
+      {
+        (previous || next) && (
+          <nav class="docs-pager" data-pagefind-ignore aria-label={ctx.ui.docs.pagerLabel}>
+            {previous && (
+              <a class="docs-pager-previous" href={hrefFor(ctx.locale, previous.href)} rel="prev">
+                <span>{ctx.ui.docs.previous}</span>
+                {previous.label}
+              </a>
+            )}
+            {next && (
+              <a class="docs-pager-next" href={hrefFor(ctx.locale, next.href)} rel="next">
+                <span>{ctx.ui.docs.next}</span>
+                {next.label}
+              </a>
+            )}
+          </nav>
+        )
+      }
+    </div>
   </div>
 </Base>
 
