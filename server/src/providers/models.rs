@@ -395,19 +395,24 @@ struct KnownModel {
     name: &'static str,
 }
 
-/// Curated Claude Code model IDs (Anthropic API / subscription CLI).
+/// Curated Claude Code model IDs (Anthropic API / subscription CLI), newest first.
 /// No live CLI catalog exists yet; refresh from https://platform.claude.com/docs/en/about-claude/models/overview
-/// `fable` is a `--model` alias (`claude --help` lists fable, opus, and sonnet).
+/// and check the IDs are in the installed `claude` binary. The 5.x models have a
+/// 1M context window by default, so the old `opus[1m]` / `sonnet[1m]` entries are gone.
 fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
     match provider_id {
         "sonnet" => vec![
             KnownModel {
-                id: "claude-sonnet-4-6",
-                name: "Claude Sonnet 4.6",
+                id: "claude-sonnet-5-5",
+                name: "Claude Sonnet 5.5",
             },
             KnownModel {
-                id: "sonnet[1m]",
-                name: "Sonnet 4.6 (1M context)",
+                id: "claude-sonnet-5",
+                name: "Claude Sonnet 5",
+            },
+            KnownModel {
+                id: "claude-sonnet-4-6",
+                name: "Claude Sonnet 4.6",
             },
             KnownModel {
                 id: "claude-sonnet-4-5-20250929",
@@ -416,12 +421,16 @@ fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
         ],
         "opus" => vec![
             KnownModel {
-                id: "claude-opus-4-8",
-                name: "Claude Opus 4.8",
+                id: "claude-opus-5-5",
+                name: "Claude Opus 5.5",
             },
             KnownModel {
-                id: "opus[1m]",
-                name: "Opus 4.8 (1M context)",
+                id: "claude-opus-5",
+                name: "Claude Opus 5",
+            },
+            KnownModel {
+                id: "claude-opus-4-8",
+                name: "Claude Opus 4.8",
             },
             KnownModel {
                 id: "claude-opus-4-7",
@@ -434,18 +443,24 @@ fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
         ],
         "haiku" => vec![
             KnownModel {
-                id: "claude-haiku-4-5-20251001",
-                name: "Claude Haiku 4.5",
+                id: "claude-haiku-5-5",
+                name: "Claude Haiku 5.5",
             },
             KnownModel {
                 id: "claude-haiku-4-5",
-                name: "Claude Haiku 4.5 (alias)",
+                name: "Claude Haiku 4.5",
             },
         ],
-        "fable" => vec![KnownModel {
-            id: "fable",
-            name: "fable",
-        }],
+        "fable" => vec![
+            KnownModel {
+                id: "claude-fable-5-1",
+                name: "Claude Fable 5.1",
+            },
+            KnownModel {
+                id: "claude-fable-5",
+                name: "Claude Fable 5",
+            },
+        ],
         _ => vec![],
     }
 }
@@ -455,16 +470,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_code_models_include_fable_alias_and_current_opus() {
-        let opus = known_claude_code_models("opus");
-        assert!(opus.iter().any(|m| m.id == "claude-opus-4-8"));
-        assert!(!opus.iter().any(|m| m.id.contains("fable")));
-        let sonnet = known_claude_code_models("sonnet");
-        assert!(sonnet.iter().any(|m| m.id == "claude-sonnet-4-6"));
-        let fable = known_claude_code_models("fable");
-        assert_eq!(fable.len(), 1);
-        assert_eq!(fable[0].id, "fable");
-        assert_eq!(fable[0].name, "fable");
+    fn claude_code_models_lead_with_the_current_generation() {
+        let first = |provider: &str| known_claude_code_models(provider)[0].id;
+        assert_eq!(first("opus"), "claude-opus-5-5");
+        assert_eq!(first("sonnet"), "claude-sonnet-5-5");
+        assert_eq!(first("haiku"), "claude-haiku-5-5");
+        assert_eq!(first("fable"), "claude-fable-5-1");
+        for provider in ["opus", "sonnet", "haiku", "fable"] {
+            let models = known_claude_code_models(provider);
+            assert!(
+                models
+                    .iter()
+                    .all(|m| m.id.starts_with(&format!("claude-{provider}-"))),
+                "{provider}: every entry is a full model id"
+            );
+        }
+        assert!(known_claude_code_models("opus")
+            .iter()
+            .any(|m| m.id == "claude-opus-4-8"));
     }
 
     #[tokio::test]
