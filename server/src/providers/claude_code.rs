@@ -426,7 +426,7 @@ impl LineHandler for ClaudeLines {
                 }
             }
         }
-        let stop = ty == Some("result");
+        let stop = ty == Some("result") && !answers_task_notification(value);
         if stop {
             self.terminal.is_error = value.get("is_error").and_then(|v| v.as_bool()) == Some(true);
             self.terminal.terminal_reason = value
@@ -453,6 +453,15 @@ impl LineHandler for ClaudeLines {
         }
         LineStep { session_id, stop }
     }
+}
+
+/// A `result` that ends Claude Code's turn about a background task, not the
+/// prompt's turn. Resuming a session whose background shell was still running
+/// when the last run was stopped emits an empty one (origin
+/// `task-notification`, `num_turns` 0) before the prompt even starts; ending
+/// the run there reported "no result contract found". Seen on 2.1.310.
+fn answers_task_notification(result: &serde_json::Value) -> bool {
+    result.pointer("/origin/kind").and_then(|kind| kind.as_str()) == Some("task-notification")
 }
 
 impl ClaudeTerminal {
@@ -751,6 +760,35 @@ mod tests {
                 h.on_json(&serde_json::from_str(line).expect("json line"));
             }
             h
+        }
+
+        #[test]
+        fn a_task_notification_result_on_resume_does_not_end_the_run() {
+            let mut h = handler(false);
+            let contract = r#"```json
+{"status":"done","summary":"Did the work."}
+```"#;
+            // Claude Code 2.1.310 resuming a session whose background shell
+            // was still running when the previous run was stopped.
+            let notification = json!({ "type": "system", "subtype": "task_notification",
+                "status": "stopped",
+                "summary": "Background shell command didn't finish before the previous session ended" });
+            let notification_result = json!({ "type": "result", "subtype": "success",
+                "is_error": false, "num_turns": 0, "stop_reason": null, "result": "",
+                "origin": { "kind": "task-notification" }, "permission_denials": [] });
+            for line in [notification, init("bypassPermissions", "connected"), notification_result] {
+                assert!(!h.on_json(&line).stop, "{line}");
+            }
+            let assistant = json!({ "type": "assistant", "message": { "content": [
+                { "type": "text", "text": contract } ] } });
+            assert!(!h.on_json(&init("bypassPermissions", "connected")).stop);
+            assert!(!h.on_json(&assistant).stop);
+            assert!(h.on_json(&result(contract, false, "completed")).stop);
+
+            match decide(&h, &exit(0, &[]), ContextProfile::Full).expect("result") {
+                AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Did the work."),
+                other => panic!("{other:?}"),
+            }
         }
 
         #[test]
