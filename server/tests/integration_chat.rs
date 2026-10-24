@@ -742,6 +742,53 @@ async fn create_ticket_from_chat_sets_source_session() {
 }
 
 #[tokio::test]
+async fn create_ticket_from_repo_less_chat_uses_the_only_repo() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+    assert!(session["repoId"].is_null());
+
+    let created_ticket = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/create-ticket"),
+            &format!(r#"{{"boardId":"{board_id}","title":"Repo-less chat ticket"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created_ticket.status(), StatusCode::CREATED);
+    let body: serde_json::Value = common::json_body(created_ticket).await;
+    assert_eq!(body["ticket"]["repoId"], repo_id);
+}
+
+#[tokio::test]
 async fn draft_ticket_from_chat_uses_agent_fixture() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

@@ -241,6 +241,11 @@ impl<'a> TicketService<'a> {
     ) -> Result<TicketWithDisplay, TicketError> {
         self.ensure_board_exists(board_id).await?;
 
+        let repo_id = match repo_id {
+            Some(id) => Some(id),
+            None => self.default_repo_id().await?,
+        };
+
         let id = Uuid::new_v4();
         let status = TicketStatus::Backlog;
         let priority_str = priority.map(priority_to_str);
@@ -983,6 +988,17 @@ impl<'a> TicketService<'a> {
             return Err(TicketError::BoardNotFound);
         }
         Ok(())
+    }
+
+    async fn default_repo_id(&self) -> Result<Option<Uuid>, TicketError> {
+        let ids = sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos LIMIT 2")
+            .fetch_all(self.pool)
+            .await?;
+
+        Ok(match ids.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        })
     }
 
     async fn active_ticket_ids_for_board(

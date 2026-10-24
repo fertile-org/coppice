@@ -133,6 +133,100 @@ async fn reject_done_with_waiting_substatus() {
     assert_eq!(patch.status(), StatusCode::BAD_REQUEST);
 }
 
+async fn create_repo_less_ticket(app: &axum::Router, board_id: &str, body: &str, cookie: &str, csrf: &str) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/boards/{board_id}/tickets"),
+            body,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    common::json_body(res).await
+}
+
+#[tokio::test]
+async fn ticket_without_repo_defaults_to_the_only_registered_repo() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+
+    let ticket = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"Quick add","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["repoId"], repo_id);
+}
+
+#[tokio::test]
+async fn ticket_without_repo_stays_repo_less_when_several_repos_exist() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_a, path_a) = common::create_temp_git_checkout();
+    let (_git_b, path_b) = common::create_temp_git_checkout();
+    common::register_test_repo(&app, &path_a.display().to_string(), &cookie, &csrf).await;
+    let second =
+        common::register_test_repo(&app, &path_b.display().to_string(), &cookie, &csrf).await;
+
+    let ticket = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"Ambiguous","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert!(ticket["repoId"].is_null());
+
+    let explicit = create_repo_less_ticket(
+        &app,
+        &board_id,
+        &format!(r#"{{"title":"Explicit","description":"","repoId":"{second}"}}"#),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(explicit["repoId"], second);
+}
+
+#[tokio::test]
+async fn ticket_without_repo_succeeds_when_no_repos_exist() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    let ticket = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"No repos","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert!(ticket["repoId"].is_null());
+}
+
 #[tokio::test]
 async fn a_large_board_lists_quickly_without_descriptions() {
     let _guard = common::DB_TEST_LOCK.lock().await;
