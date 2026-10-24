@@ -5,7 +5,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { heroAsset, heroScreenshot, marketingGif, marketingMp4, marketingWebm } from './hero-assets.ts';
+import { heroAsset, heroScreenshot, marketingGif, marketingMp4, marketingWebm, ogCard } from './hero-assets.ts';
 
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../public/assets');
 
@@ -16,6 +16,7 @@ describe('hero asset URLs', () => {
       ['marketing.webm', marketingWebm],
       ['marketing.mp4', marketingMp4],
       ['marketing.gif', marketingGif],
+      ['og-card.png', ogCard],
     ] as const) {
       const hash = createHash('sha256').update(readFileSync(path.join(assetsDir, filename))).digest('hex').slice(0, 12);
       assert.equal(url, `/assets/${filename}?v=${hash}`);

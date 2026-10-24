@@ -10,6 +10,7 @@ import {
   canonicalHref,
   localeFromPathname,
   localizedPath,
+  ogLocale,
   pagefindHasLanguage,
   sitemapXml,
   translatedLocales,
@@ -117,6 +118,26 @@ describe('hreflang and canonical', () => {
     assert.match(xml, /hreflang="x-default" href="https:\/\/example\.com\/docs\/concepts"/);
     assert.doesNotMatch(xml, /\/ja\/docs\/install/);
     assert.doesNotMatch(xml, /hreflang="zh-CN"/);
+  });
+
+  it('adds lastmod only for pages with a known date', () => {
+    const xml = sitemapXml({
+      englishRoutes: ['/docs/concepts', '/docs/install'],
+      catalog: buildCatalog(['src/pages/ja/docs/concepts.md']),
+      site: 'https://example.com',
+      lastmod: (locale, englishPath) => (locale === 'ja' && englishPath === '/docs/concepts' ? '2026-10-01' : undefined),
+    });
+    assert.match(xml, /<loc>https:\/\/example\.com\/ja\/docs\/concepts<\/loc>\n    <lastmod>2026-10-01<\/lastmod>/);
+    assert.equal(xml.match(/<lastmod>/g)?.length, 1);
+  });
+});
+
+describe('Open Graph locale', () => {
+  it('maps URL prefixes and language codes', () => {
+    assert.equal(ogLocale('en'), 'en_US');
+    assert.equal(ogLocale('zh-hk'), 'zh_HK');
+    assert.equal(ogLocale('zh-TW'), 'zh_TW');
+    assert.equal(ogLocale('ja'), 'ja_JP');
   });
 });
 

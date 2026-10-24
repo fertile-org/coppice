@@ -1,0 +1,14 @@
+{
+  "name": "Coppice",
+  "short_name": "Coppice",
+  "description": "The AI coding agent board. Agents plan, build and review on one board, and nothing is done until you accept the diff.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#faf7f2",
+  "theme_color": "#faf7f2",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180" },
+    { "src": "/favicon-32x32.png", "type": "image/png", "sizes": "32x32" }
+  ]
+}

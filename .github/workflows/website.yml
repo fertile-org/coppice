@@ -56,6 +56,9 @@ jobs:
       - name: Check internal links
         working-directory: website
         run: npm run check:links
+      - name: Check SEO tags
+        working-directory: website
+        run: npm run check:seo
       - name: Check i18n pages
         working-directory: website
         run: node scripts/check-i18n.mjs

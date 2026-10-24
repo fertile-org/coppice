@@ -11,12 +11,14 @@
     "check:search": "node --experimental-strip-types --test src/lib/docs-search.test.ts",
     "preview": "astro preview --host 127.0.0.1",
     "check:links": "node scripts/check-links.mjs",
+    "check:seo": "node scripts/check-seo.mjs",
     "check:download": "node --experimental-strip-types --test src/content/downloads.test.ts",
     "check:download-page": "node scripts/check-download-page.mjs",
     "check:a11y": "node scripts/check-a11y.mjs",
     "check:code": "node scripts/check-code-blocks.mjs",
     "check:placeholders": "node scripts/check-doc-placeholders.mjs",
-    "check:i18n": "node --experimental-strip-types --test src/i18n/i18n.test.ts && node scripts/check-i18n.mjs"
+    "check:i18n": "node --experimental-strip-types --test src/i18n/i18n.test.ts && node scripts/check-i18n.mjs",
+    "og:image": "node scripts/make-og-image.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.1",
