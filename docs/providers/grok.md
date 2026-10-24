@@ -10,6 +10,7 @@ Run `grok login` (or set `XAI_API_KEY`). Grok keeps its sign-in in `~/.grok/auth
 
 - The Coppice gateway is passed in `session/new`. Grok loads MCP tools lazily (`search_tool`, then `use_tool`), and the gateway's tools show as `coppice__<tool>`.
 - Models are the values of the session's `model` option. Resume uses `session/resume`.
+- Live Console results: built-in tools come from ACP `content`. Coppice MCP and Bash results come from `rawOutput` (`output` MCP envelope, `output_for_prompt`), because Grok sends no text `content` for them.
 - `--always-approve`: refusing a Grok permission prompt cancels the whole turn, so no run waits on one.
 - `--no-leader`: each run is its own process. Grok refuses a sandbox in leader mode, and a shared leader would outlive the run.
 - `grok agent` takes no `--add-dir`, so ticket attachments are not passed as extra directories. The read-only sandbox can still read them.

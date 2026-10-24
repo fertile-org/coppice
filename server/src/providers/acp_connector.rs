@@ -230,8 +230,21 @@ fn tool_event(update: &Value, started: bool) -> Option<Value> {
     Some(event)
 }
 
-/// Text parts of a tool's `content`. Diffs show the file they touch.
+/// Text a tool shows when expanded. ACP `content` wins. Connectors that send
+/// no text there (Grok's MCP and Bash results) fall back to `rawOutput`.
 fn tool_output(update: &Value) -> String {
+    let content = content_output(update);
+    if !content.is_empty() {
+        return content;
+    }
+    update
+        .get("rawOutput")
+        .and_then(raw_output_text)
+        .unwrap_or_default()
+}
+
+/// Text parts of a tool's `content`. Diffs show the file they touch.
+fn content_output(update: &Value) -> String {
     let mut parts = Vec::new();
     for item in update
         .get("content")
@@ -245,6 +258,11 @@ fn tool_output(update: &Value) -> String {
                     parts.push(text.to_string());
                 }
             }
+            Some("resource") => {
+                if let Some(text) = item.pointer("/resource/text").and_then(Value::as_str) {
+                    parts.push(text.to_string());
+                }
+            }
             Some("diff") => {
                 if let Some(path) = item.get("path").and_then(Value::as_str) {
                     parts.push(format!("Changed {path}"));
@@ -254,6 +272,56 @@ fn tool_output(update: &Value) -> String {
         }
     }
     parts.join("\n")
+}
+
+/// Keys where a tool's result text lives in `rawOutput`, checked on the object
+/// itself and then one level down.
+const RAW_OUTPUT_TEXT_KEYS: [&str; 6] = [
+    "output_for_prompt",
+    "tool_output_for_prompt",
+    "content",
+    "text",
+    "result",
+    "message",
+];
+
+/// Only string text is taken. Byte arrays (`output`, `stdout`) and metadata
+/// never become output, and there is no JSON dump fallback.
+fn raw_output_text(raw: &Value) -> Option<String> {
+    if let Some(text) = raw.as_str() {
+        return non_blank(text);
+    }
+    let object = raw.as_object()?;
+    // Grok's MCP envelope: {"output": {"OkayOutput": "..."}} or an error variant.
+    if let Some(text) = object
+        .get("output")
+        .and_then(Value::as_object)
+        .and_then(|output| output.values().find_map(Value::as_str))
+        .and_then(non_blank)
+    {
+        return Some(text);
+    }
+    let levels = std::iter::once(object).chain(object.values().filter_map(Value::as_object));
+    for level in levels {
+        for key in RAW_OUTPUT_TEXT_KEYS {
+            if let Some(text) = level.get(key).and_then(Value::as_str).and_then(non_blank) {
+                return Some(text);
+            }
+        }
+    }
+    // Single-key error variants such as {"FileReadError": "..."}.
+    if object.len() == 1 {
+        return object
+            .values()
+            .next()
+            .and_then(Value::as_str)
+            .and_then(non_blank);
+    }
+    None
+}
+
+fn non_blank(text: &str) -> Option<String> {
+    (!text.trim().is_empty()).then(|| text.to_string())
 }
 
 fn plan_markdown(update: &Value) -> Option<String> {
@@ -363,5 +431,119 @@ mod tests {
             .count();
         assert_eq!(results, 1);
         assert!(got.iter().all(|e| e["type"] != "opencode.console.text"));
+    }
+
+    fn tool_row<'a>(got: &'a [Value], id: &str) -> &'a Value {
+        got.iter()
+            .filter(|e| e["type"] == "opencode.console.tool" && e["id"] == id)
+            .last()
+            .unwrap_or_else(|| panic!("no tool event for {id}"))
+    }
+
+    #[test]
+    fn recorded_grok_turn_shows_mcp_and_bash_output() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/grok-acp/grok-1.0.62-turn.jsonl");
+        let updates: Vec<Value> = std::fs::read_to_string(path)
+            .expect("fixture")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("json"))
+            .filter(|m| m.get("method").and_then(Value::as_str) == Some("session/update"))
+            .filter_map(|m| m.pointer("/params/update").cloned())
+            .collect();
+        let got = events(&updates);
+
+        let read = tool_row(&got, "call-fc7a92a4-3aa5-424e-9539-d0f79f42b0fb-0");
+        assert_eq!(read["status"], "completed");
+        assert!(read["output"]
+            .as_str()
+            .unwrap()
+            .contains("# Knowledge compaction"));
+
+        let mcp = tool_row(&got, "call-36918796-2301-49de-adf4-0915d7038368-2");
+        assert_eq!(mcp["status"], "completed");
+        assert!(mcp["output"]
+            .as_str()
+            .unwrap()
+            .starts_with("{\n  \"items\""));
+
+        let bash = tool_row(&got, "call-be83b7d7-102f-4d3e-91ad-7c84779a405c-0");
+        assert_eq!(bash["output"], "exit: 0\n");
+
+        let failed = tool_row(&got, "call-1c284954-74f1-47a3-b5d6-62528b7b577e-0");
+        assert_eq!(failed["status"], "error");
+        assert!(failed["output"].as_str().unwrap().contains("IO Error"));
+    }
+
+    #[test]
+    fn content_text_wins_over_raw_output() {
+        let update = json!({
+            "content": [{ "type": "content", "content": { "type": "text", "text": "from content" } }],
+            "rawOutput": { "output_for_prompt": "from raw" }
+        });
+        assert_eq!(tool_output(&update), "from content");
+    }
+
+    #[test]
+    fn raw_output_string_and_mcp_envelope_are_text() {
+        assert_eq!(tool_output(&json!({ "rawOutput": "plain" })), "plain");
+        assert_eq!(
+            tool_output(
+                &json!({ "rawOutput": { "type": "MCP", "output": { "OkayOutput": "{\"ok\":true}" } } })
+            ),
+            "{\"ok\":true}"
+        );
+        assert_eq!(
+            tool_output(&json!({ "rawOutput": { "output": { "EmptyOutput": "nothing" } } })),
+            "nothing"
+        );
+    }
+
+    #[test]
+    fn raw_output_nested_and_error_variants_are_text() {
+        assert_eq!(
+            tool_output(
+                &json!({ "rawOutput": { "type": "ReadFile", "FileContent": { "content": "1→line" } } })
+            ),
+            "1→line"
+        );
+        assert_eq!(
+            tool_output(
+                &json!({ "rawOutput": { "type": "EditsApplied", "EditsApplied": { "tool_output_for_prompt": "created" } } })
+            ),
+            "created"
+        );
+        assert_eq!(
+            tool_output(&json!({ "rawOutput": { "FileReadError": "not found" } })),
+            "not found"
+        );
+    }
+
+    #[test]
+    fn byte_arrays_and_metadata_never_become_output() {
+        assert_eq!(
+            tool_output(
+                &json!({ "rawOutput": { "type": "Bash", "output": [104, 105], "stdout": [104, 105] } })
+            ),
+            ""
+        );
+        assert_eq!(
+            tool_output(&json!({ "rawOutput": { "metadata": { "truncated": false } } })),
+            ""
+        );
+        assert_eq!(
+            tool_output(
+                &json!({ "rawOutput": { "type": "Bash", "output": [104, 105], "output_for_prompt": "exit: 0\n" } })
+            ),
+            "exit: 0\n"
+        );
+    }
+
+    #[test]
+    fn resource_text_is_shown() {
+        let update = json!({
+            "content": [{ "type": "resource", "resource": { "uri": "file:///x", "text": "body" } }]
+        });
+        assert_eq!(tool_output(&update), "body");
     }
 }
