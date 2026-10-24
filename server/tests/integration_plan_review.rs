@@ -554,6 +554,18 @@ fn snapshot_ticket_git(git: &TicketGit) {
     assert!(!listed.contains("plan-scratch"));
 }
 
+/// The scratch worktree is removed after the run finishes, so a ticket can
+/// show the run's outcome a moment before `git worktree list` drops it.
+async fn wait_for_scratch_removal(git: &TicketGit) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while git_stdout(&git.repo, &["worktree", "list"]).contains("plan-scratch") {
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for the plan scratch worktree to be removed");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn open_planned_repo(
     app: &axum::Router,
     state: &coppice_server::AppState,
@@ -850,17 +862,7 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
     assert_eq!(ticket["status"], "plan_review");
     let after = repo_ref_snapshot(&git.repo);
     assert_eq!(before, after, "plan run changed branches, tags, or remotes");
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        let listed = git_stdout(&git.repo, &["worktree", "list"]);
-        if !listed.contains("plan-scratch") {
-            break;
-        }
-        if Instant::now() >= deadline {
-            panic!("plan scratch worktree was not removed:\n{listed}");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
 
     let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
@@ -1014,7 +1016,8 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
         &csrf,
         "waiting for answers",
         Duration::from_secs(20),
-        |ticket| ticket["planQuestions"]["waiting"] == true,
+        // The questions are stored just before the move to Plan Review.
+        |ticket| ticket["planQuestions"]["waiting"] == true && ticket["status"] == "plan_review",
     )
     .await;
     assert_eq!(ticket["status"], "plan_review");
@@ -1027,6 +1030,7 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
         .expect("questions comment");
     assert!(asked["body"].as_str().unwrap().starts_with(QUESTIONS_COMMENT_TITLE));
     assert!(thread.iter().all(|note| note["intent"] != "plan"));
+    wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
 
     // A waiting ticket is outside the review cap.
@@ -1109,6 +1113,7 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     let plan = plan_runs(&listed);
     assert_eq!(plan.len(), 2);
     assert!(plan.iter().all(|run| run["status"] == "succeeded"), "{plan:?}");
+    wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
 }
 
@@ -1185,7 +1190,12 @@ async fn a_split_at_plan_review_then_verify_parent() {
         &csrf,
         "plan with a split",
         Duration::from_secs(20),
-        |ticket| ticket["status"] == "plan_review" && ticket["hasPlan"] == true,
+        // The split is stored just after the plan.
+        |ticket| {
+            ticket["status"] == "plan_review"
+                && ticket["hasPlan"] == true
+                && !ticket["pendingSplitRecommendation"].is_null()
+        },
     )
     .await;
     let pending = &ticket["pendingSplitRecommendation"];
