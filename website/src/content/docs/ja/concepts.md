@@ -1,6 +1,7 @@
 ---
 title: コンセプト
-description: "チケットが Backlog から Done まで進む流れと、誰が何をするか。"
+metaTitle: "コンセプト：チケット、エージェント、レビュー"
+description: "Coppice のチケットが Backlog から Done へ進む流れ、各エージェントの役割、チャットとナレッジの仕組み、diff をレビューして承認する場所。"
 ---
 
 # コンセプト

@@ -25,6 +25,10 @@ export const ui: Ui = {
   },
   docs: {
     navLabel: 'ドキュメント',
+    breadcrumbLabel: 'パンくずリスト',
+    pagerLabel: 'ほかのドキュメント',
+    previous: '前へ',
+    next: '次へ',
     install: 'インストール',
     gettingStarted: 'はじめに',
     concepts: 'コンセプト',

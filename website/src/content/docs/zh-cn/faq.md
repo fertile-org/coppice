@@ -1,6 +1,7 @@
 ---
 title: 常见问题
-description: "Beta 范围、后续计划，以及 Coppice 不是什么。"
+metaTitle: "Coppice 常见问题：Beta、Docker、Windows 与合并"
+description: "Coppice 能用于生产吗？需要 Docker 或账号吗？智能体会不经你同意就合并吗？关于 Beta、Windows、冲突等问题的解答。"
 ---
 
 # 常见问题

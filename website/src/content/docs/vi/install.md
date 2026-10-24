@@ -1,6 +1,7 @@
 ---
 title: Cài đặt
-description: "Coppice Beta là ứng dụng desktop. Không cần Docker, không cần server, không cần tài khoản Coppice."
+metaTitle: "Cài Coppice trên macOS, Linux và Windows (WSL)"
+description: "Cài ứng dụng desktop Coppice trên macOS, Linux, hoặc Windows 11 qua WSL. Không cần Docker, server hay tài khoản. Kèm cập nhật, yêu cầu và cách xử lý lỗi."
 ---
 
 # Cài đặt

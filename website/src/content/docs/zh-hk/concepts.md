@@ -1,6 +1,7 @@
 ---
 title: 核心概念
-description: "工單如何從 Backlog 走到 Done，以及各自由誰負責。"
+metaTitle: "核心概念：工單、代理、聊天與審查"
+description: "Coppice 的工單如何從 Backlog 走到 Done，每個代理做什麼，聊天和知識庫如何運作，以及你在哪裡審查並接受 diff。"
 ---
 
 # 核心概念

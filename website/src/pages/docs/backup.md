@@ -1,7 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Backup data
-description: "Back up Coppice, move it to a new computer, and replace keys if a backup leaks."
+metaTitle: "Back Up and Move Your Coppice Data"
+description: "Download a backup of Coppice, import it on a new computer, copy the data folders by hand, and replace your keys if a backup ever leaks."
 ---
 
 # Backup data

@@ -3,8 +3,10 @@ export const locale = 'en';
 /** English homepage and download copy. A locale file in this folder overrides any keys it sets. */
 export const pages = {
   home: {
+    title: 'Coppice: AI Coding Agent Board, Local and Open Source',
     description:
-      'Coding agents with their own roles plan, build and review on one board, and nothing is done until you accept the diff. Local, open source, with the agent CLIs you already pay for.',
+      'Coppice is an AI coding agent board on your own machine. Claude Code, Codex, Cursor and more plan, build and review in parallel, and you accept every diff.',
+    worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
     lede: 'Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
     hero: {
@@ -70,6 +72,9 @@ export const pages = {
   },
   download: {
     title: 'Download Coppice',
+    metaTitle: 'Download Coppice for macOS and Linux',
+    description:
+      'Download Coppice, the free and open source AI coding agent board, for macOS (Apple Silicon or Intel) and Linux. Runs locally with no Coppice account.',
     intro: 'Free, runs on your own machine, with no Coppice account.',
     groups: [
       {

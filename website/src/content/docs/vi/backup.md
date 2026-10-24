@@ -1,6 +1,7 @@
 ---
 title: Sao lưu dữ liệu
-description: "Sao lưu Coppice, chuyển sang máy mới, và thay khóa nếu bản sao lưu bị lộ."
+metaTitle: "Sao lưu và chuyển dữ liệu Coppice"
+description: "Tải bản sao lưu Coppice, nhập vào máy mới, chép thư mục dữ liệu bằng tay, và thay khóa nếu bản sao lưu bị lộ."
 ---
 
 # Sao lưu dữ liệu

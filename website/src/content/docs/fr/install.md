@@ -1,6 +1,7 @@
 ---
 title: Installer
-description: "Coppice Beta est une application de bureau. Pas de Docker, pas de serveur, pas de compte Coppice."
+metaTitle: "Installer Coppice sur macOS, Linux et Windows (WSL)"
+description: "Installez l’application de bureau Coppice sur macOS, Linux, ou Windows 11 via WSL. Sans Docker, serveur ni compte. Mises à jour, prérequis et dépannage."
 ---
 
 # Installer

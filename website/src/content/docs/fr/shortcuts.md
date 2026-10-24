@@ -1,6 +1,7 @@
 ---
 title: Raccourcis clavier
-description: "Se déplacer dans Coppice au clavier : le tableau, les tickets et la revue."
+metaTitle: "Raccourcis clavier"
+description: "Utilisez Coppice au clavier : parcourez le tableau, ouvrez et déplacez les tickets, relisez les diffs sans souris, et définissez vos propres raccourcis."
 ---
 
 # Raccourcis clavier

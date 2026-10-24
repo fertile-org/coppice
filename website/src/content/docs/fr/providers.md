@@ -1,6 +1,7 @@
 ---
 title: Fournisseurs
-description: "Les CLI d’agents que Coppice pilote : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok."
+metaTitle: "CLI d’agents prises en charge : Claude Code, Codex"
+description: "Coppice pilote les CLI d’agents que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok."
 ---
 
 # Fournisseurs

@@ -1,6 +1,7 @@
 ---
 title: Hỏi đáp
-description: "Bản Beta có gì, sắp tới làm gì, và Coppice không phải là gì."
+metaTitle: "Hỏi đáp về Coppice: Beta, Docker, Windows và merge"
+description: "Coppice đã dùng cho production được chưa? Có cần Docker hay tài khoản không? Agent có tự merge không? Giải đáp về bản Beta, Windows, xung đột và hơn thế."
 ---
 
 # Hỏi đáp

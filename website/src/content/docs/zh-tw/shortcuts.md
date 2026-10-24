@@ -1,6 +1,7 @@
 ---
 title: 鍵盤快捷鍵
-description: "用鍵盤在 Coppice 中操作：看板、工單和審查。"
+metaTitle: "鍵盤快捷鍵"
+description: "用鍵盤操作 Coppice：在看板上移動，開啟和移動工單，不用滑鼠就能審查 diff，還能按自己的習慣自訂快捷鍵。"
 ---
 
 # 鍵盤快捷鍵

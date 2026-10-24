@@ -1,6 +1,7 @@
 ---
 title: Plugins
-description: "Les plugins donnent aux agents des skills et des outils MCP. Ajoutez-en un, activez-le, et choisissez quels agents peuvent s’en servir."
+metaTitle: "Plugins : skills et outils MCP pour vos agents"
+description: "Les plugins donnent aux agents Coppice des skills et des outils MCP. Installez-en un depuis git ou un dossier, activez-le et choisissez ses agents."
 ---
 
 # Plugins

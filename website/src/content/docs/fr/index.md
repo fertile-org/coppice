@@ -1,6 +1,7 @@
 ---
 title: Documentation
-description: "Coppice réunit une équipe d’agents de code sur un seul tableau : mettez le travail en tickets, laissez les agents construire chacun sur sa branche, et relisez chaque diff avant qu’il compte. Commencez par Installer pour lancer votre premier ticket."
+metaTitle: "Documentation Coppice : des agents de code IA sur un tableau"
+description: "Coppice réunit des agents de code sur un seul tableau : des tickets, une branche par agent, et chaque diff relu par vous. Commencez par Installer."
 ---
 
 # Documentation

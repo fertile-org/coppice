@@ -1,6 +1,7 @@
 ---
 title: Référence des paramètres
-description: "Chaque champ modifiable de config.toml, avec son type et sa valeur par défaut."
+metaTitle: "Référence des paramètres : config.toml"
+description: "Chaque champ du config.toml de Coppice, avec son type et sa valeur par défaut : logs, stockage, agents, connecteurs, workflow, git, plugins, MCP."
 ---
 
 # Référence des paramètres

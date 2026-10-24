@@ -1,6 +1,7 @@
 ---
 title: 提供商
-description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。"
+metaTitle: "支持的智能体 CLI：Claude Code、Codex、Cursor"
+description: "Coppice 运行你已在用的智能体 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。"
 ---
 
 # 提供商

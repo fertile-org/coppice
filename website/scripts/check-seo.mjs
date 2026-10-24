@@ -1,8 +1,10 @@
 // SEO checks on the built site. Run after `npm run build`.
 // Every page: one title, one description, one canonical on `site`, Open Graph and
 // Twitter tags that agree with it, and an og:image that exists in dist.
-// Indexable pages (self canonical, no noindex): one h1 and a title unique within
-// their language. Also robots.txt, the sitemap, the manifest, and any JSON-LD.
+// Indexable pages (self canonical, no noindex): one h1, a title unique within
+// their language, and title / description lengths that fit a search result.
+// Lengths are display width: CJK and fullwidth characters count as two, since
+// search engines truncate by pixels, not characters. Also robots.txt, the sitemap, the manifest, and any JSON-LD.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -10,6 +12,16 @@ const root = process.cwd();
 const dist = path.resolve('dist');
 const failures = [];
 const TITLE_MAX = 60;
+const DESCRIPTION_MIN = 100;
+const DESCRIPTION_MAX = 160;
+
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
+
+function width(text) {
+  let total = 0;
+  for (const char of text) total += WIDE.test(char) ? 2 : 1;
+  return total;
+}
 
 function fail(message) {
   failures.push(message);
@@ -176,7 +188,11 @@ for (const file of walk(dist)) {
     if (!crumb.item || !distFileFor(crumb.item, site)) where(`breadcrumb ${crumb.name} points at ${crumb.item}, which is not a page`);
   }
 
-  if (titles[0] && titles[0].length > TITLE_MAX) where(`title is ${titles[0].length} characters (max ${TITLE_MAX}): ${titles[0]}`);
+  if (titles[0] && width(titles[0]) > TITLE_MAX) where(`title is ${width(titles[0])} wide (max ${TITLE_MAX}): ${titles[0]}`);
+  const descriptionWidth = width(descriptions[0] ?? '');
+  if (descriptionWidth < DESCRIPTION_MIN || descriptionWidth > DESCRIPTION_MAX) {
+    where(`description is ${descriptionWidth} wide (${DESCRIPTION_MIN}–${DESCRIPTION_MAX}): ${descriptions[0]}`);
+  }
   const h1s = (html.match(/<h1\b/gi) ?? []).length;
   if (h1s !== 1) where(`expected one <h1>, found ${h1s}`);
   const seen = titlesByLang.get(lang) ?? new Map();

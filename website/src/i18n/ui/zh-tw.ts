@@ -25,6 +25,10 @@ export const ui: Ui = {
   },
   docs: {
     navLabel: '文件',
+    breadcrumbLabel: '導覽路徑',
+    pagerLabel: '更多文件',
+    previous: '上一頁',
+    next: '下一頁',
     install: '安裝',
     gettingStarted: '快速上手',
     concepts: '核心概念',

@@ -1,6 +1,7 @@
 ---
 title: 設定リファレンス
-description: "config.toml で変更できるすべての項目と、その型と既定値。"
+metaTitle: "設定リファレンス：config.toml"
+description: "Coppice の config.toml の全項目と型・既定値：ログ、ストレージ、エージェントとコネクター、ワークフロー、ナレッジ、git、プラグイン、MCP、鍵。"
 ---
 
 # 設定リファレンス
