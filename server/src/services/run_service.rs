@@ -130,6 +130,12 @@ impl From<crate::services::split_service::SplitError> for RunError {
             }
             crate::services::split_service::SplitError::Ticket(e) => e.into(),
             crate::services::split_service::SplitError::Agent(e) => e.into(),
+            crate::services::split_service::SplitError::Plan(
+                crate::services::planning_service::PlanError::Validation(msg),
+            ) => RunError::Validation(msg),
+            crate::services::split_service::SplitError::Plan(
+                crate::services::planning_service::PlanError::Database(e),
+            ) => RunError::Database(e),
         }
     }
 }

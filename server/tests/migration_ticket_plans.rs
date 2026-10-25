@@ -380,3 +380,116 @@ async fn migration_backfills_plans_approvals_and_appended_change_requests() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn migration_approves_plans_for_stuck_split_children_only() {
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let db = MigrationDb::create().await.expect("fresh database");
+    db.apply_before(55).await.expect("migrations before 055");
+
+    let board_id = Uuid::new_v4();
+    let parent = Uuid::new_v4();
+    let stuck = Uuid::new_v4();
+    let top_level = Uuid::new_v4();
+    let has_plan = Uuid::new_v4();
+    let skip = Uuid::new_v4();
+    let ready = Uuid::new_v4();
+    let archived = Uuid::new_v4();
+
+    sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, 'Board', $2)")
+        .bind(board_id)
+        .bind(format!("board-{board_id}"))
+        .execute(&db.pool)
+        .await
+        .expect("board");
+
+    // (id, parent, status, skip_planning, archived, content_version, description)
+    let rows: [(Uuid, Option<Uuid>, &str, bool, bool, i32, &str); 7] = [
+        (parent, None, "backlog", false, false, 1, "Epic"),
+        (stuck, Some(parent), "backlog", false, false, 3, "Stuck child deliverable"),
+        (top_level, None, "backlog", false, false, 1, "Top-level"),
+        (has_plan, Some(parent), "backlog", false, false, 1, "Already planned"),
+        (skip, Some(parent), "backlog", true, false, 1, "Skip planning"),
+        (ready, Some(parent), "ready", false, false, 1, "Already ready"),
+        (archived, Some(parent), "backlog", false, true, 1, "Archived"),
+    ];
+    for (id, parent_id, status, skip_planning, archived, version, description) in rows {
+        sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, board_id, title, description, status, created_by, content_version,
+                parent_ticket_id, skip_planning, archived_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 'user', $6, $7, $8,
+                    CASE WHEN $9 THEN now() ELSE NULL END)
+            "#,
+        )
+        .bind(id)
+        .bind(board_id)
+        .bind(format!("ticket-{id}"))
+        .bind(description)
+        .bind(status)
+        .bind(version)
+        .bind(parent_id)
+        .bind(skip_planning)
+        .bind(archived)
+        .execute(&db.pool)
+        .await
+        .expect("ticket");
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_plans (id, ticket_id, revision, body, content_version)
+        VALUES ($1, $2, 1, 'Existing plan', 1)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(has_plan)
+    .execute(&db.pool)
+    .await
+    .expect("existing plan");
+
+    db.apply_version(55).await.expect("migration 055");
+
+    let stuck_row: (Option<Uuid>, Option<i32>, Option<String>, i32) = sqlx::query_as(
+        r#"
+        SELECT ticket.approved_plan_id, ticket.approved_plan_content_version,
+               plan.body, plan.content_version
+        FROM tickets ticket
+        JOIN ticket_plans plan ON plan.id = ticket.approved_plan_id
+        WHERE ticket.id = $1
+        "#,
+    )
+    .bind(stuck)
+    .fetch_one(&db.pool)
+    .await
+    .expect("stuck child approved");
+    assert_eq!(stuck_row.1, Some(3));
+    assert_eq!(stuck_row.2.as_deref(), Some("Stuck child deliverable"));
+    assert_eq!(stuck_row.3, 3);
+
+    for untouched in [parent, top_level, has_plan, skip, ready, archived] {
+        let approved: Option<Uuid> = sqlx::query_scalar(
+            "SELECT approved_plan_id FROM tickets WHERE id = $1",
+        )
+        .bind(untouched)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert!(approved.is_none(), "ticket {untouched} must stay unapproved");
+    }
+
+    let stuck_plans: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ticket_plans WHERE ticket_id = $1")
+            .bind(stuck)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(stuck_plans, 1);
+
+    db.close().await;
+}

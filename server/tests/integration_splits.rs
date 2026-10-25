@@ -211,3 +211,99 @@ async fn auto_split_creates_children_on_pm_run() {
     assert!(dashboard_child["pendingAssignRecommendation"].is_null());
 
 }
+
+#[tokio::test]
+async fn approved_split_children_can_start_without_skip_planning() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id =
+        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
+    let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
+
+    let parent = TicketService::new(pool)
+        .get(ticket_uuid)
+        .await
+        .expect("load parent");
+
+    let splits = vec![
+        SplitTicketSpec {
+            title: "Child A".into(),
+            description: "First deliverable".into(),
+            acceptance_criteria: Some("- A works".into()),
+            assign_to: None,
+            steps: Vec::new(),
+        },
+        SplitTicketSpec {
+            title: "Child B".into(),
+            description: "Second deliverable".into(),
+            acceptance_criteria: None,
+            assign_to: Some(String::new()),
+            steps: Vec::new(),
+        },
+    ];
+
+    SplitService::new(pool, &state.config.workflow)
+        .apply_splits(&parent.ticket, &splits, pm_uuid, false)
+        .await
+        .expect("set pending splits");
+
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/approve-splits"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+
+    let created: serde_json::Value = common::json_body(approve).await;
+    let created_items = created.as_array().expect("children array");
+    assert_eq!(created_items.len(), 2, "empty assign_to still creates a child");
+
+    for child in created_items {
+        let child_id = child["id"].as_str().expect("child id");
+        assert_eq!(child["planApproved"], true);
+
+        let ready = app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{child_id}/status"),
+                r#"{"status":"ready"}"#,
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(ready.status(), StatusCode::OK);
+        assert_eq!(
+            common::get_ticket(&app, child_id, &cookie, &csrf).await["status"],
+            "ready"
+        );
+
+        let in_progress = app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{child_id}/status"),
+                r#"{"status":"in_progress"}"#,
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(in_progress.status(), StatusCode::OK);
+    }
+}

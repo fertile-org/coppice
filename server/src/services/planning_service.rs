@@ -480,6 +480,40 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
+    /// Write a sub-ticket's plan from its split spec and approve it. Call
+    /// after every write that can bump the child's content_version: the plan
+    /// and the approval both read the version fresh, so they match.
+    pub(crate) async fn approve_child_plan(
+        &self,
+        parent: &crate::domain::ticket::Ticket,
+        child_id: Uuid,
+        spec: &crate::domain::workflow::SplitTicketSpec,
+        recommended_by: Uuid,
+    ) -> Result<(), PlanError> {
+        let body = plan::child_plan(
+            &parent.title,
+            &spec.description,
+            &spec.steps,
+            spec.acceptance_criteria.as_deref(),
+        );
+        let child_plan = self
+            .insert_plan_body(child_id, Some(recommended_by), None, &body, Some(1))
+            .await?;
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET approved_plan_id = $2, approved_plan_content_version = $3, updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(child_id)
+        .bind(child_plan.id)
+        .bind(child_plan.content_version)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Create the sub-tickets an approved plan proposed, each in Backlog with
     /// its own approved plan, and record the parent as split.
     async fn create_planned_children(
@@ -493,38 +527,6 @@ impl<'a> PlanningService<'a> {
             .create_child_tickets(parent, &pending.splits, pending.recommended_by_agent_id)
             .await
             .map_err(|err| PlanError::Validation(err.to_string()))?;
-        for spec in &pending.splits {
-            let Some(child) = children.iter().find(|child| child.title == spec.title) else {
-                continue;
-            };
-            let body = plan::child_plan(
-                &parent.title,
-                &spec.description,
-                &spec.steps,
-                spec.acceptance_criteria.as_deref(),
-            );
-            let child_plan = self
-                .insert_plan_body(
-                    child.id,
-                    Some(pending.recommended_by_agent_id),
-                    None,
-                    &body,
-                    Some(1),
-                )
-                .await?;
-            sqlx::query(
-                r#"
-                UPDATE tickets
-                SET approved_plan_id = $2, approved_plan_content_version = $3, updated_at = now()
-                WHERE id = $1
-                "#,
-            )
-            .bind(child.id)
-            .bind(child_plan.id)
-            .bind(child.content_version)
-            .execute(self.pool)
-            .await?;
-        }
         TicketService::new(self.pool)
             .clear_pending_split_recommendation(parent.id)
             .await?;
