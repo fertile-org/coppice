@@ -29,6 +29,27 @@ export const chatActionMetadataSchema = z.object({
   knowledgeItemId: z.string().uuid().optional(),
 });
 
+export const chatProposalSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(['create_ticket', 'create_knowledge']),
+  status: z.enum(['pending', 'created', 'rejected']),
+  title: z.string(),
+  description: z.string().optional(),
+  content: z.string().optional(),
+  boardId: z.string().uuid().nullable().optional(),
+  repoId: z.string().uuid().nullable().optional(),
+  knowledgeType: z.string().optional(),
+  scope: z.string().optional(),
+  ticketId: z.string().uuid().optional(),
+  knowledgeItemId: z.string().uuid().optional(),
+});
+
+const chatProposalMetadataSchema = z.object({
+  proposals: z.array(chatProposalSchema),
+});
+
+export type ChatProposal = z.infer<typeof chatProposalSchema>;
+
 export const chatAttachmentSchema = z.object({
   id: z.string().uuid(),
   filename: z.string(),
@@ -66,7 +87,7 @@ export const postChatMessageResponseSchema = z.object({
   runId: z.string().uuid(),
 });
 
-/** Ticket fields needed after create-ticket; full board shape varies. */
+/** Ticket fields needed after accepting a proposal; full board shape varies. */
 const chatCreatedTicketSchema = z
   .object({
     id: z.string().uuid(),
@@ -76,20 +97,10 @@ const chatCreatedTicketSchema = z
   })
   .passthrough();
 
-export const createTicketFromChatResponseSchema = z.object({
-  ticket: chatCreatedTicketSchema,
+export const acceptChatProposalResponseSchema = z.object({
   message: chatMessageSchema,
-});
-
-export const draftTicketFromChatResponseSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  source: z.enum(['agent', 'fallback']),
-});
-
-export const createKnowledgeFromChatResponseSchema = z.object({
-  knowledge: knowledgeItemSchema,
-  message: chatMessageSchema,
+  ticket: chatCreatedTicketSchema.optional(),
+  knowledge: knowledgeItemSchema.optional(),
 });
 
 export type ChatSession = z.infer<typeof chatSessionSchema>;
@@ -98,14 +109,8 @@ export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
 export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
 export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
 export type ChatActionMetadata = z.infer<typeof chatActionMetadataSchema>;
-export type CreateTicketFromChatResponse = z.infer<
-  typeof createTicketFromChatResponseSchema
->;
-export type DraftTicketFromChatResponse = z.infer<
-  typeof draftTicketFromChatResponseSchema
->;
-export type CreateKnowledgeFromChatResponse = z.infer<
-  typeof createKnowledgeFromChatResponseSchema
+export type AcceptChatProposalResponse = z.infer<
+  typeof acceptChatProposalResponseSchema
 >;
 
 export interface PostChatMessageInput {
@@ -118,4 +123,10 @@ export function parseChatActionMetadata(
 ): ChatActionMetadata | null {
   const parsed = chatActionMetadataSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+/** Pending or settled proposals on an agent message; invalid metadata yields none. */
+export function parseChatProposals(value: unknown): ChatProposal[] {
+  const parsed = chatProposalMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data.proposals : [];
 }
