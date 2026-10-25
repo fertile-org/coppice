@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptChatProposalResponseSchema,
   chatActionMetadataSchema,
   chatMessageListSchema,
   chatMessageSchema,
   chatSessionListSchema,
   chatSessionSchema,
-  createKnowledgeFromChatResponseSchema,
-  createTicketFromChatResponseSchema,
-  draftTicketFromChatResponseSchema,
   parseChatActionMetadata,
+  parseChatProposals,
   postChatMessageResponseSchema,
 } from './chat';
 
@@ -144,7 +143,7 @@ describe('chat schemas', () => {
     expect(parseChatActionMetadata({ action: 'nope' })).toBeNull();
 
     expect(
-      createTicketFromChatResponseSchema.parse({
+      acceptChatProposalResponseSchema.parse({
         ticket: {
           id: '00000000-0000-4000-8000-000000000050',
           boardId: '00000000-0000-4000-8000-000000000003',
@@ -155,35 +154,46 @@ describe('chat schemas', () => {
         },
         message: {
           ...message,
-          role: 'system',
+          role: 'agent',
           actionMetadata: {
-            action: 'create_ticket',
-            ticketId: '00000000-0000-4000-8000-000000000050',
+            proposals: [
+              {
+                id: '00000000-0000-4000-8000-000000000052',
+                type: 'create_ticket',
+                status: 'created',
+                title: 'Fix chat cwd',
+                ticketId: '00000000-0000-4000-8000-000000000050',
+              },
+            ],
           },
         },
-      }).ticket.title,
+      }).ticket?.title,
     ).toBe('Fix chat cwd');
 
     expect(
-      draftTicketFromChatResponseSchema.parse({
-        title: 'Harden chat cwd resolution',
-        description: '## Context\n\nDetails',
-        source: 'agent',
-      }).source,
-    ).toBe('agent');
-
-    expect(
-      createKnowledgeFromChatResponseSchema.parse({
+      acceptChatProposalResponseSchema.parse({
         knowledge: knowledgeItem,
-        message: {
-          ...message,
-          role: 'system',
-          actionMetadata: {
-            action: 'create_knowledge',
-            knowledgeItemId: knowledgeItem.id,
-          },
-        },
-      }).knowledge.sourceType,
+        message,
+      }).knowledge?.sourceType,
     ).toBe('chat_session');
+  });
+
+  it('parses agent proposals and ignores malformed metadata', () => {
+    const proposals = parseChatProposals({
+      proposals: [
+        {
+          id: '00000000-0000-4000-8000-000000000052',
+          type: 'create_ticket',
+          status: 'pending',
+          title: 'Harden chat cwd resolution',
+          description: '## Context',
+          boardId: null,
+        },
+      ],
+    });
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.status).toBe('pending');
+    expect(parseChatProposals({ action: 'create_ticket' })).toEqual([]);
+    expect(parseChatProposals(null)).toEqual([]);
   });
 });

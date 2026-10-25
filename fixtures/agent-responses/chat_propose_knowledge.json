@@ -1,0 +1,16 @@
+{
+  "status": "done",
+  "summary": "Knowledge draft ready for you to confirm: chat cwd rule.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "actions": [
+    {
+      "type": "create_knowledge",
+      "title": "Chat cwd is per session",
+      "content": "Unbound chat sessions run under WORKTREES_PATH/chat/{session_id}. Never reuse a ticket worktree for chat.",
+      "knowledgeType": "coding_convention",
+      "scope": "board"
+    }
+  ]
+}

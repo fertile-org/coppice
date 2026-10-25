@@ -4,10 +4,7 @@ use crate::api::tickets::ticket_to_response;
 use crate::domain::attachment::Attachment;
 use crate::domain::chat_message::ChatMessage;
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
-use crate::services::chat_service::{
-    ChatError, ChatService, CreateKnowledgeFromChatInput, CreateTicketFromChatInput,
-    DraftTicketDeps,
-};
+use crate::services::chat_service::{AcceptProposalInput, ChatError, ChatService};
 use crate::services::comment_service::CommentService;
 use crate::AppState;
 use axum::{
@@ -21,11 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
-
-const DRAFT_TICKET_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -39,17 +33,34 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(list_messages).post(post_message),
         )
         .route(
-            "/api/chat/sessions/{session_id}/draft-ticket",
-            post(draft_ticket),
+            "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/accept",
+            post(accept_proposal),
         )
         .route(
-            "/api/chat/sessions/{session_id}/create-ticket",
-            post(create_ticket),
+            "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/reject",
+            post(reject_proposal),
         )
-        .route(
-            "/api/chat/sessions/{session_id}/create-knowledge",
-            post(create_knowledge),
-        )
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptProposalBody {
+    title: Option<String>,
+    /// Ticket description, or knowledge content.
+    description: Option<String>,
+    board_id: Option<Uuid>,
+    knowledge_type: Option<String>,
+    scope: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptProposalResponse {
+    message: MessageResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ticket: Option<crate::api::tickets::TicketResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    knowledge: Option<crate::api::knowledge::KnowledgeResponse>,
 }
 
 #[derive(Deserialize)]
@@ -77,25 +88,6 @@ struct PatchSessionBody {
 struct PostMessageBody {
     body: String,
     attachment_ids: Option<Vec<Uuid>>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateTicketBody {
-    board_id: Uuid,
-    title: Option<String>,
-    description: Option<String>,
-    repo_id: Option<Uuid>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateKnowledgeBody {
-    title: Option<String>,
-    content: Option<String>,
-    knowledge_type: Option<String>,
-    scope: Option<String>,
-    board_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -177,33 +169,12 @@ struct PostMessageResponse {
     run_id: Uuid,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateTicketResponse {
-    ticket: crate::api::tickets::TicketResponse,
-    message: MessageResponse,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DraftTicketResponse {
-    title: String,
-    description: String,
-    source: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateKnowledgeResponse {
-    knowledge: crate::api::knowledge::KnowledgeResponse,
-    message: MessageResponse,
-}
-
 fn map_error(err: ChatError) -> StatusCode {
     match err {
         ChatError::NotFound => StatusCode::NOT_FOUND,
         ChatError::Validation(_) | ChatError::ChatUnavailable(_) => StatusCode::BAD_REQUEST,
-        ChatError::ActiveRunExists => StatusCode::CONFLICT,
+        ChatError::BoardRequired => StatusCode::UNPROCESSABLE_ENTITY,
+        ChatError::ActiveRunExists | ChatError::ProposalNotPending => StatusCode::CONFLICT,
         ChatError::Database(_) | ChatError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -437,95 +408,52 @@ async fn post_message(
     ))
 }
 
-async fn create_ticket(
+async fn accept_proposal(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
-    Json(body): Json<CreateTicketBody>,
-) -> Result<(StatusCode, Json<CreateTicketResponse>), StatusCode> {
+    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+    body: Option<Json<AcceptProposalBody>>,
+) -> Result<Json<AcceptProposalResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
+    let body = body.map(|Json(b)| b).unwrap_or_default();
     let result = ChatService::new(pool)
-        .create_ticket_from_chat(
+        .accept_proposal(
             session_id,
+            message_id,
+            proposal_id,
             user.id,
-            CreateTicketFromChatInput {
-                board_id: body.board_id,
+            &state.config.knowledge,
+            AcceptProposalInput {
                 title: body.title.as_deref(),
                 description: body.description.as_deref(),
-                repo_id: body.repo_id,
+                board_id: body.board_id,
+                knowledge_type: body.knowledge_type.as_deref(),
+                scope: body.scope.as_deref(),
                 created_by: &user.email,
             },
         )
         .await
         .map_err(map_error)?;
     let attachments_by_id =
-        attachments_for_messages(pool, std::slice::from_ref(&result.system_message)).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateTicketResponse {
-            ticket: ticket_to_response(result.ticket),
-            message: message_response(result.system_message, &attachments_by_id),
-        }),
-    ))
-}
-
-async fn draft_ticket(
-    State(state): State<Arc<AppState>>,
-    AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
-) -> Result<Json<DraftTicketResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
-    let registry = state.connectors.registry();
-    let result = ChatService::new(pool)
-        .draft_ticket_from_chat(
-            session_id,
-            user.id,
-            DraftTicketDeps {
-                worktrees_path: std::path::Path::new(&state.config.agent.worktrees_path),
-                artifacts_dir: Some(state.config.storage.artifacts_dir.as_str()),
-                connector_registry: registry.as_ref(),
-                timeout: DRAFT_TICKET_HTTP_TIMEOUT,
-            },
-        )
-        .await
-        .map_err(map_error)?;
-
-    Ok(Json(DraftTicketResponse {
-        title: result.title,
-        description: result.description,
-        source: result.source.as_str().to_string(),
+        attachments_for_messages(pool, std::slice::from_ref(&result.message)).await?;
+    Ok(Json(AcceptProposalResponse {
+        message: message_response(result.message, &attachments_by_id),
+        ticket: result.ticket.map(ticket_to_response),
+        knowledge: result.knowledge.map(knowledge_item_response),
     }))
 }
 
-async fn create_knowledge(
+async fn reject_proposal(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
-    Json(body): Json<CreateKnowledgeBody>,
-) -> Result<(StatusCode, Json<CreateKnowledgeResponse>), StatusCode> {
+    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<Json<MessageResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let result = ChatService::new(pool)
-        .create_knowledge_from_chat(
-            session_id,
-            user.id,
-            &state.config.knowledge,
-            CreateKnowledgeFromChatInput {
-                title: body.title.as_deref(),
-                content: body.content.as_deref(),
-                knowledge_type: body.knowledge_type.as_deref(),
-                scope: body.scope.as_deref(),
-                board_id: body.board_id,
-            },
-        )
+    let message = ChatService::new(pool)
+        .reject_proposal(session_id, message_id, proposal_id, user.id)
         .await
         .map_err(map_error)?;
     let attachments_by_id =
-        attachments_for_messages(pool, std::slice::from_ref(&result.system_message)).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateKnowledgeResponse {
-            knowledge: knowledge_item_response(result.item),
-            message: message_response(result.system_message, &attachments_by_id),
-        }),
-    ))
+        attachments_for_messages(pool, std::slice::from_ref(&message)).await?;
+    Ok(Json(message_response(message, &attachments_by_id)))
 }

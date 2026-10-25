@@ -52,6 +52,7 @@ fn done(summary: &str, blockers: Vec<String>) -> AgentRunResult {
         look_here_first: None,
         criteria_results: Vec::new(),
         plan_questions: Vec::new(),
+        actions: None,
     }
 }
 

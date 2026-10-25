@@ -1,16 +1,34 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Textarea } from '../../components/ui/textarea';
+import { parseApiErrorMessage } from '../../lib/api';
 import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
 import {
   parseChatActionMetadata,
+  parseChatProposals,
   type ChatMessage,
+  type ChatProposal,
 } from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
+import { useBoards } from '../boards/useBoards';
 import { CommentAttachments } from '../tickets/CommentAttachments';
 import { useOpenTicket } from '../tickets/useOpenTicket';
+import { useAcceptChatProposal, useRejectChatProposal } from './useChat';
 
 const ESTIMATED_ROW_HEIGHT = 72;
+
+export interface ChatProposalContext {
+  sessionId: string;
+  /** The session's board, if it has one. Ticket proposals need a board to create. */
+  boardId: string | null;
+  /** Show the proposal state only; no Create, Save, or Reject buttons. */
+  readOnly: boolean;
+}
 
 export function ThinkingIndicator({
   label = 'Thinking…',
@@ -82,14 +100,213 @@ function ActionMetadataChip({ message }: { message: ChatMessage }) {
   return null;
 }
 
+function ChatProposalCard({
+  proposal,
+  messageId,
+  context,
+}: {
+  proposal: ChatProposal;
+  messageId: string;
+  context: ChatProposalContext;
+}) {
+  const openTicket = useOpenTicket();
+  const { data: boards = [] } = useBoards();
+  const accept = useAcceptChatProposal(context.sessionId);
+  const reject = useRejectChatProposal(context.sessionId);
+  const isTicket = proposal.type === 'create_ticket';
+  const needsBoard = isTicket || (proposal.scope ?? 'board') !== 'workspace';
+  const defaultBoardId = proposal.boardId ?? context.boardId ?? '';
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(proposal.title);
+  const [body, setBody] = useState(proposal.description ?? proposal.content ?? '');
+  const [boardId, setBoardId] = useState(defaultBoardId);
+  const [error, setError] = useState<string | null>(null);
+  const busy = accept.isPending || reject.isPending;
+
+  if (proposal.status === 'created') {
+    return (
+      <section
+        className="mt-2 rounded-lg border border-moss-200 bg-paper-50 px-3 py-2 font-body text-xs text-text-secondary"
+        data-testid="chat-proposal-card"
+        data-status="created"
+      >
+        <p className="font-medium text-text-primary">{proposal.title}</p>
+        {isTicket && proposal.ticketId ? (
+          <button
+            type="button"
+            className="mt-1 inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 text-accent hover:bg-accent/15"
+            data-testid="chat-proposal-open-ticket"
+            onClick={() => void openTicket(proposal.ticketId!)}
+          >
+            Created ticket · Open
+          </button>
+        ) : (
+          <Link
+            to="/knowledge"
+            className="mt-1 inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 text-accent hover:bg-accent/15"
+            data-testid="chat-proposal-knowledge-link"
+          >
+            Proposed knowledge · View inbox
+          </Link>
+        )}
+      </section>
+    );
+  }
+
+  if (proposal.status === 'rejected') {
+    return (
+      <section
+        className="mt-2 rounded-lg border border-border px-3 py-2 font-body text-xs text-text-secondary"
+        data-testid="chat-proposal-card"
+        data-status="rejected"
+      >
+        <p className="line-through">{proposal.title}</p>
+        <p className="mt-0.5">Rejected</p>
+      </section>
+    );
+  }
+
+  const interactive = !context.readOnly;
+  const showBoardPicker = needsBoard && !proposal.boardId && !context.boardId;
+
+  async function handleAccept(event?: FormEvent) {
+    event?.preventDefault();
+    if (needsBoard && !boardId) {
+      setError('Select a board.');
+      return;
+    }
+    setError(null);
+    try {
+      await accept.mutateAsync({
+        messageId,
+        proposalId: proposal.id,
+        title: title.trim() || undefined,
+        description: body.trim() || undefined,
+        boardId: boardId || undefined,
+      });
+    } catch (err) {
+      setError(
+        parseApiErrorMessage(
+          err,
+          isTicket ? 'Could not create ticket.' : 'Could not propose knowledge.',
+        ),
+      );
+    }
+  }
+
+  async function handleReject() {
+    setError(null);
+    try {
+      await reject.mutateAsync({ messageId, proposalId: proposal.id });
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Could not reject this proposal.'));
+    }
+  }
+
+  return (
+    <form
+      className="mt-2 space-y-2 rounded-lg border border-accent/40 bg-paper-50 px-3 py-2 font-body text-xs"
+      data-testid="chat-proposal-card"
+      data-status="pending"
+      onSubmit={(event) => void handleAccept(event)}
+    >
+      <p className="font-medium text-text-primary">
+        {isTicket ? 'Proposed ticket' : 'Proposed knowledge'}
+      </p>
+      {editing ? (
+        <div className="space-y-2">
+          <Label htmlFor={`proposal-title-${proposal.id}`}>Title</Label>
+          <Input
+            id={`proposal-title-${proposal.id}`}
+            aria-label="Title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            disabled={busy}
+          />
+          <Label htmlFor={`proposal-body-${proposal.id}`}>
+            {isTicket ? 'Description' : 'Content'}
+          </Label>
+          <Textarea
+            id={`proposal-body-${proposal.id}`}
+            aria-label={isTicket ? 'Description' : 'Content'}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            rows={4}
+            disabled={busy}
+          />
+        </div>
+      ) : (
+        <div>
+          <p className="text-sm text-text-primary">{title}</p>
+          {body.trim() ? (
+            <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-text-secondary">
+              {body}
+            </p>
+          ) : null}
+        </div>
+      )}
+      {interactive && showBoardPicker ? (
+        <div className="space-y-1">
+          <Label htmlFor={`proposal-board-${proposal.id}`}>Board</Label>
+          <Combobox
+            id={`proposal-board-${proposal.id}`}
+            aria-label="Board"
+            value={boardId}
+            onValueChange={setBoardId}
+            placeholder="Select board"
+            searchPlaceholder="Search boards…"
+            options={boards.map((board) => ({ value: board.id, label: board.name }))}
+          />
+        </div>
+      ) : null}
+      {error ? (
+        <p className="text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {interactive ? (
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={() => setEditing((value) => !value)}
+          >
+            {editing ? 'Done editing' : 'Edit'}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={() => void handleReject()}
+          >
+            Reject
+          </Button>
+          <Button type="submit" size="sm" disabled={busy || (needsBoard && !boardId)}>
+            {accept.isPending
+              ? 'Saving…'
+              : isTicket
+                ? 'Create ticket'
+                : 'Save knowledge'}
+          </Button>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
 export function ChatMessageBubble({
   message,
   streaming,
   streamingText,
+  proposalContext,
 }: {
   message?: ChatMessage;
   streaming?: boolean;
   streamingText?: string;
+  proposalContext?: ChatProposalContext;
 }) {
   if (streaming) {
     const text = streamingText?.trim() ?? '';
@@ -175,6 +392,16 @@ export function ChatMessageBubble({
         ) : null}
         <CommentAttachments attachments={attachments} />
         <ActionMetadataChip message={message} />
+        {proposalContext && message.role === 'agent'
+          ? parseChatProposals(message.actionMetadata).map((proposal) => (
+              <ChatProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                messageId={message.id}
+                context={proposalContext}
+              />
+            ))
+          : null}
       </article>
     </div>
   );
@@ -184,10 +411,12 @@ export function ChatMessageList({
   messages,
   thinking,
   streamingAgent,
+  proposalContext,
 }: {
   messages: ChatMessage[];
   thinking?: boolean;
   streamingAgent?: { runId: string; text: string; error?: string | null };
+  proposalContext?: ChatProposalContext;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const streamingRow = streamingAgent ? 1 : 0;
@@ -235,7 +464,10 @@ export function ChatMessageList({
               }}
             >
               {item.index < messages.length ? (
-                <ChatMessageBubble message={messages[item.index]!} />
+                <ChatMessageBubble
+                  message={messages[item.index]!}
+                  proposalContext={proposalContext}
+                />
               ) : (
                 <ChatMessageBubble
                   streaming

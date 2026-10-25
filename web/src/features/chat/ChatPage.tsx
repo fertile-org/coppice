@@ -25,7 +25,6 @@ import { cn } from '../../lib/utils';
 import { useAgents, type Agent } from '../agents/useAgents';
 import { useUploadAttachment } from '../tickets/useTicket';
 import { ChatMessageList } from './ChatMessageList';
-import { ChatSessionActions } from './ChatSessionActions';
 import {
   CHAT_SESSIONS_QUERY_KEY,
   fetchOlderMessages,
@@ -402,9 +401,6 @@ function ChatTranscript({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {session && session.status === 'active' ? (
-            <ChatSessionActions session={session} disabled={awaiting} />
-          ) : null}
           {sessionId && !chatUnavailable ? (
             <Button
               type="button"
@@ -445,6 +441,15 @@ function ChatTranscript({
             messages={messages}
             thinking={awaiting && !activeRunId}
             streamingAgent={streamingAgent}
+            proposalContext={
+              session
+                ? {
+                    sessionId: session.id,
+                    boardId: session.boardId,
+                    readOnly: session.status !== 'active',
+                  }
+                : undefined
+            }
           />
           </>
         )}

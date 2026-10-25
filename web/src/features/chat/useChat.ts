@@ -1,20 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import {
+  acceptChatProposalResponseSchema,
   chatMessageListSchema,
+  chatMessageSchema,
   chatSessionListSchema,
   chatSessionSchema,
-  createKnowledgeFromChatResponseSchema,
-  createTicketFromChatResponseSchema,
-  draftTicketFromChatResponseSchema,
   postChatMessageResponseSchema,
+  type AcceptChatProposalResponse,
   type ChatMessage,
   type ChatMessagePage,
   type ChatSession,
   type ChatSessionStatus,
-  type CreateKnowledgeFromChatResponse,
-  type CreateTicketFromChatResponse,
-  type DraftTicketFromChatResponse,
   type PostChatMessageInput,
 } from '../../lib/schemas/chat';
 import type {
@@ -40,19 +37,15 @@ export interface PostChatMessageResult {
   runId: string;
 }
 
-export interface CreateTicketFromChatInput {
-  boardId: string;
+export interface AcceptChatProposalInput {
+  messageId: string;
+  proposalId: string;
   title?: string;
+  /** Ticket description, or knowledge content. */
   description?: string;
-  repoId?: string | null;
-}
-
-export interface CreateKnowledgeFromChatInput {
-  title?: string;
-  content?: string;
+  boardId?: string;
   knowledgeType?: KnowledgeType;
   scope?: KnowledgeScope;
-  boardId?: string;
 }
 
 async function fetchSessions(boardId?: string | null): Promise<ChatSession[]> {
@@ -126,53 +119,45 @@ async function patchSessionStatus(
   return chatSessionSchema.parse(await res.json());
 }
 
-async function createTicketFromChat(
-  sessionId: string,
-  input: CreateTicketFromChatInput,
-): Promise<CreateTicketFromChatResponse> {
-  const res = await apiFetch(`/api/chat/sessions/${sessionId}/create-ticket`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      boardId: input.boardId,
-      title: input.title,
-      description: input.description,
-      repoId: input.repoId ?? undefined,
-    }),
-  });
-  return createTicketFromChatResponseSchema.parse(await res.json());
+function proposalPath(sessionId: string, messageId: string, proposalId: string) {
+  return `/api/chat/sessions/${sessionId}/messages/${messageId}/proposals/${proposalId}`;
 }
 
-async function draftTicketFromChat(
+async function acceptProposal(
   sessionId: string,
-): Promise<DraftTicketFromChatResponse> {
-  const res = await apiFetch(`/api/chat/sessions/${sessionId}/draft-ticket`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
-  });
-  return draftTicketFromChatResponseSchema.parse(await res.json());
-}
-
-async function createKnowledgeFromChat(
-  sessionId: string,
-  input: CreateKnowledgeFromChatInput,
-): Promise<CreateKnowledgeFromChatResponse> {
+  input: AcceptChatProposalInput,
+): Promise<AcceptChatProposalResponse> {
   const res = await apiFetch(
-    `/api/chat/sessions/${sessionId}/create-knowledge`,
+    `${proposalPath(sessionId, input.messageId, input.proposalId)}/accept`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: input.title,
-        content: input.content,
+        description: input.description,
+        boardId: input.boardId,
         knowledgeType: input.knowledgeType,
         scope: input.scope,
-        boardId: input.boardId,
       }),
     },
   );
-  return createKnowledgeFromChatResponseSchema.parse(await res.json());
+  return acceptChatProposalResponseSchema.parse(await res.json());
+}
+
+async function rejectProposal(
+  sessionId: string,
+  messageId: string,
+  proposalId: string,
+): Promise<ChatMessage> {
+  const res = await apiFetch(
+    `${proposalPath(sessionId, messageId, proposalId)}/reject`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    },
+  );
+  return chatMessageSchema.parse(await res.json());
 }
 
 export function useChatSessions(boardId?: string | null) {
@@ -248,41 +233,37 @@ export function usePatchChatSession() {
   });
 }
 
-export function useCreateTicketFromChat(sessionId: string) {
+export function useAcceptChatProposal(sessionId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateTicketFromChatInput) =>
-      createTicketFromChat(sessionId, input),
+    mutationFn: (input: AcceptChatProposalInput) =>
+      acceptProposal(sessionId, input),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({
         queryKey: chatMessagesQueryKey(sessionId),
       });
       void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-      void queryClient.invalidateQueries({
-        queryKey: ['tickets', result.ticket.boardId],
-      });
+      if (result.ticket) {
+        void queryClient.invalidateQueries({
+          queryKey: ['tickets', result.ticket.boardId],
+        });
+      }
+      if (result.knowledge) {
+        void queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
+      }
     },
   });
 }
 
-export function useDraftTicketFromChat(sessionId: string) {
-  return useQuery({
-    queryKey: ['chat-draft-ticket', sessionId],
-    queryFn: () => draftTicketFromChat(sessionId),
-  });
-}
-
-export function useCreateKnowledgeFromChat(sessionId: string) {
+export function useRejectChatProposal(sessionId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateKnowledgeFromChatInput) =>
-      createKnowledgeFromChat(sessionId, input),
+    mutationFn: (input: { messageId: string; proposalId: string }) =>
+      rejectProposal(sessionId, input.messageId, input.proposalId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: chatMessagesQueryKey(sessionId),
       });
-      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-      void queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
     },
   });
 }

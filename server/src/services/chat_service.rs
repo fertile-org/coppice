@@ -1,25 +1,17 @@
 use crate::domain::attachment::Attachment;
 use crate::domain::chat_action::{
-    compact_transcript, draft_fields_from_agent_summary, draft_ticket_title,
-    fallback_draft_ticket, ChatActionResultMeta, DraftTicketFields, DraftTicketSource,
+    compact_transcript, draft_ticket_title, proposal_mut, ChatActionResultMeta,
 };
 use crate::domain::chat_message::{ChatMessage, ChatMessageRole};
 use crate::domain::chat_session::{title_from_first_message, ChatSession, ChatSessionStatus};
 use crate::services::chat_transcript::bound_rendered_transcript;
-use crate::domain::context_profile::ContextProfile;
 use crate::domain::knowledge::{
     scope_from_str, type_from_str, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeSourceType, KnowledgeType, MAX_KNOWLEDGE_CONTENT_CHARS,
 };
 use crate::domain::run::AgentRun;
-use crate::domain::slug::slugify;
-use crate::providers::{AgentRunInput, AgentRunResult};
 use crate::services::agent_service::{AgentError, AgentService};
-use crate::services::chat_cwd::resolve_chat_cwd;
 use crate::services::comment_service::CommentService;
-use crate::services::context_builder::{
-    build_draft_ticket_context, write_context_document, ContextInput,
-};
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
 use crate::services::board_service::{BoardError, BoardService};
 use crate::services::repo_service::{RepoError, RepoService};
@@ -32,7 +24,6 @@ use sqlx::Row;
 use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
-use std::time::Duration;
 use uuid::Uuid;
 
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
@@ -52,7 +43,6 @@ pub fn truncate_message_preview(body: &str) -> String {
     out.push('…');
     out
 }
-const DRAFT_TICKET_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_CHAT_ATTACHMENTS_PER_MESSAGE: usize = 5;
 
 /// MIME types allowed when associating uploads with a chat message (stricter than comments).
@@ -89,6 +79,12 @@ pub enum ChatError {
     ChatUnavailable(String),
     #[error("active run already exists")]
     ActiveRunExists,
+    /// The proposal was already accepted or rejected.
+    #[error("proposal is no longer pending")]
+    ProposalNotPending,
+    /// Accepting a ticket needs a board from the override, the proposal or the session.
+    #[error("boardId is required to create a ticket")]
+    BoardRequired,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -186,26 +182,32 @@ pub struct CreateTicketFromChatInput<'a> {
     pub created_by: &'a str,
 }
 
-#[derive(Debug, Clone)]
-pub struct DraftTicketResult {
-    pub title: String,
-    pub description: String,
-    pub source: DraftTicketSource,
-}
-
-pub struct DraftTicketDeps<'a> {
-    pub worktrees_path: &'a Path,
-    pub artifacts_dir: Option<&'a str>,
-    pub connector_registry: &'a crate::providers::ConnectorRegistry,
-    pub timeout: Duration,
-}
-
 pub struct CreateKnowledgeFromChatInput<'a> {
     pub title: Option<&'a str>,
     pub content: Option<&'a str>,
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
     pub board_id: Option<Uuid>,
+}
+
+/// Optional overrides for an accepted proposal. Unset fields use the proposal.
+pub struct AcceptProposalInput<'a> {
+    pub title: Option<&'a str>,
+    /// Ticket description, or knowledge content.
+    pub description: Option<&'a str>,
+    pub board_id: Option<Uuid>,
+    pub knowledge_type: Option<&'a str>,
+    pub scope: Option<&'a str>,
+    pub created_by: &'a str,
+}
+
+pub struct AcceptedProposal {
+    /// Agent message with the proposal marked `created`.
+    pub message: ChatMessage,
+    /// The "Created ticket" or "Proposed knowledge" note.
+    pub system_message: ChatMessage,
+    pub ticket: Option<TicketWithDisplay>,
+    pub knowledge: Option<KnowledgeItemView>,
 }
 
 fn ensure_chat_available(connector: &str) -> Result<(), ChatError> {
@@ -662,20 +664,16 @@ impl<'a> ChatService<'a> {
         Ok(PostMessageResult { message, run })
     }
 
-    pub async fn append_agent_message(
+    /// Agent reply that carries pending proposals (see `proposals_metadata`).
+    pub async fn append_agent_message_with_proposals(
         &self,
         session_id: Uuid,
         run_id: Uuid,
         body: &str,
+        proposals: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
-        self.append_message(
-            session_id,
-            ChatMessageRole::Agent,
-            body,
-            Some(run_id),
-            None,
-        )
-        .await
+        self.append_message(session_id, ChatMessageRole::Agent, body, Some(run_id), proposals)
+            .await
     }
 
     pub async fn append_system_note(
@@ -1067,132 +1065,6 @@ impl<'a> ChatService<'a> {
         })
     }
 
-    /// In-process agent draft for create-ticket confirm dialog. Never creates a
-    /// ticket or appends chat messages. Always returns a usable draft.
-    pub async fn draft_ticket_from_chat(
-        &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
-        deps: DraftTicketDeps<'_>,
-    ) -> Result<DraftTicketResult, ChatError> {
-        let session = self.get_session(session_id, owner_user_id).await?;
-        let transcript = self.format_transcript(session_id).await?;
-        let fallback = fallback_draft_ticket(&transcript, TRANSCRIPT_COMPACT_CHARS);
-
-        let agent = match AgentService::new(self.pool).get(session.agent_id).await {
-            Ok(agent) => agent,
-            Err(_) => {
-                return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-            }
-        };
-        if crate::providers::chat_unavailable_message(&agent.connector).is_some() {
-            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-        }
-        let Some(connector) = deps.connector_registry.get(&agent.connector) else {
-            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-        };
-        let agent_key = agent
-            .preset_source
-            .clone()
-            .unwrap_or_else(|| slugify(&agent.name));
-
-        let cwd = match resolve_chat_cwd(deps.worktrees_path, session_id) {
-            Ok(path) => path,
-            Err(_) => {
-                return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-            }
-        };
-        let cwd_str = cwd.to_string_lossy().into_owned();
-
-        if self
-            .stage_attachments_into_cwd(session_id, &cwd)
-            .await
-            .is_err()
-        {
-            // Attachments are best-effort for drafting; continue without them.
-        }
-
-        let context_input = ContextInput {
-            ticket_title: "Draft ticket from chat",
-            ticket_description: "",
-            ticket_status: "n/a",
-            ticket_substatus: None,
-            agent_name: &agent.name,
-            agent_key: &agent_key,
-            agent_role: &agent.role,
-            agent_responsibilities: &agent.responsibilities,
-            agent_system_prompt: &agent.system_prompt,
-            repo_name: None,
-            repo_remote_url: None,
-            repo_default_branch: None,
-            worktree_path: Some(&cwd_str),
-            latest_comments: Some(&transcript),
-            project_rules: None,
-            resume_context: None,
-            context_profile: ContextProfile::Conversation,
-            human_request: None,
-            ticket_id: None,
-            assignee_agent_key: None,
-            thread_excerpt: None,
-            has_attachments: false,
-        };
-        let markdown = build_draft_ticket_context(&context_input);
-        if write_context_document(&cwd, &markdown).is_err() {
-            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-        }
-        let context_path = cwd.join(".agent").join("context.md");
-
-        let timeout = if deps.timeout.is_zero() {
-            DRAFT_TICKET_TIMEOUT
-        } else {
-            deps.timeout
-        };
-        let provider_input = AgentRunInput {
-            agent_id: agent.id.to_string(),
-            agent_key: agent_key.clone(),
-            agent_role: agent.role.clone(),
-            job_type: "draft_ticket".into(),
-            ticket_id: None,
-            ticket_status: None,
-            context_profile: ContextProfile::Conversation,
-            context_path: context_path.to_string_lossy().into_owned(),
-            run_id: None,
-            chat_session_id: None,
-            artifacts_dir: deps.artifacts_dir.map(str::to_string),
-            model_provider: agent.model_provider.clone(),
-            model: agent.model.clone(),
-            stream: None,
-            cancel_rx: None,
-            session_created_tx: None,
-            resume_context: None,
-            resume_session_id: None,
-            read_only_tools: true,
-            mcp: None,
-        };
-
-        let provider_result =
-            match tokio::time::timeout(timeout, connector.run(provider_input)).await {
-                Ok(Ok(result)) => result,
-                Ok(Err(_)) | Err(_) => {
-                    return Ok(draft_result(fallback, DraftTicketSource::Fallback));
-                }
-            };
-
-        let fields = match provider_result {
-            AgentRunResult::Done {
-                summary,
-                updated_description,
-                ..
-            } => draft_fields_from_agent_summary(&summary, updated_description.as_deref()),
-            _ => None,
-        };
-
-        match fields {
-            Some(fields) => Ok(draft_result(fields, DraftTicketSource::Agent)),
-            None => Ok(draft_result(fallback, DraftTicketSource::Fallback)),
-        }
-    }
-
     /// Human-confirmed knowledge candidate from compacted chat transcript (M06 pending).
     pub async fn create_knowledge_from_chat(
         &self,
@@ -1289,6 +1161,175 @@ impl<'a> ChatService<'a> {
             system_message,
         })
     }
+
+    /// Accept a pending proposal. The agent message row lock serializes
+    /// concurrent accept/reject calls, so a proposal creates at most one item.
+    pub async fn accept_proposal(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        proposal_id: Uuid,
+        owner_user_id: Uuid,
+        knowledge_config: &KnowledgeConfig,
+        input: AcceptProposalInput<'_>,
+    ) -> Result<AcceptedProposal, ChatError> {
+        let session = self.get_session(session_id, owner_user_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let mut metadata = lock_proposal_message(&mut tx, session_id, message_id).await?;
+        let pid = proposal_id.to_string();
+        let proposal = proposal_mut(&mut metadata, &pid)
+            .ok_or(ChatError::NotFound)?
+            .clone();
+        ensure_proposal_pending(&proposal)?;
+
+        let str_field = |key: &str| proposal.get(key).and_then(serde_json::Value::as_str);
+        let uuid_field = |key: &str| str_field(key).and_then(|s| Uuid::parse_str(s).ok());
+        let override_or = |value: Option<&str>, key: &str| {
+            value
+                .map(str::to_string)
+                .or_else(|| str_field(key).map(str::to_string))
+        };
+
+        let (key, created_id, system_message, ticket, knowledge) = match str_field("type") {
+            Some("create_ticket") => {
+                let board_id = input
+                    .board_id
+                    .or_else(|| uuid_field("boardId"))
+                    .or(session.board_id)
+                    .ok_or(ChatError::BoardRequired)?;
+                let title = override_or(input.title, "title");
+                let description = override_or(input.description, "description");
+                let created = self
+                    .create_ticket_from_chat(
+                        session_id,
+                        owner_user_id,
+                        CreateTicketFromChatInput {
+                            board_id,
+                            title: title.as_deref(),
+                            description: description.as_deref(),
+                            repo_id: uuid_field("repoId"),
+                            created_by: input.created_by,
+                        },
+                    )
+                    .await?;
+                (
+                    "ticketId",
+                    created.ticket.ticket.id,
+                    created.system_message,
+                    Some(created.ticket),
+                    None,
+                )
+            }
+            Some("create_knowledge") => {
+                let title = override_or(input.title, "title");
+                let content = override_or(input.description, "content");
+                let knowledge_type = override_or(input.knowledge_type, "knowledgeType");
+                let scope = override_or(input.scope, "scope");
+                let created = self
+                    .create_knowledge_from_chat(
+                        session_id,
+                        owner_user_id,
+                        knowledge_config,
+                        CreateKnowledgeFromChatInput {
+                            title: title.as_deref(),
+                            content: content.as_deref(),
+                            knowledge_type: knowledge_type.as_deref(),
+                            scope: scope.as_deref(),
+                            board_id: input.board_id.or_else(|| uuid_field("boardId")),
+                        },
+                    )
+                    .await?;
+                (
+                    "knowledgeItemId",
+                    created.item.id,
+                    created.system_message,
+                    None,
+                    Some(created.item),
+                )
+            }
+            _ => return Err(ChatError::Validation("unknown proposal type".into())),
+        };
+
+        let proposal = proposal_mut(&mut metadata, &pid).ok_or(ChatError::NotFound)?;
+        proposal["status"] = "created".into();
+        proposal[key] = created_id.to_string().into();
+        let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
+        tx.commit().await?;
+
+        Ok(AcceptedProposal {
+            message,
+            system_message,
+            ticket,
+            knowledge,
+        })
+    }
+
+    /// Reject a pending proposal. Creates nothing.
+    pub async fn reject_proposal(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        proposal_id: Uuid,
+        owner_user_id: Uuid,
+    ) -> Result<ChatMessage, ChatError> {
+        self.get_session(session_id, owner_user_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let mut metadata = lock_proposal_message(&mut tx, session_id, message_id).await?;
+        let pid = proposal_id.to_string();
+        let proposal = proposal_mut(&mut metadata, &pid).ok_or(ChatError::NotFound)?;
+        ensure_proposal_pending(proposal)?;
+        proposal["status"] = "rejected".into();
+        let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
+        tx.commit().await?;
+        Ok(message)
+    }
+}
+
+/// Lock one agent message's proposal metadata for the rest of `tx`.
+async fn lock_proposal_message(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: Uuid,
+    message_id: Uuid,
+) -> Result<serde_json::Value, ChatError> {
+    let row: Option<Option<serde_json::Value>> = sqlx::query_scalar(
+        r#"
+        SELECT action_metadata FROM chat_messages
+        WHERE id = $1 AND session_id = $2 AND role = 'agent'
+        FOR UPDATE
+        "#,
+    )
+    .bind(message_id)
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.flatten().ok_or(ChatError::NotFound)
+}
+
+fn ensure_proposal_pending(proposal: &serde_json::Value) -> Result<(), ChatError> {
+    match proposal.get("status").and_then(serde_json::Value::as_str) {
+        Some("pending") => Ok(()),
+        _ => Err(ChatError::ProposalNotPending),
+    }
+}
+
+async fn update_message_metadata(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    message_id: Uuid,
+    metadata: &serde_json::Value,
+) -> Result<ChatMessage, ChatError> {
+    let row = sqlx::query(
+        r#"
+        UPDATE chat_messages SET action_metadata = $2 WHERE id = $1
+        RETURNING
+            id, session_id, seq, role, body, agent_run_id, action_metadata,
+            attachment_ids, created_at
+        "#,
+    )
+    .bind(message_id)
+    .bind(metadata)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row_to_message(&row))
 }
 
 /// Serialize message inserts for one session. `seq` is unique per session, and
@@ -1367,14 +1408,6 @@ fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-fn draft_result(fields: DraftTicketFields, source: DraftTicketSource) -> DraftTicketResult {
-    DraftTicketResult {
-        title: fields.title,
-        description: fields.description,
-        source,
-    }
 }
 
 const CHAT_SESSION_LIST_SELECT: &str = r"

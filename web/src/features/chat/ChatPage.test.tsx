@@ -11,19 +11,8 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   postMessagePending: false,
   uploadAttachment: vi.fn(),
-  createTicket: vi.fn(),
-  draftTicketData: {
-    title: 'Harden chat cwd resolution',
-    description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
-    source: 'agent' as 'agent' | 'fallback',
-  } as {
-    title: string;
-    description: string;
-    source: 'agent' | 'fallback';
-  } | undefined,
-  draftTicketLoading: false,
-  draftTicketError: false,
-  createKnowledge: vi.fn(),
+  acceptProposal: vi.fn(),
+  rejectProposal: vi.fn(),
   openTicket: vi.fn(),
   sessions: [] as Array<{
     id: string;
@@ -156,17 +145,12 @@ vi.mock('./useChat', () => ({
     mutateAsync: mocks.postMessage,
     isPending: mocks.postMessagePending,
   }),
-  useCreateTicketFromChat: () => ({
-    mutateAsync: mocks.createTicket,
+  useAcceptChatProposal: () => ({
+    mutateAsync: mocks.acceptProposal,
     isPending: false,
   }),
-  useDraftTicketFromChat: () => ({
-    data: mocks.draftTicketData,
-    isLoading: mocks.draftTicketLoading,
-    isError: mocks.draftTicketError,
-  }),
-  useCreateKnowledgeFromChat: () => ({
-    mutateAsync: mocks.createKnowledge,
+  useRejectChatProposal: () => ({
+    mutateAsync: mocks.rejectProposal,
     isPending: false,
   }),
 }));
@@ -223,15 +207,8 @@ describe('ChatPage', () => {
     mocks.postMessage.mockReset();
     mocks.postMessagePending = false;
     mocks.uploadAttachment.mockReset();
-    mocks.createTicket.mockReset();
-    mocks.draftTicketData = {
-      title: 'Harden chat cwd resolution',
-      description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
-      source: 'agent',
-    };
-    mocks.draftTicketLoading = false;
-    mocks.draftTicketError = false;
-    mocks.createKnowledge.mockReset();
+    mocks.acceptProposal.mockReset();
+    mocks.rejectProposal.mockReset();
     mocks.openTicket.mockReset();
     mocks.sessions = [];
     mocks.messages = [];
@@ -556,7 +533,8 @@ describe('ChatPage', () => {
     expect(within(transcript).getByText('Prior message')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-pane')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Backend Engineer' })).toBeInTheDocument();
-    expect(screen.getByTestId('chat-session-actions')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create ticket' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Propose knowledge' })).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'What is cwd?' },
@@ -760,167 +738,104 @@ describe('ChatPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('File too large');
   });
 
-  it('shows ThinkingIndicator while draft-ticket is loading', () => {
+  it('shows a pending ticket proposal under the agent reply and creates it on click', async () => {
     mocks.sessions = [ACTIVE_SESSION];
-    mocks.draftTicketLoading = true;
-    mocks.draftTicketData = undefined;
-
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
-    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
-
-    const status = screen.getByTestId('draft-ticket-status');
-    expect(status).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByTestId('thinking-indicator')).toBeInTheDocument();
-    expect(screen.getByTestId('thinking-indicator')).toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
-    expect(screen.getByTestId('thinking-indicator')).toHaveTextContent(
-      /Drafting title and description from this chat/,
-    );
-    expect(screen.getByLabelText('Title')).toBeDisabled();
-    expect(screen.getByLabelText('Description')).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Confirm create ticket' }),
-    ).toBeDisabled();
-  });
-
-  it('clears ThinkingIndicator after draft-ticket finishes', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
-    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
-    expect(await screen.findByDisplayValue('Harden chat cwd resolution')).toBeInTheDocument();
-
-    expect(screen.queryByTestId('thinking-indicator')).not.toBeInTheDocument();
-    expect(screen.getByTestId('draft-ticket-status')).not.toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
-    expect(screen.getByTestId('draft-ticket-status')).toHaveTextContent(
-      'Review the agent draft, edit if needed, then confirm.',
-    );
-    expect(screen.getByLabelText('Title')).not.toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Confirm create ticket' }),
-    ).not.toBeDisabled();
-  });
-
-  it('explains a basic draft when the agent could not draft the ticket', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    mocks.draftTicketData = {
-      title: 'From the chat',
-      description: 'Notes from the conversation.',
-      source: 'fallback',
-    };
-
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
-
-    expect(await screen.findByDisplayValue('From the chat')).toBeInTheDocument();
-    expect(screen.getByTestId('draft-ticket-status')).toHaveTextContent(
-      "The agent couldn't draft this, so here's a basic draft from the chat. Edit it before you confirm.",
-    );
-    expect(screen.getByLabelText('Title')).not.toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Confirm create ticket' }),
-    ).not.toBeDisabled();
-  });
-
-  it('creates a ticket from chat after confirming board and title', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    mocks.createTicket.mockResolvedValue({
+    mocks.messages = [
+      {
+        id: '00000000-0000-4000-8000-000000000070',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'agent',
+        body: 'Draft ready for you to confirm.',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: {
+          proposals: [
+            {
+              id: '00000000-0000-4000-8000-000000000071',
+              type: 'create_ticket',
+              status: 'pending',
+              title: 'Harden chat cwd resolution',
+              description: '## Context\n\nUnbound chat sessions need a safe cwd.',
+            },
+          ],
+        },
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+    ];
+    mocks.acceptProposal.mockResolvedValue({
+      message: mocks.messages[0],
       ticket: {
         id: '00000000-0000-4000-8000-000000000050',
-        boardId: '00000000-0000-4000-8000-000000000003',
-        title: 'Fix chat cwd',
+        boardId: ACTIVE_SESSION.boardId,
+        title: 'Harden chat cwd resolution',
         status: 'backlog',
       },
-      message: {
-        id: '00000000-0000-4000-8000-000000000051',
-        sessionId: ACTIVE_SESSION.id,
-        seq: 2,
-        role: 'system',
-        body: 'Created ticket',
-        agentRunId: null,
-        actionMetadata: {
-          action: 'create_ticket',
-          ticketId: '00000000-0000-4000-8000-000000000050',
-        },
-        createdAt: '2026-09-08T00:03:00Z',
-      },
     });
 
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
-    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
-    expect(await screen.findByDisplayValue('Harden chat cwd resolution')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Title'), {
-      target: { value: 'Fix chat cwd' },
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Confirm create ticket' }),
-    );
+    const card = screen.getByTestId('chat-proposal-card');
+    expect(card).toHaveAttribute('data-status', 'pending');
+    expect(within(card).getByText('Harden chat cwd resolution')).toBeInTheDocument();
+    expect(within(card).queryByRole('combobox', { name: 'Board' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Create ticket' }));
 
     await waitFor(() => {
-      expect(mocks.createTicket).toHaveBeenCalledWith({
-        boardId: '00000000-0000-4000-8000-000000000003',
-        title: 'Fix chat cwd',
+      expect(mocks.acceptProposal).toHaveBeenCalledWith({
+        messageId: '00000000-0000-4000-8000-000000000070',
+        proposalId: '00000000-0000-4000-8000-000000000071',
+        title: 'Harden chat cwd resolution',
         description: '## Context\n\nUnbound chat sessions need a safe cwd.',
+        boardId: ACTIVE_SESSION.boardId,
       });
     });
-    expect(mocks.openTicket).toHaveBeenCalledWith(
-      '00000000-0000-4000-8000-000000000050',
-    );
+    expect(mocks.openTicket).not.toHaveBeenCalled();
   });
 
-  it('proposes knowledge from chat into the pending inbox', async () => {
+  it('rejects a proposal from the chat card without creating anything', async () => {
     mocks.sessions = [ACTIVE_SESSION];
-    mocks.createKnowledge.mockResolvedValue({
-      knowledge: { id: '00000000-0000-4000-8000-000000000060', status: 'pending' },
-      message: {
-        id: '00000000-0000-4000-8000-000000000061',
+    mocks.messages = [
+      {
+        id: '00000000-0000-4000-8000-000000000080',
         sessionId: ACTIVE_SESSION.id,
         seq: 2,
-        role: 'system',
-        body: 'Proposed knowledge',
-        agentRunId: null,
+        role: 'agent',
+        body: 'Want a ticket?',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
         actionMetadata: {
-          action: 'create_knowledge',
-          knowledgeItemId: '00000000-0000-4000-8000-000000000060',
+          proposals: [
+            {
+              id: '00000000-0000-4000-8000-000000000081',
+              type: 'create_ticket',
+              status: 'pending',
+              title: 'Not wanted',
+            },
+          ],
         },
-        createdAt: '2026-09-08T00:03:00Z',
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:02:00Z',
       },
-    });
+    ];
+    mocks.rejectProposal.mockResolvedValue({ ...mocks.messages[0] });
 
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Propose knowledge' }));
-    expect(screen.getByTestId('create-knowledge-dialog')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Knowledge title (optional)'), {
-      target: { value: 'Resolve chat cwd under worktrees' },
-    });
     fireEvent.click(
-      screen.getByRole('button', { name: 'Confirm propose knowledge' }),
+      within(screen.getByTestId('chat-proposal-card')).getByRole('button', { name: 'Reject' }),
     );
 
     await waitFor(() => {
-      expect(mocks.createKnowledge).toHaveBeenCalledWith({
-        title: 'Resolve chat cwd under worktrees',
-        content: undefined,
-        knowledgeType: 'coding_convention',
-        scope: 'board',
-        boardId: '00000000-0000-4000-8000-000000000003',
+      expect(mocks.rejectProposal).toHaveBeenCalledWith({
+        messageId: '00000000-0000-4000-8000-000000000080',
+        proposalId: '00000000-0000-4000-8000-000000000081',
       });
     });
-    expect(await screen.findByText('Knowledge inbox')).toBeInTheDocument();
+    expect(mocks.acceptProposal).not.toHaveBeenCalled();
   });
-
 
   it('submits on Enter with a non-empty body', async () => {
     mocks.sessions = [ACTIVE_SESSION];

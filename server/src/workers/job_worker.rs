@@ -1299,8 +1299,22 @@ async fn execute_chat_turn(
         AgentRunResult::Continued { summary, .. } => (summary.clone(), RunStatus::Succeeded),
     };
 
+    let proposals = match &result {
+        AgentRunResult::Done {
+            actions: Some(actions),
+            ..
+        } => match crate::domain::chat_action::parse_chat_actions(actions) {
+            Ok(list) => crate::domain::chat_action::proposals_metadata(&list),
+            Err(err) => {
+                tracing::warn!(run_id = %run.id, error = %err, "dropping invalid chat proposals");
+                None
+            }
+        },
+        _ => None,
+    };
+
     ChatService::new(pool)
-        .append_agent_message(session_id, run.id, &summary)
+        .append_agent_message_with_proposals(session_id, run.id, &summary, proposals)
         .await
         .context("persist agent chat message")?;
 

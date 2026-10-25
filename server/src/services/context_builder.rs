@@ -112,7 +112,14 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              The focus repository is the one the current board uses most, and it is checked out \
              at the start of the chat when it fits. \
              Call `open_repo` with a slug from `REPOS.md` when you need a repository that is not checked out. \
-             Pass a slug, not a path.\n\n",
+             Pass a slug, not a path.\n\n\
+             When the human asks for a ticket or a knowledge item, draft it and add it to `actions` in \
+             your `result_submit` call: `{\"type\":\"create_ticket\",\"title\":...,\"description\":...}` or \
+             `{\"type\":\"create_knowledge\",\"title\":...,\"content\":...,\"knowledgeType\":...,\"scope\":...}`. \
+             `scope` is `workspace`, `board` or `agent`; `knowledgeType` must be one of the values in the \
+             `result_submit` schema (default `coding_convention`). \
+             Use at most 5 actions per reply and only when asked. The human confirms each one in the chat \
+             with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n",
         );
         if input.has_attachments {
             out.push_str(
@@ -216,64 +223,6 @@ fn write_tool_first_repository(out: &mut String, input: &ContextInput<'_>) {
         out.push_str("Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git.\n");
     }
     out.push('\n');
-}
-
-/// Minimal overlay for in-process chat → board ticket drafting (no transcript reply).
-pub fn build_draft_ticket_context(input: &ContextInput<'_>) -> String {
-    let transcript = input.latest_comments.unwrap_or("(No previous messages)");
-    let repository = input
-        .worktree_path
-        .map(|path| format!("\n# Working directory\n\n`{path}`\n"))
-        .unwrap_or_default();
-    format!(
-        r#"# Draft board ticket
-
-You are drafting a board-ready ticket from a human-owned chat session.
-Do not reply in chat. Do not create a ticket. Draft title and description only.
-Coppice tools are not available here: return the JSON object below as your final reply and do not call `result_submit`.
-
-# Agent
-
-**Name:** {name}
-**Role:** {role}
-
-{system_prompt}
-{repository}
-# Conversation transcript
-
-{transcript}
-
-# Drafting rules
-
-- Produce a concise, actionable title (not a pasted chat line).
-- Write a structured markdown description with Context and Next steps when helpful.
-- Do not invent acceptanceCriteria as a separate field.
-- Do not write, edit, create, delete, rename, stage, commit, or push files.
-- Do not change tickets, workflow state, or knowledge.
-
-# Expected output contract
-
-Return one JSON object:
-
-```json
-{{
-  "status": "done",
-  "summary": "<concise board ticket title>",
-  "updatedDescription": "<markdown description with context and next steps>",
-  "changedFiles": [],
-  "testsRun": [],
-  "blockers": []
-}}
-```
-
-`summary` is the ticket title. `updatedDescription` is the ticket body.
-"#,
-        name = input.agent_name,
-        role = input.agent_role,
-        system_prompt = input.agent_system_prompt,
-        repository = repository,
-        transcript = transcript,
-    )
 }
 
 enum FullContextKind<'a> {

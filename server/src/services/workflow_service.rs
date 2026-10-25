@@ -637,6 +637,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             board_agent_keys: vec!["pm".into()],
             board_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
@@ -668,6 +669,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         }
     }
 
@@ -1045,6 +1047,7 @@ mod tests {
                     look_here_first: None,
                     criteria_results: Vec::new(),
                     plan_questions: Vec::new(),
+                    actions: None,
                 };
                 if let Ok(action) = WorkflowService::resolve_transition(ctx) {
                     assert_ne!(action.new_status, Some(Done), "{current_status:?} / {role}");
@@ -1370,6 +1373,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             ..minimal_ctx()
         })
@@ -1428,6 +1432,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             ..minimal_ctx()
         })
@@ -1482,6 +1487,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             ..minimal_ctx()
         })
@@ -1514,6 +1520,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             ..minimal_ctx()
         })
@@ -1548,6 +1555,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             ..minimal_ctx()
         })
@@ -1582,6 +1590,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
@@ -1625,6 +1634,7 @@ mod tests {
                 look_here_first: None,
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
+                actions: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[

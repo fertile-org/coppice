@@ -1,3 +1,4 @@
+use crate::domain::chat_action::{KNOWLEDGE_SCOPES, KNOWLEDGE_TYPES};
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::ToolDefinition;
 use serde_json::{json, Value};
@@ -260,6 +261,24 @@ fn result_submit_properties() -> Value {
                     "choices": strings("Optional short answers to pick from."),
                 },
                 "required": ["question"],
+            },
+        },
+        "actions": {
+            "type": "array",
+            "description": "Agent chat only (chat turns). Ticket or knowledge drafts for the human to confirm with Create or Reject. Nothing is created until they click. Max 5.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "enum": ["create_ticket", "create_knowledge"] },
+                    "title": { "type": "string" },
+                    "description": { "type": "string", "description": "create_ticket body (markdown)." },
+                    "content": { "type": "string", "description": "create_knowledge body (markdown)." },
+                    "knowledgeType": { "type": "string", "enum": KNOWLEDGE_TYPES },
+                    "scope": { "type": "string", "enum": KNOWLEDGE_SCOPES },
+                    "boardId": { "type": "string" },
+                    "repoId": { "type": "string" },
+                },
+                "required": ["type", "title"],
             },
         },
     })
