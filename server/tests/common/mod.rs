@@ -158,10 +158,18 @@ async fn init_test_plugins(
     let base = BASE.get_or_init(|| tempfile::tempdir().expect("plugins tempdir"));
     let dir = base.path().join(uuid::Uuid::new_v4().to_string());
     config.plugins.dir = dir.to_string_lossy().into_owned();
+    config.plugins.marketplaces_dir = base
+        .path()
+        .join(format!("{}-marketplaces", uuid::Uuid::new_v4()))
+        .to_string_lossy()
+        .into_owned();
     let skills = AppState::test_skills();
     AppState::init_plugins(pool, config, &skills)
         .await
         .expect("init test plugins");
+    AppState::init_marketplace(pool, config)
+        .await
+        .expect("init test marketplace");
     skills
 }
 

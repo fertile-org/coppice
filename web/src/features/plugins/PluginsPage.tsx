@@ -1,16 +1,22 @@
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useRef, useState, type FormEvent, type RefObject } from 'react';
+import { useCallback, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
+import { cn } from '../../lib/utils';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
 import { PLUGIN_COPY } from './copy';
+import { MarketplaceSection } from './MarketplaceSection';
 import { PluginCard } from './PluginCard';
 import { PluginsGuide } from './PluginsGuide';
 import { parseApiErrorMessage } from '../../lib/api';
+import {
+  useMarketplaceEntries,
+  useMarketplaceSources,
+} from './useMarketplace';
 import {
   useAddPluginDir,
   useInstallPlugin,
@@ -24,6 +30,13 @@ import {
 
 const ERROR_CLASS =
   'rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger';
+
+type PluginsTab = 'installed' | 'marketplace';
+
+const TABS: { id: PluginsTab; label: string }[] = [
+  { id: 'installed', label: 'Installed' },
+  { id: 'marketplace', label: 'Marketplace' },
+];
 
 function SectionHeading({ children }: { children: string }) {
   return (
@@ -381,13 +394,23 @@ export function PluginsPage() {
   const { user, loading } = useSession();
   const dirsQuery = usePluginDirs();
   const pluginsQuery = usePlugins();
+  const sourcesQuery = useMarketplaceSources();
+  const entriesQuery = useMarketplaceEntries();
   const [gitUrl, setGitUrl] = useState('');
+  const [tab, setTab] = useState<PluginsTab>('installed');
+  const [notice, setNotice] = useState<string | null>(null);
   const installRef = useRef<HTMLElement>(null);
 
   function handleInstallFromGit(url: string) {
     setGitUrl(url);
     installRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
+
+  /** A marketplace install lands on the new plugin's card so it can be enabled. */
+  const handleMarketplaceDone = useCallback((message: string) => {
+    setNotice(message);
+    setTab('installed');
+  }, []);
 
   if (loading) {
     return <p className="font-body text-sm text-text-muted">Loading session…</p>;
@@ -439,48 +462,109 @@ export function PluginsPage() {
 
       {!isLoading && !isError && (
         <>
-          <section className="space-y-3">
-            <SectionHeading>Installed plugins</SectionHeading>
-            {plugins.length === 0 ? (
-              <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
-                No plugins yet. Install one from git or add a plugin directory below. To try
-                one out, add the{' '}
-                <a
-                  href="https://github.com/fertile-org/coppice/tree/main/examples/plugins"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-moss-700 underline-offset-2 hover:underline"
-                >
-                  <code className="font-mono">examples/plugins</code>
-                </a>{' '}
-                folder from GitHub.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {plugins.map((plugin) => (
-                  <PluginCard
-                    key={plugin.id}
-                    plugin={plugin}
-                    onInstallFromGit={handleInstallFromGit}
-                    siblingCount={
-                      plugin.gitRoot ? clonePluginCounts.get(plugin.gitRoot) : undefined
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-          <section className="space-y-6">
-            <SectionHeading>Add plugins</SectionHeading>
-            <InstallSection
-              dirs={dirs}
-              plugins={plugins}
-              gitUrl={gitUrl}
-              onGitUrlChange={setGitUrl}
-              sectionRef={installRef}
-            />
-            <PluginDirsSection dirs={dirs} />
-          </section>
+          <div role="tablist" aria-label="Plugins" className="flex gap-1 border-b border-border">
+            {TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                id={`plugins-tab-${item.id}`}
+                aria-selected={tab === item.id}
+                aria-controls={`plugins-panel-${item.id}`}
+                onClick={() => {
+                  setTab(item.id);
+                  setNotice(null);
+                }}
+                className={cn(
+                  '-mb-px border-b-2 px-3 py-2 font-body text-sm font-medium transition-colors',
+                  tab === item.id
+                    ? 'border-moss-700 text-moss-700'
+                    : 'border-transparent text-text-muted hover:text-text-primary',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'installed' && (
+            <div
+              role="tabpanel"
+              id="plugins-panel-installed"
+              aria-labelledby="plugins-tab-installed"
+              className="space-y-8"
+            >
+              {notice && (
+                <p role="status" className="font-body text-sm text-success">
+                  {notice}
+                </p>
+              )}
+              <section className="space-y-3">
+                <SectionHeading>Installed plugins</SectionHeading>
+                {plugins.length === 0 ? (
+                  <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
+                    No plugins yet. Install one from git or add a plugin directory below. To try
+                    one out, add the{' '}
+                    <a
+                      href="https://github.com/fertile-org/coppice/tree/main/examples/plugins"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-moss-700 underline-offset-2 hover:underline"
+                    >
+                      <code className="font-mono">examples/plugins</code>
+                    </a>{' '}
+                    folder from GitHub.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {plugins.map((plugin) => (
+                      <PluginCard
+                        key={plugin.id}
+                        plugin={plugin}
+                        onInstallFromGit={handleInstallFromGit}
+                        siblingCount={
+                          plugin.gitRoot ? clonePluginCounts.get(plugin.gitRoot) : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="space-y-6">
+                <SectionHeading>Add plugins</SectionHeading>
+                <InstallSection
+                  dirs={dirs}
+                  plugins={plugins}
+                  gitUrl={gitUrl}
+                  onGitUrlChange={setGitUrl}
+                  sectionRef={installRef}
+                />
+                <PluginDirsSection dirs={dirs} />
+              </section>
+            </div>
+          )}
+
+          {tab === 'marketplace' && (
+            <div
+              role="tabpanel"
+              id="plugins-panel-marketplace"
+              aria-labelledby="plugins-tab-marketplace"
+              className="space-y-4"
+            >
+              <SectionHeading>{PLUGIN_COPY.marketplaceTitle}</SectionHeading>
+              {sourcesQuery.isError || entriesQuery.isError ? (
+                <p className="font-body text-sm text-danger">Unable to load the marketplace.</p>
+              ) : sourcesQuery.isLoading || entriesQuery.isLoading ? (
+                <p className="font-body text-sm text-text-muted">Loading marketplace…</p>
+              ) : (
+                <MarketplaceSection
+                  sources={sourcesQuery.data ?? []}
+                  entries={entriesQuery.data ?? []}
+                  onDone={handleMarketplaceDone}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

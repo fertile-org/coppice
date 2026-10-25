@@ -447,6 +447,12 @@ const FIXED_AFTER_CONNECTORS: &[Fixed] = &[
         POSITIVE,
     ),
     fixed(
+        "plugins.marketplaces_dir",
+        "Plugins",
+        "Where Coppice caches marketplace catalogs. Regenerated on start. Keep it out of plugin folders.",
+        SettingKind::String,
+    ),
+    fixed(
         "mcp.builtin_plugins_dir",
         "MCP",
         "Where Coppice writes its built-in skills on every start. Edits there are lost.",

@@ -109,6 +109,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             agent_plugins,
             plugins,
             plugin_dirs,
+            marketplace_sources,
             agents,
             boards,
             sessions,

@@ -139,7 +139,10 @@ impl AppState {
     ) -> anyhow::Result<()> {
         let service = crate::services::plugin_service::PluginService::new(db);
         service
-            .ensure_default_dir(&config.plugins.dir)
+            .ensure_default_dir(
+                &config.plugins.dir,
+                std::path::Path::new(&config.plugins.marketplaces_dir),
+            )
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
@@ -154,6 +157,21 @@ impl AppState {
             tracing::warn!(error = %err, "loading plugin skills failed");
         }
         Ok(())
+    }
+
+    /// Seeds the built-in Coppice marketplace source and refreshes its catalog
+    /// in `plugins.marketplaces_dir`. Fails when that cache sits inside the
+    /// default or any registered plugin dir. Call after `init_plugins`, which
+    /// creates the default dir.
+    pub async fn init_marketplace(db: &PgPool, config: &AppConfig) -> anyhow::Result<()> {
+        let cache = std::path::Path::new(&config.plugins.marketplaces_dir);
+        std::fs::create_dir_all(cache).map_err(|e| {
+            anyhow::anyhow!("failed to create marketplaces dir {}: {e}", cache.display())
+        })?;
+        crate::services::marketplace_service::MarketplaceService::new(db)
+            .seed_builtin(cache)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to seed marketplace: {e}"))
     }
 
     /// Built-in skills materialized once into a process-lifetime temp dir, so

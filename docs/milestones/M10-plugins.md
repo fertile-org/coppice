@@ -27,7 +27,7 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 
 - Coppice-owned agent loop (direct LLM API calls)
 - Plugin storage; plugin `commands/`, `agents/`, `hooks/` (listed as unsupported)
-- Marketplaces, signing
+- Signing
 - Personal access tokens / external agents using Coppice MCP (token layer designed to allow it later)
 - Sandboxing plugin processes, per-tool grants, secret scoping (M13)
 - Signals / observation tools (M14)
@@ -54,6 +54,17 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 - [x] CI mock path green; `make e2e-smoke-m10` passes
 
 Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-code` gateway wiring needs their CLIs (only `cursor` and `opencode` are verified). Record it from **Tools → Connectors → Test connection** ([connector diagnostics](../superpowers/specs/2026-10-03-connector-diagnostics-design.md), [how to verify](../providers/README.md#diagnostics-tools--connectors)) and update the status table in the providers README. Of the existing smokes, `make e2e-smoke-m05` fails on a reused database (handoff picks an older same-key agent); the others pass.
+
+## Part 3 — Marketplace (proposed)
+
+A Coppice-owned catalog of plugins (first-party `github` plugin in this repo, plus curated and user-added `marketplace.json` sources). Installing an entry adds one plugin; every agent with access reaches it through the gateway, so no connector config is written. Design: [plugin marketplace spec](../superpowers/specs/2026-10-25-plugin-marketplace-design.md). Server and web are implemented; open items are below. Must not merge ahead of M12 without human sign-off.
+
+- [x] Catalog source and first-party `github` plugin embedded and materialized into the marketplace cache
+- [x] `plugins.marketplaces_dir` config, desktop wiring, and cache-outside-plugin-dir check
+- [x] Marketplace sources API and install / update, including 409 conflicts and provenance (`origin_*`)
+- [x] Marketplace tab in the web Plugins page
+- [x] Cross-connector gateway test (shared gateway path; per-connector live checks stay manual)
+- [ ] `make e2e-smoke-m10` extended to install from the catalog
 
 ## References
 

@@ -7,6 +7,7 @@ use crate::plugins::manifest::{
 };
 use crate::plugins::skill_walk::has_skills_package;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::path::{Component, Path};
 
 const ESCAPES_REPO: &str = "source must stay inside the repository";
@@ -29,6 +30,38 @@ pub fn expand_marketplace(folder: &Path, folder_rel: &str) -> Vec<Discovered> {
         .iter()
         .map(|entry| expand_entry(folder, folder_rel, &market, entry))
         .collect()
+}
+
+/// Checks that `folder` holds a readable `marketplace.json` with a `plugins`
+/// array. Entry-level problems are reported per entry by `expand_marketplace`.
+pub fn validate_marketplace(folder: &Path) -> Result<(), String> {
+    read_marketplace(folder).map(|_| ())
+}
+
+/// `category` of each `plugins` entry, keyed by entry name. Entries without a
+/// string `category` are absent.
+pub fn entry_categories(folder: &Path) -> HashMap<String, String> {
+    let Ok((_, entries)) = read_marketplace(folder) else {
+        return HashMap::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?;
+            let category = entry.get("category")?.as_str()?;
+            Some((name.to_string(), category.to_string()))
+        })
+        .collect()
+}
+
+/// The raw `source` value of the first `plugins` entry named `name`.
+pub fn entry_source(folder: &Path, name: &str) -> Option<Value> {
+    let (_, entries) = read_marketplace(folder).ok()?;
+    entries
+        .iter()
+        .find(|entry| entry.get("name").and_then(Value::as_str) == Some(name))?
+        .get("source")
+        .cloned()
 }
 
 fn read_marketplace(folder: &Path) -> Result<(MarketplaceRef, Vec<Value>), String> {
@@ -119,7 +152,7 @@ fn expand_entry(
 
 /// `"./plugins/foo/"` → `"plugins/foo"`, `"./"` → `""`; `None` for absolute
 /// paths or any `..` component.
-fn normalize_source(source: &str) -> Option<String> {
+pub fn normalize_source(source: &str) -> Option<String> {
     let mut parts = Vec::new();
     for component in Path::new(source).components() {
         match component {
@@ -189,12 +222,12 @@ fn external_source(source: &Map<String, Value>) -> ExternalSource {
     }
 }
 
-fn github_url(repo: &str) -> String {
+pub(crate) fn github_url(repo: &str) -> String {
     format!("https://github.com/{repo}.git")
 }
 
 /// `owner/repo` with nothing that marks a URL, ssh remote, or path.
-fn is_github_shorthand(url: &str) -> bool {
+pub(crate) fn is_github_shorthand(url: &str) -> bool {
     let mut parts = url.split('/');
     let valid = |part: Option<&str>| {
         part.is_some_and(|p| {
@@ -285,6 +318,25 @@ mod tests {
             by("marketplace-repo#ghost").result.as_ref().unwrap_err(),
             "marketplace entry \"ghost\": source path does not exist"
         );
+    }
+
+    #[test]
+    fn entry_categories_reads_string_categories_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("m");
+        write_skill(&folder.join("p/skills/s"), "s");
+        market(
+            &folder,
+            serde_json::json!([
+                { "name": "p", "source": "./p", "category": "devops" },
+                { "name": "q", "source": "./p", "category": 3 },
+                { "name": "r", "source": "./p" },
+            ]),
+        );
+        let categories = entry_categories(&folder);
+        assert_eq!(categories.len(), 1, "{categories:?}");
+        assert_eq!(categories.get("p").map(String::as_str), Some("devops"));
+        assert!(entry_categories(&dir.path().join("missing")).is_empty());
     }
 
     #[test]

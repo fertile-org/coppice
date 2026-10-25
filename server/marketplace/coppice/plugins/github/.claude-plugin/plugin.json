@@ -1,0 +1,6 @@
+{
+  "name": "github",
+  "version": "0.1.0",
+  "description": "Work with GitHub issues, pull requests, reviews and CI from any agent.",
+  "author": { "name": "Coppice" }
+}

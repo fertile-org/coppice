@@ -158,9 +158,15 @@ impl<'a> PluginService<'a> {
     /// plugins are forgotten, so a different plugin at the same rel_path in the
     /// new dir cannot inherit `enabled` or git metadata. The caller rescans and
     /// refreshes the skill catalog afterwards.
-    pub async fn ensure_default_dir(&self, path: &str) -> Result<PluginDir, PluginError> {
+    pub async fn ensure_default_dir(
+        &self,
+        path: &str,
+        marketplaces_dir: &Path,
+    ) -> Result<PluginDir, PluginError> {
         std::fs::create_dir_all(path)?;
         let canonical = canonical_string(Path::new(path))?;
+        self.check_marketplace_cache(marketplaces_dir, &canonical)
+            .await?;
 
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
@@ -223,6 +229,27 @@ impl<'a> PluginService<'a> {
         Ok(dir)
     }
 
+    /// Rejects a plugin dir that would contain the marketplace cache, so a
+    /// rescan cannot turn catalog entries into plugin rows. `candidate` is the
+    /// canonical path about to be registered.
+    async fn check_marketplace_cache(
+        &self,
+        marketplaces_dir: &Path,
+        candidate: &str,
+    ) -> Result<(), PluginError> {
+        std::fs::create_dir_all(marketplaces_dir)?;
+        let mut dirs: Vec<PathBuf> = self
+            .list_dirs()
+            .await?
+            .into_iter()
+            .map(|dir| PathBuf::from(dir.path))
+            .collect();
+        dirs.push(PathBuf::from(candidate));
+        let refs: Vec<&Path> = dirs.iter().map(PathBuf::as_path).collect();
+        crate::plugins::catalog::check_cache_outside_plugin_dirs(marketplaces_dir, &refs)
+            .map_err(|err| PluginError::Validation(err.to_string()))
+    }
+
     pub async fn list_dirs(&self) -> Result<Vec<PluginDir>, PluginError> {
         let rows = sqlx::query(&format!(
             "SELECT {DIR_COLUMNS} FROM plugin_dirs ORDER BY position, created_at"
@@ -232,7 +259,11 @@ impl<'a> PluginService<'a> {
         Ok(rows.iter().map(row_to_dir).collect())
     }
 
-    pub async fn add_dir(&self, path: &str) -> Result<PluginDir, PluginError> {
+    pub async fn add_dir(
+        &self,
+        path: &str,
+        marketplaces_dir: &Path,
+    ) -> Result<PluginDir, PluginError> {
         let path = Path::new(path.trim());
         if !path.is_absolute() {
             return Err(PluginError::Validation(
@@ -246,6 +277,8 @@ impl<'a> PluginService<'a> {
             )));
         }
         let canonical = canonical_string(path)?;
+        self.check_marketplace_cache(marketplaces_dir, &canonical)
+            .await?;
 
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
@@ -1288,7 +1321,9 @@ fn join_plugin_path(dir: &str, rel_path: &str) -> PathBuf {
     }
 }
 
-async fn lock_plugin_state(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+pub(crate) async fn lock_plugin_state(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('coppice_plugin_rescan'))")
         .execute(&mut **tx)
         .await?;
@@ -1391,7 +1426,7 @@ async fn upsert_discovered(
     Ok(())
 }
 
-async fn insert_install(
+pub(crate) async fn insert_install(
     tx: &mut Transaction<'_, Postgres>,
     plugin_dir_id: Uuid,
     kind: &str,

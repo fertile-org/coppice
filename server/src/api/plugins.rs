@@ -70,7 +70,7 @@ struct PluginDirResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PluginResponse {
+pub(crate) struct PluginResponse {
     id: Uuid,
     plugin_dir_id: Uuid,
     rel_path: String,
@@ -156,7 +156,7 @@ struct SettingsBody {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PluginInstallResponse {
+pub(crate) struct PluginInstallResponse {
     id: Uuid,
     plugin_dir_id: Uuid,
     kind: String,
@@ -205,7 +205,7 @@ struct PluginAgentsBody {
     agent_ids: Vec<Uuid>,
 }
 
-struct ApiError(StatusCode, String);
+pub(crate) struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -266,7 +266,7 @@ async fn sync_plugins(service: &PluginService<'_>, state: &AppState) {
     stop_unusable_servers(service, state).await;
 }
 
-async fn stop_unusable_servers(service: &PluginService<'_>, state: &AppState) {
+pub(crate) async fn stop_unusable_servers(service: &PluginService<'_>, state: &AppState) {
     match service.ok_plugin_ids().await {
         Ok(ok) => state.plugin_mcp.retain_plugins(&ok).await,
         Err(err) => tracing::error!(error = %err, "failed to list ok plugins"),
@@ -381,7 +381,7 @@ fn plugin_response(
     }
 }
 
-async fn single_response(
+pub(crate) async fn single_response(
     state: &AppState,
     pool: &PgPool,
     plugin: PluginRow,
@@ -427,7 +427,7 @@ async fn plugins_response(
     ))
 }
 
-fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
+pub(crate) fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
     Json(PluginInstallResponse {
         id: install.id,
         plugin_dir_id: install.plugin_dir_id,
@@ -558,7 +558,12 @@ async fn add_dir(
 ) -> Result<(StatusCode, Json<PluginDirResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
-    let dir = service.add_dir(&body.path).await?;
+    let dir = service
+        .add_dir(
+            &body.path,
+            std::path::Path::new(&state.config.plugins.marketplaces_dir),
+        )
+        .await?;
     sync_plugins(&service, &state).await;
     Ok((StatusCode::CREATED, Json(dir_response(dir))))
 }
