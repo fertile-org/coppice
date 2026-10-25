@@ -587,6 +587,7 @@ async fn execute_job(
         ticket_id: Some(ticket_id),
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: context_thread_excerpt,
+        has_attachments: false,
     };
     let skills = state.skills.skills_for(&plugin_ids);
     let required = required_skill(
@@ -939,12 +940,14 @@ fn chat_context_input_base<'a>(
         ticket_id: None,
         assignee_agent_key: None,
         thread_excerpt: None,
+        has_attachments: false,
     }
 }
 
 /// Writes the chat context. `resumed` sends only the latest human message (the
 /// provider session already holds earlier turns); otherwise `text` is the full
-/// transcript.
+/// transcript. `has_attachments` says whether `text` lists any attachments.
+#[allow(clippy::too_many_arguments)]
 fn write_chat_context(
     state: &AppState,
     plugin_ids: &[uuid::Uuid],
@@ -952,10 +955,12 @@ fn write_chat_context(
     agent_key: &str,
     cwd: &std::path::Path,
     text: &str,
+    has_attachments: bool,
     resumed: bool,
 ) -> std::io::Result<()> {
     let cwd_str = cwd.to_string_lossy();
     let mut input = chat_context_input_base(agent, agent_key, &cwd_str, text);
+    input.has_attachments = has_attachments;
     if resumed {
         input.latest_comments = None;
         input.human_request = Some(HumanRequest {
@@ -1115,13 +1120,13 @@ async fn execute_chat_turn(
         "chat turn started"
     );
 
-    let human_body = if let Some(mid) = run.chat_message_id {
+    let (human_body, human_has_attachments) = if let Some(mid) = run.chat_message_id {
         ChatService::new(pool)
-            .get_message_body(mid)
+            .render_message(mid)
             .await
             .context("load triggering human message")?
     } else {
-        String::new()
+        (String::new(), false)
     };
 
     ChatService::new(pool)
@@ -1141,6 +1146,7 @@ async fn execute_chat_turn(
             &agent_key,
             &cwd,
             &human_body,
+            human_has_attachments,
             true,
         )
         .context("write slim chat context")?;
@@ -1177,8 +1183,8 @@ async fn execute_chat_turn(
                     .clear_session_id(run.id)
                     .await
                     .context("clear stale run session id")?;
-                let transcript = ChatService::new(pool)
-                    .format_model_transcript(
+                let (transcript, has_attachments) = ChatService::new(pool)
+                    .format_model_transcript_with_attachments(
                         session_id,
                         state.config.knowledge.context_budget.latest_comments,
                     )
@@ -1191,6 +1197,7 @@ async fn execute_chat_turn(
                     &agent_key,
                     &cwd,
                     &transcript,
+                    has_attachments,
                     false,
                 )
                 .context("write full chat context fallback")?;
@@ -1212,8 +1219,8 @@ async fn execute_chat_turn(
             Err(err) => Err(err),
         }
     } else {
-        let transcript = ChatService::new(pool)
-            .format_model_transcript(
+        let (transcript, has_attachments) = ChatService::new(pool)
+            .format_model_transcript_with_attachments(
                 session_id,
                 state.config.knowledge.context_budget.latest_comments,
             )
@@ -1226,6 +1233,7 @@ async fn execute_chat_turn(
             &agent_key,
             &cwd,
             &transcript,
+            has_attachments,
             false,
         )
         .context("write chat context")?;

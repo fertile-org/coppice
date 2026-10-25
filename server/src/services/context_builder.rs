@@ -35,6 +35,8 @@ pub struct ContextInput<'a> {
     // HumanChat: recent-thread excerpt. Full: None for owned work, Some("") for
     // other non-work runs, or Some(request) for a bounded consultation.
     pub thread_excerpt: Option<&'a str>,
+    // Chat replies: whether the rendered transcript or latest message lists attachments.
+    pub has_attachments: bool,
 }
 
 /// Slim `.agent/context.md`: who the agent is, what the task is, and where to
@@ -112,6 +114,13 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              Call `open_repo` with a slug from `REPOS.md` when you need a repository that is not checked out. \
              Pass a slug, not a path.\n\n",
         );
+        if input.has_attachments {
+            out.push_str(
+                "Files attached to messages are listed under `Attachments:` and are in the working \
+                 directory at those paths. Read them before replying (open images with your \
+                 file-reading tool). Don't say nothing was attached without checking.\n\n",
+            );
+        }
         match (&input.human_request, input.latest_comments) {
             (Some(human), _) => out.push_str(&format!(
                 "### Latest human message\n\n{}\n\n",
@@ -375,6 +384,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            has_attachments: false,
         }
     }
 
@@ -592,6 +602,21 @@ mod tests {
         assert!(slim.contains("What is the second question?"));
         assert!(!slim.contains("# Conversation transcript"));
         assert!(!slim.contains("First question"));
+    }
+
+    #[test]
+    fn tool_first_chat_reads_attachments_only_when_present() {
+        let mut input = fixture_full_input();
+        input.context_profile = ContextProfile::Conversation;
+        input.repo_name = None;
+        input.latest_comments = Some("- **Human:** First question");
+        let plain = build_tool_first_context(&input, &test_skills(), None);
+        assert!(!plain.contains("Files attached to messages"));
+
+        input.has_attachments = true;
+        let with_files = build_tool_first_context(&input, &test_skills(), None);
+        assert!(with_files.contains("Files attached to messages are listed under `Attachments:`"));
+        assert!(with_files.contains("Read them before replying"));
     }
 
     #[test]

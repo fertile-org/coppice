@@ -450,14 +450,36 @@ impl<'a> ChatService<'a> {
         Ok(())
     }
 
-    pub async fn get_message_body(&self, message_id: Uuid) -> Result<String, ChatError> {
-        let body: Option<String> = sqlx::query_scalar(
-            r#"SELECT body FROM chat_messages WHERE id = $1"#,
-        )
-        .bind(message_id)
-        .fetch_optional(self.pool)
-        .await?;
-        body.ok_or(ChatError::NotFound)
+    /// The message as a resumed chat context shows it: body plus the same
+    /// `Attachments:` list the transcript renders. The bool is whether the
+    /// message has attachments.
+    pub async fn render_message(&self, message_id: Uuid) -> Result<(String, bool), ChatError> {
+        let row = sqlx::query(r#"SELECT body, attachment_ids FROM chat_messages WHERE id = $1"#)
+            .bind(message_id)
+            .fetch_optional(self.pool)
+            .await?
+            .ok_or(ChatError::NotFound)?;
+        let body: String = row.get("body");
+        let attachment_ids: Vec<Uuid> = row.get("attachment_ids");
+        let by_id = self.attachments_by_id(&attachment_ids).await?;
+        let has_attachments = !attachment_ids.is_empty();
+        Ok((render_message_text(&body, &attachment_ids, &by_id), has_attachments))
+    }
+
+    async fn attachments_by_id(
+        &self,
+        attachment_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Attachment>, ChatError> {
+        let attachments = CommentService::new(self.pool)
+            .list_attachments_by_ids(attachment_ids)
+            .await
+            .map_err(|err| match err {
+                crate::services::comment_service::CommentError::Database(e) => {
+                    ChatError::Database(e)
+                }
+                other => ChatError::Validation(other.to_string()),
+            })?;
+        Ok(attachments.into_iter().map(|a| (a.id, a)).collect())
     }
 
     pub async fn patch_session(
@@ -734,9 +756,26 @@ impl<'a> ChatService<'a> {
         session_id: Uuid,
         max_tokens: usize,
     ) -> Result<String, ChatError> {
+        Ok(self
+            .format_model_transcript_with_attachments(session_id, max_tokens)
+            .await?
+            .0)
+    }
+
+    /// Like `format_model_transcript`, and also whether any rendered turn has
+    /// attachments.
+    pub async fn format_model_transcript_with_attachments(
+        &self,
+        session_id: Uuid,
+        max_tokens: usize,
+    ) -> Result<(String, bool), ChatError> {
         let rows = self.recent_transcript_rows(session_id, max_tokens).await?;
+        let has_attachments = rows.iter().any(|row| {
+            let ids: Vec<Uuid> = row.get("attachment_ids");
+            !ids.is_empty()
+        });
         let blocks = self.render_blocks(rows).await?;
-        Ok(bound_rendered_transcript(&blocks, max_tokens))
+        Ok((bound_rendered_transcript(&blocks, max_tokens), has_attachments))
     }
 
     /// The newest messages the bounded transcript can use, oldest first. Rows
@@ -820,19 +859,7 @@ impl<'a> ChatService<'a> {
         all_ids.sort_unstable();
         all_ids.dedup();
 
-        let attachments = CommentService::new(self.pool)
-            .list_attachments_by_ids(&all_ids)
-            .await
-            .map_err(|err| match err {
-                crate::services::comment_service::CommentError::Database(e) => {
-                    ChatError::Database(e)
-                }
-                other => ChatError::Validation(other.to_string()),
-            })?;
-        let by_id: std::collections::HashMap<Uuid, Attachment> = attachments
-            .into_iter()
-            .map(|a| (a.id, a))
-            .collect();
+        let by_id = self.attachments_by_id(&all_ids).await?;
 
         let mut blocks = Vec::with_capacity(rows.len());
         for row in rows {
@@ -846,25 +873,7 @@ impl<'a> ChatService<'a> {
                 other => other,
             };
             let mut block = format!("### {label}\n\n");
-            if !body.is_empty() {
-                block.push_str(&body);
-                block.push_str("\n\n");
-            }
-            if !attachment_ids.is_empty() {
-                block.push_str("Attachments:\n");
-                for id in &attachment_ids {
-                    if let Some(att) = by_id.get(id) {
-                        let safe_name = sanitize_filename(&att.filename);
-                        block.push_str(&format!(
-                            "- file: attachments/{}/{safe_name} ({}, {} bytes)\n",
-                            att.id, att.content_type, att.size_bytes
-                        ));
-                    } else {
-                        block.push_str(&format!("- file: attachments/{id}/(missing)\n"));
-                    }
-                }
-                block.push('\n');
-            }
+            block.push_str(&render_message_text(&body, &attachment_ids, &by_id));
             blocks.push(block);
         }
         Ok(blocks)
@@ -1125,6 +1134,7 @@ impl<'a> ChatService<'a> {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
+            has_attachments: false,
         };
         let markdown = build_draft_ticket_context(&context_input);
         if write_context_document(&cwd, &markdown).is_err() {
@@ -1292,6 +1302,36 @@ async fn lock_chat_session(
         .execute(&mut **tx)
         .await?;
     Ok(())
+}
+
+/// A message's text after its heading: the body, then one `Attachments:` list
+/// with the path each file is staged at.
+fn render_message_text(
+    body: &str,
+    attachment_ids: &[Uuid],
+    by_id: &std::collections::HashMap<Uuid, Attachment>,
+) -> String {
+    let mut text = String::new();
+    if !body.is_empty() {
+        text.push_str(body);
+        text.push_str("\n\n");
+    }
+    if !attachment_ids.is_empty() {
+        text.push_str("Attachments:\n");
+        for id in attachment_ids {
+            if let Some(att) = by_id.get(id) {
+                let safe_name = sanitize_filename(&att.filename);
+                text.push_str(&format!(
+                    "- file: attachments/{}/{safe_name} ({}, {} bytes)\n",
+                    att.id, att.content_type, att.size_bytes
+                ));
+            } else {
+                text.push_str(&format!("- file: attachments/{id}/(missing)\n"));
+            }
+        }
+        text.push('\n');
+    }
+    text
 }
 
 fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {

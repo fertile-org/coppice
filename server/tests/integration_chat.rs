@@ -1739,6 +1739,159 @@ async fn kilo_chat_second_turn_passes_session_id() {
     );
 }
 
+/// A resumed Kilo turn sends only the latest message. A screenshot attached
+/// to that message must still be listed under it, with the read instruction.
+#[cfg(feature = "embedded-test-db")]
+#[tokio::test]
+async fn kilo_chat_resumed_turn_lists_latest_attachment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fake = env!("CARGO_BIN_EXE_fake-cli");
+    let (state, app, cookie, csrf, env) = common::bootstrap_and_login_with_state_and_workers(
+        "backend_engineer/chat_turn",
+        |config| {
+            config.agent.connectors.kilo_code.enabled = Some(true);
+            config.agent.connectors.kilo_code.command = fake.to_string();
+        },
+    )
+    .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    set_agent_connector(pool, agent_uuid, "kilo-code").await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
+
+    let fixture = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/kilo-code/done.jsonl"),
+    )
+    .expect("kilo fixture");
+    let chat_dir = env.worktrees.path().join("chat").join(&session_id);
+    std::fs::create_dir_all(&chat_dir).expect("chat dir");
+    std::fs::write(
+        chat_dir.join(".fake-cli-env.json"),
+        serde_json::json!({ "FAKE_CLI_LINES": fixture }).to_string(),
+    )
+    .expect("fake cli env");
+
+    let first = post_chat_message(
+        &app,
+        &cookie,
+        &csrf,
+        &session_id,
+        "Earlier kilo turn about the cache",
+    )
+    .await;
+    let first_run = wait_run(&app, &cookie, &csrf, &first).await;
+    assert_eq!(
+        first_run["run"]["status"], "succeeded",
+        "first kilo turn failed: {first_run}"
+    );
+    let first_context = std::fs::read_to_string(chat_dir.join(".agent").join("context.md"))
+        .expect("first turn context");
+    assert!(
+        !first_context.contains("Files attached to messages"),
+        "instruction shown without attachments: {first_context}"
+    );
+    assert!(
+        wait_provider_session(pool, session_uuid).await.is_some(),
+        "first turn did not store a provider session"
+    );
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n-chat-screenshot";
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request_bytes(
+            "/api/attachments",
+            "shot.png",
+            "image/png",
+            PNG,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert!(upload.status().is_success(), "upload failed: {}", upload.status());
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap().to_string();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &serde_json::json!({
+                "body": "What does this screenshot show?",
+                "attachmentIds": [attachment_id],
+            })
+            .to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let posted_body: serde_json::Value = common::json_body(posted).await;
+    let second = posted_body["runId"].as_str().unwrap().to_string();
+    let second_run = wait_run(&app, &cookie, &csrf, &second).await;
+    assert_eq!(
+        second_run["run"]["status"], "succeeded",
+        "second kilo turn failed: {second_run}"
+    );
+
+    let log_path = std::path::Path::new(&state.config.storage.artifacts_dir)
+        .join("runs")
+        .join(&second)
+        .join("run.log");
+    let log = std::fs::read_to_string(&log_path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", log_path.display()));
+    assert!(
+        log.contains("--session kilo_sess_abc123"),
+        "attachment turn did not resume the stored session: {log}"
+    );
+
+    let context = std::fs::read_to_string(chat_dir.join(".agent").join("context.md"))
+        .expect("second turn context");
+    assert!(
+        context.contains(&format!("attachments/{attachment_id}/shot.png")),
+        "resumed context does not list the latest attachment: {context}"
+    );
+    assert!(context.contains("image/png"), "{context}");
+    assert!(
+        context.contains("Files attached to messages are listed under `Attachments:`"),
+        "missing read-attachments instruction: {context}"
+    );
+    assert!(
+        !context.contains("Earlier kilo turn about the cache"),
+        "resumed turn replayed the earlier message: {context}"
+    );
+}
+
 #[cfg(feature = "embedded-test-db")]
 async fn post_chat_message(
     app: &axum::Router,
