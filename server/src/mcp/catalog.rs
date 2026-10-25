@@ -1,3 +1,4 @@
+use crate::domain::chat_action::{KNOWLEDGE_SCOPES, KNOWLEDGE_TYPES};
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::ToolDefinition;
 use serde_json::{json, Value};
@@ -272,8 +273,8 @@ fn result_submit_properties() -> Value {
                     "title": { "type": "string" },
                     "description": { "type": "string", "description": "create_ticket body (markdown)." },
                     "content": { "type": "string", "description": "create_knowledge body (markdown)." },
-                    "knowledgeType": { "type": "string" },
-                    "scope": { "type": "string" },
+                    "knowledgeType": { "type": "string", "enum": KNOWLEDGE_TYPES },
+                    "scope": { "type": "string", "enum": KNOWLEDGE_SCOPES },
                     "boardId": { "type": "string" },
                     "repoId": { "type": "string" },
                 },

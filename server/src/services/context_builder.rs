@@ -116,6 +116,8 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              When the human asks for a ticket or a knowledge item, draft it and add it to `actions` in \
              your `result_submit` call: `{\"type\":\"create_ticket\",\"title\":...,\"description\":...}` or \
              `{\"type\":\"create_knowledge\",\"title\":...,\"content\":...,\"knowledgeType\":...,\"scope\":...}`. \
+             `scope` is `workspace`, `board` or `agent`; `knowledgeType` must be one of the values in the \
+             `result_submit` schema (default `coding_convention`). \
              Use at most 5 actions per reply and only when asked. The human confirms each one in the chat \
              with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n",
         );

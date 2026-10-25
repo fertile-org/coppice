@@ -1,3 +1,4 @@
+use crate::domain::knowledge::{scope_from_str, type_from_str};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -47,6 +48,25 @@ pub struct ChatActionResultMeta {
 /// Most proposals one chat turn may carry.
 pub const MAX_CHAT_ACTIONS: usize = 5;
 
+/// `knowledgeType` values a `create_knowledge` proposal may use.
+pub const KNOWLEDGE_TYPES: &[&str] = &[
+    "coding_convention",
+    "architecture_rule",
+    "bug_pattern",
+    "test_command",
+    "review_feedback",
+    "dependency_note",
+    "api_contract",
+    "workflow_rule",
+    "human_preference",
+    "operational_runbook",
+    "security_rule",
+    "performance_note",
+];
+
+/// `scope` values a `create_knowledge` proposal may use.
+pub const KNOWLEDGE_SCOPES: &[&str] = &["workspace", "board", "agent"];
+
 /// Parse and validate the `actions` array of a chat-turn result.
 pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>, String> {
     let Some(arr) = actions.as_array() else {
@@ -71,6 +91,20 @@ pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>
             {
                 return Err(format!(
                     "create_knowledge at index {i}: title and content are required"
+                ));
+            }
+            ChatAction::CreateKnowledge { knowledge_type, .. }
+                if type_from_str(knowledge_type).is_none() =>
+            {
+                return Err(format!(
+                    "create_knowledge at index {i}: knowledgeType must be one of {}",
+                    KNOWLEDGE_TYPES.join(", ")
+                ));
+            }
+            ChatAction::CreateKnowledge { scope, .. } if scope_from_str(scope).is_none() => {
+                return Err(format!(
+                    "create_knowledge at index {i}: scope must be one of {}",
+                    KNOWLEDGE_SCOPES.join(", ")
                 ));
             }
             _ => {}
@@ -217,6 +251,27 @@ mod tests {
         let one = json!({ "type": "create_ticket", "title": "T" });
         let six = json!([one, one, one, one, one, one]);
         assert!(parse_chat_actions(&six).expect_err("cap").contains("at most 5"));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_knowledge_type_or_scope() {
+        let bad_type = json!([{
+            "type": "create_knowledge", "title": "T", "content": "C", "knowledgeType": "convention"
+        }]);
+        let err = parse_chat_actions(&bad_type).expect_err("bad type");
+        assert!(err.contains("index 0") && err.contains("coding_convention"), "{err}");
+
+        let bad_scope = json!([{
+            "type": "create_knowledge", "title": "T", "content": "C", "scope": "team"
+        }]);
+        let err = parse_chat_actions(&bad_scope).expect_err("bad scope");
+        assert!(err.contains("scope must be one of workspace, board, agent"), "{err}");
+    }
+
+    #[test]
+    fn knowledge_value_lists_match_domain_parsers() {
+        assert!(KNOWLEDGE_TYPES.iter().all(|t| type_from_str(t).is_some()));
+        assert!(KNOWLEDGE_SCOPES.iter().all(|s| scope_from_str(s).is_some()));
     }
 
     #[test]
