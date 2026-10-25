@@ -98,6 +98,17 @@ Catalog `github` plugin: use `${GITHUB_PERSONAL_ACCESS_TOKEN}` (the name GitHub'
 
 Docs (`docs/plugins.md` Marketplace section) state the resolution order for catalog plugins and the two separate GitHub tokens.
 
+## Credentials: token in the UI now, OAuth later
+
+**Phase 1 (this ticket): the access token is entered in the Coppice UI.** The flow is Plugins → Marketplace → GitHub → Install → the plugin card → Settings → paste `GITHUB_PERSONAL_ACCESS_TOKEN` → Save → Enable. It already works on top of M10 Part 2b: every `${VAR}` becomes a password field on the plugin card, the value is stored encrypted, and a saved setting always wins over the environment. The environment is only a fallback for headless or Compose setups. It is not the intended path, and the card badges it when it is used.
+
+Phase 1 gaps (follow-up, small):
+
+- The setting shows the raw key with no help. Add a label, a short description and a "create a token" link with the scopes the GitHub skills need.
+- The install notice says "Enable it and choose which agents can use it" but doesn't mention required settings, and it doesn't scroll to the new card. When settings are missing, say so and focus the card.
+
+**Phase 2 (separate ticket, not in this ticket): OAuth sign-in.** This should be a generic "Sign in" for HTTP plugin MCP servers that follow the MCP authorization spec, not a GitHub-only feature. Open questions: who registers the OAuth app and owns its client id; the redirect model (loopback for desktop vs. the Compose server URL); token refresh; and storing tokens in the same encrypted settings. This touches credential handling, so it lines up with M13 (security) and needs human sign-off on the OAuth app registration.
+
 ## Web
 
 A **Marketplace** tab on the Plugins page (`web/src/features/plugins/`):
