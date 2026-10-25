@@ -1,5 +1,6 @@
 pub mod builtin;
 pub mod capability;
+pub mod catalog;
 pub mod discover;
 pub mod git_install;
 pub mod manifest;

@@ -1,0 +1,17 @@
+{
+  "name": "coppice",
+  "owner": { "name": "Coppice" },
+  "description": "Plugins maintained by Coppice in this repository.",
+  "plugins": [
+    {
+      "name": "github",
+      "source": "./plugins/github",
+      "description": "Work with GitHub issues, pull requests, reviews and CI from any agent.",
+      "version": "0.1.0",
+      "author": { "name": "Coppice" },
+      "category": "development",
+      "tags": ["github", "issues", "pull-requests", "ci"],
+      "homepage": "https://github.com/github/github-mcp-server"
+    }
+  ]
+}
