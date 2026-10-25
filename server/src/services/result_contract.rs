@@ -196,11 +196,31 @@ pub fn apply_consultation_result(result: &AgentRunResult) -> Result<ApplyResult,
 
 /// Validate a tool-submitted result against the rules of the run that submits it.
 /// The error text goes back to the agent, so it names the offending field.
+/// `actions` (chat proposals) are accepted only for agent-chat turns.
+fn validate_chat_actions(
+    result: &AgentRunResult,
+    profile: ContextProfile,
+    job_type: &str,
+) -> Result<(), String> {
+    let AgentRunResult::Done {
+        actions: Some(actions),
+        ..
+    } = result
+    else {
+        return Ok(());
+    };
+    if profile != ContextProfile::Conversation || job_type != "chat_turn" {
+        return Err("actions is only allowed in agent chat".into());
+    }
+    crate::domain::chat_action::parse_chat_actions(actions).map(|_| ())
+}
+
 pub fn validate_for_profile(
     result: &AgentRunResult,
     profile: ContextProfile,
     job_type: &str,
 ) -> Result<(), String> {
+    validate_chat_actions(result, profile, job_type)?;
     if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
         return validate_plan_result(result);
     }
@@ -746,6 +766,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
@@ -777,6 +798,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
 
         let applied = apply_agent_result(&result).expect("apply");
@@ -815,6 +837,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
 
         let applied = apply_agent_result(&result).expect("apply attention result");
@@ -851,6 +874,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
 
         let applied = apply_consultation_result(&result).expect("apply consultation");
@@ -926,6 +950,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -954,6 +979,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("Refined scope."));
@@ -982,6 +1008,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -1021,6 +1048,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert_eq!(
@@ -1068,6 +1096,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         }
     }
 
@@ -1130,6 +1159,44 @@ mod tests {
                 .expect_err("ticket-mutation field rejected in chat");
             assert!(err.contains(field), "{err}");
         }
+    }
+
+    #[test]
+    fn validate_for_profile_accepts_actions_only_in_agent_chat() {
+        let mut result = done_result();
+        if let AgentRunResult::Done { actions, .. } = &mut result {
+            *actions = Some(Box::new(serde_json::json!([
+                { "type": "create_ticket", "title": "Add export" }
+            ])));
+        }
+        assert!(validate_for_profile(&result, ContextProfile::Conversation, "chat_turn").is_ok());
+        for (profile, job) in [
+            (ContextProfile::HumanChat, "chat_turn"),
+            (ContextProfile::HumanAgent, "work_on_ticket"),
+            (ContextProfile::Full, "work_on_ticket"),
+            (ContextProfile::Conversation, "connector_check"),
+        ] {
+            let err = validate_for_profile(&result, profile, job).expect_err("actions rejected");
+            assert!(err.contains("only allowed in agent chat"), "{err}");
+        }
+    }
+
+    #[test]
+    fn validate_for_profile_rejects_malformed_or_excess_actions() {
+        let mut bad = done_result();
+        if let AgentRunResult::Done { actions, .. } = &mut bad {
+            *actions = Some(Box::new(serde_json::json!([{ "type": "board_move" }])));
+        }
+        assert!(validate_for_profile(&bad, ContextProfile::Conversation, "chat_turn").is_err());
+
+        let mut many = done_result();
+        if let AgentRunResult::Done { actions, .. } = &mut many {
+            let one = serde_json::json!({ "type": "create_ticket", "title": "T" });
+            *actions = Some(Box::new(serde_json::Value::Array(vec![one; 6])));
+        }
+        let err = validate_for_profile(&many, ContextProfile::Conversation, "chat_turn")
+            .expect_err("cap");
+        assert!(err.contains("at most 5"), "{err}");
     }
 
     #[test]

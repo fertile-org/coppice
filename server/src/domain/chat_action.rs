@@ -44,14 +44,17 @@ pub struct ChatActionResultMeta {
     pub knowledge_item_id: Option<Uuid>,
 }
 
-/// Parse `actions` array from a chat-turn result object.
-pub fn parse_chat_actions(value: &serde_json::Value) -> Result<Vec<ChatAction>, String> {
-    let Some(actions) = value.get("actions") else {
-        return Ok(Vec::new());
-    };
+/// Most proposals one chat turn may carry.
+pub const MAX_CHAT_ACTIONS: usize = 5;
+
+/// Parse and validate the `actions` array of a chat-turn result.
+pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>, String> {
     let Some(arr) = actions.as_array() else {
         return Err("actions must be an array".into());
     };
+    if arr.len() > MAX_CHAT_ACTIONS {
+        return Err(format!("actions allows at most {MAX_CHAT_ACTIONS} per turn"));
+    }
     let mut out = Vec::with_capacity(arr.len());
     for (i, item) in arr.iter().enumerate() {
         let action: ChatAction = serde_json::from_value(item.clone()).map_err(|err| {
@@ -75,6 +78,50 @@ pub fn parse_chat_actions(value: &serde_json::Value) -> Result<Vec<ChatAction>, 
         out.push(action);
     }
     Ok(out)
+}
+
+/// Pending proposal cards for an agent message's `action_metadata`.
+/// Returns `None` when there is nothing to propose.
+pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
+    if actions.is_empty() {
+        return None;
+    }
+    let proposals: Vec<serde_json::Value> = actions
+        .iter()
+        .map(|action| match action {
+            ChatAction::CreateTicket {
+                title,
+                description,
+                repo_id,
+                board_id,
+            } => serde_json::json!({
+                "id": Uuid::new_v4(),
+                "type": "create_ticket",
+                "title": title,
+                "description": description,
+                "repoId": repo_id,
+                "boardId": board_id,
+                "status": "pending",
+            }),
+            ChatAction::CreateKnowledge {
+                title,
+                content,
+                knowledge_type,
+                scope,
+                board_id,
+            } => serde_json::json!({
+                "id": Uuid::new_v4(),
+                "type": "create_knowledge",
+                "title": title,
+                "content": content,
+                "knowledgeType": knowledge_type,
+                "scope": scope,
+                "boardId": board_id,
+                "status": "pending",
+            }),
+        })
+        .collect();
+    Some(serde_json::json!({ "proposals": proposals }))
 }
 
 /// Deterministic compact of a chat transcript for knowledge drafts.
@@ -165,14 +212,12 @@ mod tests {
 
     #[test]
     fn parse_empty_actions_ok() {
-        assert_eq!(parse_chat_actions(&json!({})).unwrap(), vec![]);
-        assert_eq!(parse_chat_actions(&json!({ "actions": [] })).unwrap(), vec![]);
+        assert_eq!(parse_chat_actions(&json!([])).unwrap(), vec![]);
     }
 
     #[test]
     fn parse_create_ticket_and_knowledge() {
-        let value = json!({
-            "actions": [
+        let value = json!([
                 {
                     "type": "create_ticket",
                     "title": "Fix cwd",
@@ -186,8 +231,7 @@ mod tests {
                     "knowledgeType": "coding_convention",
                     "scope": "board"
                 }
-            ]
-        });
+            ]);
         let actions = parse_chat_actions(&value).expect("parse");
         assert_eq!(actions.len(), 2);
         match &actions[0] {
@@ -202,11 +246,17 @@ mod tests {
 
     #[test]
     fn unknown_action_type_fails() {
-        let err = parse_chat_actions(&json!({
-            "actions": [{ "type": "board_move", "status": "done" }]
-        }))
-        .expect_err("unknown");
+        let err = parse_chat_actions(&json!([{ "type": "board_move", "status": "done" }]))
+            .expect_err("unknown");
         assert!(err.contains("invalid chat action") || err.contains("unknown"));
+    }
+
+    #[test]
+    fn parse_rejects_non_array_and_too_many() {
+        assert!(parse_chat_actions(&json!({ "type": "create_ticket" })).is_err());
+        let one = json!({ "type": "create_ticket", "title": "T" });
+        let six = json!([one, one, one, one, one, one]);
+        assert!(parse_chat_actions(&six).expect_err("cap").contains("at most 5"));
     }
 
     #[test]

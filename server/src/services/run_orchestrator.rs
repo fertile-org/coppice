@@ -1277,6 +1277,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         }
     }
 
@@ -1313,6 +1314,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         }
     }
 
@@ -1342,6 +1344,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         }
     }
 
@@ -1472,6 +1475,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
 
         let targets = select_collaboration_targets(&contract, &agents, source_id);
@@ -1963,6 +1967,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let apply = ApplyResult {
             run_status: RunStatus::Succeeded,
@@ -3496,6 +3501,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let workflow = WorkflowConfig {
             auto_start_runs: true,
@@ -3743,6 +3749,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            actions: None,
         };
         let mut malicious_apply =
             crate::services::result_contract::apply_agent_result(&response_contract)
@@ -4387,6 +4394,7 @@ mod tests {
                     look_here_first: None,
                     criteria_results: Vec::new(),
                     plan_questions: Vec::new(),
+                    actions: None,
                 },
                 ApplyResult {
                     run_status: RunStatus::Succeeded,

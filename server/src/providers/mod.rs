@@ -316,6 +316,10 @@ pub enum AgentRunResult {
             skip_serializing_if = "Vec::is_empty"
         )]
         plan_questions: Vec<PlanQuestion>,
+        /// Agent-chat turns only: proposed ticket/knowledge items for the human to confirm.
+        /// Kept raw so validation can report the specific `parse_chat_actions` error.
+        #[serde(default, rename = "actions", skip_serializing_if = "Option::is_none")]
+        actions: Option<Box<serde_json::Value>>,
     },
     Blocked {
         #[serde(rename = "blockerType")]

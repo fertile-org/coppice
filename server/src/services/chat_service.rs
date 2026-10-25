@@ -662,20 +662,16 @@ impl<'a> ChatService<'a> {
         Ok(PostMessageResult { message, run })
     }
 
-    pub async fn append_agent_message(
+    /// Agent reply that carries pending proposals (see `proposals_metadata`).
+    pub async fn append_agent_message_with_proposals(
         &self,
         session_id: Uuid,
         run_id: Uuid,
         body: &str,
+        proposals: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
-        self.append_message(
-            session_id,
-            ChatMessageRole::Agent,
-            body,
-            Some(run_id),
-            None,
-        )
-        .await
+        self.append_message(session_id, ChatMessageRole::Agent, body, Some(run_id), proposals)
+            .await
     }
 
     pub async fn append_system_note(
