@@ -119,7 +119,7 @@ fn expand_entry(
 
 /// `"./plugins/foo/"` → `"plugins/foo"`, `"./"` → `""`; `None` for absolute
 /// paths or any `..` component.
-fn normalize_source(source: &str) -> Option<String> {
+pub fn normalize_source(source: &str) -> Option<String> {
     let mut parts = Vec::new();
     for component in Path::new(source).components() {
         match component {

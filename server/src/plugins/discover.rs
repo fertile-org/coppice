@@ -32,7 +32,7 @@ pub fn discover(dir: &Path) -> std::io::Result<Vec<Discovered>> {
         let Some(folder) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !path.is_dir() || !is_plugin_root(&path) {
+        if folder.starts_with('.') || !path.is_dir() || !is_plugin_root(&path) {
             continue;
         }
         if path.join(MARKETPLACE_JSON).is_file() {

@@ -22,6 +22,7 @@ pub mod context_budget;
 pub mod job_service;
 pub mod knowledge_compaction_service;
 pub mod knowledge_service;
+pub mod marketplace_service;
 pub mod mention_service;
 pub mod notification_service;
 pub mod planning_service;

@@ -3142,3 +3142,93 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
         );
     }
 }
+
+fn marketplace_fixture(root: &Path, entry_name: &str, plugin_fixture: &str) {
+    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        root.join(".claude-plugin/marketplace.json"),
+        json!({
+            "name": "test-market",
+            "plugins": [{ "name": entry_name, "source": format!("./plugins/{entry_name}") }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    copy_tree(
+        &fixtures().join(plugin_fixture),
+        &root.join("plugins").join(entry_name),
+    );
+}
+
+#[tokio::test]
+async fn marketplace_path_entry_installs_one_row_with_origin() {
+    use coppice_server::services::marketplace_service::{MarketplaceService, PathEntry};
+    use coppice_server::services::plugin_service::PluginService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let market = tempfile::tempdir().unwrap();
+    marketplace_fixture(market.path(), "sample-plugin", "sample-plugin");
+    let source_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO marketplace_sources (id, name, kind, position) VALUES ($1, 'test-market', 'builtin', 0)",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let entry = |name: &'static str| PathEntry {
+        source_id,
+        root: market.path(),
+        source: "./plugins/sample-plugin",
+        name,
+        commit: Some("abc123"),
+    };
+
+    let installed = MarketplaceService::new(&pool)
+        .install_path_entry(entry("sample-plugin"), &catalog)
+        .await
+        .expect("install");
+    assert_eq!(installed.name, "sample-plugin");
+    assert!(!installed.enabled);
+    let default_path = PluginService::new(&pool)
+        .list_dirs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|d| d.is_default)
+        .unwrap()
+        .path;
+    assert!(Path::new(&default_path)
+        .join("sample-plugin/.claude-plugin/plugin.json")
+        .is_file());
+
+    let origin: (Option<uuid::Uuid>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT origin_source_id, origin_entry, origin_commit FROM plugins WHERE id = $1",
+    )
+    .bind(installed.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(origin.0, Some(source_id));
+    assert_eq!(origin.1.as_deref(), Some("sample-plugin"));
+    assert_eq!(origin.2.as_deref(), Some("abc123"));
+
+    let again = MarketplaceService::new(&pool)
+        .install_path_entry(entry("sample-plugin"), &catalog)
+        .await
+        .expect_err("second install conflicts");
+    assert!(matches!(again, PluginError::Conflict(_)), "{again:?}");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM plugins WHERE name = $1",
+            "sample-plugin"
+        )
+        .await,
+        1
+    );
+}

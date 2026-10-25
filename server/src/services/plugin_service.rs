@@ -1321,7 +1321,9 @@ fn join_plugin_path(dir: &str, rel_path: &str) -> PathBuf {
     }
 }
 
-async fn lock_plugin_state(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+pub(crate) async fn lock_plugin_state(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('coppice_plugin_rescan'))")
         .execute(&mut **tx)
         .await?;
