@@ -14,20 +14,21 @@ fn main() {
     embed_marketplace_catalog();
 }
 
-/// Embeds every file under `marketplace/` as `(relative path, bytes)`, so the
-/// first-party catalog ships in the binary without a runtime checkout.
+/// Embeds every file under `marketplace/coppice/` as `(path relative to the
+/// catalog root, bytes)`, so the first-party catalog ships in the binary
+/// without a runtime checkout.
 fn embed_marketplace_catalog() {
-    println!("cargo:rerun-if-changed=marketplace");
+    println!("cargo:rerun-if-changed=marketplace/coppice");
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let root = manifest_dir.join("marketplace");
+    let root = manifest_dir.join("marketplace/coppice");
     let mut files = Vec::new();
     collect_files(&root, &root, &mut files);
     files.sort();
     let mut out = String::from("pub const MARKETPLACE_FILES: &[(&str, &[u8])] = &[\n");
     for rel in &files {
-        println!("cargo:rerun-if-changed=marketplace/{rel}");
+        println!("cargo:rerun-if-changed=marketplace/coppice/{rel}");
         out.push_str(&format!(
-            "    ({rel:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/marketplace/{rel}\"))),\n"
+            "    ({rel:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/marketplace/coppice/{rel}\"))),\n"
         ));
     }
     out.push_str("];\n");
@@ -41,10 +42,16 @@ fn collect_files(root: &Path, dir: &Path, files: &mut Vec<String>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Symlinks are skipped so the catalog cannot embed files from outside it.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_files(root, &path, files);
-        } else if let Ok(rel) = path.strip_prefix(root) {
-            files.push(rel.to_string_lossy().replace('\\', "/"));
+        } else if file_type.is_file() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                files.push(rel.to_string_lossy().replace('\\', "/"));
+            }
         }
     }
 }

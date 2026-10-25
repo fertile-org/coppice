@@ -17,7 +17,7 @@ pub fn materialize_catalog(dir: &Path) -> io::Result<()> {
         Err(err) => return Err(err),
     }
     for (rel, contents) in MARKETPLACE_FILES {
-        let path = dir.join(rel);
+        let path = catalog_root.join(rel);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

@@ -9,7 +9,7 @@ Use the `github__*` tools exposed by the Coppice MCP gateway. Check `tools/list`
 
 ## Before opening a PR
 
-- Push the branch with git from the worktree. Do not push to a branch you were not asked to touch.
+- Push only when the task and the project's git rules allow it, and only the branch you were asked to work on.
 - Base the PR on the repository's default branch unless the ticket names another base.
 - Write the title and body from the commits. Name the ticket, what changed, and how it was verified.
 
