@@ -5,7 +5,9 @@
  * Adds the fixture plugin dir, saves the plugin setting, runs the MCP Test,
  * enables the plugin, assigns it to a new agent, and runs a mock ticket that
  * calls a core tool, a plugin skill, a plugin MCP tool, and `result_submit`.
- * Requires the server to run with MOCK_AGENT_RESPONSE=mcp/m10_smoke.
+ * Then installs `github` from the built-in Coppice marketplace source and
+ * checks it lands disabled with its token setting, and that a second install
+ * is refused. Requires the server to run with MOCK_AGENT_RESPONSE=mcp/m10_smoke.
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
@@ -29,6 +31,10 @@ const PLUGIN_NAME = 'm10-smoke';
 const PLUGIN_TOOL = 'm10-smoke__echo';
 const PLUGIN_SKILL = 'm10-smoke:greet';
 const EXPECTED_TOOLS = ['ticket_get', 'skill_load', PLUGIN_TOOL, 'result_submit'];
+
+const CATALOG_SOURCE = 'coppice';
+const CATALOG_ENTRY = 'github';
+const CATALOG_SETTING = 'GITHUB_PERSONAL_ACCESS_TOKEN';
 
 const MAX_HEALTH_ATTEMPTS = 60;
 const HEALTH_INTERVAL_MS = 1000;
@@ -413,6 +419,57 @@ async function assertToolCalls(runId, pluginId, auth) {
   console.log(`smoke: tool calls ${summary}; skillsUsed ${skills.join(', ')}`);
 }
 
+async function installFromCatalog(auth) {
+  const entries = await expectJson(
+    await api('GET', `/api/marketplace/entries?q=${CATALOG_ENTRY}`, auth),
+    200,
+    'list marketplace entries',
+  );
+  const entry = entries.find(
+    (e) => e.sourceName === CATALOG_SOURCE && e.name === CATALOG_ENTRY,
+  );
+  if (!entry) {
+    fail(`marketplace does not list ${CATALOG_SOURCE}/${CATALOG_ENTRY}`);
+  }
+  if (entry.kind !== 'path' || !entry.installable) {
+    fail(`${CATALOG_ENTRY} entry is not an installable path entry: ${JSON.stringify(entry)}`);
+  }
+  const body = { sourceId: entry.sourceId, entry: CATALOG_ENTRY };
+
+  let plugin;
+  if (entry.installedPluginId) {
+    // Compose keeps the plugin dir across smoke runs.
+    plugin = await expectJson(
+      await api('GET', `/api/plugins/${entry.installedPluginId}`, auth),
+      200,
+      'get catalog plugin',
+    );
+    console.log(`smoke: ${CATALOG_ENTRY} already installed as ${plugin.id}`);
+  } else {
+    plugin = await expectJson(
+      await api('POST', '/api/marketplace/install', { ...auth, body }),
+      201,
+      'install catalog entry',
+    );
+    if (plugin.enabled) {
+      fail(`${CATALOG_ENTRY} must install disabled`);
+    }
+    console.log(`smoke: installed ${CATALOG_ENTRY} from the marketplace as ${plugin.id}`);
+  }
+  if (plugin.name !== CATALOG_ENTRY || plugin.status !== 'ok') {
+    fail(`unexpected catalog plugin: ${plugin.name} (${plugin.status})`);
+  }
+  if (!plugin.settings.some((setting) => setting.key === CATALOG_SETTING)) {
+    fail(`${CATALOG_ENTRY} card has no ${CATALOG_SETTING} setting`);
+  }
+
+  const again = await api('POST', '/api/marketplace/install', { ...auth, body });
+  if (again.status !== 409) {
+    fail(`second install of ${CATALOG_ENTRY}: expected 409, got ${again.status} ${await again.text()}`);
+  }
+  console.log(`smoke: second install of ${CATALOG_ENTRY} refused with 409`);
+}
+
 async function main() {
   console.log(`smoke: waiting for ${API}/health`);
   await waitForHealth();
@@ -433,8 +490,9 @@ async function main() {
   const runId = await runAgent(ticket.id, auth);
   await pollRunUntilSucceeded(runId, auth);
   await assertToolCalls(runId, plugin.id, auth);
+  await installFromCatalog(auth);
 
-  console.log('smoke: M10 plugin MCP flow passed');
+  console.log('smoke: M10 plugin MCP and marketplace flow passed');
 }
 
 main().catch((err) => {

@@ -2,7 +2,7 @@
 layout: ../../layouts/Docs.astro
 title: Plugins
 metaTitle: "Plugins: Agent Skills and MCP Tools"
-description: "Plugins give Coppice agents skills and MCP tools. Install one from git or a folder, enable it, choose which agents can use it, or write your own."
+description: "Plugins give Coppice agents skills and MCP tools. Install one from the marketplace, git or a folder, enable it, choose which agents can use it, or write your own."
 ---
 
 # Plugins
@@ -14,9 +14,25 @@ A plugin is a folder. It can hold skills (`SKILL.md` files) and MCP tools (`.mcp
 The built-in `coppice` plugin is always there. You can't switch its skills off.
 
 ## Install a plugin
+The quickest way is the **Marketplace** tab. You can also use **Add plugins** to install from git or a folder.
+
+### From the marketplace
+1. Open **Plugins** and switch to the **Marketplace** tab.
+2. Search, or filter by source or category.
+3. Click **Install** on an entry.
+
+The plugin lands on the **Installed** tab, disabled. Fill in its settings and enable it (see below). A plugin works for every agent you give it to, whatever CLI the agent runs on.
+
+Cards marked **Coppice** come from the catalog that ships with Coppice. Cards marked **Community: not reviewed by Coppice** come from sources you added. Review them before you enable them.
+
+To add more plugins, add a git repository that has a `.claude-plugin/marketplace.json` under **Sources**. Click **Refresh** to fetch it again. If you remove a source, the plugins you installed from it stay installed.
+
+**Example: GitHub.** Install `github` from the marketplace. On its card, open **Settings**, paste a GitHub personal access token into `GITHUB_PERSONAL_ACCESS_TOKEN`, and click **Save settings**. Click **Test** to list its tools, then enable it and pick the agents that can use it. This token is separate from the GitHub token in **Settings** that Coppice uses for pull requests.
+
+### From git or a folder
 Use **Add plugins**. There are two ways.
 
-### From git
+#### From git
 1. Paste the **Git URL**.
 2. Optional: set **Ref (optional)**, such as `main`.
 3. Pick a **Target directory**.
@@ -24,7 +40,7 @@ Use **Add plugins**. There are two ways.
 
 Coppice clones the repo with your computer's git credentials. Click **Update** on the card later to pull new changes.
 
-### From a folder
+#### From a folder
 1. Under **Plugin directories**, click **Browse…** and pick a folder. Or type it in **Directory path**.
 2. Click **Add directory**.
 

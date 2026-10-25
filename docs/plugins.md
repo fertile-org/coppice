@@ -49,7 +49,7 @@ Coppice reads repositories the way the rest of the ecosystem publishes them, wit
 
 Skills are found up to 3 folders deep inside each skills folder (`skills/<category>/<group>/<name>/SKILL.md` at most). A folder with a `SKILL.md` is one skill; nothing below it is searched. Folders starting with `.` and `node_modules` are skipped. A skill's name is its folder name.
 
-**Marketplaces.** Each `plugins` entry with a path `source` (`"./plugins/foo"`, `"plugins/foo"`, or `"./"`) is read as a plugin or skills folder inside the repository. It is named by its `plugin.json` `name`, or else the entry `name`, and its card shows `From marketplace <name>`. Entries whose `source` is an object (`github`, `git-subdir`, `url`, `npm`, …) live in another repository and are not fetched: they appear with status `external`, a link to their repository when Coppice can derive one, and an **Install from git** button that fills in the install form. If two entries point at the same path, the first one is used.
+**Marketplaces.** Each `plugins` entry with a path `source` (`"./plugins/foo"`, `"plugins/foo"`, or `"./"`) is read as a plugin or skills folder inside the repository. It is named by its `plugin.json` `name`, or else the entry `name`, and its card shows `From marketplace <name>`. Entries whose `source` is an object (`github`, `git-subdir`, `url`, `npm`, …) live in another repository and are not fetched: they appear with status `external`, a link to their repository when Coppice can derive one, and an **Install from git** button that fills in the install form. When the marketplace is added as a source on the **Marketplace** tab, the same entries install from there instead, one plugin each. If two entries point at the same path, the first one is used.
 
 ## Using plugins
 
@@ -58,7 +58,7 @@ Skills are found up to 3 folders deep inside each skills folder (`skills/<catego
 On **Plugins → Add plugins**, either:
 
 - **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. Coppice clones it with your computer's git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
-- **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. **Browse…** opens a folder picker.
+- **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored, and so are folders whose name starts with `.` (Coppice uses those for in-progress marketplace installs). Press **Rescan** after changing files. **Browse…** opens a folder picker.
 
 Directories are scanned in order. If two plugins have the same name, the one in the earlier directory is used and the other is marked `shadowed`. Use the arrows to reorder.
 
@@ -111,7 +111,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | `shadowed` | A plugin with the same name in an earlier directory is used instead. |
 | `missing` | The folder is gone. Agent assignments are kept and return when the folder does. |
 | `invalid` | The plugin could not be read; the card shows the error. |
-| `external` | A marketplace entry that lives in another repository. It cannot be enabled, tested, updated, or attached; install it separately (**Install from git** on the card). |
+| `external` | A marketplace entry that lives in another repository. It cannot be enabled, tested, updated, or attached; install it from the **Marketplace** tab after adding its marketplace as a source, or separately with **Install from git** on the card. |
 
 **Update** pulls the whole cloned repository once and refreshes every plugin that came from it (the button's tooltip says `Updates all N plugins from this repository` when there are several). Their MCP servers are stopped. Plugins whose entry disappeared become `missing`; new entries appear disabled.
 
@@ -128,7 +128,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | Symptom | Fix |
 |---------|-----|
 | Plugin does not appear | Is it the plugin directory itself or a direct subfolder of it? Are its skills within 3 levels of a skills folder? Press **Rescan**. |
-| Install fails with `no plugin, skills, or marketplace found in this repository` | The repository has none of the supported layouts at its root. Installing a subfolder of a repository is not supported. |
+| Install fails with `no plugin, skills, or marketplace found in this repository` | The repository has none of the supported layouts at its root. **Install from git** cannot install a subfolder; publish it as a `git-subdir` entry in a marketplace and install it from the **Marketplace** tab. |
 | `invalid` with a JSON error | Fix `plugin.json` or `.mcp.json` and rescan. |
 | `invalid marketplace.json: …` | The marketplace file is not valid JSON, or `plugins` is not an array. |
 | `marketplace entry "<name>": source must stay inside the repository` | The entry's path is absolute, contains `..`, or resolves outside the marketplace folder. |
