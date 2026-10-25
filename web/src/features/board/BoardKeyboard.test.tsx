@@ -582,6 +582,23 @@ describe('board keyboard navigation', () => {
     open.mockRestore();
   });
 
+  it('opens code review for a focused card inside the desktop app', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    window.coppiceDesktop = { pickDirectory: async () => null };
+    ticketsState.active = [
+      makeTicket({ id: 'alpha', title: 'Alpha', status: 'in_progress', repoId: 'repo-1' }),
+    ];
+    renderBoard();
+
+    press('g');
+    press('4');
+    press('d');
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location')).toHaveTextContent('/code?repoId=repo-1&ticketId=alpha');
+    delete window.coppiceDesktop;
+    open.mockRestore();
+  });
+
   it('skips to the board tab stop', () => {
     renderBoard();
 

@@ -1,7 +1,7 @@
 import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isExternalHttpUrl, isSameOrigin } from './navigation.mjs';
+import { isExternalHttpUrl, isSameOrigin, windowOpenAction } from './navigation.mjs';
 import { attachMainWindowFocus } from './windowFocus.mjs';
 
 const DESKTOP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,7 +35,12 @@ export function restrictNavigation(win, origin) {
     event.preventDefault();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    openExternally(url);
+    const action = windowOpenAction(url, origin);
+    if (action === 'in-app') {
+      void win.loadURL(url);
+    } else if (action === 'external') {
+      void shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
 }

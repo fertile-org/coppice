@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { useConfirm } from '../../components/ui/confirm-dialog';
 import { ApiError } from '../../lib/api';
+import { openCodeReview } from '../code/openCodeReview';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import {
   createRepoSchema,
@@ -498,6 +500,7 @@ function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
 export function RepositoriesPage() {
   const { user, loading } = useSession();
   const { data: repos, isLoading, isError, refetch } = useRepos();
+  const navigate = useNavigate();
   const [drawer, setDrawer] = useState<DrawerState>({ type: 'closed' });
   const isAdmin = user?.role === 'admin';
 
@@ -643,11 +646,7 @@ export function RepositoriesPage() {
                             variant="secondary"
                             disabled={repo.verificationStatus !== 'ready'}
                             onClick={() => {
-                              window.open(
-                                `/code?repoId=${repo.id}`,
-                                '_blank',
-                                'noopener,noreferrer',
-                              );
+                              openCodeReview(`/code?repoId=${repo.id}`, navigate);
                             }}
                           >
                             View code

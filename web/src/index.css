@@ -212,4 +212,34 @@
     pointer-events: none;
     color: var(--color-text-muted);
   }
+
+  /* react-diff-view ships light-only colours in :root; map them to theme tokens. */
+  .code-review-diff {
+    --diff-background-color: var(--color-paper-50);
+    --diff-text-color: var(--color-text-primary);
+    --diff-selection-background-color: var(--color-accent-muted);
+    --diff-selection-text-color: var(--color-text-primary);
+    --diff-gutter-insert-background-color: var(--color-success-muted);
+    --diff-gutter-insert-text-color: var(--color-text-secondary);
+    --diff-gutter-delete-background-color: var(--color-danger-muted);
+    --diff-gutter-delete-text-color: var(--color-text-secondary);
+    --diff-gutter-selected-background-color: var(--color-warning-muted);
+    --diff-gutter-selected-text-color: var(--color-text-primary);
+    --diff-code-insert-background-color: var(--color-success-muted);
+    --diff-code-insert-text-color: var(--color-text-primary);
+    --diff-code-delete-background-color: var(--color-danger-muted);
+    --diff-code-delete-text-color: var(--color-text-primary);
+    --diff-code-insert-edit-background-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+    --diff-code-insert-edit-text-color: var(--color-text-primary);
+    --diff-code-delete-edit-background-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+    --diff-code-delete-edit-text-color: var(--color-text-primary);
+    --diff-code-selected-background-color: var(--color-warning-muted);
+    --diff-code-selected-text-color: var(--color-text-primary);
+    --diff-omit-gutter-line-color: var(--color-border-strong);
+  }
+
+  .code-review-diff .diff-decoration {
+    background-color: var(--color-paper-200);
+    color: var(--color-text-secondary);
+  }
 }

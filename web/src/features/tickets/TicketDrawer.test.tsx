@@ -704,6 +704,7 @@ describe('TicketDrawer keyboard sections', () => {
             <ToastProvider>
               <ConfirmProvider>
                 <DrawerKeyboardEnvironment />
+                <LocationProbe />
                 <TicketDrawer
                   ticketId="00000000-0000-0000-0000-000000000001"
                   onClose={() => {}}
@@ -810,6 +811,25 @@ describe('TicketDrawer keyboard sections', () => {
       '_blank',
       'noopener,noreferrer',
     );
+    open.mockRestore();
+  });
+
+  it('opens code review inside the desktop app instead of a browser tab', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    window.coppiceDesktop = { pickDirectory: async () => null };
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_progress',
+      repoId: 'repo-1',
+    };
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'd' });
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location-search')).toHaveTextContent(
+      '?repoId=repo-1&ticketId=00000000-0000-0000-0000-000000000001',
+    );
+    delete window.coppiceDesktop;
     open.mockRestore();
   });
 
