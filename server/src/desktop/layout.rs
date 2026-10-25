@@ -12,6 +12,7 @@ pub struct DataLayout {
     pub worktrees: PathBuf,
     pub plugins: PathBuf,
     pub builtin_plugins: PathBuf,
+    pub marketplaces: PathBuf,
     pub logs: PathBuf,
 }
 
@@ -34,6 +35,7 @@ impl DataLayout {
             worktrees: root.join("worktrees"),
             plugins: root.join("plugins"),
             builtin_plugins: root.join("builtin-plugins"),
+            marketplaces: root.join("marketplaces"),
             logs,
         }
     }
@@ -47,6 +49,7 @@ impl DataLayout {
             &self.worktrees,
             &self.plugins,
             &self.builtin_plugins,
+            &self.marketplaces,
             &self.logs,
         ] {
             std::fs::create_dir_all(dir)?;
@@ -132,6 +135,7 @@ mod tests {
             &layout.worktrees,
             &layout.plugins,
             &layout.builtin_plugins,
+            &layout.marketplaces,
             &layout.logs,
         ] {
             assert!(path.is_dir(), "{} missing", path.display());

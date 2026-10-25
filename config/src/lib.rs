@@ -96,10 +96,18 @@ pub struct PluginsConfig {
     pub mcp_list_timeout_secs: u64,
     #[serde(default = "default_plugins_mcp_idle_shutdown_secs")]
     pub mcp_idle_shutdown_secs: u64,
+    /// Marketplace cache (Coppice catalog and git sources). Regenerable and
+    /// never inside a plugin dir.
+    #[serde(default = "default_plugins_marketplaces_dir")]
+    pub marketplaces_dir: String,
 }
 
 fn default_plugins_dir() -> String {
     "./data/plugins".into()
+}
+
+fn default_plugins_marketplaces_dir() -> String {
+    "./data/marketplaces".into()
 }
 
 fn default_plugins_git_timeout_secs() -> u64 {
@@ -144,6 +152,7 @@ impl Default for PluginsConfig {
             mcp_start_timeout_secs: default_plugins_mcp_start_timeout_secs(),
             mcp_list_timeout_secs: default_plugins_mcp_list_timeout_secs(),
             mcp_idle_shutdown_secs: default_plugins_mcp_idle_shutdown_secs(),
+            marketplaces_dir: default_plugins_marketplaces_dir(),
         }
     }
 }
@@ -2143,6 +2152,7 @@ mod tests {
         assert_eq!(defaults.mcp_start_timeout_secs, 20);
         assert_eq!(defaults.mcp_list_timeout_secs, 10);
         assert_eq!(defaults.mcp_idle_shutdown_secs, 600);
+        assert_eq!(defaults.marketplaces_dir, "./data/marketplaces");
 
         const KEY: &str = "COPPICE_PLUGINS__DIR";
         let previous = std::env::var(KEY).ok();

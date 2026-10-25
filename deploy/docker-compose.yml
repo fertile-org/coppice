@@ -45,6 +45,8 @@ services:
       COPPICE_MCP__BUILTIN_PLUGINS_DIR: /data/builtin-plugins
       # Default plugin dir (cannot be removed in Settings → Plugins).
       COPPICE_PLUGINS__DIR: /data/plugins
+      # Marketplace cache; rebuilt on every start, so no volume. Must stay outside /data/plugins.
+      COPPICE_PLUGINS__MARKETPLACES_DIR: /data/marketplaces
       WORKTREES_PATH: /data/worktrees
       # Default [logs] dir is ./data/logs. The process cwd is / and the dropped
       # user cannot create directories there, so Compose uses this absolute path.

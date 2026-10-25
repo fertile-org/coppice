@@ -24,8 +24,8 @@ if [ ! -f "$config" ]; then
   exit 1
 fi
 
-mkdir -p /data/artifacts /data/worktrees /data/builtin-plugins /data/plugins /data/logs
-chown -R "${uid}:${gid}" /data/artifacts /data/worktrees /data/builtin-plugins /data/plugins /data/logs
+mkdir -p /data/artifacts /data/worktrees /data/builtin-plugins /data/marketplaces /data/plugins /data/logs
+chown -R "${uid}:${gid}" /data/artifacts /data/worktrees /data/builtin-plugins /data/marketplaces /data/plugins /data/logs
 
 # gosu may reset HOME from /etc/passwd. For numeric COPPICE_UID with no
 # passwd entry that clears Compose HOME, connector auth under $HOME would

@@ -356,6 +356,7 @@ pub async fn serve(
         .map_err(|e| anyhow::anyhow!("agent template validation failed: {e}"))?;
     let skills = AppState::builtin_skills_from_config(&config)?;
     AppState::init_plugins(&db, &config, &skills).await?;
+    AppState::init_marketplace(&db, &config).await?;
     crate::services::plugin_service::PluginService::new(&db)
         .fail_stale_installs()
         .await

@@ -202,6 +202,8 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          [plugins]\n\
          # Add more folders on the Plugins page. This one can't be removed there.\n\
          dir = {plugins}\n\
+          # Cache for marketplace catalogs. Coppice rebuilds it; keep it out of plugin folders.\n\
+          marketplaces_dir = {marketplaces}\n\
          \n\
          # Skills that ship with Coppice.\n\
          [mcp]\n\
@@ -223,6 +225,7 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
         worktrees = path(&layout.worktrees),
         artifacts = path(&layout.artifacts),
         plugins = path(&layout.plugins),
+        marketplaces = path(&layout.marketplaces),
         builtin_plugins = path(&layout.builtin_plugins),
     ))
 }
@@ -330,6 +333,10 @@ mod tests {
             layout.worktrees.as_path()
         );
         assert_eq!(Path::new(&cfg.plugins.dir), layout.plugins.as_path());
+        assert_eq!(
+            Path::new(&cfg.plugins.marketplaces_dir),
+            layout.marketplaces.as_path()
+        );
         assert_eq!(
             Path::new(&cfg.mcp.builtin_plugins_dir),
             layout.builtin_plugins.as_path()
