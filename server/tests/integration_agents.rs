@@ -201,6 +201,114 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
 }
 
 #[tokio::test]
+async fn list_agents_orders_by_role_and_stays_stable_after_edit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+
+    let qc = common::create_agent_with_preset_key(&app, "qc", "QC One", &cookie, &csrf).await;
+    let pm = common::create_agent_with_preset_key(&app, "pm", "PM One", &cookie, &csrf).await;
+    let be_first =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE First", &cookie, &csrf)
+            .await;
+    let tech_lead =
+        common::create_agent_with_preset_key(&app, "tech_lead", "TL One", &cookie, &csrf).await;
+    let be_second = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "BE Second",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let fe =
+        common::create_agent_with_preset_key(&app, "frontend_engineer", "FE One", &cookie, &csrf)
+            .await;
+    let custom = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            r#"{"name":"Ops Bot","role":"Ops","systemPrompt":"You run ops.","connector":"mock"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(custom.status(), StatusCode::CREATED);
+    let custom = common::json_body(custom).await;
+    let custom_id = custom["id"].as_str().unwrap().to_string();
+
+    // Same created_at for everything, so only the sort keys decide the order.
+    // The two backend engineers differ by one second to pin creation order.
+    let base = "2026-01-01T00:00:00Z";
+    for id in [&qc, &pm, &tech_lead, &fe, &custom_id, &be_first] {
+        sqlx::query("UPDATE agents SET created_at = $2::timestamptz WHERE id = $1")
+            .bind(Uuid::parse_str(id).unwrap())
+            .bind(base)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE agents SET created_at = $2::timestamptz WHERE id = $1")
+        .bind(Uuid::parse_str(&be_second).unwrap())
+        .bind("2026-01-01T00:00:01Z")
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let list_ids = |body: serde_json::Value| -> Vec<String> {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let fetch = || {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        let csrf = csrf.clone();
+        async move {
+            let res = app
+                .oneshot(common::json_request("GET", "/api/agents", "", &cookie, &csrf))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            common::json_body(res).await
+        }
+    };
+
+    let expected = vec![
+        pm.clone(),
+        tech_lead.clone(),
+        be_first.clone(),
+        be_second.clone(),
+        fe.clone(),
+        qc.clone(),
+        custom_id.clone(),
+    ];
+    let before = list_ids(fetch().await);
+    assert_eq!(before, expected);
+
+    let patched = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/agents/{pm}"),
+            r#"{"name":"PM Renamed"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patched.status(), StatusCode::OK);
+
+    let after = list_ids(fetch().await);
+    assert_eq!(after, before);
+}
+
+#[tokio::test]
 async fn list_connectors_returns_mock() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
