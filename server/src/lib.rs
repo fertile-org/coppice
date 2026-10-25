@@ -159,28 +159,19 @@ impl AppState {
         Ok(())
     }
 
-    /// Refreshes the first-party catalog in `plugins.marketplaces_dir`. Fails
-    /// when that cache sits inside the default or any registered plugin dir.
-    /// Call after `init_plugins`, which creates the default dir.
+    /// Seeds the built-in Coppice marketplace source and refreshes its catalog
+    /// in `plugins.marketplaces_dir`. Fails when that cache sits inside the
+    /// default or any registered plugin dir. Call after `init_plugins`, which
+    /// creates the default dir.
     pub async fn init_marketplace(db: &PgPool, config: &AppConfig) -> anyhow::Result<()> {
         let cache = std::path::Path::new(&config.plugins.marketplaces_dir);
         std::fs::create_dir_all(cache).map_err(|e| {
             anyhow::anyhow!("failed to create marketplaces dir {}: {e}", cache.display())
         })?;
-        let dirs = crate::services::plugin_service::PluginService::new(db)
-            .list_dirs()
+        crate::services::marketplace_service::MarketplaceService::new(db)
+            .seed_builtin(cache)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to list plugin dirs: {e}"))?;
-        let mut paths: Vec<&std::path::Path> = vec![std::path::Path::new(&config.plugins.dir)];
-        paths.extend(dirs.iter().map(|dir| std::path::Path::new(&dir.path)));
-        crate::plugins::catalog::check_cache_outside_plugin_dirs(cache, &paths)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        crate::plugins::catalog::materialize_catalog(cache).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to write marketplace catalog to {}: {e}",
-                cache.display()
-            )
-        })
+            .map_err(|e| anyhow::anyhow!("failed to seed marketplace: {e}"))
     }
 
     /// Built-in skills materialized once into a process-lifetime temp dir, so

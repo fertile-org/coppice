@@ -3213,13 +3213,17 @@ async fn marketplace_seed_rejects_cache_inside_plugin_dir() {
         .path;
     let cache = Path::new(&default_path).join("marketplaces");
     std::fs::create_dir_all(&cache).unwrap();
+    let before = count(&pool, "SELECT COUNT(*) FROM marketplace_sources", "").await;
 
     let err = MarketplaceService::new(&pool)
         .seed_builtin(&cache)
         .await
         .expect_err("cache inside plugin dir");
     assert!(matches!(err, PluginError::Io(_)), "{err:?}");
-    assert_eq!(count(&pool, "SELECT COUNT(*) FROM marketplace_sources", "").await, 0);
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM marketplace_sources", "").await,
+        before
+    );
 }
 
 #[tokio::test]
@@ -3516,4 +3520,184 @@ async fn marketplace_path_entry_rolls_back_plugin_json_name_clash() {
         .await,
         1
     );
+}
+
+#[tokio::test]
+async fn marketplace_api_lists_adds_refreshes_and_removes_sources() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.plugins.allow_file_git_urls = true;
+    })
+    .await;
+
+    let sources = get(&app, "/api/marketplace/sources", &cookie, &csrf).await;
+    let builtin = sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|source| source["name"] == "coppice")
+        .expect("builtin source is seeded at startup");
+    assert_eq!(builtin["kind"], "builtin", "{builtin}");
+    let builtin_id = builtin["id"].as_str().unwrap().to_string();
+
+    let entries = get(&app, "/api/marketplace/entries", &cookie, &csrf).await;
+    let github = entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "github")
+        .expect("catalog entry github");
+    assert_eq!(github["sourceId"], builtin_id, "{github}");
+    assert_eq!(github["installable"], true, "{github}");
+    assert!(github["installedPluginId"].is_null(), "{github}");
+    assert_eq!(github["updateAvailable"], false, "{github}");
+
+    let none = get(
+        &app,
+        "/api/marketplace/entries?q=no-such-text",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(none, json!([]));
+
+    let repo = PluginRepo::of("marketplace-repo");
+    let (status, added) = send(
+        &app,
+        "POST",
+        "/api/marketplace/sources",
+        json!({ "name": "acme", "gitUrl": repo.url() }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    assert_eq!(added["kind"], "git", "{added}");
+    assert!(added["commitSha"].is_null(), "{added}");
+    let source_id = added["id"].as_str().unwrap().to_string();
+
+    let before = get(
+        &app,
+        &format!("/api/marketplace/entries?source={source_id}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(before, json!([]), "unrefreshed source lists nothing");
+
+    let (status, refreshed) = send(
+        &app,
+        "POST",
+        &format!("/api/marketplace/sources/{source_id}/refresh"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    assert_eq!(refreshed["commitSha"], repo.head(), "{refreshed}");
+    assert!(refreshed["refreshedAt"].is_string(), "{refreshed}");
+
+    let entries = get(
+        &app,
+        &format!("/api/marketplace/entries?source={source_id}&q=alpha"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let alpha = entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "alpha")
+        .expect("alpha entry after refresh");
+    assert_eq!(alpha["sourceName"], "acme", "{alpha}");
+    assert_eq!(alpha["kind"], "path", "{alpha}");
+
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/marketplace/sources",
+        json!({ "name": "bad", "gitUrl": "not a url" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/api/marketplace/sources/{builtin_id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/api/marketplace/sources/{source_id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let sources = get(&app, "/api/marketplace/sources", &cookie, &csrf).await;
+    assert!(
+        sources
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|source| source["name"] != "acme"),
+        "{sources}"
+    );
+}
+
+#[tokio::test]
+async fn marketplace_mutations_require_admin_and_csrf() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/users",
+        json!({ "email": "member@localhost", "password": "secret123" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+
+    get(&app, "/api/marketplace/sources", &member_cookie, &member_csrf).await;
+    get(&app, "/api/marketplace/entries", &member_cookie, &member_csrf).await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/marketplace/sources",
+        json!({ "name": "acme", "gitUrl": "https://example.com/acme.git" }),
+        &member_cookie,
+        &member_csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/marketplace/sources",
+        json!({ "name": "acme", "gitUrl": "https://example.com/acme.git" }),
+        &cookie,
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

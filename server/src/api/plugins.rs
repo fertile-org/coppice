@@ -205,7 +205,7 @@ struct PluginAgentsBody {
     agent_ids: Vec<Uuid>,
 }
 
-struct ApiError(StatusCode, String);
+pub(crate) struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
