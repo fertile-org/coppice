@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use coppice_server::middleware::session::parse_session_cookie;
+use coppice_server::services::plugin_service::PluginError;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -322,6 +323,72 @@ async fn add_dir_rejects_relative_missing_and_duplicate() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn rescan_keeps_marketplace_origin() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    let plugin_uuid: uuid::Uuid = plugin_id.parse().unwrap();
+    sqlx::query(
+        "UPDATE plugins SET origin_entry = 'sample-plugin', origin_commit = 'abc123' WHERE id = $1",
+    )
+    .bind(plugin_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    rescan(&app, &cookie, &csrf).await;
+
+    let (entry, commit): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT origin_entry, origin_commit FROM plugins WHERE id = $1")
+            .bind(plugin_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(entry.as_deref(), Some("sample-plugin"));
+    assert_eq!(commit.as_deref(), Some("abc123"));
+}
+
+#[tokio::test]
+async fn add_dir_rejects_marketplace_cache_inside_it() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let service = coppice_server::services::plugin_service::PluginService::new(&pool);
+
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    let cache = plugins.join("marketplaces");
+    std::fs::create_dir_all(&cache).unwrap();
+
+    let err = service
+        .add_dir(&plugins.to_string_lossy(), &cache)
+        .await
+        .expect_err("cache inside a plugin dir must be rejected");
+    assert!(
+        matches!(err, PluginError::Validation(ref msg) if msg.contains("marketplaces_dir")),
+        "{err:?}"
+    );
+    let registered = service.list_dirs().await.unwrap();
+    assert!(registered.iter().all(|dir| dir.path != canonical(&plugins)));
+
+    let sibling = root.path().join("sibling");
+    std::fs::create_dir_all(&sibling).unwrap();
+    let marketplaces = root.path().join("marketplaces");
+    service
+        .add_dir(&sibling.to_string_lossy(), &marketplaces)
+        .await
+        .expect("sibling of the cache is allowed");
 }
 
 #[tokio::test]
@@ -1118,8 +1185,9 @@ async fn repointing_default_dir_forgets_old_plugins() {
 
     let new_dir = plugin_dir_with(&["sample-plugin"]);
     let service = coppice_server::services::plugin_service::PluginService::new(&pool);
+    let marketplaces = tempfile::tempdir().unwrap();
     let repointed = service
-        .ensure_default_dir(&new_dir.path().to_string_lossy())
+        .ensure_default_dir(&new_dir.path().to_string_lossy(), marketplaces.path())
         .await
         .unwrap();
     assert_eq!(repointed.id.to_string(), dir_id);

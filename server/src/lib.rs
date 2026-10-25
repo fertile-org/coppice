@@ -139,7 +139,10 @@ impl AppState {
     ) -> anyhow::Result<()> {
         let service = crate::services::plugin_service::PluginService::new(db);
         service
-            .ensure_default_dir(&config.plugins.dir)
+            .ensure_default_dir(
+                &config.plugins.dir,
+                std::path::Path::new(&config.plugins.marketplaces_dir),
+            )
             .await
             .map_err(|e| {
                 anyhow::anyhow!(

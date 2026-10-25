@@ -60,7 +60,7 @@ Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-co
 A Coppice-owned catalog of plugins (first-party `github` plugin in this repo, plus curated and user-added `marketplace.json` sources). Installing an entry adds one plugin; every agent with access reaches it through the gateway, so no connector config is written. Design: [plugin marketplace spec](../superpowers/specs/2026-10-25-plugin-marketplace-design.md). Not started; must not merge ahead of M12 without human sign-off.
 
 - [ ] Catalog source and first-party `github` plugin embedded and materialized into the marketplace cache
-- [ ] `plugins.marketplaces_dir` config, desktop wiring, and cache-outside-plugin-dir check
+- [x] `plugins.marketplaces_dir` config, desktop wiring, and cache-outside-plugin-dir check
 - [ ] Marketplace sources API and install / update, including 409 conflicts and provenance (`origin_*`)
 - [ ] Marketplace tab in the web Plugins page
 - [ ] Cross-connector gateway test and `make e2e-smoke-m10` extended to install from the catalog

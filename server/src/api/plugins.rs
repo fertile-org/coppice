@@ -558,7 +558,12 @@ async fn add_dir(
 ) -> Result<(StatusCode, Json<PluginDirResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
-    let dir = service.add_dir(&body.path).await?;
+    let dir = service
+        .add_dir(
+            &body.path,
+            std::path::Path::new(&state.config.plugins.marketplaces_dir),
+        )
+        .await?;
     sync_plugins(&service, &state).await;
     Ok((StatusCode::CREATED, Json(dir_response(dir))))
 }
