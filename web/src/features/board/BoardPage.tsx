@@ -9,12 +9,13 @@ import {
 } from '@dnd-kit/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import { useStableCallback } from '../../lib/useStableCallback';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
 import { codeReviewHref } from '../code/codeReviewHref';
+import { openCodeReview } from '../code/openCodeReview';
 import { useKeyboardEnvironment, useKeyboardLayer } from '../keyboard/useKeyboard';
 import { approveTicketPlan } from '../plan/approvePlan';
 import { useRepos } from '../repos/useRepos';
@@ -103,6 +104,7 @@ export function BoardPage() {
   const { data: agents } = useAgents();
   const { data: repos } = useRepos();
   const toast = useToast();
+  const navigate = useNavigate();
   const createTicket = useCreateTicket(boardId ?? '');
   const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
   const startPlan = useStartPlanRun(boardId ?? '');
@@ -283,11 +285,7 @@ export function BoardPage() {
     onAccept: setAcceptTicket,
     onOpenCode: (ticket) => {
       if (!ticket.repoId) return;
-      window.open(
-        codeReviewHref(ticket.id, ticket.repoId, null),
-        '_blank',
-        'noopener,noreferrer',
-      );
+      openCodeReview(codeReviewHref(ticket.id, ticket.repoId, null), navigate);
     },
   });
 

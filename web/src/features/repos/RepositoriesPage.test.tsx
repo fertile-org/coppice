@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Repo } from '../../lib/schemas/repo';
 import { RepositoriesPage } from './RepositoriesPage';
@@ -66,9 +67,11 @@ vi.mock('../../components/ToastProvider', () => ({
 
 function renderPage() {
   return render(
-    <ConfirmProvider>
-      <RepositoriesPage />
-    </ConfirmProvider>,
+    <MemoryRouter>
+      <ConfirmProvider>
+        <RepositoriesPage />
+      </ConfirmProvider>
+    </MemoryRouter>,
   );
 }
 

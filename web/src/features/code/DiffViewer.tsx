@@ -75,7 +75,7 @@ function InlineCommentWidget({
         onChange={(e) => setDraft(e.target.value)}
         placeholder="Leave a comment…"
         rows={3}
-        className="min-h-[72px] bg-white"
+        className="min-h-[72px] bg-field-bg"
         autoFocus={isNew}
       />
       <div className="mt-2 flex items-center gap-2">

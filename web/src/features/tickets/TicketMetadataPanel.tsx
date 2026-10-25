@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BOARD_COLUMNS, type TicketStatus } from '../board/columns';
 import type { HumanReview, Ticket } from '../board/useTickets';
 import { useToast } from '../../components/ToastProvider';
@@ -18,6 +19,7 @@ import {
 } from '../../lib/schemas/substatus';
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
 import { codeReviewHref } from '../code/codeReviewHref';
+import { openCodeReview } from '../code/openCodeReview';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { PLAN_COPY } from '../plan/copy';
 import { useRepos } from '../repos/useRepos';
@@ -61,6 +63,7 @@ function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
 export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const assignAgent = useAssignAgent(ticket.id);
@@ -214,18 +217,14 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const activeSubstatus = substatus || null;
   const codeReviewReady = Boolean(ticket.repoId) && !repoNotReady;
 
-  function openCodeReview() {
+  function handleOpenCodeReview() {
     if (!ticket.repoId || repoNotReady) return;
-    window.open(
-      codeReviewHref(ticket.id, ticket.repoId, worktreePath),
-      '_blank',
-      'noopener,noreferrer',
-    );
+    openCodeReview(codeReviewHref(ticket.id, ticket.repoId, worktreePath), navigate);
   }
 
   useEffect(() => subscribeAssigneeOpen(ticket.id, openAssigneeCombobox), [ticket.id]);
   useRegisterShortcut('ticket.assign', openAssigneeCombobox, !formDisabled);
-  useRegisterShortcut('review.openCode', openCodeReview, codeReviewReady);
+  useRegisterShortcut('review.openCode', handleOpenCodeReview, codeReviewReady);
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
   return (
@@ -385,7 +384,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
           type="button"
           variant="secondary"
           disabled={!codeReviewReady}
-          onClick={openCodeReview}
+          onClick={handleOpenCodeReview}
           className="w-full"
         >
           Review code

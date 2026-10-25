@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isExternalHttpUrl, isSameOrigin } from '../src/navigation.mjs';
+import { isExternalHttpUrl, isSameOrigin, windowOpenAction } from '../src/navigation.mjs';
 
 test('isSameOrigin matches scheme, host and port exactly', () => {
   const origin = 'http://127.0.0.1:5123';
@@ -18,4 +18,18 @@ test('isExternalHttpUrl accepts only http(s)', () => {
   assert.equal(isExternalHttpUrl('javascript:alert(1)'), false);
   assert.equal(isExternalHttpUrl('smb://host/share'), false);
   assert.equal(isExternalHttpUrl(''), false);
+});
+
+test('windowOpenAction keeps same-origin pages in the app window', () => {
+  const origin = 'http://127.0.0.1:5123';
+  assert.equal(windowOpenAction('http://127.0.0.1:5123/code?repoId=r1', origin), 'in-app');
+  assert.equal(windowOpenAction('http://127.0.0.1:5124/code', origin), 'external');
+  assert.equal(windowOpenAction('https://github.com/fertile-org/coppice', origin), 'external');
+});
+
+test('windowOpenAction denies non-http targets and windows without an origin', () => {
+  assert.equal(windowOpenAction('file:///etc/passwd', 'http://127.0.0.1:5123'), 'deny');
+  assert.equal(windowOpenAction('javascript:alert(1)', 'http://127.0.0.1:5123'), 'deny');
+  assert.equal(windowOpenAction('http://127.0.0.1:5123/', null), 'external');
+  assert.equal(windowOpenAction('file:///etc/passwd', null), 'deny');
 });

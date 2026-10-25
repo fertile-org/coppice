@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Ticket } from '../board/useTickets';
@@ -60,11 +61,13 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 
 function renderPanel(ticket: Ticket = makeTicket()) {
   return render(
-    <ToastProvider>
-      <ConfirmProvider>
-        <TicketMetadataPanel ticket={ticket} />
-      </ConfirmProvider>
-    </ToastProvider>,
+    <MemoryRouter>
+      <ToastProvider>
+        <ConfirmProvider>
+          <TicketMetadataPanel ticket={ticket} />
+        </ConfirmProvider>
+      </ToastProvider>
+    </MemoryRouter>,
   );
 }
 
