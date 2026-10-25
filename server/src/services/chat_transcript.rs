@@ -89,16 +89,26 @@ fn summarize_blocks(blocks: &[String], budget: usize, counter: &dyn TokenCounter
 }
 
 fn summary_line(block: &str) -> String {
-    let mut lines = block.lines();
-    let header = lines.next().unwrap_or("").trim();
+    let mut lines = block.lines().map(str::trim);
+    let header = lines.next().unwrap_or("");
     let role = header.strip_prefix("### ").unwrap_or(header);
-    let text = lines
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("Attachment");
+    let mut text = None;
+    let mut files = Vec::new();
+    for line in lines {
+        if let Some(file) = line.strip_prefix("- file: ") {
+            files.push(file.rsplit_once(" (").map_or(file, |(path, _)| path));
+        } else if text.is_none() && !line.is_empty() && line != "Attachments:" {
+            text = Some(line);
+        }
+    }
+    let text = text.unwrap_or("Attachment");
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let clipped: String = collapsed.chars().take(160).collect();
-    format!("- {role}: {clipped}")
+    if files.is_empty() {
+        format!("- {role}: {clipped}")
+    } else {
+        format!("- {role}: {clipped} [attachments: {}]", files.join(", "))
+    }
 }
 
 fn truncate_to_tokens(text: &str, max_tokens: usize, counter: &dyn TokenCounter) -> String {
@@ -174,6 +184,20 @@ mod tests {
         assert!(bound.contains("### Earlier messages"));
         assert!(bound.contains("ALPHA unique older question"));
         assert!(!bound.contains("word word word"));
+    }
+
+    #[test]
+    fn summarized_older_turns_keep_their_attachment_paths() {
+        let older = "### Human\n\nALPHA shot question\n\nAttachments:\n- file: attachments/abc/shot.png (image/png, 10 bytes)\n\n".to_string();
+        let filler = format!("### Agent\n\n{}\n\n", "word ".repeat(2_000));
+        let latest = "### Human\n\nLATEST please remember this\n\n".to_string();
+        let bound = bound_rendered_transcript(&[older, filler, latest], 200);
+        assert!(ByteTokenCounter.count(&bound) <= 200);
+        assert!(
+            bound.contains("- Human: ALPHA shot question [attachments: attachments/abc/shot.png]"),
+            "{bound}"
+        );
+        assert!(!bound.contains("image/png"));
     }
 
     #[test]

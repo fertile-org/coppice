@@ -322,6 +322,7 @@ async fn drive_plan_run(
         assignee_agent_key: assignee_key.as_deref(),
         // Empty excerpt keeps this out of the "work on ticket" path.
         thread_excerpt: Some(""),
+        has_attachments: false,
     };
     let plugin_ids = super::run_plugin_snapshot(pool, run).await;
     let skills = state.skills.skills_for(&plugin_ids);

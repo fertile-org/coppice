@@ -950,15 +950,27 @@ pub fn multipart_request(
     cookie: &str,
     csrf: &str,
 ) -> Request<Body> {
+    multipart_request_bytes(uri, filename, content_type, contents.as_bytes(), cookie, csrf)
+}
+
+pub fn multipart_request_bytes(
+    uri: &str,
+    filename: &str,
+    content_type: &str,
+    contents: &[u8],
+    cookie: &str,
+    csrf: &str,
+) -> Request<Body> {
     let boundary = "----coppice-test-boundary";
-    let body = format!(
+    let mut body = format!(
         "--{boundary}\r\n\
          Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
          Content-Type: {content_type}\r\n\
-         \r\n\
-         {contents}\r\n\
-         --{boundary}--\r\n"
-    );
+         \r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(contents);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
     Request::builder()
         .method("POST")
