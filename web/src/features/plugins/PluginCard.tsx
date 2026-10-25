@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { useConfirm, type ConfirmFn } from '../../components/ui/confirm-dialog';
+import { Switch } from '../../components/ui/switch';
 import type {
   Plugin,
   PluginMcpServerHealth,
@@ -155,40 +156,6 @@ function statusPillClass(status: PluginStatus): string {
     case 'external':
       return `${base} border-border bg-paper-200 text-text-secondary`;
   }
-}
-
-interface SwitchProps {
-  checked: boolean;
-  label: string;
-  title?: string;
-  disabled?: boolean;
-  onToggle: () => void;
-}
-
-function Switch({ checked, label, title, disabled, onToggle }: SwitchProps) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      title={title}
-      disabled={disabled}
-      onClick={onToggle}
-      className={cn(
-        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? 'bg-accent' : 'bg-paper-200',
-      )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          'inline-block h-3.5 w-3.5 rounded-full bg-surface-raised shadow-card transition-transform duration-fast',
-          checked ? 'translate-x-4' : 'translate-x-0.5',
-        )}
-      />
-    </button>
-  );
 }
 
 function skillsHeader(skills: Plugin['skills']): string {
@@ -353,9 +320,9 @@ function SkillsSection({ plugin }: { plugin: Plugin }) {
                 </div>
                 <Switch
                   checked={skill.enabled}
-                  label={`${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
+                  aria-label={`${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
                   disabled={setSkillEnabled.isPending}
-                  onToggle={() => void handleToggle(skill.name, !skill.enabled)}
+                  onCheckedChange={() => void handleToggle(skill.name, !skill.enabled)}
                 />
               </li>
             ))}
@@ -518,10 +485,10 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
             )}
             <Switch
               checked={plugin.enabled}
-              label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.name}`}
+              aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.name}`}
               title={canToggle ? undefined : 'Only plugins with status ok can be enabled'}
               disabled={!canToggle || setEnabled.isPending}
-              onToggle={() => void handleToggle()}
+              onCheckedChange={() => void handleToggle()}
             />
           </div>
         )}
