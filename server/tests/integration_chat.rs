@@ -1879,6 +1879,44 @@ fn proposal_url(session_id: &str, message_id: &str, proposal_id: &str, action: &
     format!("/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/{action}")
 }
 
+/// Wait for a chat turn to attach a proposal. Returns (message id, proposal id).
+async fn await_agent_proposal(
+    app: &axum::Router,
+    cookie: &str,
+    csrf: &str,
+    session_id: &str,
+) -> (String, String) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                cookie,
+                csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        let proposal_message = messages["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "agent" && m["actionMetadata"]["proposals"].is_array());
+        if let Some(message) = proposal_message {
+            let proposal = &message["actionMetadata"]["proposals"][0];
+            return (
+                message["id"].as_str().unwrap().to_string(),
+                proposal["id"].as_str().unwrap().to_string(),
+            );
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no proposal message");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test]
 async fn accept_ticket_proposal_creates_one_ticket_then_conflicts() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -2165,35 +2203,7 @@ async fn agent_chat_turn_proposes_ticket_until_human_accepts() {
         .unwrap();
     assert_eq!(posted.status(), StatusCode::CREATED);
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    let (message_id, proposal_id) = loop {
-        let list = app
-            .clone()
-            .oneshot(common::json_request(
-                "GET",
-                &format!("/api/chat/sessions/{session_id}/messages"),
-                "",
-                &cookie,
-                &csrf,
-            ))
-            .await
-            .unwrap();
-        let messages: serde_json::Value = common::json_body(list).await;
-        let proposal_message = messages["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|m| m["role"] == "agent" && m["actionMetadata"]["proposals"].is_array());
-        if let Some(message) = proposal_message {
-            let proposal = &message["actionMetadata"]["proposals"][0];
-            break (
-                message["id"].as_str().unwrap().to_string(),
-                proposal["id"].as_str().unwrap().to_string(),
-            );
-        }
-        assert!(tokio::time::Instant::now() < deadline, "no proposal message");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
+    let (message_id, proposal_id) = await_agent_proposal(&app, &cookie, &csrf, &session_id).await;
 
     assert_eq!(ticket_count(pool, &board_id).await, before);
 
@@ -2212,4 +2222,58 @@ async fn agent_chat_turn_proposes_ticket_until_human_accepts() {
     let body: serde_json::Value = common::json_body(accepted).await;
     assert_eq!(body["ticket"]["title"], "Harden chat cwd resolution for unbound sessions");
     assert_eq!(ticket_count(pool, &board_id).await, before + 1);
+}
+
+#[tokio::test]
+async fn agent_chat_turn_proposes_knowledge_until_human_accepts() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("chat_propose_knowledge", |_| {}).await;
+    let pool = state.db.as_ref().expect("test db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"Save the chat cwd rule as knowledge"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let (message_id, proposal_id) = await_agent_proposal(&app, &cookie, &csrf, &session_id).await;
+
+    let knowledge_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_items")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(knowledge_rows, 0, "proposal must not create knowledge before accept");
+
+    let accepted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(accepted).await;
+    assert_eq!(body["knowledge"]["title"], "Chat cwd is per session");
+    assert_eq!(body["knowledge"]["status"], "pending");
+    assert_eq!(body["knowledge"]["sourceType"], "chat_session");
 }
