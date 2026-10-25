@@ -2031,6 +2031,54 @@ async fn result_submit_warns_on_unknown_targets() {
 }
 
 #[tokio::test]
+async fn result_submit_warns_on_a_long_plan_and_still_accepts_it() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    mark_running(&fx.pool, fx.scope.run_id).await;
+    let url = serve(&fx).await;
+    let token = mint_scope(
+        &fx,
+        NewRunToolScope {
+            job_type: "plan_ticket".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+
+    let short = "## Plan\n\n### Approach\nAdd a check.\n\n### Steps\n- [ ] Add it\n";
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": short}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
+    assert_eq!(out["warnings"], json!([]));
+
+    let steps: String = (0..12).map(|i| format!("- [ ] Step {i}\n")).collect();
+    let long = format!("## Plan\n\n### Approach\nAdd a check.\n\n### Steps\n{steps}");
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": long}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
+    let warnings = out["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w.as_str().unwrap().contains("12 steps")),
+        "{warnings:?}"
+    );
+    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    assert_eq!(stored["summary"], long);
+}
+
+#[tokio::test]
 async fn invalid_resubmission_keeps_previous_valid() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
