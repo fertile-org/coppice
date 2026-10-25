@@ -24,6 +24,7 @@ export default {
           DEFAULT: 'var(--color-border)',
           strong: 'var(--color-border-strong)',
         },
+        'switch-track-off': 'var(--color-switch-track-off)',
         overlay: {
           DEFAULT: 'var(--color-overlay)',
           strong: 'var(--color-overlay-strong)',

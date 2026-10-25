@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DesktopAppInfo, DesktopUpdateCheck } from '../../lib/desktop';
 import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 
 export function updateHelperText(info: Pick<DesktopAppInfo, 'platform' | 'macInPlaceUpdates'>): string {
   if (info.platform === 'darwin' && info.macInPlaceUpdates) {
@@ -93,27 +94,11 @@ export function DesktopUpdatesSection() {
     <section aria-label="Updates" className="space-y-3">
       <p className="font-body text-sm text-text-primary">Version {version}</p>
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={automatic}
+        <Switch
+          checked={automatic}
           aria-label="Automatic updates"
-          onClick={() => void toggle()}
-          className={
-            automatic
-              ? 'relative h-5 w-9 rounded-full border border-success-muted bg-success-muted'
-              : 'relative h-5 w-9 rounded-full border border-border bg-paper-200'
-          }
-        >
-          <span
-            aria-hidden
-            className={
-              automatic
-                ? 'absolute top-0.5 left-4 h-3.5 w-3.5 rounded-full bg-surface'
-                : 'absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded-full bg-surface'
-            }
-          />
-        </button>
+          onCheckedChange={() => void toggle()}
+        />
         <span className="font-body text-sm text-text-primary">Automatic updates</span>
       </div>
       <p className="font-body text-sm text-text-secondary">{helper}</p>

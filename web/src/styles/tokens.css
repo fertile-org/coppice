@@ -67,6 +67,7 @@
   --color-field-border-disabled: var(--color-bark-200);
   --color-border: var(--color-bark-200);
   --color-border-strong: var(--color-bark-300);
+  --color-switch-track-off: #8f7a5f;
 
   --color-text-primary: var(--color-bark-900);
   --color-text-secondary: var(--color-bark-600);
@@ -248,6 +249,7 @@
   --color-field-border: #3f3f46;
   --color-field-bg-disabled: #18181b;
   --color-field-border-disabled: #27272a;
+  --color-switch-track-off: var(--color-paper-300);
   --color-border: #27272a;
   --color-border-strong: #3f3f46;
 
