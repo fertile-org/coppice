@@ -1,0 +1,14 @@
+{
+  "status": "done",
+  "summary": "Draft ticket ready for you to confirm: Harden chat cwd resolution for unbound sessions.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "actions": [
+    {
+      "type": "create_ticket",
+      "title": "Harden chat cwd resolution for unbound sessions",
+      "description": "## Context\n\nChat turns need a safe working directory when no repo is bound.\n\n## Next steps\n\n- Keep unbound sessions under WORKTREES_PATH/chat/{session_id}\n- Reject `/` and TICKET-* paths\n- Cover bound-repo and unbound cases in tests"
+    }
+  ]
+}

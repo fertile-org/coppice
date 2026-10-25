@@ -1,7 +1,8 @@
 use crate::domain::attachment::Attachment;
 use crate::domain::chat_action::{
     compact_transcript, draft_fields_from_agent_summary, draft_ticket_title,
-    fallback_draft_ticket, ChatActionResultMeta, DraftTicketFields, DraftTicketSource,
+    fallback_draft_ticket, proposal_mut, ChatActionResultMeta, DraftTicketFields,
+    DraftTicketSource,
 };
 use crate::domain::chat_message::{ChatMessage, ChatMessageRole};
 use crate::domain::chat_session::{title_from_first_message, ChatSession, ChatSessionStatus};
@@ -89,6 +90,12 @@ pub enum ChatError {
     ChatUnavailable(String),
     #[error("active run already exists")]
     ActiveRunExists,
+    /// The proposal was already accepted or rejected.
+    #[error("proposal is no longer pending")]
+    ProposalNotPending,
+    /// Accepting a ticket needs a board from the override, the proposal or the session.
+    #[error("boardId is required to create a ticket")]
+    BoardRequired,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -206,6 +213,26 @@ pub struct CreateKnowledgeFromChatInput<'a> {
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
     pub board_id: Option<Uuid>,
+}
+
+/// Optional overrides for an accepted proposal. Unset fields use the proposal.
+pub struct AcceptProposalInput<'a> {
+    pub title: Option<&'a str>,
+    /// Ticket description, or knowledge content.
+    pub description: Option<&'a str>,
+    pub board_id: Option<Uuid>,
+    pub knowledge_type: Option<&'a str>,
+    pub scope: Option<&'a str>,
+    pub created_by: &'a str,
+}
+
+pub struct AcceptedProposal {
+    /// Agent message with the proposal marked `created`.
+    pub message: ChatMessage,
+    /// The "Created ticket" or "Proposed knowledge" note.
+    pub system_message: ChatMessage,
+    pub ticket: Option<TicketWithDisplay>,
+    pub knowledge: Option<KnowledgeItemView>,
 }
 
 fn ensure_chat_available(connector: &str) -> Result<(), ChatError> {
@@ -1285,6 +1312,175 @@ impl<'a> ChatService<'a> {
             system_message,
         })
     }
+
+    /// Accept a pending proposal. The agent message row lock serializes
+    /// concurrent accept/reject calls, so a proposal creates at most one item.
+    pub async fn accept_proposal(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        proposal_id: Uuid,
+        owner_user_id: Uuid,
+        knowledge_config: &KnowledgeConfig,
+        input: AcceptProposalInput<'_>,
+    ) -> Result<AcceptedProposal, ChatError> {
+        let session = self.get_session(session_id, owner_user_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let mut metadata = lock_proposal_message(&mut tx, session_id, message_id).await?;
+        let pid = proposal_id.to_string();
+        let proposal = proposal_mut(&mut metadata, &pid)
+            .ok_or(ChatError::NotFound)?
+            .clone();
+        ensure_proposal_pending(&proposal)?;
+
+        let str_field = |key: &str| proposal.get(key).and_then(serde_json::Value::as_str);
+        let uuid_field = |key: &str| str_field(key).and_then(|s| Uuid::parse_str(s).ok());
+        let override_or = |value: Option<&str>, key: &str| {
+            value
+                .map(str::to_string)
+                .or_else(|| str_field(key).map(str::to_string))
+        };
+
+        let (key, created_id, system_message, ticket, knowledge) = match str_field("type") {
+            Some("create_ticket") => {
+                let board_id = input
+                    .board_id
+                    .or_else(|| uuid_field("boardId"))
+                    .or(session.board_id)
+                    .ok_or(ChatError::BoardRequired)?;
+                let title = override_or(input.title, "title");
+                let description = override_or(input.description, "description");
+                let created = self
+                    .create_ticket_from_chat(
+                        session_id,
+                        owner_user_id,
+                        CreateTicketFromChatInput {
+                            board_id,
+                            title: title.as_deref(),
+                            description: description.as_deref(),
+                            repo_id: uuid_field("repoId"),
+                            created_by: input.created_by,
+                        },
+                    )
+                    .await?;
+                (
+                    "ticketId",
+                    created.ticket.ticket.id,
+                    created.system_message,
+                    Some(created.ticket),
+                    None,
+                )
+            }
+            Some("create_knowledge") => {
+                let title = override_or(input.title, "title");
+                let content = override_or(input.description, "content");
+                let knowledge_type = override_or(input.knowledge_type, "knowledgeType");
+                let scope = override_or(input.scope, "scope");
+                let created = self
+                    .create_knowledge_from_chat(
+                        session_id,
+                        owner_user_id,
+                        knowledge_config,
+                        CreateKnowledgeFromChatInput {
+                            title: title.as_deref(),
+                            content: content.as_deref(),
+                            knowledge_type: knowledge_type.as_deref(),
+                            scope: scope.as_deref(),
+                            board_id: input.board_id.or_else(|| uuid_field("boardId")),
+                        },
+                    )
+                    .await?;
+                (
+                    "knowledgeItemId",
+                    created.item.id,
+                    created.system_message,
+                    None,
+                    Some(created.item),
+                )
+            }
+            _ => return Err(ChatError::Validation("unknown proposal type".into())),
+        };
+
+        let proposal = proposal_mut(&mut metadata, &pid).ok_or(ChatError::NotFound)?;
+        proposal["status"] = "created".into();
+        proposal[key] = created_id.to_string().into();
+        let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
+        tx.commit().await?;
+
+        Ok(AcceptedProposal {
+            message,
+            system_message,
+            ticket,
+            knowledge,
+        })
+    }
+
+    /// Reject a pending proposal. Creates nothing.
+    pub async fn reject_proposal(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        proposal_id: Uuid,
+        owner_user_id: Uuid,
+    ) -> Result<ChatMessage, ChatError> {
+        self.get_session(session_id, owner_user_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let mut metadata = lock_proposal_message(&mut tx, session_id, message_id).await?;
+        let pid = proposal_id.to_string();
+        let proposal = proposal_mut(&mut metadata, &pid).ok_or(ChatError::NotFound)?;
+        ensure_proposal_pending(proposal)?;
+        proposal["status"] = "rejected".into();
+        let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
+        tx.commit().await?;
+        Ok(message)
+    }
+}
+
+/// Lock one agent message's proposal metadata for the rest of `tx`.
+async fn lock_proposal_message(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: Uuid,
+    message_id: Uuid,
+) -> Result<serde_json::Value, ChatError> {
+    let row: Option<Option<serde_json::Value>> = sqlx::query_scalar(
+        r#"
+        SELECT action_metadata FROM chat_messages
+        WHERE id = $1 AND session_id = $2 AND role = 'agent'
+        FOR UPDATE
+        "#,
+    )
+    .bind(message_id)
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.flatten().ok_or(ChatError::NotFound)
+}
+
+fn ensure_proposal_pending(proposal: &serde_json::Value) -> Result<(), ChatError> {
+    match proposal.get("status").and_then(serde_json::Value::as_str) {
+        Some("pending") => Ok(()),
+        _ => Err(ChatError::ProposalNotPending),
+    }
+}
+
+async fn update_message_metadata(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    message_id: Uuid,
+    metadata: &serde_json::Value,
+) -> Result<ChatMessage, ChatError> {
+    let row = sqlx::query(
+        r#"
+        UPDATE chat_messages SET action_metadata = $2 WHERE id = $1
+        RETURNING
+            id, session_id, seq, role, body, agent_run_id, action_metadata,
+            attachment_ids, created_at
+        "#,
+    )
+    .bind(message_id)
+    .bind(metadata)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row_to_message(&row))
 }
 
 /// Serialize message inserts for one session. `seq` is unique per session, and

@@ -5,8 +5,8 @@ use crate::domain::attachment::Attachment;
 use crate::domain::chat_message::ChatMessage;
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
 use crate::services::chat_service::{
-    ChatError, ChatService, CreateKnowledgeFromChatInput, CreateTicketFromChatInput,
-    DraftTicketDeps,
+    AcceptProposalInput, ChatError, ChatService, CreateKnowledgeFromChatInput,
+    CreateTicketFromChatInput, DraftTicketDeps,
 };
 use crate::services::comment_service::CommentService;
 use crate::AppState;
@@ -50,6 +50,35 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/chat/sessions/{session_id}/create-knowledge",
             post(create_knowledge),
         )
+        .route(
+            "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/accept",
+            post(accept_proposal),
+        )
+        .route(
+            "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/reject",
+            post(reject_proposal),
+        )
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptProposalBody {
+    title: Option<String>,
+    /// Ticket description, or knowledge content.
+    description: Option<String>,
+    board_id: Option<Uuid>,
+    knowledge_type: Option<String>,
+    scope: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptProposalResponse {
+    message: MessageResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ticket: Option<crate::api::tickets::TicketResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    knowledge: Option<crate::api::knowledge::KnowledgeResponse>,
 }
 
 #[derive(Deserialize)]
@@ -203,7 +232,8 @@ fn map_error(err: ChatError) -> StatusCode {
     match err {
         ChatError::NotFound => StatusCode::NOT_FOUND,
         ChatError::Validation(_) | ChatError::ChatUnavailable(_) => StatusCode::BAD_REQUEST,
-        ChatError::ActiveRunExists => StatusCode::CONFLICT,
+        ChatError::BoardRequired => StatusCode::UNPROCESSABLE_ENTITY,
+        ChatError::ActiveRunExists | ChatError::ProposalNotPending => StatusCode::CONFLICT,
         ChatError::Database(_) | ChatError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -495,6 +525,56 @@ async fn draft_ticket(
         description: result.description,
         source: result.source.as_str().to_string(),
     }))
+}
+
+async fn accept_proposal(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+    body: Option<Json<AcceptProposalBody>>,
+) -> Result<Json<AcceptProposalResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let result = ChatService::new(pool)
+        .accept_proposal(
+            session_id,
+            message_id,
+            proposal_id,
+            user.id,
+            &state.config.knowledge,
+            AcceptProposalInput {
+                title: body.title.as_deref(),
+                description: body.description.as_deref(),
+                board_id: body.board_id,
+                knowledge_type: body.knowledge_type.as_deref(),
+                scope: body.scope.as_deref(),
+                created_by: &user.email,
+            },
+        )
+        .await
+        .map_err(map_error)?;
+    let attachments_by_id =
+        attachments_for_messages(pool, std::slice::from_ref(&result.message)).await?;
+    Ok(Json(AcceptProposalResponse {
+        message: message_response(result.message, &attachments_by_id),
+        ticket: result.ticket.map(ticket_to_response),
+        knowledge: result.knowledge.map(knowledge_item_response),
+    }))
+}
+
+async fn reject_proposal(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<Json<MessageResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let message = ChatService::new(pool)
+        .reject_proposal(session_id, message_id, proposal_id, user.id)
+        .await
+        .map_err(map_error)?;
+    let attachments_by_id =
+        attachments_for_messages(pool, std::slice::from_ref(&message)).await?;
+    Ok(Json(message_response(message, &attachments_by_id)))
 }
 
 async fn create_knowledge(

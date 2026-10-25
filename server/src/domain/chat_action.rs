@@ -124,6 +124,18 @@ pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
     Some(serde_json::json!({ "proposals": proposals }))
 }
 
+/// Find one proposal in an agent message's `action_metadata` by id.
+pub fn proposal_mut<'a>(
+    metadata: &'a mut serde_json::Value,
+    proposal_id: &str,
+) -> Option<&'a mut serde_json::Value> {
+    metadata
+        .get_mut("proposals")?
+        .as_array_mut()?
+        .iter_mut()
+        .find(|p| p.get("id").and_then(serde_json::Value::as_str) == Some(proposal_id))
+}
+
 /// Deterministic compact of a chat transcript for knowledge drafts.
 pub fn compact_transcript(transcript: &str, max_chars: usize) -> String {
     let trimmed = transcript.trim();

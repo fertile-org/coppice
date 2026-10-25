@@ -112,7 +112,12 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              The focus repository is the one the current board uses most, and it is checked out \
              at the start of the chat when it fits. \
              Call `open_repo` with a slug from `REPOS.md` when you need a repository that is not checked out. \
-             Pass a slug, not a path.\n\n",
+             Pass a slug, not a path.\n\n\
+             When the human asks for a ticket or a knowledge item, draft it and add it to `actions` in \
+             your `result_submit` call: `{\"type\":\"create_ticket\",\"title\":...,\"description\":...}` or \
+             `{\"type\":\"create_knowledge\",\"title\":...,\"content\":...,\"knowledgeType\":...,\"scope\":...}`. \
+             Use at most 5 actions per reply and only when asked. The human confirms each one in the chat \
+             with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n",
         );
         if input.has_attachments {
             out.push_str(
