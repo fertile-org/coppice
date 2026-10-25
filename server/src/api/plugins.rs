@@ -70,7 +70,7 @@ struct PluginDirResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PluginResponse {
+pub(crate) struct PluginResponse {
     id: Uuid,
     plugin_dir_id: Uuid,
     rel_path: String,
@@ -381,7 +381,7 @@ fn plugin_response(
     }
 }
 
-async fn single_response(
+pub(crate) async fn single_response(
     state: &AppState,
     pool: &PgPool,
     plugin: PluginRow,

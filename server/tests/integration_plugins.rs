@@ -3465,6 +3465,60 @@ async fn marketplace_path_entry_installs_one_row_with_origin() {
 }
 
 #[tokio::test]
+async fn marketplace_install_entry_resolves_path_and_refuses_object_sources() {
+    use coppice_server::services::marketplace_service::MarketplaceService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let cache = tempfile::tempdir().unwrap();
+    let source_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'test-market', 'git', 'file:///unused', 'abc123', 1)",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let root = cache.path().join(source_id.to_string());
+    marketplace_fixture(&root, "sample-plugin", "sample-plugin");
+    let market = json!({
+        "name": "test-market",
+        "plugins": [
+            { "name": "sample-plugin", "source": "./plugins/sample-plugin" },
+            { "name": "remote", "source": { "source": "github", "repo": "acme/remote" } }
+        ]
+    });
+    std::fs::write(root.join(".claude-plugin/marketplace.json"), market.to_string()).unwrap();
+
+    let service = MarketplaceService::new(&pool);
+    let installed = service
+        .install_entry(source_id, cache.path(), "sample-plugin", &catalog)
+        .await
+        .expect("path entry installs");
+    let origin: (Option<String>,) =
+        sqlx::query_as("SELECT origin_commit FROM plugins WHERE id = $1")
+            .bind(installed.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(origin.0.as_deref(), Some("abc123"));
+
+    let remote = service
+        .install_entry(source_id, cache.path(), "remote", &catalog)
+        .await
+        .expect_err("object source is refused");
+    assert!(matches!(remote, PluginError::Validation(_)), "{remote:?}");
+    let missing = service
+        .install_entry(source_id, cache.path(), "ghost", &catalog)
+        .await
+        .expect_err("unknown entry is refused");
+    assert!(matches!(missing, PluginError::NotFound), "{missing:?}");
+}
+
+#[tokio::test]
 async fn marketplace_path_entry_rolls_back_plugin_json_name_clash() {
     use coppice_server::services::marketplace_service::{MarketplaceService, PathEntry};
     use coppice_server::services::plugin_service::PluginService;

@@ -6,7 +6,7 @@ use crate::plugins::catalog::CATALOG_DIR;
 use crate::plugins::git_install::{clone, validate_git_url, validate_ref};
 use crate::plugins::manifest::is_valid_plugin_name;
 use crate::plugins::marketplace::{
-    entry_categories, expand_marketplace, normalize_source, validate_marketplace,
+    entry_categories, entry_source, expand_marketplace, normalize_source, validate_marketplace,
 };
 use crate::plugins::skills::SkillCatalog;
 use crate::services::plugin_service::{lock_plugin_state, PluginError, PluginRow, PluginService};
@@ -407,6 +407,53 @@ impl<'a> MarketplaceService<'a> {
             .execute(self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Installs one `path` entry of a source's cached marketplace. Object
+    /// sources (`github`, `url`, `git-subdir`, `npm`) are not installed yet.
+    pub async fn install_entry(
+        &self,
+        id: Uuid,
+        cache: &Path,
+        name: &str,
+        catalog: &SkillCatalog,
+    ) -> Result<PluginRow, PluginError> {
+        let source = self.get_source(id).await?;
+        let (root, _) = source_root(cache, &source);
+        if !root.join(MARKETPLACE_JSON).is_file() {
+            return Err(PluginError::Validation(
+                "marketplace has not been fetched yet".into(),
+            ));
+        }
+        let source_value = entry_source(&root, name).ok_or(PluginError::NotFound)?;
+        let path = match &source_value {
+            serde_json::Value::String(path) => path.clone(),
+            serde_json::Value::Object(object) => {
+                let kind = object
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
+                return Err(PluginError::Validation(format!(
+                    "installs from {kind} sources are not supported yet"
+                )));
+            }
+            _ => {
+                return Err(PluginError::Validation(
+                    "source must be a path or an object".into(),
+                ))
+            }
+        };
+        self.install_path_entry(
+            PathEntry {
+                source_id: source.id,
+                root: &root,
+                source: &path,
+                name,
+                commit: source.commit_sha.as_deref(),
+            },
+            catalog,
+        )
+        .await
     }
 
     /// Lists entries of every source whose cache folder exists. A source with

@@ -54,6 +54,16 @@ pub fn entry_categories(folder: &Path) -> HashMap<String, String> {
         .collect()
 }
 
+/// The raw `source` value of the first `plugins` entry named `name`.
+pub fn entry_source(folder: &Path, name: &str) -> Option<Value> {
+    let (_, entries) = read_marketplace(folder).ok()?;
+    entries
+        .iter()
+        .find(|entry| entry.get("name").and_then(Value::as_str) == Some(name))?
+        .get("source")
+        .cloned()
+}
+
 fn read_marketplace(folder: &Path) -> Result<(MarketplaceRef, Vec<Value>), String> {
     let text = std::fs::read_to_string(folder.join(MARKETPLACE_JSON)).map_err(|e| e.to_string())?;
     let mut value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;

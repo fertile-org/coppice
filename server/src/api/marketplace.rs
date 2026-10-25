@@ -1,5 +1,5 @@
 use crate::api::auth::{pool_from_state, AuthUser};
-use crate::api::plugins::ApiError;
+use crate::api::plugins::{single_response, ApiError, PluginResponse};
 use crate::middleware::admin::AdminUser;
 use crate::services::marketplace_service::{
     EntryFilter, MarketplaceEntry, MarketplaceService, MarketplaceSource,
@@ -34,6 +34,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(refresh_source),
         )
         .route("/api/marketplace/entries", get(list_entries))
+        .route("/api/marketplace/install", post(install_entry))
 }
 
 #[derive(Serialize)]
@@ -75,6 +76,13 @@ struct AddSourceBody {
     git_url: String,
     #[serde(rename = "ref")]
     git_ref: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallBody {
+    source_id: Uuid,
+    entry: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -160,6 +168,24 @@ async fn list_entries(
         .list_entries(cache_dir(&state), &filter)
         .await?;
     Ok(Json(entries.into_iter().map(entry_response).collect()))
+}
+
+async fn install_entry(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Json(body): Json<InstallBody>,
+) -> Result<(StatusCode, Json<PluginResponse>), ApiError> {
+    let pool = pool_from_state(&state)?;
+    let plugin = MarketplaceService::new(pool)
+        .install_entry(
+            body.source_id,
+            cache_dir(&state),
+            &body.entry,
+            &state.skills,
+        )
+        .await?;
+    let response = single_response(&state, pool, plugin).await?;
+    Ok((StatusCode::CREATED, response))
 }
 
 fn cache_dir(state: &AppState) -> &FsPath {
