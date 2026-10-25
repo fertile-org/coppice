@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { selectComboboxOption } from '../../test/combobox';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import type { Plugin } from '../../lib/schemas/plugin';
 import { AgentsPage } from './AgentsPage';
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     id: string;
     displayName?: string;
   }[],
+  agents: null as Agent[] | null,
 }));
 
 vi.mock('../tools/useUncoveredModels', () => ({
@@ -50,7 +51,12 @@ const agent: Agent = {
 };
 
 vi.mock('./useAgents', () => ({
-  useAgents: () => ({ data: [agent], isLoading: false, isError: false, refetch: vi.fn() }),
+  useAgents: () => ({
+    data: mocks.agents ?? [agent],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
   useAgentPresets: () => ({ data: [], isLoading: false }),
   useConnectors: () => ({ data: mocks.connectors }),
   useUpdateAgentMutation: () => ({ mutateAsync: vi.fn() }),
@@ -150,6 +156,30 @@ describe('AgentsPage rows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('AgentsPage order', () => {
+  afterEach(() => {
+    mocks.agents = null;
+  });
+
+  it('keeps the server order instead of re-sorting rows on the client', () => {
+    const serverOrder = ['PM Alpha', 'TL Alpha', 'BE Alpha', 'BE Beta', 'Ops Bot'];
+    mocks.agents = serverOrder.map((name, index) => ({
+      ...agent,
+      id: `00000000-0000-4000-8000-0000000000${index + 10}`,
+      name,
+      role: name.split(' ')[0],
+    }));
+
+    renderPage('/agents');
+
+    const rendered = screen
+      .getAllByRole('row')
+      .map((row) => serverOrder.find((name) => row.textContent?.includes(name)))
+      .filter((name): name is string => name !== undefined);
+    expect(rendered).toEqual(serverOrder);
   });
 });
 

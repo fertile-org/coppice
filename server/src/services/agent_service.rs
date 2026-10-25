@@ -1,4 +1,4 @@
-use crate::domain::agent::{Agent, AgentPreset};
+use crate::domain::agent::{compare_agents_for_board, Agent, AgentPreset};
 use crate::services::plugin_service::PluginService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -48,13 +48,15 @@ impl<'a> AgentService<'a> {
                 id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
-            ORDER BY created_at ASC
+            ORDER BY created_at ASC, id ASC
             "#,
         )
         .fetch_all(self.pool)
         .await?;
 
-        Ok(rows.iter().map(row_to_agent).collect())
+        let mut agents: Vec<Agent> = rows.iter().map(row_to_agent).collect();
+        agents.sort_by(compare_agents_for_board);
+        Ok(agents)
     }
 
     pub async fn get(&self, agent_id: Uuid) -> Result<Agent, AgentError> {
