@@ -45,7 +45,7 @@ Coppice reads repositories the way the rest of the ecosystem publishes them, wit
 |--------|---------------|---------|
 | Claude Code plugin | `.claude-plugin/plugin.json` | One plugin. Skills are searched in `skills/` (or the `skills` paths in `plugin.json`). |
 | Skills repo (`npx skills add` layout) | A root `SKILL.md`, or `SKILL.md` files in `skills/`, `skills/.curated/`, `skills/.experimental/`, `skills/.system/`, `.agents/skills/`, `.claude/skills/`, or one level below the folder (`<name>/SKILL.md`) | One plugin named after the folder, version `0.0.0`. A root `SKILL.md` makes the whole folder a single skill. |
-| Claude Code marketplace | `.claude-plugin/marketplace.json` | One plugin per entry in its `plugins` list (see below). |
+| Marketplace file | `.claude-plugin/marketplace.json` (the file format Coppice reads) | One plugin per entry in its `plugins` list (see below). |
 
 Skills are found up to 3 folders deep inside each skills folder (`skills/<category>/<group>/<name>/SKILL.md` at most). A folder with a `SKILL.md` is one skill; nothing below it is searched. Folders starting with `.` and `node_modules` are skipped. A skill's name is its folder name.
 
