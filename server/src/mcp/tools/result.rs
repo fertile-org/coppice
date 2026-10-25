@@ -51,9 +51,26 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         .await
         .map_err(|e| ToolError::Internal(e.into()))?;
     let keys = resolve_agent_keys(&agents);
-    let warnings = target_warnings(&result, &keys, ctx.scope.agent_id);
+    let mut warnings = target_warnings(&result, &keys, ctx.scope.agent_id);
+    if ctx.scope.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        warnings.extend(plan_warnings(&result));
+    }
 
     Ok(json!({ "accepted": true, "warnings": warnings }))
+}
+
+/// Length advice on a written plan; questions stand in for a plan, so they get none.
+fn plan_warnings(result: &AgentRunResult) -> Vec<String> {
+    match result {
+        AgentRunResult::Done {
+            summary,
+            plan_questions,
+            ..
+        } if plan_questions.is_empty() && !summary.trim().is_empty() => {
+            crate::copy::plan::plan_length_warnings(summary)
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Questions belong to a planning run on a ticket with no plan and no

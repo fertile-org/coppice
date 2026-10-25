@@ -78,6 +78,27 @@ pub const PLAN_CRITERIA_INSTRUCTION: &str = "Under Acceptance criteria, write ea
 /// Diagrams support the written plan. They are not a substitute for it.
 pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
 
+/// A person reviews the plan at Plan Review, so it has to fit on one screen.
+/// Detail belongs to the Tech Lead and the implementer, not the plan.
+pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work. Leave implementation detail to the implementer.";
+
+/// Above these, `result_submit` warns a planning run. The plan still saves.
+pub const PLAN_MAX_STEPS: usize = 8;
+pub const PLAN_MAX_CRITERIA: usize = 8;
+pub const PLAN_MAX_WORDS: usize = 400;
+
+pub fn plan_too_many_steps(count: usize) -> String {
+    format!("The plan has {count} steps; keep it to {PLAN_MAX_STEPS} or fewer. Merge small steps and leave implementation detail to the implementer, or propose sub-tickets in `splitTickets`. Resubmit to replace this plan.")
+}
+
+pub fn plan_too_many_criteria(count: usize) -> String {
+    format!("The plan has {count} acceptance criteria; keep it to {PLAN_MAX_CRITERIA} or fewer. Keep the ones a person checks at Human Review, or propose sub-tickets in `splitTickets`. Resubmit to replace this plan.")
+}
+
+pub fn plan_too_long(words: usize) -> String {
+    format!("The plan is about {words} words; keep it under {PLAN_MAX_WORDS} so it fits on one screen. Drop signatures, line numbers, SQL, and code, and leave that detail to the implementer. Resubmit to replace this plan.")
+}
+
 pub const CHANGES_REQUESTED_HEADING: &str = "## Changes requested";
 
 pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a planning run.";
@@ -89,7 +110,7 @@ pub const PLAN_SPLIT_TOO_SMALL: &str =
 pub const PLAN_MUST_FINISH: &str =
     "A planning run finishes with status `done` and the plan in `summary`.";
 
-pub const PLAN_SPLIT_INSTRUCTION: &str = "If the work is too big for one ticket, you may also propose 2 or more sub-tickets in `splitTickets`, each with a title, a description, acceptance criteria, and short `steps`. They are created only when the plan is approved, each with its own approved plan. Then write this plan as the umbrella plan for the whole ticket.";
+pub const PLAN_SPLIT_INSTRUCTION: &str = "If the work is too big for one ticket, you may also propose 2 or more sub-tickets in `splitTickets`, each with a title, a description, acceptance criteria, and short one-line `steps`. They are created only when the plan is approved, each with its own approved plan. Then write this plan as the umbrella plan for the whole ticket.";
 
 /// System note when approving a plan creates its sub-tickets.
 pub fn split_approved_note(count: usize) -> String {
@@ -346,9 +367,14 @@ pub fn format_plan(summary: &str) -> String {
     )
 }
 
+const TEMPLATE_APPROACH: &str = "One to three sentences: what changes and why.";
+const TEMPLATE_STEP: &str = "One line: an outcome, not code.";
+const TEMPLATE_CRITERION: &str =
+    "One line a person can check (verified by a test, command, or manual check)";
+
 pub fn plan_template() -> String {
     format!(
-        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n...\n\n{STEPS_HEADING}\n- [ ] ...\n\n{ACCEPTANCE_CRITERIA_HEADING}\n- [ ] ... (verified by ...)\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{TEMPLATE_APPROACH}\n\n{STEPS_HEADING}\n- [ ] {TEMPLATE_STEP}\n\n{ACCEPTANCE_CRITERIA_HEADING}\n- [ ] {TEMPLATE_CRITERION}\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
     )
 }
 
@@ -383,7 +409,7 @@ pub struct PlanRevision<'a> {
 /// Instructions appended to a planning run.
 pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n{PLAN_LENGTH_INSTRUCTION}\n",
         plan_template()
     );
     let Some(revision) = revision else {
@@ -410,6 +436,47 @@ pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     }
     out.push_str(&format!("\n{REVISION_INSTRUCTION}\n"));
     out
+}
+
+/// Advisory length checks on a submitted plan. Diagrams (fenced code blocks)
+/// and a revision's `### Changes requested` preamble don't count.
+pub fn plan_length_warnings(summary: &str) -> Vec<String> {
+    let plan = approved_plan_section_body(summary);
+    let mut warnings = Vec::new();
+    let steps = checklist_steps(&plan).len();
+    if steps > PLAN_MAX_STEPS {
+        warnings.push(plan_too_many_steps(steps));
+    }
+    let criteria = plan_criteria(&plan).len();
+    if criteria > PLAN_MAX_CRITERIA {
+        warnings.push(plan_too_many_criteria(criteria));
+    }
+    let words = prose_word_count(&plan);
+    if words > PLAN_MAX_WORDS {
+        warnings.push(plan_too_long(words));
+    }
+    warnings
+}
+
+/// Words outside fenced code blocks, headings excluded.
+fn prose_word_count(markdown: &str) -> usize {
+    let mut in_fence = false;
+    let mut words = 0;
+    for line in markdown.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence || trimmed.starts_with('#') {
+            continue;
+        }
+        words += line
+            .split_whitespace()
+            .filter(|word| !matches!(*word, "-" | "*" | "[" | "]" | "[x]" | "[X]"))
+            .count();
+    }
+    words
 }
 
 #[cfg(test)]
@@ -476,7 +543,8 @@ mod tests {
         let text = plan_instructions(None);
         assert!(text.contains(ACCEPTANCE_CRITERIA_HEADING));
         assert!(text.contains(PLAN_CRITERIA_INSTRUCTION));
-        assert_eq!(checklist_steps(&plan_template()), vec!["..."]);
+        assert_eq!(checklist_steps(&plan_template()), vec![TEMPLATE_STEP]);
+        assert_eq!(plan_criteria(&plan_template()), vec![TEMPLATE_CRITERION]);
     }
 
     #[test]
@@ -513,6 +581,18 @@ mod tests {
         assert!(text.contains("The written plan always stays."));
         assert!(text.contains(PLAN_HEADING));
         assert!(text.contains(STEPS_HEADING));
+    }
+
+    #[test]
+    fn instructions_ask_for_a_plan_one_screen_long() {
+        let text = plan_instructions(None);
+        assert!(text.contains(PLAN_LENGTH_INSTRUCTION));
+        assert!(text.contains("at most 8"));
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Old\n",
+            requests: vec!["Shorter please."],
+        };
+        assert!(plan_instructions(Some(&revision)).contains(PLAN_LENGTH_INSTRUCTION));
     }
 
     #[test]
@@ -557,5 +637,57 @@ mod tests {
         let revised = "### Changes requested\n- Use Postgres: switched the store to Postgres.\n- [ ] Split the API change: now two steps.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n- [ ] Change the API\n";
         assert_eq!(format_plan(revised), revised.trim());
         assert_eq!(checklist_steps(revised), vec!["Add the table", "Change the API"]);
+    }
+    fn plan_with(steps: usize, criteria: usize, approach: &str) -> String {
+        let mut plan =
+            format!("{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{approach}\n\n{STEPS_HEADING}\n");
+        for i in 0..steps {
+            plan.push_str(&format!("- [ ] Step {i}\n"));
+        }
+        plan.push_str(&format!("\n{ACCEPTANCE_CRITERIA_HEADING}\n"));
+        for i in 0..criteria {
+            plan.push_str(&format!("- [ ] Criterion {i} (verified by test)\n"));
+        }
+        plan.push_str(&format!(
+            "\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+        ));
+        plan
+    }
+
+    #[test]
+    fn a_short_plan_has_no_length_warning() {
+        assert!(plan_length_warnings(&plan_with(5, 4, "Add a check.")).is_empty());
+    }
+
+    #[test]
+    fn a_long_plan_warns_on_steps_criteria_and_words() {
+        let plan = plan_with(9, 9, &"word ".repeat(PLAN_MAX_WORDS));
+        assert_eq!(
+            plan_length_warnings(&plan),
+            vec![
+                plan_too_many_steps(9),
+                plan_too_many_criteria(9),
+                plan_too_long(prose_word_count(&plan)),
+            ]
+        );
+    }
+
+    #[test]
+    fn diagrams_do_not_count_toward_the_length() {
+        let diagram = format!(
+            "Short.\n\n```mermaid\n{}```",
+            "A --> B\n".repeat(PLAN_MAX_WORDS)
+        );
+        assert!(plan_length_warnings(&plan_with(3, 3, &diagram)).is_empty());
+    }
+
+    #[test]
+    fn a_revision_preamble_does_not_count_toward_the_length() {
+        let preamble = format!(
+            "{REVISED_CHANGES_HEADING}\n{}\n\n",
+            "Done as asked. ".repeat(PLAN_MAX_WORDS)
+        );
+        let revised = format!("{preamble}{}", plan_with(3, 3, "Add a check."));
+        assert!(plan_length_warnings(&revised).is_empty());
     }
 }

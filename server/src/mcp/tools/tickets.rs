@@ -25,14 +25,19 @@ const RUNS_MAX_LIMIT: usize = 30;
 const SEARCH_DEFAULT_LIMIT: usize = 20;
 const SEARCH_MAX_LIMIT: usize = 50;
 
+/// Splits at the `## Acceptance criteria` heading line. A `###` subsection or
+/// the header quoted inside a line (as in an approved plan) does not split.
 pub(crate) fn split_ticket_description(description: &str) -> (String, Option<String>) {
-    if let Some(idx) = description.find(ACCEPTANCE_CRITERIA_HEADER) {
-        let body = description[..idx].trim_end().to_string();
-        let acceptance = description[idx..].trim().to_string();
-        (body, Some(acceptance))
-    } else {
-        (description.to_string(), None)
+    let mut offset = 0;
+    for line in description.split_inclusive('\n') {
+        if line.trim() == ACCEPTANCE_CRITERIA_HEADER {
+            let body = description[..offset].trim_end().to_string();
+            let acceptance = description[offset..].trim().to_string();
+            return (body, Some(acceptance));
+        }
+        offset += line.len();
     }
+    (description.to_string(), None)
 }
 
 pub(crate) fn build_comments_json(
@@ -319,4 +324,33 @@ async fn board_names(ctx: &ToolCtx<'_>) -> Result<HashMap<Uuid, String>, ToolErr
         .into_iter()
         .map(|board| (board.id, board.name))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_on_the_acceptance_criteria_heading_line() {
+        let (body, criteria) =
+            split_ticket_description("Fix it.\n\n## Acceptance criteria\n- [ ] Works\n");
+        assert_eq!(body, "Fix it.");
+        assert_eq!(criteria.as_deref(), Some("## Acceptance criteria\n- [ ] Works"));
+    }
+
+    #[test]
+    fn an_approved_plan_keeps_its_criteria_subsection() {
+        let description = "Fix it.\n\n## Approved plan\n\n### Steps\n- [ ] Do it\n\n### Acceptance criteria\n- [ ] Works\n\n### Risks\nNone.";
+        let (body, criteria) = split_ticket_description(description);
+        assert_eq!(body, description);
+        assert_eq!(criteria, None);
+    }
+
+    #[test]
+    fn the_heading_quoted_inside_a_line_does_not_split() {
+        let description = "Fix it.\n- [ ] Split on `## Acceptance criteria` only as a line\n\n## Acceptance criteria\n- [ ] Works";
+        let (body, criteria) = split_ticket_description(description);
+        assert!(body.ends_with("only as a line"), "{body}");
+        assert_eq!(criteria.as_deref(), Some("## Acceptance criteria\n- [ ] Works"));
+    }
 }
