@@ -360,7 +360,7 @@ describe('TicketGitActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));
     const dialog = await screen.findByRole('dialog', {
-      name: /Remove worktree at:/,
+      name: /Remove worktree\?/,
     });
     expect(dialog).toHaveTextContent(baseGitInfo.worktreePath);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -373,9 +373,9 @@ describe('TicketGitActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));
     const dialog = await screen.findByRole('dialog', {
-      name: /Remove worktree at:/,
+      name: /Remove worktree\?/,
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove worktree' }));
 
     await waitFor(() => expect(removeWorktreeMutateAsync).toHaveBeenCalled());
   });

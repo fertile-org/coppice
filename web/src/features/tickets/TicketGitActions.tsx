@@ -442,7 +442,9 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   async function handleRemoveWorktree() {
     if (!gitInfo?.worktreeExists) return;
     const confirmed = await confirm({
-      title: `Remove worktree at:\n${gitInfo.worktreePath}\n\nThe ticket branch and commits are kept in git. This cannot be undone from the UI.`,
+      title: 'Remove worktree?',
+      description: `${gitInfo.worktreePath}\n\nThe ticket branch and commits are kept in git. This cannot be undone from the UI.`,
+      confirmLabel: 'Remove worktree',
       danger: true,
     });
     if (!confirmed) return;

@@ -119,9 +119,11 @@ export function ConfirmDialog({
           }
         }}
       >
-        <DialogTitle className="whitespace-pre-wrap">{title}</DialogTitle>
+        <DialogTitle className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {title}
+        </DialogTitle>
         {description ? (
-          <DialogDescription className="mt-1 whitespace-pre-wrap">
+          <DialogDescription className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
             {description}
           </DialogDescription>
         ) : (
