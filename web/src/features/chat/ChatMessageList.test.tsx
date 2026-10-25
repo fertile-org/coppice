@@ -102,6 +102,30 @@ describe('ChatMessageList', () => {
     expect(agent.className).toMatch(/bg-moss-50/);
   });
 
+  it('left-aligns system notices like agent replies', () => {
+    const notices: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'system',
+        body: 'Opening coppice…',
+        agentRunId: null,
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={notices} />);
+
+    const system = screen.getByLabelText('System');
+    expect(system).toHaveAttribute('data-role', 'system');
+    expect(system.parentElement).toHaveClass('justify-start');
+    expect(system.parentElement).not.toHaveClass('justify-center');
+  });
+
   it('shows streaming agent row inside the virtualized list', () => {
     renderList(
       <ChatMessageList

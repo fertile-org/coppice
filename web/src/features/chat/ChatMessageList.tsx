@@ -138,7 +138,7 @@ export function ChatMessageBubble({
     <div
       className={cn(
         'flex w-full',
-        isHuman ? 'justify-end' : isSystem ? 'justify-center' : 'justify-start',
+        isHuman ? 'justify-end' : 'justify-start',
       )}
     >
       <article
