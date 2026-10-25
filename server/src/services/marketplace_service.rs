@@ -770,6 +770,30 @@ impl<'a> MarketplaceService<'a> {
         .bind(BUILTIN_SOURCE_NAME)
         .execute(self.pool)
         .await?;
+        // Jobs run in-process, so clones left under `.installs` are from a
+        // crash or restart.
+        remove_quietly(&cache.join(INSTALLS_DIR));
+        self.forget_missing_clones(cache).await
+    }
+
+    /// The cache is regenerable (Compose keeps it off a volume), so a git
+    /// source whose clone is gone shows as not fetched until it is refreshed.
+    async fn forget_missing_clones(&self, cache: &Path) -> Result<(), PluginError> {
+        for source in self.list_sources().await? {
+            if source.kind != "git" || source.refreshed_at.is_none() {
+                continue;
+            }
+            let (root, _) = source_root(cache, &source);
+            if root.join(MARKETPLACE_JSON).is_file() {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE marketplace_sources SET commit_sha = NULL, refreshed_at = NULL WHERE id = $1",
+            )
+            .bind(source.id)
+            .execute(self.pool)
+            .await?;
+        }
         Ok(())
     }
 

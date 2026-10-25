@@ -3239,6 +3239,56 @@ async fn marketplace_seed_rejects_cache_inside_plugin_dir() {
 }
 
 #[tokio::test]
+async fn marketplace_seed_forgets_lost_clones_and_sweeps_installs() {
+    use coppice_server::services::marketplace_service::{EntryFilter, MarketplaceService};
+    use std::time::Duration;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    marketplace_fixture(repo.path(), "sample-plugin", "sample-plugin");
+    git(repo.path(), &["init"]);
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-m", "market"]);
+    let url = format!("file://{}", repo.path().display());
+    let service = MarketplaceService::new(&pool);
+
+    let source = service
+        .add_git_source("lost-market", &url, None, true)
+        .await
+        .expect("add");
+    service
+        .refresh_source(source.id, cache.path(), true, Duration::from_secs(60))
+        .await
+        .expect("refresh");
+    let leftover = cache.path().join(".installs").join("crashed-job");
+    std::fs::create_dir_all(&leftover).unwrap();
+
+    // A recreated container starts with an empty cache.
+    std::fs::remove_dir_all(cache.path().join(source.id.to_string())).unwrap();
+    service.seed_builtin(cache.path()).await.expect("seed");
+
+    let after = service.get_source(source.id).await.unwrap();
+    assert!(after.refreshed_at.is_none(), "{after:?}");
+    assert!(after.commit_sha.is_none(), "{after:?}");
+    assert!(!leftover.exists());
+    let entries = service
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                source_id: Some(source.id),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(entries.is_empty(), "{entries:?}");
+}
+
+#[tokio::test]
 async fn marketplace_git_source_refresh_install_update_and_remove() {
     use coppice_server::services::marketplace_service::{
         EntryFilter, MarketplaceService, PathEntry,
