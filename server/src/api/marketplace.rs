@@ -62,6 +62,8 @@ struct EntryResponse {
     installable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
     installed_plugin_id: Option<Uuid>,
     update_available: bool,
 }
@@ -80,6 +82,7 @@ struct AddSourceBody {
 struct EntriesQuery {
     q: Option<String>,
     source: Option<Uuid>,
+    category: Option<String>,
 }
 
 async fn list_sources(
@@ -147,6 +150,11 @@ async fn list_entries(
     let filter = EntryFilter {
         query: query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()),
         source_id: query.source,
+        category: query
+            .category
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty()),
     };
     let entries = MarketplaceService::new(pool)
         .list_entries(cache_dir(&state), &filter)
@@ -182,6 +190,7 @@ fn entry_response(entry: MarketplaceEntry) -> EntryResponse {
         kind: entry.kind,
         installable: entry.installable,
         reason: entry.reason,
+        category: entry.category,
         installed_plugin_id: entry.installed_plugin_id,
         update_available: entry.update_available,
     }

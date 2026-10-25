@@ -5,7 +5,9 @@ use crate::plugins::capability::MARKETPLACE_JSON;
 use crate::plugins::catalog::CATALOG_DIR;
 use crate::plugins::git_install::{clone, validate_git_url, validate_ref};
 use crate::plugins::manifest::is_valid_plugin_name;
-use crate::plugins::marketplace::{expand_marketplace, normalize_source, validate_marketplace};
+use crate::plugins::marketplace::{
+    entry_categories, expand_marketplace, normalize_source, validate_marketplace,
+};
 use crate::plugins::skills::SkillCatalog;
 use crate::services::plugin_service::{lock_plugin_state, PluginError, PluginRow, PluginService};
 use sqlx::postgres::PgRow;
@@ -202,6 +204,8 @@ pub struct MarketplaceEntry {
     pub kind: String,
     pub installable: bool,
     pub reason: Option<String>,
+    /// `category` from the source's `marketplace.json`, when set.
+    pub category: Option<String>,
     pub installed_plugin_id: Option<Uuid>,
     pub update_available: bool,
 }
@@ -211,6 +215,8 @@ pub struct EntryFilter<'a> {
     /// Case-insensitive match on entry name or description.
     pub query: Option<&'a str>,
     pub source_id: Option<Uuid>,
+    /// Exact match on the entry's `category`.
+    pub category: Option<&'a str>,
 }
 
 const SOURCE_COLUMNS: &str =
@@ -422,7 +428,15 @@ impl<'a> MarketplaceService<'a> {
             if !root.join(MARKETPLACE_JSON).is_file() {
                 continue;
             }
+            let categories = entry_categories(&root);
             for found in expand_marketplace(&root, &rel) {
+                let category = categories.get(&found.name).cloned();
+                if filter
+                    .category
+                    .is_some_and(|c| category.as_deref() != Some(c))
+                {
+                    continue;
+                }
                 let (kind, installable, reason, version, description) = match &found.result {
                     Ok(manifest) => match &manifest.external {
                         None => (
@@ -482,6 +496,7 @@ impl<'a> MarketplaceService<'a> {
                     kind,
                     installable,
                     reason,
+                    category,
                     installed_plugin_id: origin.map(|o| o.id),
                     update_available,
                 });

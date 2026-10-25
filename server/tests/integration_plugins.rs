@@ -3180,12 +3180,24 @@ async fn marketplace_seed_builtin_is_idempotent_and_lists_catalog() {
             cache.path(),
             &EntryFilter {
                 query: Some("no-such-text"),
-                source_id: None,
+                ..Default::default()
             },
         )
         .await
         .unwrap();
     assert!(filtered.is_empty());
+
+    let uncategorised = service
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                category: Some("no-such-category"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(uncategorised.is_empty(), "{uncategorised:?}");
 
     let err = service
         .remove_source(sources[0].id, cache.path())
@@ -3305,7 +3317,7 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         .expect("install");
 
     let entries = service
-        .list_entries(cache.path(), &EntryFilter { query: None, source_id: Some(source.id) })
+        .list_entries(cache.path(), &EntryFilter { source_id: Some(source.id), ..Default::default() })
         .await
         .unwrap();
     assert_eq!(entries[0].installed_plugin_id, Some(installed.id));
@@ -3320,7 +3332,7 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         .await
         .expect("second refresh");
     let entries = service
-        .list_entries(cache.path(), &EntryFilter { query: None, source_id: Some(source.id) })
+        .list_entries(cache.path(), &EntryFilter { source_id: Some(source.id), ..Default::default() })
         .await
         .unwrap();
     assert!(entries[0].update_available, "{entries:?}");
