@@ -154,7 +154,9 @@ export function DefaultBranchSyncControls({
   async function handlePull() {
     if (
       !(await confirm({
-        title: `Pull remote \`${repo.defaultBranch}\` into the local default branch?\n\nThis fast-forwards the registered checkout only when it is strictly behind (no merge or rebase).`,
+        title: `Pull remote \`${repo.defaultBranch}\` into the local default branch?`,
+        description:
+          'This fast-forwards the registered checkout only when it is strictly behind (no merge or rebase).',
       }))
     ) {
       return;
@@ -178,7 +180,9 @@ export function DefaultBranchSyncControls({
   async function handlePush() {
     if (
       !(await confirm({
-        title: `Push local \`${repo.defaultBranch}\` to the remote default branch?\n\nThis updates the remote to match your local checkout (no force).`,
+        title: `Push local \`${repo.defaultBranch}\` to the remote default branch?`,
+        description:
+          'This updates the remote to match your local checkout (no force).',
       }))
     ) {
       return;

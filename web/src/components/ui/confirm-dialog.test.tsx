@@ -56,6 +56,18 @@ describe('useConfirm', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('wraps long unbroken title and description text inside the panel', () => {
+    const longPath = `/home/user/.config/Coppice/worktrees/${'x'.repeat(120)}`;
+    renderConfirm(<Probe title={longPath} description={longPath} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    const dialog = screen.getByRole('dialog');
+    const title = within(dialog).getByText(longPath, { selector: 'h2' });
+    const description = within(dialog).getByText(longPath, { selector: 'p' });
+    expect(title).toHaveClass('[overflow-wrap:anywhere]');
+    expect(description).toHaveClass('[overflow-wrap:anywhere]');
+  });
+
   it('uses the danger confirm style when requested', () => {
     renderConfirm(<Probe danger />);
 
