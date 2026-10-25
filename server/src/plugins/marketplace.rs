@@ -31,6 +31,12 @@ pub fn expand_marketplace(folder: &Path, folder_rel: &str) -> Vec<Discovered> {
         .collect()
 }
 
+/// Checks that `folder` holds a readable `marketplace.json` with a `plugins`
+/// array. Entry-level problems are reported per entry by `expand_marketplace`.
+pub fn validate_marketplace(folder: &Path) -> Result<(), String> {
+    read_marketplace(folder).map(|_| ())
+}
+
 fn read_marketplace(folder: &Path) -> Result<(MarketplaceRef, Vec<Value>), String> {
     let text = std::fs::read_to_string(folder.join(MARKETPLACE_JSON)).map_err(|e| e.to_string())?;
     let mut value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;

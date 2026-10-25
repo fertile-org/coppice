@@ -1,10 +1,16 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use crate::plugins::capability::MARKETPLACE_JSON;
+use crate::plugins::catalog::CATALOG_DIR;
+use crate::plugins::git_install::{clone, validate_git_url, validate_ref};
 use crate::plugins::manifest::is_valid_plugin_name;
-use crate::plugins::marketplace::normalize_source;
+use crate::plugins::marketplace::{expand_marketplace, normalize_source, validate_marketplace};
 use crate::plugins::skills::SkillCatalog;
 use crate::services::plugin_service::{lock_plugin_state, PluginError, PluginRow, PluginService};
-use sqlx::PgPool;
+use sqlx::postgres::PgRow;
+use sqlx::{PgPool, Row};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub struct MarketplaceService<'a> {
@@ -167,6 +173,379 @@ impl<'a> MarketplaceService<'a> {
             .into_iter()
             .find(|plugin| plugin.plugin_dir_id == *dir_id && plugin.rel_path == name);
         Ok(row)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketplaceSource {
+    pub id: Uuid,
+    pub name: String,
+    /// `builtin` (embedded Coppice catalog) or `git`.
+    pub kind: String,
+    pub git_url: Option<String>,
+    pub git_ref: Option<String>,
+    pub commit_sha: Option<String>,
+    pub refreshed_at: Option<OffsetDateTime>,
+    pub last_error: Option<String>,
+    pub position: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketplaceEntry {
+    pub source_id: Uuid,
+    pub source_name: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    /// `path` for in-repo entries; otherwise the object source kind
+    /// (`github`, `url`, `git-subdir`, `npm`, ...).
+    pub kind: String,
+    pub installable: bool,
+    pub reason: Option<String>,
+    pub installed_plugin_id: Option<Uuid>,
+    pub update_available: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct EntryFilter<'a> {
+    /// Case-insensitive match on entry name or description.
+    pub query: Option<&'a str>,
+    pub source_id: Option<Uuid>,
+}
+
+const SOURCE_COLUMNS: &str =
+    "id, name, kind, git_url, git_ref, commit_sha, refreshed_at, last_error, position";
+
+const BUILTIN_SOURCE_NAME: &str = "coppice";
+
+impl<'a> MarketplaceService<'a> {
+    /// Ensures the built-in Coppice source row exists, writes the embedded
+    /// catalog into `cache`, and checks that `cache` is outside every plugin dir.
+    pub async fn seed_builtin(&self, cache: &Path) -> Result<(), PluginError> {
+        let dirs = PluginService::new(self.pool).list_dirs().await?;
+        let dir_paths: Vec<&Path> = dirs.iter().map(|d| Path::new(d.path.as_str())).collect();
+        crate::plugins::catalog::check_cache_outside_plugin_dirs(cache, &dir_paths)?;
+        crate::plugins::catalog::materialize_catalog(cache)?;
+        sqlx::query(
+            r#"
+            INSERT INTO marketplace_sources (id, name, kind, position)
+            VALUES ($1, $2, 'builtin', 0)
+            ON CONFLICT (name) DO NOTHING
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(BUILTIN_SOURCE_NAME)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_sources(&self) -> Result<Vec<MarketplaceSource>, PluginError> {
+        let rows = sqlx::query(&format!(
+            "SELECT {SOURCE_COLUMNS} FROM marketplace_sources ORDER BY position, name"
+        ))
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_source).collect())
+    }
+
+    pub async fn get_source(&self, id: Uuid) -> Result<MarketplaceSource, PluginError> {
+        let row = sqlx::query(&format!(
+            "SELECT {SOURCE_COLUMNS} FROM marketplace_sources WHERE id = $1"
+        ))
+        .bind(id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(PluginError::NotFound)?;
+        Ok(row_to_source(&row))
+    }
+
+    /// Registers a git marketplace. Nothing is cloned here; call
+    /// [`Self::refresh_source`] to fetch it.
+    pub async fn add_git_source(
+        &self,
+        name: &str,
+        git_url: &str,
+        git_ref: Option<&str>,
+        allow_file: bool,
+    ) -> Result<MarketplaceSource, PluginError> {
+        let name = name.trim();
+        if !is_valid_plugin_name(name) || name == BUILTIN_SOURCE_NAME {
+            return Err(PluginError::Validation(format!(
+                "invalid marketplace name `{name}`"
+            )));
+        }
+        validate_git_url(git_url, allow_file).map_err(PluginError::Validation)?;
+        if let Some(git_ref) = git_ref {
+            validate_ref(git_ref).map_err(PluginError::Validation)?;
+        }
+        let taken: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM marketplace_sources WHERE name = $1)")
+                .bind(name)
+                .fetch_one(self.pool)
+                .await?;
+        if taken {
+            return Err(PluginError::Conflict(format!(
+                "marketplace {name} already exists"
+            )));
+        }
+        let row = sqlx::query(&format!(
+            r#"
+            INSERT INTO marketplace_sources (id, name, kind, git_url, git_ref, position)
+            VALUES ($1, $2, 'git', $3, $4,
+                (SELECT COALESCE(MAX(position), 0) + 1 FROM marketplace_sources))
+            RETURNING {SOURCE_COLUMNS}
+            "#
+        ))
+        .bind(Uuid::new_v4())
+        .bind(name)
+        .bind(git_url)
+        .bind(git_ref)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(row_to_source(&row))
+    }
+
+    /// Removes a git source and its cache folder. Plugins installed from it
+    /// stay installed; their origin is cleared by the foreign key.
+    pub async fn remove_source(&self, id: Uuid, cache: &Path) -> Result<(), PluginError> {
+        let source = self.get_source(id).await?;
+        if source.kind == "builtin" {
+            return Err(PluginError::Conflict(
+                "the built-in Coppice catalog cannot be removed".into(),
+            ));
+        }
+        sqlx::query("DELETE FROM marketplace_sources WHERE id = $1")
+            .bind(id)
+            .execute(self.pool)
+            .await?;
+        remove_quietly(&cache.join(id.to_string()));
+        Ok(())
+    }
+
+    /// Fetches a git source into `<cache>/<id>` and records the commit. The
+    /// previous clone stays in place when the fetch or validation fails.
+    /// Runs without holding the plugin state lock.
+    pub async fn refresh_source(
+        &self,
+        id: Uuid,
+        cache: &Path,
+        allow_file: bool,
+        timeout: Duration,
+    ) -> Result<MarketplaceSource, PluginError> {
+        let source = self.get_source(id).await?;
+        if source.kind == "builtin" {
+            crate::plugins::catalog::materialize_catalog(cache)?;
+            return self.mark_refreshed(id, None).await;
+        }
+        let url = source
+            .git_url
+            .clone()
+            .ok_or_else(|| PluginError::Validation("marketplace has no git URL".into()))?;
+        let staging = cache.join(format!(".{id}.refresh-{}", Uuid::new_v4()));
+        let fetched = clone(
+            &url,
+            source.git_ref.as_deref(),
+            &staging,
+            allow_file,
+            timeout,
+        )
+        .await
+        .and_then(|commit| {
+            validate_marketplace(&staging)
+                .map(|()| commit)
+                .map_err(|reason| format!("invalid marketplace: {reason}"))
+        });
+        let commit = match fetched {
+            Ok(commit) => commit,
+            Err(reason) => {
+                remove_quietly(&staging);
+                self.record_error(id, &reason).await?;
+                return Err(PluginError::Validation(reason));
+            }
+        };
+        let root = cache.join(id.to_string());
+        remove_quietly(&root);
+        if let Err(err) = std::fs::rename(&staging, &root) {
+            remove_quietly(&staging);
+            return Err(err.into());
+        }
+        self.mark_refreshed(id, Some(&commit)).await
+    }
+
+    async fn mark_refreshed(
+        &self,
+        id: Uuid,
+        commit: Option<&str>,
+    ) -> Result<MarketplaceSource, PluginError> {
+        let row = sqlx::query(&format!(
+            r#"
+            UPDATE marketplace_sources
+            SET commit_sha = $2, refreshed_at = now(), last_error = NULL
+            WHERE id = $1
+            RETURNING {SOURCE_COLUMNS}
+            "#
+        ))
+        .bind(id)
+        .bind(commit)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(PluginError::NotFound)?;
+        Ok(row_to_source(&row))
+    }
+
+    async fn record_error(&self, id: Uuid, reason: &str) -> Result<(), PluginError> {
+        sqlx::query("UPDATE marketplace_sources SET last_error = $2 WHERE id = $1")
+            .bind(id)
+            .bind(reason)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Lists entries of every source whose cache folder exists. A source with
+    /// no cache (never refreshed, or failed before any fetch) contributes none.
+    pub async fn list_entries(
+        &self,
+        cache: &Path,
+        filter: &EntryFilter<'_>,
+    ) -> Result<Vec<MarketplaceEntry>, PluginError> {
+        let sources = self.list_sources().await?;
+        let installed = self.installed_origins().await?;
+        let query = filter.query.map(str::to_lowercase);
+        let mut out = Vec::new();
+        for source in &sources {
+            if filter.source_id.is_some_and(|id| id != source.id) {
+                continue;
+            }
+            let (root, rel) = source_root(cache, source);
+            if !root.join(MARKETPLACE_JSON).is_file() {
+                continue;
+            }
+            for found in expand_marketplace(&root, &rel) {
+                let (kind, installable, reason, version, description) = match &found.result {
+                    Ok(manifest) => match &manifest.external {
+                        None => (
+                            "path".to_string(),
+                            true,
+                            None,
+                            manifest.version.clone(),
+                            manifest.description.clone(),
+                        ),
+                        Some(external) => {
+                            let kind = external
+                                .kind
+                                .split(':')
+                                .next()
+                                .unwrap_or_default()
+                                .to_string();
+                            let reason = if kind == "npm" {
+                                "npm sources are not supported".to_string()
+                            } else {
+                                format!("installs from {kind} sources are not supported yet")
+                            };
+                            (
+                                kind,
+                                false,
+                                Some(reason),
+                                manifest.version.clone(),
+                                manifest.description.clone(),
+                            )
+                        }
+                    },
+                    Err(reason) => (
+                        "unknown".to_string(),
+                        false,
+                        Some(reason.clone()),
+                        String::new(),
+                        String::new(),
+                    ),
+                };
+                if let Some(q) = &query {
+                    let hit = found.name.to_lowercase().contains(q)
+                        || description.to_lowercase().contains(q);
+                    if !hit {
+                        continue;
+                    }
+                }
+                let origin = installed.get(&(source.id, found.name.clone()));
+                let update_available = origin.is_some_and(|o| match source.kind.as_str() {
+                    "builtin" => o.version != version,
+                    _ => o.commit.as_deref() != source.commit_sha.as_deref(),
+                });
+                out.push(MarketplaceEntry {
+                    source_id: source.id,
+                    source_name: source.name.clone(),
+                    name: found.name.clone(),
+                    description,
+                    version,
+                    kind,
+                    installable,
+                    reason,
+                    installed_plugin_id: origin.map(|o| o.id),
+                    update_available,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn installed_origins(
+        &self,
+    ) -> Result<std::collections::HashMap<(Uuid, String), InstalledOrigin>, PluginError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, origin_source_id, origin_entry, origin_commit, version FROM plugins
+            WHERE origin_source_id IS NOT NULL AND origin_entry IS NOT NULL AND status <> 'missing'
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let source: Uuid = row.get("origin_source_id");
+                let entry: String = row.get("origin_entry");
+                (
+                    (source, entry),
+                    InstalledOrigin {
+                        id: row.get("id"),
+                        commit: row.get("origin_commit"),
+                        version: row.get("version"),
+                    },
+                )
+            })
+            .collect())
+    }
+}
+
+struct InstalledOrigin {
+    id: Uuid,
+    commit: Option<String>,
+    version: String,
+}
+
+/// The folder a source's entries are read from, and the `folder_rel` prefix
+/// used for their discovered paths.
+fn source_root(cache: &Path, source: &MarketplaceSource) -> (PathBuf, String) {
+    if source.kind == "builtin" {
+        (cache.join(CATALOG_DIR), CATALOG_DIR.to_string())
+    } else {
+        (cache.join(source.id.to_string()), source.id.to_string())
+    }
+}
+
+fn row_to_source(row: &PgRow) -> MarketplaceSource {
+    MarketplaceSource {
+        id: row.get("id"),
+        name: row.get("name"),
+        kind: row.get("kind"),
+        git_url: row.get("git_url"),
+        git_ref: row.get("git_ref"),
+        commit_sha: row.get("commit_sha"),
+        refreshed_at: row.get("refreshed_at"),
+        last_error: row.get("last_error"),
+        position: row.get("position"),
     }
 }
 

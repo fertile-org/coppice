@@ -3143,6 +3143,221 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
     }
 }
 
+#[tokio::test]
+async fn marketplace_seed_builtin_is_idempotent_and_lists_catalog() {
+    use coppice_server::services::marketplace_service::{
+        EntryFilter, MarketplaceService,
+    };
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let service = MarketplaceService::new(&pool);
+
+    service.seed_builtin(cache.path()).await.expect("seed");
+    service.seed_builtin(cache.path()).await.expect("re-seed");
+    let sources = service.list_sources().await.unwrap();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert_eq!(sources[0].name, "coppice");
+    assert_eq!(sources[0].kind, "builtin");
+
+    let entries = service
+        .list_entries(cache.path(), &EntryFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    let github = &entries[0];
+    assert_eq!(github.name, "github");
+    assert_eq!(github.kind, "path");
+    assert!(github.installable);
+    assert!(github.installed_plugin_id.is_none());
+    assert!(!github.update_available);
+
+    let filtered = service
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                query: Some("no-such-text"),
+                source_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(filtered.is_empty());
+
+    let err = service
+        .remove_source(sources[0].id, cache.path())
+        .await
+        .expect_err("builtin cannot be removed");
+    assert!(matches!(err, PluginError::Conflict(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn marketplace_seed_rejects_cache_inside_plugin_dir() {
+    use coppice_server::services::marketplace_service::MarketplaceService;
+    use coppice_server::services::plugin_service::PluginService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let default_path = PluginService::new(&pool)
+        .list_dirs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|d| d.is_default)
+        .unwrap()
+        .path;
+    let cache = Path::new(&default_path).join("marketplaces");
+    std::fs::create_dir_all(&cache).unwrap();
+
+    let err = MarketplaceService::new(&pool)
+        .seed_builtin(&cache)
+        .await
+        .expect_err("cache inside plugin dir");
+    assert!(matches!(err, PluginError::Io(_)), "{err:?}");
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM marketplace_sources", "").await, 0);
+}
+
+#[tokio::test]
+async fn marketplace_git_source_refresh_install_update_and_remove() {
+    use coppice_server::services::marketplace_service::{
+        EntryFilter, MarketplaceService, PathEntry,
+    };
+    use std::time::Duration;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    marketplace_fixture(repo.path(), "sample-plugin", "sample-plugin");
+    git(repo.path(), &["init"]);
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-m", "market"]);
+    let first_sha = git(repo.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let url = format!("file://{}", repo.path().display());
+    let service = MarketplaceService::new(&pool);
+    let timeout = Duration::from_secs(60);
+
+    let source = service
+        .add_git_source("test-market", &url, None, true)
+        .await
+        .expect("add");
+    assert_eq!(source.kind, "git");
+    assert!(source.commit_sha.is_none());
+    assert!(matches!(
+        service.add_git_source("test-market", &url, None, true).await,
+        Err(PluginError::Conflict(_))
+    ));
+    assert!(matches!(
+        service.add_git_source("coppice", &url, None, true).await,
+        Err(PluginError::Validation(_))
+    ));
+    assert!(matches!(
+        service.add_git_source("bad", "https://user:pw@example.com/m.git", None, true).await,
+        Err(PluginError::Validation(_))
+    ));
+
+    let refreshed = service
+        .refresh_source(source.id, cache.path(), true, timeout)
+        .await
+        .expect("refresh");
+    assert_eq!(refreshed.commit_sha.as_deref(), Some(first_sha.as_str()));
+    assert!(refreshed.refreshed_at.is_some());
+    assert!(refreshed.last_error.is_none());
+
+    let entries = service
+        .list_entries(cache.path(), &EntryFilter::default())
+        .await
+        .unwrap();
+    let sample: Vec<_> = entries
+        .iter()
+        .filter(|e| e.source_id == source.id)
+        .collect();
+    assert_eq!(sample.len(), 1, "{entries:?}");
+    assert_eq!(sample[0].name, "sample-plugin");
+    assert!(sample[0].installable);
+    assert!(sample[0].installed_plugin_id.is_none());
+
+    let root = cache.path().join(source.id.to_string());
+    let installed = service
+        .install_path_entry(
+            PathEntry {
+                source_id: source.id,
+                root: &root,
+                source: "./plugins/sample-plugin",
+                name: "sample-plugin",
+                commit: Some(&first_sha),
+            },
+            &catalog,
+        )
+        .await
+        .expect("install");
+
+    let entries = service
+        .list_entries(cache.path(), &EntryFilter { query: None, source_id: Some(source.id) })
+        .await
+        .unwrap();
+    assert_eq!(entries[0].installed_plugin_id, Some(installed.id));
+    assert!(!entries[0].update_available);
+
+    std::fs::write(repo.path().join("CHANGELOG.md"), "next\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-m", "next"]);
+    let second_sha = git(repo.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    service
+        .refresh_source(source.id, cache.path(), true, timeout)
+        .await
+        .expect("second refresh");
+    let entries = service
+        .list_entries(cache.path(), &EntryFilter { query: None, source_id: Some(source.id) })
+        .await
+        .unwrap();
+    assert!(entries[0].update_available, "{entries:?}");
+    assert_eq!(
+        service.get_source(source.id).await.unwrap().commit_sha.as_deref(),
+        Some(second_sha.as_str())
+    );
+
+    let broken = service
+        .add_git_source(
+            "broken-market",
+            &format!("file://{}/missing", repo.path().display()),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    let err = service
+        .refresh_source(broken.id, cache.path(), true, timeout)
+        .await
+        .expect_err("missing repo fails");
+    assert!(matches!(err, PluginError::Validation(_)), "{err:?}");
+    let broken = service.get_source(broken.id).await.unwrap();
+    assert!(broken.last_error.is_some());
+    assert!(broken.commit_sha.is_none());
+
+    service.remove_source(source.id, cache.path()).await.expect("remove");
+    assert!(!root.exists());
+    let origin: Option<uuid::Uuid> = sqlx::query_scalar("SELECT origin_source_id FROM plugins WHERE id = $1")
+        .bind(installed.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(origin.is_none());
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM plugins WHERE name = $1", "sample-plugin").await,
+        1,
+        "removing the source keeps the installed plugin"
+    );
+}
+
 fn marketplace_fixture(root: &Path, entry_name: &str, plugin_fixture: &str) {
     std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
     std::fs::write(
