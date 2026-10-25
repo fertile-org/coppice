@@ -9,6 +9,7 @@ use crate::domain::workflow::{
 };
 use crate::services::ticket_service::TicketWithDisplay;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::planning_service::{PlanError, PlanningService};
 use crate::services::result_contract::merge_ticket_description;
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
@@ -39,6 +40,8 @@ pub enum SplitError {
     Ticket(#[from] TicketError),
     #[error(transparent)]
     Agent(#[from] AgentError),
+    #[error(transparent)]
+    Plan(#[from] PlanError),
 }
 
 impl<'a> SplitService<'a> {
@@ -129,11 +132,12 @@ impl<'a> SplitService<'a> {
                 .await?;
             let mut child = created.ticket;
 
-            if let Some(ref assign_key) = spec.assign_to {
-                let key = assign_key.trim();
-                if key.is_empty() {
-                    continue;
-                }
+            if let Some(key) = spec
+                .assign_to
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+            {
                 let auto_assign = self
                     .workflow
                     .auto_assign
@@ -166,6 +170,11 @@ impl<'a> SplitService<'a> {
                     }
                 }
             }
+
+            PlanningService::new(self.pool)
+                .approve_child_plan(parent, child.id, spec, recommended_by)
+                .await?;
+            child = ticket_svc.get(child.id).await?.ticket;
 
             children.push(child);
         }
@@ -461,6 +470,17 @@ mod tests {
         assert!(children
             .iter()
             .all(|child| child.parent_ticket_id == Some(parent_id)));
+        assert!(children.iter().all(|child| child.approved_plan_id.is_some()));
+        assert!(children
+            .iter()
+            .all(|child| child.approved_plan_content_version == Some(child.content_version)));
+
+        let plan = PlanningService::new(&pool)
+            .latest_plan(children[0].id)
+            .await
+            .expect("load child plan")
+            .expect("child has a plan");
+        assert!(plan.body.contains("First deliverable"));
 
         let updated = TicketService::new(&pool)
             .get(parent_id)
@@ -574,5 +594,97 @@ mod tests {
         assert_eq!(children[0].status, TicketStatus::Backlog);
         assert_eq!(children[0].assignee_agent_id, Some(engineer_agent_id));
         assert!(children[0].description.contains("Acceptance criteria"));
+        assert!(children[0].approved_plan_id.is_some());
+        assert_eq!(
+            children[0].approved_plan_content_version,
+            Some(children[0].content_version)
+        );
+
+        let plan = PlanningService::new(&pool)
+            .latest_plan(children[0].id)
+            .await
+            .expect("load child plan")
+            .expect("child has a plan");
+        assert!(plan.body.contains("Add exponential backoff"));
+        assert!(plan.body.contains("Retries up to 3 times"));
+    }
+
+    #[tokio::test]
+    async fn create_child_tickets_keeps_child_with_empty_assign_to() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("split empty assign board")
+            .bind(format!("split-empty-assign-{}", board_id))
+            .execute(&pool)
+            .await
+            .expect("insert board");
+
+        let pm_agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
+            "#,
+        )
+        .bind(pm_agent_id)
+        .bind("PM Agent")
+        .bind("PM")
+        .bind("prompt")
+        .bind("mock")
+        .bind("pm")
+        .execute(&pool)
+        .await
+        .expect("insert pm agent");
+
+        let parent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, board_id, title, status, created_by, assignee_agent_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(parent_id)
+        .bind(board_id)
+        .bind("Epic ticket")
+        .bind("backlog")
+        .bind("test")
+        .bind(pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("insert parent ticket");
+
+        let parent = TicketService::new(&pool)
+            .get(parent_id)
+            .await
+            .expect("load parent")
+            .ticket;
+
+        let workflow = WorkflowConfig::default();
+        let splits = vec![SplitTicketSpec {
+            title: "Unassigned".into(),
+            description: "No owner yet".into(),
+            acceptance_criteria: None,
+            assign_to: Some("  ".into()),
+            steps: Vec::new(),
+        }];
+
+        let children = SplitService::new(&pool, &workflow)
+            .create_child_tickets(&parent, &splits, pm_agent_id)
+            .await
+            .expect("create children");
+
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "Unassigned");
+        assert!(children[0].assignee_agent_id.is_none());
+        assert!(children[0].approved_plan_id.is_some());
     }
 }

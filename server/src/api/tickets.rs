@@ -522,6 +522,10 @@ fn map_split_error(err: SplitError) -> StatusCode {
         SplitError::Validation(_) => StatusCode::BAD_REQUEST,
         SplitError::Ticket(e) => map_error(e),
         SplitError::Agent(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        SplitError::Plan(crate::services::planning_service::PlanError::Validation(_)) => {
+            StatusCode::BAD_REQUEST
+        }
+        SplitError::Plan(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
