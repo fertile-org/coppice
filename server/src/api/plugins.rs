@@ -156,7 +156,7 @@ struct SettingsBody {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PluginInstallResponse {
+pub(crate) struct PluginInstallResponse {
     id: Uuid,
     plugin_dir_id: Uuid,
     kind: String,
@@ -266,7 +266,7 @@ async fn sync_plugins(service: &PluginService<'_>, state: &AppState) {
     stop_unusable_servers(service, state).await;
 }
 
-async fn stop_unusable_servers(service: &PluginService<'_>, state: &AppState) {
+pub(crate) async fn stop_unusable_servers(service: &PluginService<'_>, state: &AppState) {
     match service.ok_plugin_ids().await {
         Ok(ok) => state.plugin_mcp.retain_plugins(&ok).await,
         Err(err) => tracing::error!(error = %err, "failed to list ok plugins"),
@@ -427,7 +427,7 @@ async fn plugins_response(
     ))
 }
 
-fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
+pub(crate) fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
     Json(PluginInstallResponse {
         id: install.id,
         plugin_dir_id: install.plugin_dir_id,

@@ -222,12 +222,12 @@ fn external_source(source: &Map<String, Value>) -> ExternalSource {
     }
 }
 
-fn github_url(repo: &str) -> String {
+pub(crate) fn github_url(repo: &str) -> String {
     format!("https://github.com/{repo}.git")
 }
 
 /// `owner/repo` with nothing that marks a URL, ssh remote, or path.
-fn is_github_shorthand(url: &str) -> bool {
+pub(crate) fn is_github_shorthand(url: &str) -> bool {
     let mut parts = url.split('/');
     let valid = |part: Option<&str>| {
         part.is_some_and(|p| {

@@ -1426,7 +1426,7 @@ async fn upsert_discovered(
     Ok(())
 }
 
-async fn insert_install(
+pub(crate) async fn insert_install(
     tx: &mut Transaction<'_, Postgres>,
     plugin_dir_id: Uuid,
     kind: &str,

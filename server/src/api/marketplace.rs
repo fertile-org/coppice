@@ -1,17 +1,21 @@
 use crate::api::auth::{pool_from_state, AuthUser};
-use crate::api::plugins::{single_response, ApiError, PluginResponse};
+use crate::api::plugins::{install_response, single_response, stop_unusable_servers, ApiError};
 use crate::middleware::admin::AdminUser;
 use crate::services::marketplace_service::{
-    EntryFilter, MarketplaceEntry, MarketplaceService, MarketplaceSource,
+    EntryFilter, EntryOutcome, MarketplaceEntry, MarketplaceJob, MarketplaceService,
+    MarketplaceSource,
 };
+use crate::services::plugin_service::PluginService;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::path::Path as FsPath;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +39,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/marketplace/entries", get(list_entries))
         .route("/api/marketplace/install", post(install_entry))
+        .route(
+            "/api/marketplace/plugins/{plugin_id}/update",
+            post(update_plugin),
+        )
 }
 
 #[derive(Serialize)]
@@ -170,22 +178,91 @@ async fn list_entries(
     Ok(Json(entries.into_iter().map(entry_response).collect()))
 }
 
+/// `path` entries answer with the plugin (201); object entries answer with
+/// the install job (202) to poll at `/api/plugin-installs/{id}`.
 async fn install_entry(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
     Json(body): Json<InstallBody>,
-) -> Result<(StatusCode, Json<PluginResponse>), ApiError> {
+) -> Result<Response, ApiError> {
     let pool = pool_from_state(&state)?;
-    let plugin = MarketplaceService::new(pool)
+    let outcome = MarketplaceService::new(pool)
         .install_entry(
             body.source_id,
             cache_dir(&state),
             &body.entry,
+            state.config.plugins.allow_file_git_urls,
             &state.skills,
         )
         .await?;
-    let response = single_response(&state, pool, plugin).await?;
-    Ok((StatusCode::CREATED, response))
+    outcome_response(&state, pool, outcome, StatusCode::CREATED, None).await
+}
+
+/// Same answer shapes as install. Updating a `path` plugin replaces its folder
+/// in place; an object plugin answers with the update job.
+async fn update_plugin(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let outcome = MarketplaceService::new(pool)
+        .update_entry(
+            plugin_id,
+            cache_dir(&state),
+            state.config.plugins.allow_file_git_urls,
+            &state.skills,
+        )
+        .await?;
+    outcome_response(&state, pool, outcome, StatusCode::OK, Some(plugin_id)).await
+}
+
+async fn outcome_response(
+    state: &Arc<AppState>,
+    pool: &PgPool,
+    outcome: EntryOutcome,
+    status: StatusCode,
+    updated: Option<Uuid>,
+) -> Result<Response, ApiError> {
+    match outcome {
+        EntryOutcome::Plugin(plugin) => {
+            if let Some(plugin_id) = updated {
+                state.plugin_mcp.stop_plugin(plugin_id).await;
+            }
+            let Json(body) = single_response(state, pool, *plugin).await?;
+            Ok((status, Json(body)).into_response())
+        }
+        EntryOutcome::Job(job) => {
+            let install = install_response(job.install.clone());
+            spawn_job(state.clone(), *job);
+            Ok((StatusCode::ACCEPTED, install).into_response())
+        }
+    }
+}
+
+/// Runs a git job in the background. A successful update stops the plugin's
+/// MCP servers so they restart from the new copy.
+fn spawn_job(state: Arc<AppState>, job: MarketplaceJob) {
+    tokio::spawn(async move {
+        let Some(pool) = state.db.as_ref() else {
+            return;
+        };
+        let timeout = Duration::from_secs(state.config.plugins.git_timeout_secs);
+        let update_of = job.update_of;
+        let allow_file = state.config.plugins.allow_file_git_urls;
+        match MarketplaceService::new(pool)
+            .run_job(job, allow_file, timeout, &state.skills)
+            .await
+        {
+            Ok(install) => {
+                if let (Some(plugin_id), "succeeded") = (update_of, install.status.as_str()) {
+                    state.plugin_mcp.stop_plugin(plugin_id).await;
+                }
+            }
+            Err(err) => tracing::error!(error = %err, "marketplace job could not be recorded"),
+        }
+        stop_unusable_servers(&PluginService::new(pool), &state).await;
+    });
 }
 
 fn cache_dir(state: &AppState) -> &FsPath {
