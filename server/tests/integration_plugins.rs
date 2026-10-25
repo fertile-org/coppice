@@ -3232,3 +3232,73 @@ async fn marketplace_path_entry_installs_one_row_with_origin() {
         1
     );
 }
+
+#[tokio::test]
+async fn marketplace_path_entry_rolls_back_plugin_json_name_clash() {
+    use coppice_server::services::marketplace_service::{MarketplaceService, PathEntry};
+    use coppice_server::services::plugin_service::PluginService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let market = tempfile::tempdir().unwrap();
+    marketplace_fixture(market.path(), "sample-plugin", "sample-plugin");
+    copy_tree(
+        &fixtures().join("sample-plugin"),
+        &market.path().join("plugins/renamed-entry"),
+    );
+    std::fs::write(
+        market
+            .path()
+            .join("plugins/renamed-entry/.claude-plugin/plugin.json"),
+        json!({ "name": "sample-plugin", "version": "0.1.0" }).to_string(),
+    )
+    .unwrap();
+    let source_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO marketplace_sources (id, name, kind, position) VALUES ($1, 'test-market', 'builtin', 0)",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let entry = |source: &'static str, name: &'static str| PathEntry {
+        source_id,
+        root: market.path(),
+        source,
+        name,
+        commit: None,
+    };
+
+    MarketplaceService::new(&pool)
+        .install_path_entry(entry("./plugins/sample-plugin", "sample-plugin"), &catalog)
+        .await
+        .expect("first install");
+
+    let clash = MarketplaceService::new(&pool)
+        .install_path_entry(entry("./plugins/renamed-entry", "renamed-entry"), &catalog)
+        .await
+        .expect_err("plugin.json name clash must be refused");
+    assert!(matches!(clash, PluginError::Conflict(_)), "{clash:?}");
+
+    let default_path = PluginService::new(&pool)
+        .list_dirs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|d| d.is_default)
+        .unwrap()
+        .path;
+    assert!(!Path::new(&default_path).join("renamed-entry").exists());
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM plugins WHERE name = $1 AND status = 'ok'",
+            "sample-plugin"
+        )
+        .await,
+        1
+    );
+}

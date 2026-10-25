@@ -91,7 +91,10 @@ impl<'a> MarketplaceService<'a> {
         tx.commit().await?;
 
         let stamped = match plugins.rescan().await {
-            Ok(_) => self.stamp_origin(&default_dir.id, entry.name, &entry).await,
+            Ok(_) => match self.stamp_origin(&default_dir.id, entry.name, &entry).await {
+                Ok(Some(row)) => self.ensure_unique_name(&row).await.map(|_| Some(row)),
+                other => other,
+            },
             Err(err) => Err(err),
         };
         let row = match stamped {
@@ -114,6 +117,25 @@ impl<'a> MarketplaceService<'a> {
             tracing::error!(error = %err, "failed to refresh plugin skill catalog");
         }
         Ok(row)
+    }
+
+    /// The pre-copy check only sees the folder name. The row name comes from
+    /// `plugin.json`, so a clash found after the rescan must still roll back.
+    async fn ensure_unique_name(&self, row: &PluginRow) -> Result<(), PluginError> {
+        let clash: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM plugins WHERE name = $1 AND id <> $2 AND status <> 'missing')",
+        )
+        .bind(&row.name)
+        .bind(row.id)
+        .fetch_one(self.pool)
+        .await?;
+        if clash {
+            return Err(PluginError::Conflict(format!(
+                "plugin name {} is already used by another plugin",
+                row.name
+            )));
+        }
+        Ok(())
     }
 
     async fn stamp_origin(
