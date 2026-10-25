@@ -78,6 +78,10 @@ pub const PLAN_CRITERIA_INSTRUCTION: &str = "Under Acceptance criteria, write ea
 /// Diagrams support the written plan. They are not a substitute for it.
 pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
 
+/// A person reviews the plan at Plan Review, so it has to fit on one screen.
+/// Detail belongs to the Tech Lead and the implementer, not the plan.
+pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work. Leave implementation detail to the implementer.";
+
 pub const CHANGES_REQUESTED_HEADING: &str = "## Changes requested";
 
 pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a planning run.";
@@ -383,7 +387,7 @@ pub struct PlanRevision<'a> {
 /// Instructions appended to a planning run.
 pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n{PLAN_LENGTH_INSTRUCTION}\n",
         plan_template()
     );
     let Some(revision) = revision else {
@@ -513,6 +517,18 @@ mod tests {
         assert!(text.contains("The written plan always stays."));
         assert!(text.contains(PLAN_HEADING));
         assert!(text.contains(STEPS_HEADING));
+    }
+
+    #[test]
+    fn instructions_ask_for_a_plan_one_screen_long() {
+        let text = plan_instructions(None);
+        assert!(text.contains(PLAN_LENGTH_INSTRUCTION));
+        assert!(text.contains("at most 8"));
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Old\n",
+            requests: vec!["Shorter please."],
+        };
+        assert!(plan_instructions(Some(&revision)).contains(PLAN_LENGTH_INSTRUCTION));
     }
 
     #[test]
