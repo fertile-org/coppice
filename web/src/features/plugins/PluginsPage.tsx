@@ -8,7 +8,7 @@ import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import { cn } from '../../lib/utils';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
-import { PLUGIN_COPY } from './copy';
+import { missingSettingsNotice, PLUGIN_COPY } from './copy';
 import { MarketplaceSection } from './MarketplaceSection';
 import { PluginCard } from './PluginCard';
 import { PluginsGuide } from './PluginsGuide';
@@ -399,6 +399,7 @@ export function PluginsPage() {
   const [gitUrl, setGitUrl] = useState('');
   const [tab, setTab] = useState<PluginsTab>('installed');
   const [notice, setNotice] = useState<string | null>(null);
+  const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const installRef = useRef<HTMLElement>(null);
 
   function handleInstallFromGit(url: string) {
@@ -407,8 +408,9 @@ export function PluginsPage() {
   }
 
   /** A marketplace install lands on the new plugin's card so it can be enabled. */
-  const handleMarketplaceDone = useCallback((message: string) => {
+  const handleMarketplaceDone = useCallback((message: string, pluginIds: string[]) => {
     setNotice(message);
+    setHighlightIds(pluginIds);
     setTab('installed');
   }, []);
 
@@ -424,6 +426,17 @@ export function PluginsPage() {
   const plugins = pluginsQuery.data ?? [];
   const isLoading = dirsQuery.isLoading || pluginsQuery.isLoading;
   const isError = dirsQuery.isError || pluginsQuery.isError;
+  const missingKeys = plugins
+    .filter((plugin) => highlightIds.includes(plugin.id))
+    .flatMap((plugin) =>
+      plugin.settings
+        .filter((setting) => setting.source === 'missing')
+        .map((setting) => setting.key),
+    );
+  const noticeText =
+    notice && missingKeys.length > 0
+      ? `${notice} ${missingSettingsNotice(missingKeys)}`
+      : notice;
   const clonePluginCounts = new Map<string, number>();
   for (const plugin of plugins) {
     if (plugin.gitRoot) {
@@ -474,6 +487,7 @@ export function PluginsPage() {
                 onClick={() => {
                   setTab(item.id);
                   setNotice(null);
+                  setHighlightIds([]);
                 }}
                 className={cn(
                   '-mb-px border-b-2 px-3 py-2 font-body text-sm font-medium transition-colors',
@@ -494,9 +508,9 @@ export function PluginsPage() {
               aria-labelledby="plugins-tab-installed"
               className="space-y-8"
             >
-              {notice && (
+              {noticeText && (
                 <p role="status" className="font-body text-sm text-success">
-                  {notice}
+                  {noticeText}
                 </p>
               )}
               <section className="space-y-3">
@@ -525,6 +539,7 @@ export function PluginsPage() {
                         siblingCount={
                           plugin.gitRoot ? clonePluginCounts.get(plugin.gitRoot) : undefined
                         }
+                        highlighted={highlightIds.includes(plugin.id)}
                       />
                     ))}
                   </div>

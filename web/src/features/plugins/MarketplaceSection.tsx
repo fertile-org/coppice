@@ -49,8 +49,8 @@ function matches(entry: MarketplaceEntry, query: string): boolean {
 interface MarketplaceSectionProps {
   sources: MarketplaceSource[];
   entries: MarketplaceEntry[];
-  /** Called with a notice once a plugin is installed or updated. */
-  onDone: (notice: string) => void;
+  /** Called with a notice and the installed plugin ids once a plugin is installed or updated. */
+  onDone: (notice: string, pluginIds: string[]) => void;
 }
 
 export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSectionProps) {
@@ -81,6 +81,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
 
   const jobStatus = pending?.jobId ? job.data?.status : undefined;
   const jobFailure = jobStatus === 'failed' ? (job.data?.error ?? 'unknown error') : null;
+  const jobPluginIds = job.data?.pluginIds;
   const active = pending !== null && jobStatus !== 'failed';
   useEffect(() => {
     if (!pending || jobStatus !== 'succeeded') return;
@@ -88,8 +89,9 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
       pending.update
         ? PLUGIN_COPY.updatedNotice(pending.name)
         : PLUGIN_COPY.installedNotice(pending.name),
+      jobPluginIds ?? [],
     );
-  }, [jobStatus, pending, onDone]);
+  }, [jobStatus, pending, onDone, jobPluginIds]);
 
   async function run(
     key: string,
@@ -107,6 +109,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
           update
             ? PLUGIN_COPY.updatedNotice(name)
             : PLUGIN_COPY.installedNotice(name),
+          [started.plugin.id],
         );
       } else {
         setPending({ key, name, jobId: started.install.id, update });

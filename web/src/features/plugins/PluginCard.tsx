@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { useConfirm, type ConfirmFn } from '../../components/ui/confirm-dialog';
 import { Switch } from '../../components/ui/switch';
@@ -370,11 +370,19 @@ interface PluginCardProps {
   onInstallFromGit?: (url: string) => void;
   /** Plugins sharing this plugin's git clone, itself included. */
   siblingCount?: number;
+  /** Set right after a marketplace install: scroll to the card and mark it. */
+  highlighted?: boolean;
 }
 
-export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: PluginCardProps) {
+export function PluginCard({
+  plugin,
+  onInstallFromGit,
+  siblingCount = 1,
+  highlighted = false,
+}: PluginCardProps) {
   const [updateId, setUpdateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const setEnabled = useSetPluginEnabled();
   const updatePlugin = useUpdatePlugin();
   const confirm = useConfirm();
@@ -382,6 +390,10 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
   const isExternal = plugin.status === 'external';
   const canToggle = plugin.enabled || plugin.status === 'ok';
   const updating = updatePlugin.isPending || update?.status === 'running';
+
+  useEffect(() => {
+    if (highlighted) cardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [highlighted]);
 
   async function handleToggle() {
     setError(null);
@@ -405,8 +417,13 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
 
   return (
     <div
+      ref={cardRef}
       data-testid={`plugin-card-${plugin.id}`}
-      className="rounded-xl border border-border bg-surface-raised p-4 shadow-card"
+      data-highlighted={highlighted || undefined}
+      className={cn(
+        'rounded-xl border border-border bg-surface-raised p-4 shadow-card',
+        highlighted && 'ring-2 ring-moss-500',
+      )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
