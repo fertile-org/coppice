@@ -16,6 +16,27 @@ A plugin is not a rule set and does not change workflow, statuses, or permission
 
 `commands/`, `agents/`, and `hooks/` folders are detected and listed as **Not supported yet**; they never run.
 
+### Marketplace
+
+The **Marketplace** tab on the Plugins page lists plugins you can install with one click. It has two kinds of source:
+
+- **Coppice** (built in, always listed). The catalog lives in `server/marketplace/coppice/`. It is embedded in the server and written to the marketplace cache on every start, so it works offline. The first entry is `github`: skills for issues, pull requests, reviews and CI, plus an MCP server that needs a `GITHUB_PERSONAL_ACCESS_TOKEN` setting.
+- **Git sources** you add by URL. Coppice shallow-clones the repository, reads its `.claude-plugin/marketplace.json`, and lists its entries. **Refresh** pulls it again; removing a source keeps the plugins you installed from it.
+
+Entries with a path `source` install from the source folder. Entries with a `github`, `url` or `git-subdir` source are cloned as a background install job, the same as **Install from git**. `npm` entries are listed but cannot be installed yet.
+
+Installing an entry adds one plugin folder to your default plugin directory. The plugin starts **disabled**, so turn it on and fill in its settings first. **Update** on a catalog plugin replaces the folder and keeps the same plugin id, so enabled state, settings and agent access stay.
+
+Catalog plugins work for every agent you give access to, whatever its connector, because they reach the agent through the Coppice MCP gateway. Coppice does not write into any CLI config (`~/.claude`, `~/.cursor`, `~/.codex`, …) or into the worktree. Cards show **Coppice** or **Community: not reviewed by Coppice**.
+
+Placeholders such as `${GITHUB_PERSONAL_ACCESS_TOKEN}` resolve from the plugin's settings first, then from the server's environment. A catalog plugin can therefore pick up that variable from the host without a setting. The card shows where the value came from.
+
+**Contributing to the Coppice catalog:** add a folder under `server/marketplace/coppice/plugins/<name>/` and list it in `server/marketplace/coppice/.claude-plugin/marketplace.json`. Skills should name only `<plugin>__<tool>` gateway tools and generic shell or git commands, never one CLI. The unit test that parses every embedded entry must pass.
+
+**Two GitHub tokens:** the forge token from Settings (used by the git and PR features, M07) and the `github` plugin's `GITHUB_PERSONAL_ACCESS_TOKEN` (used by its MCP server) are separate. Setting one does not set the other.
+
+Design: [plugin marketplace spec](superpowers/specs/2026-10-25-plugin-marketplace-design.md).
+
 ### Supported layouts
 
 Coppice reads repositories the way the rest of the ecosystem publishes them, without restructuring:
