@@ -64,9 +64,11 @@ Compact, structured actions from a chat turn (server-validated):
 
 | Action | Behavior |
 |--------|----------|
-| `create_ticket` | Create ticket from chat summary; link `source_chat_session_id`; return ticket id in message metadata |
-| `create_knowledge` | Enqueue **pending** Knowledge Inbox item (M06); never auto-approve |
+| `create_ticket` | Agent puts a `create_ticket` entry in `result_submit.actions`; the server stores it as a **pending proposal** on the agent message. A human accepts it (`POST …/messages/{mid}/proposals/{pid}/accept`), which creates the ticket with `source_chat_session_id` and marks the proposal `created` with `ticketId`. Reject (`…/reject`) creates nothing. |
+| `create_knowledge` | Same flow. Accept enqueues a **pending** Knowledge Inbox item (M06); never auto-approved |
 | `cutoff` | Mark session cutoff — no further turns until human reopens/unarchives; preserves history |
+
+Proposals are only allowed in `conversation` / `chat_turn` runs (max 5 per turn). Accept and reject lock the agent message row, so a proposal produces at most one item: a second accept, or accept after reject, returns 409. Accept with no board anywhere returns 422.
 
 No direct status workflow transitions from chat. No silent board moves.
 
