@@ -1,4 +1,4 @@
-import { BookOpen, Lightbulb, Plus, Search, SearchX, ShieldCheck } from 'lucide-react';
+import { BookOpen, Plus, Search, SearchX, ShieldCheck } from 'lucide-react';
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
@@ -11,7 +11,6 @@ import type {
 import { useSession } from '../auth/useSession';
 import { useBoards } from '../boards/useBoards';
 import { useOpenTicket } from '../tickets/useOpenTicket';
-import { CURATION_LITMUS, CURATION_TRUST_FRAMING } from './curationGuide';
 import { CompactionStatusStrip } from './CompactionStatusStrip';
 import { KnowledgeCard } from './KnowledgeCard';
 import {
@@ -47,24 +46,6 @@ function matchesSearch(item: KnowledgeItem, terms: string[]): boolean {
     .join(' ')
     .toLowerCase();
   return terms.every((term) => haystack.includes(term));
-}
-
-function PendingInboxGuidance() {
-  return (
-    <aside
-      aria-label="Pending inbox guidance"
-      className="flex gap-3 rounded-lg border border-moss-200 bg-moss-50 px-4 py-3"
-    >
-      <Lightbulb className="mt-0.5 size-4 shrink-0 text-moss-700" aria-hidden="true" />
-      <div className="min-w-0">
-        <p className="font-display text-sm font-semibold text-bark-900">{CURATION_LITMUS}</p>
-        <p className="mt-1 font-body text-xs leading-relaxed text-text-secondary">
-          {CURATION_TRUST_FRAMING} Use the approve/reject examples on each card to keep
-          curation consistent.
-        </p>
-      </div>
-    </aside>
-  );
 }
 
 function EmptyState({
@@ -181,13 +162,6 @@ export function KnowledgePage() {
             Review durable facts before agents can use them. Every revision keeps its
             source, policy decision, and run history.
           </p>
-          <span
-            title={CURATION_TRUST_FRAMING}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-moss-200 bg-moss-50 px-2.5 py-0.5 font-body text-xs font-medium text-moss-800"
-          >
-            <ShieldCheck className="size-3.5" aria-hidden="true" />
-            Human-governed · fail-closed
-          </span>
         </div>
         {canGovern ? (
           addButton
@@ -277,8 +251,6 @@ export function KnowledgePage() {
             </Button>
           )}
         </div>
-
-        {status === 'pending' && <PendingInboxGuidance />}
 
         {query.isLoading && (
           <div className="rounded-xl border border-dashed border-border bg-paper-100 p-10 text-center">

@@ -6,7 +6,7 @@ import type {
   SimilarNeighbor,
 } from '../../lib/schemas/knowledge';
 import { selectComboboxOption } from '../../test/combobox';
-import { REJECT_PRESETS, guidanceForType } from './curationGuide';
+import { REJECT_PRESETS } from './curationGuide';
 import { KnowledgePage } from './KnowledgePage';
 
 const mocks = vi.hoisted(() => ({
@@ -217,60 +217,77 @@ describe('KnowledgePage', () => {
     expect(mocks.openTicket).toHaveBeenCalledWith('aaaaaaaa-0000-4000-8000-000000000021');
   });
 
-  it('shows Pending inbox litmus and hides it on other tabs', () => {
+  it('drops agent-facing guidance and the fail-closed badge', () => {
     render(<KnowledgePage />);
 
-    const guidance = screen.getByRole('complementary', {
-      name: 'Pending inbox guidance',
-    });
-    expect(guidance).toHaveTextContent(
-      'Would a different ticket next month still need this exact rule?',
-    );
-    expect(guidance).toHaveTextContent(/eligible for retrieval/);
-    expect(guidance).toHaveTextContent(/not instruction authority/);
-
-    const typeGuidance = guidanceForType('test_command');
-    expect(screen.getByTestId('pending-type-guidance')).toHaveTextContent(
-      typeGuidance.approveExample,
-    );
-    expect(screen.getByTestId('pending-type-guidance')).toHaveTextContent(
-      typeGuidance.rejectExample,
-    );
-
-    mocks.items = [
-      { ...item, status: 'approved', activeRevisionId: item.revisionId },
-    ];
-    fireEvent.click(screen.getByRole('tab', { name: 'Approved' }));
     expect(
       screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
-
-    mocks.items = [{ ...item, status: 'rejected' }];
-    fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
-    expect(
-      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
-
-    mocks.items = [{ ...item, status: 'stale' }];
-    fireEvent.click(screen.getByRole('tab', { name: 'Stale' }));
-    expect(
-      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
+    expect(screen.queryByText('Human-governed · fail-closed')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Would a different ticket/)).not.toBeInTheDocument();
   });
 
-  it('frames approval as retrieval eligibility in the page header', () => {
+  it('shows a main Approve button on pending cards that approves with expectedVersion', async () => {
     render(<KnowledgePage />);
 
-    expect(screen.getByText('Human-governed · fail-closed')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => {
+      expect(mocks.approve).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+      });
+    });
+  });
+
+  it('hides Approve anyway when there are no near-duplicates', () => {
+    mocks.similarItems = [];
+    render(<KnowledgePage />);
+
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
     expect(
-      screen.getAllByText(/eligible for retrieval as untrusted reference data/).length,
-    ).toBeGreaterThan(0);
+      screen.queryByRole('button', { name: 'Approve anyway' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows Approve anyway when there is a near-duplicate', () => {
+    mocks.similarItems = [neighbor];
+    render(<KnowledgePage />);
+
+    expect(
+      within(screen.getByRole('region', { name: 'Near-duplicate assist' })).getByRole(
+        'button',
+        { name: 'Approve anyway' },
+      ),
+    ).toBeVisible();
+  });
+
+  it('hides the raw policy reason on pending cards but keeps rejection reasons', () => {
+    render(<KnowledgePage />);
+
+    expect(screen.queryByText(/Policy:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Manual candidates require review/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the rejection reason on rejected cards', () => {
+    mocks.items = [
+      {
+        ...item,
+        status: 'rejected',
+        policyReason: 'Manual candidates require review.',
+        rejectionReason: 'One-off for this ticket; not reusable next month.',
+      },
+    ];
+    render(<KnowledgePage />);
+
+    expect(screen.getByText('Rejected:').parentElement).toHaveTextContent(
+      'One-off for this ticket; not reusable next month.',
+    );
+    expect(screen.getByText('Policy:')).toBeVisible();
   });
 
   it('uses the selected status and sends optimistic versions for approval', async () => {
+    mocks.similarItems = [neighbor];
     render(<KnowledgePage />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
@@ -555,6 +572,8 @@ describe('KnowledgePage', () => {
     expect(screen.queryByRole('button', { name: 'Add knowledge' })).not.toBeInTheDocument();
     expect(screen.getByText(/Read-only/)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
   });
 
   it('sends optimistic versions for edit and rejection actions', async () => {

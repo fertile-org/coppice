@@ -11,7 +11,6 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { KnowledgeItem, SimilarNeighbor } from '../../lib/schemas/knowledge';
-import { guidanceForType } from './curationGuide';
 import {
   TYPE_LABELS,
   duplicateRejectReason,
@@ -65,7 +64,7 @@ function NearDuplicateAssist({
             Close approved neighbors before you confirm this pending item.
           </p>
         </div>
-        {canGovern && (
+        {canGovern && neighbors.length > 0 && (
           <Button type="button" size="sm" disabled={busy} onClick={onApproveAnyway}>
             <Check className="size-3.5" aria-hidden="true" />
             Approve anyway
@@ -177,7 +176,6 @@ export function KnowledgeCard({
   const markStale = useMarkKnowledgeStale();
   const expire = useExpireKnowledge();
   const [error, setError] = useState<string | null>(null);
-  const typeGuidance = guidanceForType(item.knowledgeType);
 
   const busy =
     approve.isPending ||
@@ -297,24 +295,9 @@ export function KnowledgeCard({
             </div>
           )}
 
-          {item.status === 'pending' && (
-            <p
-              data-testid="pending-type-guidance"
-              className="mt-3 font-body text-xs leading-relaxed text-text-secondary"
-            >
-              <span className="font-medium text-moss-800">
-                {typeGuidance.approveExample}
-              </span>
-              <span className="mx-1.5 text-text-muted" aria-hidden="true">
-                ·
-              </span>
-              <span className="font-medium text-danger">{typeGuidance.rejectExample}</span>
-            </p>
-          )}
-
-          {(item.policyReason || item.rejectionReason) && (
+          {((item.policyReason && item.status !== 'pending') || item.rejectionReason) && (
             <div className="mt-3 space-y-1 rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-xs text-text-secondary">
-              {item.policyReason && (
+              {item.policyReason && item.status !== 'pending' && (
                 <p>
                   <span className="font-medium">Policy:</span> {item.policyReason}
                 </p>
@@ -381,7 +364,7 @@ export function KnowledgeCard({
 
       {showActions && (
         <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
-          {item.status !== 'approved' && item.status !== 'pending' && (
+          {item.status !== 'approved' && (
             <Button
               type="button"
               size="sm"
