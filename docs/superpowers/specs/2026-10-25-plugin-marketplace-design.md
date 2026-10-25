@@ -85,8 +85,18 @@ Displayed `marketplace.json` fields: `name`, `description`, `version`, `author`,
 
 `placeholders.rs` resolves `${VAR}` from plugin settings **or the server environment**. So `${GITHUB_TOKEN}` in the catalog `github` plugin would silently pick up a host `GITHUB_TOKEN`.
 
-- Recommendation: state this in docs. The plugin card shows whether a value came from a setting or the environment.
-- Open: add an opt-out so catalog plugins resolve from settings only. Decide before the catalog ships.
+**Decision (2026-10-25): no catalog-only opt-out in v1.** Catalog-installed plugins resolve `${VAR}` exactly like every other plugin: setting, then allowed server env, then default.
+
+Why:
+
+- Visibility already ships. `setting_sources` reports `setting` / `env` / `default` / `missing` per key, the plugin card shows a **From your environment** badge, and the enable prompt (`envRisk` in `web/src/features/plugins/PluginCard.tsx`) names every env-sourced key before the plugin turns on. Installs start disabled, so nothing resolves until an admin reads that prompt and enables the plugin.
+- A catalog-only rule would make the same plugin act differently depending on whether it came from the marketplace or from "Install from git". The real risk is an untrusted plugin reading host env, and that risk is the same on both paths. If we want a lockdown, make it a per-plugin setting later for every install path, not a marketplace special case.
+- The M07 forge secret is stored encrypted and never put in the server process env, so a catalog plugin cannot pick it up through `${GITHUB_TOKEN}`. Only a variable the operator exported themselves can be read, and `COPPICE_*`, `DATABASE_URL`, `SECRETS_MASTER_KEY` stay blocked (`server_env_allowed`).
+- On desktop, Dock or app-menu launches usually don't inherit shell env anyway. The card asks for the value, which is the path we want users on.
+
+Catalog `github` plugin: use `${GITHUB_PERSONAL_ACCESS_TOKEN}` (the name GitHub's own MCP server docs use), not `${GITHUB_TOKEN}`. That avoids silently grabbing a broad CI or `gh` `GITHUB_TOKEN`, and it keeps it visibly separate from the M07 forge secret in the docs.
+
+Docs (`docs/plugins.md` Marketplace section) state the resolution order for catalog plugins and the two separate GitHub tokens.
 
 ## Web
 
