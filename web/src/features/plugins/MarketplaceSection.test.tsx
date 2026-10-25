@@ -293,6 +293,34 @@ describe('PluginsPage marketplace tab', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Installed github.');
   });
 
+  it('a github install names the missing token and highlights the new card', async () => {
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const githubPlugin: Plugin = {
+      ...installedPlugin,
+      id: '00000000-0000-4000-8000-000000000030',
+      name: 'github',
+      relPath: 'github',
+      marketplace: { name: 'coppice' },
+      settings: [{ key: 'GITHUB_PERSONAL_ACCESS_TOKEN', configured: false, source: 'missing' }],
+    };
+    plugins = [githubPlugin];
+    jobResult = { ...jobResult, status: 'succeeded', pluginIds: [githubPlugin.id] };
+    renderPage();
+    await openMarketplace();
+
+    fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Installed github.');
+    expect(status).toHaveTextContent(
+      'Add GITHUB_PERSONAL_ACCESS_TOKEN in its Settings before agents can use it.',
+    );
+    const card = await screen.findByTestId(`plugin-card-${githubPlugin.id}`);
+    expect(card).toHaveAttribute('data-highlighted', 'true');
+    expect(scrollSpy).toHaveBeenCalled();
+    scrollSpy.mockRestore();
+  });
+
   it('shows why an entry cannot be installed and offers no install button', async () => {
     renderPage();
     await openMarketplace();

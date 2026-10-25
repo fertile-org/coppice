@@ -33,6 +33,32 @@ export const PLUGIN_COPY = {
     'Coppice is always listed. Add a git repository that has a .claude-plugin/marketplace.json to list its plugins too.',
 } as const;
 
+export interface PluginSettingHelp {
+  label: string;
+  help: string;
+  scopes?: string;
+  tokenUrl?: string;
+  tokenLinkLabel?: string;
+}
+
+/** Guidance for known setting keys. Unknown keys show only the raw key. */
+export const PLUGIN_SETTING_HELP: Record<string, PluginSettingHelp> = {
+  GITHUB_PERSONAL_ACCESS_TOKEN: {
+    label: 'GitHub access token',
+    help: 'Lets the github plugin read and update issues, pull requests and CI for your agents. Stored encrypted; Coppice never shows it again.',
+    scopes:
+      'Required: read access to Metadata, Contents, Issues, Pull requests and Actions. Add write access to Issues and Pull requests only if agents should comment or edit.',
+    tokenUrl: 'https://github.com/settings/personal-access-tokens/new',
+    tokenLinkLabel: 'Create a token on GitHub',
+  },
+};
+
+export function missingSettingsNotice(keys: string[]): string {
+  return keys.length === 1
+    ? `Add ${keys[0]} in its Settings before agents can use it.`
+    : `Add ${keys.join(', ')} in its Settings before agents can use it.`;
+}
+
 /** `{n} agents` for counts other than 0 and 1. */
 export function pluginAgentCount(count: number): string {
   return `${count} agents`;

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { PluginSetting, PluginSettingSource } from '../../lib/schemas/plugin';
+import { PLUGIN_SETTING_HELP } from './copy';
 import { useSetPluginSettings } from './usePlugins';
 
 const BADGE = 'rounded-full border px-2 py-0.5 font-body text-xs';
@@ -69,57 +70,75 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
       <ul className="mt-2 space-y-2">
         {settings.map(({ key, configured, source, needsReentry }) => {
           const inputId = `plugin-${pluginId}-setting-${key}`;
+          const helpId = `${inputId}-help`;
+          const help = PLUGIN_SETTING_HELP[key];
           const again = needsReentry === true;
           return (
-            <li
-              key={key}
-              data-testid={`plugin-setting-${key}`}
-              className="flex flex-wrap items-center gap-2"
-            >
-              <label htmlFor={inputId} className="w-40 truncate font-mono text-xs text-text-primary">
-                {key}
-              </label>
-              <input
-                id={inputId}
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={
-                  again
-                    ? "Paste this token again. Backups don't include saved tokens."
-                    : configured
-                      ? '••••••••'
-                      : ''
-                }
-                value={values[key] ?? ''}
-                onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                className="field-control min-w-[12rem] flex-1 px-3 py-1.5 font-mono text-xs"
-              />
-              {configured && !again && (
-                <>
-                  <span className={`${BADGE} border-success-muted bg-success-muted text-success`}>
-                    Configured
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Clear ${key}`}
-                    disabled={saveSettings.isPending}
-                    onClick={() =>
-                      void submit({ [key]: '' }).then((ok) => {
-                        if (!ok) return;
-                        setValues((prev) =>
-                          Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)),
-                        );
-                      })
-                    }
-                  >
-                    Clear
-                  </Button>
-                </>
+            <li key={key} data-testid={`plugin-setting-${key}`} className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor={inputId} className="w-40 truncate font-mono text-xs text-text-primary">
+                  {key}
+                </label>
+                <input
+                  id={inputId}
+                  type="password"
+                  aria-describedby={help ? helpId : undefined}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={
+                    again
+                      ? "Paste this token again. Backups don't include saved tokens."
+                      : configured
+                        ? '••••••••'
+                        : ''
+                  }
+                  value={values[key] ?? ''}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                  className="field-control min-w-[12rem] flex-1 px-3 py-1.5 font-mono text-xs"
+                />
+                {configured && !again && (
+                  <>
+                    <span className={`${BADGE} border-success-muted bg-success-muted text-success`}>
+                      Configured
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Clear ${key}`}
+                      disabled={saveSettings.isPending}
+                      onClick={() =>
+                        void submit({ [key]: '' }).then((ok) => {
+                          if (!ok) return;
+                          setValues((prev) =>
+                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)),
+                          );
+                        })
+                      }
+                    >
+                      Clear
+                    </Button>
+                  </>
+                )}
+                {!configured && !again && <SourceBadge source={source} />}
+              </div>
+              {help && (
+                <div id={helpId} className="font-body text-xs text-text-secondary">
+                  <p className="font-medium text-text-primary">{help.label}</p>
+                  <p className="mt-0.5">{help.help}</p>
+                  {help.scopes && <p className="mt-0.5 text-text-muted">{help.scopes}</p>}
+                  {help.tokenUrl && (
+                    <a
+                      href={help.tokenUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 inline-block font-medium text-moss-700 underline-offset-2 hover:underline"
+                    >
+                      {help.tokenLinkLabel ?? 'Create a token'}
+                    </a>
+                  )}
+                </div>
               )}
-              {!configured && !again && <SourceBadge source={source} />}
             </li>
           );
         })}

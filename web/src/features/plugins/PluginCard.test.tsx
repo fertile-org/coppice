@@ -127,6 +127,35 @@ describe('PluginCard', () => {
     vi.unstubAllGlobals();
   });
 
+  it('explains a known token with its label, help, scopes and a token link', () => {
+    renderCard({
+      ...plugin,
+      settings: [
+        { key: 'GITHUB_PERSONAL_ACCESS_TOKEN', configured: false, source: 'missing' },
+      ],
+    });
+
+    const row = screen.getByTestId('plugin-setting-GITHUB_PERSONAL_ACCESS_TOKEN');
+    expect(within(row).getByText('Missing')).toBeVisible();
+    expect(screen.getByText('GitHub access token')).toBeVisible();
+    expect(screen.getByText(/Lets the github plugin read and update issues/)).toBeVisible();
+    expect(screen.getByText(/read access to Metadata, Contents, Issues/)).toBeVisible();
+    const link = screen.getByRole('link', { name: 'Create a token on GitHub' });
+    expect(link).toHaveAttribute(
+      'href',
+      'https://github.com/settings/personal-access-tokens/new',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.getByLabelText('GITHUB_PERSONAL_ACCESS_TOKEN')).toHaveAttribute('type', 'password');
+  });
+
+  it('shows no help for settings it does not know', () => {
+    renderCard();
+
+    expect(screen.queryByRole('link', { name: 'Create a token on GitHub' })).toBeNull();
+    expect(screen.queryByText('GitHub access token')).toBeNull();
+  });
+
   it('asks for a plugin token again when the backup left it out', () => {
     renderCard({
       ...plugin,
