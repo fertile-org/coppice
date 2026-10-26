@@ -7,6 +7,7 @@ import { useRepos } from '../repos/useRepos';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
+import { CodeReviewBackButton } from './CodeReviewBackButton';
 import { DiffViewer, type InlineCommentDraft } from './DiffViewer';
 import { briefMatchesReviewedCommit } from './briefCommit';
 import { ReviewerBriefBar } from './ReviewerBriefBar';
@@ -123,10 +124,11 @@ export function CodeReviewPage() {
   const ticketBoardHref = ticket
     ? `/boards/${ticket.boardId}?ticket=${ticket.id}`
     : undefined;
+  const backFallbackHref = ticketBoardHref ?? '/settings/repositories';
 
   if (!repoId) {
     return (
-      <PageShell>
+      <PageShell fallbackHref={backFallbackHref}>
         <EmptyState
           title="Repository required"
           description="Open code review from a repository or ticket with a repoId query parameter."
@@ -139,7 +141,7 @@ export function CodeReviewPage() {
 
   if (repo && repo.verificationStatus !== 'ready') {
     return (
-      <PageShell repoName={repo.name}>
+      <PageShell repoName={repo.name} fallbackHref={backFallbackHref}>
         <EmptyState
           title="Repository not ready"
           description={
@@ -157,6 +159,7 @@ export function CodeReviewPage() {
     <div className="coppice-grain flex h-screen flex-col bg-background">
       <header className="shrink-0 border-b border-border bg-surface px-6 py-3">
         <div className="flex flex-wrap items-center gap-4">
+          <CodeReviewBackButton fallbackHref={backFallbackHref} />
           <Link to="/settings/repositories" className="flex items-center gap-2">
             <BrandLogo size={28} className="h-7 w-7 shrink-0" />
             <span className="font-display text-lg font-semibold text-text-primary">
@@ -341,14 +344,17 @@ export function CodeReviewPage() {
 function PageShell({
   children,
   repoName,
+  fallbackHref,
 }: {
   children: ReactNode;
   repoName?: string;
+  fallbackHref: string;
 }) {
   return (
     <div className="coppice-grain flex h-screen flex-col bg-background">
       <header className="border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
+          <CodeReviewBackButton fallbackHref={fallbackHref} />
           <Link to="/settings/repositories" className="flex items-center gap-2">
             <BrandLogo size={28} className="h-7 w-7" />
             <span className="font-display text-lg font-semibold text-text-primary">
