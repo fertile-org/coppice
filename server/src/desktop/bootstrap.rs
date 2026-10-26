@@ -253,22 +253,28 @@ pub fn desktop_config(
     config.auth.bootstrap_admin_password = Some(secrets.admin_password.clone());
     config.secrets.master_key = secrets.master_key.clone();
     config.mcp.base_url = None;
+    // Older desktop configs predate the marketplace cache. Do not inherit the
+    // server default: it is relative to the process cwd, which can be read-only
+    // when macOS launches the app.
+    if !file_sets_key(&layout.config_file, "plugins", "marketplaces_dir") {
+        config.plugins.marketplaces_dir = layout.marketplaces.to_string_lossy().into_owned();
+    }
     // The desktop user owns the repos and pushes with their own git
     // credentials, so push is on unless the file turns it off.
-    if !file_sets_push_enabled(&layout.config_file) {
+    if !file_sets_key(&layout.config_file, "git", "push_enabled") {
         config.git.push_enabled = true;
     }
     Ok(config)
 }
 
-fn file_sets_push_enabled(path: &Path) -> bool {
+fn file_sets_key(path: &Path, section: &str, key: &str) -> bool {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|text| text.parse::<toml::Table>().ok())
         .is_some_and(|table| {
             table
-                .get("git")
-                .and_then(|git| git.get("push_enabled"))
+                .get(section)
+                .and_then(|section| section.get(key))
                 .is_some()
         })
 }
@@ -660,6 +666,68 @@ mod tests {
         );
         assert_eq!(cfg.secrets.master_key, secrets.master_key);
         assert_eq!(cfg.mcp.base_url, None);
+    }
+
+    #[test]
+    fn desktop_config_defaults_new_marketplace_dir_into_data_dir_on_upgrade() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout_in(&dir);
+        let secrets = load_or_create_secrets(&layout.secrets_dir).expect("secrets");
+        let old_config = generated_config(&layout)
+            .unwrap()
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("marketplaces_dir ="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&layout.config_file, old_config).unwrap();
+
+        let cfg = desktop_config(
+            &layout,
+            &secrets,
+            "postgres://coppice:pw@127.0.0.1:55432/coppice",
+            43210,
+        )
+        .expect("config");
+
+        assert_eq!(
+            Path::new(&cfg.plugins.marketplaces_dir),
+            layout.marketplaces.as_path()
+        );
+    }
+
+    #[test]
+    fn desktop_config_keeps_custom_marketplace_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout_in(&dir);
+        let secrets = load_or_create_secrets(&layout.secrets_dir).expect("secrets");
+        let custom = dir.path().join("custom-marketplaces");
+        let custom_setting = format!(
+            "marketplaces_dir = {}",
+            toml::Value::String(custom.to_string_lossy().into_owned())
+        );
+        let contents = generated_config(&layout)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("marketplaces_dir =") {
+                    custom_setting.as_str()
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&layout.config_file, contents).unwrap();
+
+        let cfg = desktop_config(
+            &layout,
+            &secrets,
+            "postgres://coppice:pw@127.0.0.1:55432/coppice",
+            43210,
+        )
+        .expect("config");
+
+        assert_eq!(Path::new(&cfg.plugins.marketplaces_dir), custom);
     }
 
     #[test]
