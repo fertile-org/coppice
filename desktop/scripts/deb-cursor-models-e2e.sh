@@ -703,6 +703,8 @@ run_artifacts_retention_days = 30
 [plugins]
 # Add more folders on the Plugins page. This one can't be removed there.
 dir = "${hung_home}/.config/Coppice/plugins"
+# Cache for marketplace catalogs. Coppice rebuilds it; keep it out of plugin folders.
+marketplaces_dir = "${hung_home}/.config/Coppice/marketplaces"
 
 # Skills that ship with Coppice.
 [mcp]
