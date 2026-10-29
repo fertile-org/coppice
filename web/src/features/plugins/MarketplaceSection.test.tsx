@@ -53,6 +53,14 @@ const communitySource: MarketplaceSource = {
   position: 1,
 };
 
+const unfetchedSource: MarketplaceSource = {
+  ...communitySource,
+  id: '00000000-0000-4000-8000-000000000102',
+  name: 'anthropic-test',
+  refreshedAt: null,
+  commitSha: null,
+};
+
 const githubEntry: MarketplaceEntry = {
   sourceId: coppiceSource.id,
   sourceName: 'coppice',
@@ -172,7 +180,10 @@ describe('PluginsPage marketplace tab', () => {
     vi.clearAllMocks();
     localStorage.clear();
     entries = [githubEntry, reviewEntry, npmEntry, installedUpdatable];
-    sources = [coppiceSource, communitySource];
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      communitySource,
+    ];
     plugins = [];
     jobResult = {
       id: '00000000-0000-4000-8000-000000000020',
@@ -208,6 +219,14 @@ describe('PluginsPage marketplace tab', () => {
       }
       if (path.startsWith('/api/plugin-installs/')) {
         return Promise.resolve(json(jobResult));
+      }
+      if (path.match(/^\/api\/marketplace\/sources\/.+\/refresh$/) && method === 'POST') {
+        const id = path.split('/')[4];
+        const source = sources.find((item) => item.id === id);
+        if (source?.lastError) return Promise.reject(new Error(source.lastError));
+        const refreshed = { ...source!, refreshedAt: '2026-10-28T10:00:00Z' };
+        sources = sources.map((item) => (item.id === id ? refreshed : item));
+        return Promise.resolve(json(refreshed));
       }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
@@ -284,6 +303,44 @@ describe('PluginsPage marketplace tab', () => {
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no such plugin' } });
     expect(screen.queryAllByTestId(/^marketplace-entry-/)).toHaveLength(0);
+  });
+
+  it('fetches each never-loaded source once when Marketplace opens', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      unfetchedSource,
+    ];
+    renderPage();
+    await openMarketplace();
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/marketplace/sources/${unfetchedSource.id}/refresh`,
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText('Loading marketplace sources…')).toBeNull(),
+    );
+    const calls = mocks.apiFetch.mock.calls.filter(
+      ([path, init]) =>
+        path === `/api/marketplace/sources/${unfetchedSource.id}/refresh` &&
+        (init?.method ?? 'GET') === 'POST',
+    );
+    expect(calls).toHaveLength(1);
+    expect(entryCard(githubEntry)).toBeVisible();
+  });
+
+  it('keeps healthy entries visible when a first fetch fails', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...unfetchedSource, lastError: 'network offline' },
+    ];
+    renderPage();
+    await openMarketplace();
+
+    expect(entryCard(githubEntry)).toBeVisible();
+    expect(screen.getByText(/Some sources couldn’t load/)).toBeVisible();
   });
 
   it('a path install posts the entry and lands on the installed plugins with a notice', async () => {

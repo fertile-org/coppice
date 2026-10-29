@@ -10,6 +10,7 @@ import { MarketplacePluginIcon } from './MarketplacePluginIcon';
 import {
   useAddMarketplaceSource,
   useInstallMarketplaceEntry,
+  useMarketplaceFirstFetch,
   useMarketplaceJob,
   useRefreshMarketplaceSource,
   useRemoveMarketplaceSource,
@@ -66,6 +67,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
   const installEntry = useInstallMarketplaceEntry();
   const updatePlugin = useUpdateMarketplacePlugin();
   const job = useMarketplaceJob(pending?.jobId ?? null);
+  const firstFetch = useMarketplaceFirstFetch(sources);
 
   const sourcesById = useMemo(
     () => new Map(sources.map((source) => [source.id, source])),
@@ -214,6 +216,16 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
       {(error ?? jobFailure) && (
         <p role="alert" className={ERROR_CLASS}>
           {error ?? `Install failed: ${jobFailure}`}
+        </p>
+      )}
+      {firstFetch.pendingCount > 0 && (
+        <p role="status" className="font-body text-sm text-text-muted">
+          Loading marketplace sources…
+        </p>
+      )}
+      {sources.some((source) => source.lastError) && (
+        <p role="alert" className={ERROR_CLASS}>
+          Some sources couldn’t load. Open Manage sources to see the error and retry.
         </p>
       )}
 
