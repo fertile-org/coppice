@@ -14,9 +14,6 @@ export const PLUGIN_COPY = {
   loadAgentsFailed: "Couldn't load agents. Try again.",
   updateAgentsFailed: "Couldn't update which agents can use it. Try again.",
   nextRun: "Changes apply from each agent's next run.",
-  guideChooseTitle: 'Choose',
-  guideChooseBefore: 'pick All agents, or check specific agents here or in',
-  guideChooseLink: 'Agents',
   marketplaceTitle: 'Plugin marketplace',
   marketplaceIntro:
     'Install with one click, then enable the plugin and choose which agents can use it.',
@@ -30,9 +27,8 @@ export const PLUGIN_COPY = {
   installedNotice: (name: string) =>
     `Installed ${name}. Enable it and choose which agents can use it.`,
   updatedNotice: (name: string) => `Updated ${name}. Changes apply from each agent's next run.`,
-  sourcesTitle: 'Sources',
   sourcesIntro:
-    'Coppice and claude-plugins-official are provided by default. Add another git repository with .claude-plugin/marketplace.json to list its plugins too.',
+    'Coppice is always listed. Add a git repository with .claude-plugin/marketplace.json to list its plugins too.',
 } as const;
 
 export interface PluginSettingHelp {

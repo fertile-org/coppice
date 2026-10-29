@@ -15,7 +15,7 @@ description: "プラグインは Coppice のエージェントにスキルと MC
 <a id="install-a-plugin"></a>
 
 ## プラグインをインストールする
-**Add plugins** を使います。方法は 2 つあります。
+**Custom** タブを開きます。方法は 2 つあります。
 
 <a id="from-git"></a>
 

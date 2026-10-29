@@ -15,7 +15,7 @@ Plugin `coppice` có sẵn và luôn ở đó. Bạn không tắt được các 
 <a id="install-a-plugin"></a>
 
 ## Cài plugin
-Dùng **Add plugins**. Có hai cách.
+Mở tab **Custom**. Có hai cách.
 
 <a id="from-git"></a>
 

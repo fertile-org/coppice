@@ -143,7 +143,6 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
     void run(entryKey(entry), entry.name, true, () => updatePlugin.mutateAsync(pluginId));
   }
 
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

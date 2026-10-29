@@ -15,7 +15,7 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 <a id="install-a-plugin"></a>
 
 ## 安装插件
-使用 **Add plugins**（添加插件）。有两种方式。
+打开 **Custom**（自定义）标签页。有两种方式。
 
 <a id="from-git"></a>
 
