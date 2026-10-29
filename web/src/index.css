@@ -242,4 +242,43 @@
     background-color: var(--color-paper-200);
     color: var(--color-text-secondary);
   }
+
+  /* Repo file previews: highlight.js tokens mapped to theme tokens (light and dark). */
+  .file-preview .hljs-comment,
+  .file-preview .hljs-quote {
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .file-preview .hljs-keyword,
+  .file-preview .hljs-selector-tag,
+  .file-preview .hljs-meta {
+    color: var(--color-danger);
+  }
+
+  .file-preview .hljs-string,
+  .file-preview .hljs-regexp,
+  .file-preview .hljs-addition {
+    color: var(--color-success);
+  }
+
+  .file-preview .hljs-number,
+  .file-preview .hljs-literal,
+  .file-preview .hljs-symbol {
+    color: var(--color-warning);
+  }
+
+  .file-preview .hljs-title,
+  .file-preview .hljs-section,
+  .file-preview .hljs-name,
+  .file-preview .hljs-type,
+  .file-preview .hljs-built_in {
+    color: var(--color-info);
+  }
+
+  .file-preview .hljs-attr,
+  .file-preview .hljs-attribute,
+  .file-preview .hljs-variable {
+    color: var(--color-accent);
+  }
 }

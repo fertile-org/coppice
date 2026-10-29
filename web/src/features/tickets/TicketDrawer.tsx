@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import { useConnectors } from '../agents/useAgents';
 import { LiveRunView } from '../runs/LiveRunView';
+import { FilePreviewProvider } from '../files/FilePreviewProvider';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
@@ -298,7 +299,7 @@ function TicketDrawerPanel({
     : null;
 
   return (
-    <>
+    <FilePreviewProvider ticketId={ticket?.repoId ? ticket.id : null}>
       <header className="flex shrink-0 items-end justify-between gap-4 border-b border-border px-6 py-4">
         <div className="min-w-0">
           <p className="font-body text-xs uppercase tracking-wide text-text-muted">
@@ -511,6 +512,6 @@ function TicketDrawerPanel({
           onClose={() => setAcceptOpen(false)}
         />
       )}
-    </>
+    </FilePreviewProvider>
   );
 }
