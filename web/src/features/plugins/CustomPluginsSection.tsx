@@ -1,0 +1,409 @@
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { useState, type FormEvent, type RefObject } from 'react';
+import { Button } from '../../components/ui/button';
+import { useConfirm } from '../../components/ui/confirm-dialog';
+import { Combobox } from '../../components/ui/combobox';
+import { parseApiErrorMessage } from '../../lib/api';
+import { isDesktopShell, pickDirectory } from '../../lib/desktop';
+import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
+import { PLUGIN_FORMAT_DOCS_URL } from './copy';
+import {
+  useAddPluginDir,
+  useInstallPlugin,
+  useMovePluginDir,
+  usePluginInstall,
+  useRemovePluginDir,
+  useRescanPlugins,
+} from './usePlugins';
+
+const ERROR_CLASS =
+  'rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger';
+
+function SubHeading({ children }: { children: string }) {
+  return (
+    <h3 className="font-display text-base font-semibold text-bark-900">{children}</h3>
+  );
+}
+
+function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
+  const [path, setPath] = useState('');
+  const [desktop] = useState(isDesktopShell);
+  const [error, setError] = useState<string | null>(null);
+  const addDir = useAddPluginDir();
+  const moveDir = useMovePluginDir();
+  const removeDir = useRemovePluginDir();
+  const rescan = useRescanPlugins();
+  const confirm = useConfirm();
+
+  async function run(action: () => Promise<unknown>, fallback: string) {
+    setError(null);
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setError(parseApiErrorMessage(err, fallback));
+      return false;
+    }
+  }
+
+  async function handleAdd(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = path.trim();
+    if (!trimmed) {
+      setError('Directory path is required.');
+      return;
+    }
+    if (await run(() => addDir.mutateAsync(trimmed), 'Unable to add directory.')) {
+      setPath('');
+    }
+  }
+
+  async function handleBrowse() {
+    const selected = await pickDirectory();
+    if (selected) setPath(selected);
+  }
+
+  async function handleRemove(dir: PluginDir) {
+    if (
+      !(await confirm({
+        title: `Remove plugin directory "${dir.path}"?`,
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    void run(() => removeDir.mutateAsync(dir.id), 'Unable to remove directory.');
+  }
+
+  const busy = moveDir.isPending || removeDir.isPending;
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <SubHeading>Plugin directories</SubHeading>
+          <p className="mt-1 font-body text-sm text-text-secondary">
+            Folders Coppice scans for plugins: each folder can be a plugin itself or hold
+            one plugin per subfolder. Scanned in order; if two plugins share a name, the
+            one in the earlier folder wins. Press Rescan after changing files.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          loading={rescan.isPending}
+          onClick={() => void run(() => rescan.mutateAsync(), 'Rescan failed.')}
+        >
+          Rescan
+        </Button>
+      </div>
+
+      <ol className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
+        {dirs.map((dir, index) => (
+          <li
+            key={dir.id}
+            data-testid={`plugin-dir-${dir.id}`}
+            className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+          >
+            <span className="w-5 font-body text-xs text-text-muted">{index + 1}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
+              {dir.path}
+            </span>
+            {dir.isDefault && (
+              <span className="rounded-full border border-border px-2 py-0.5 font-body text-xs text-text-muted">
+                Default
+              </span>
+            )}
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Move ${dir.path} up`}
+                disabled={index === 0 || busy}
+                onClick={() =>
+                  void run(
+                    () => moveDir.mutateAsync({ id: dir.id, position: index - 1 }),
+                    'Unable to reorder directories.',
+                  )
+                }
+              >
+                <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Move ${dir.path} down`}
+                disabled={index === dirs.length - 1 || busy}
+                onClick={() =>
+                  void run(
+                    () => moveDir.mutateAsync({ id: dir.id, position: index + 1 }),
+                    'Unable to reorder directories.',
+                  )
+                }
+              >
+                <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+              {!dir.isDefault && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  aria-label={`Remove ${dir.path}`}
+                  disabled={busy}
+                  onClick={() => handleRemove(dir)}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <form onSubmit={(e) => void handleAdd(e)} className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[16rem] flex-1">
+          <label
+            htmlFor="plugin-dir-path"
+            className="mb-1 block font-body text-sm font-medium text-bark-800"
+          >
+            Directory path
+          </label>
+          <input
+            id="plugin-dir-path"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="~/coppice-plugins"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            className="field-control w-full px-3 py-2 font-mono text-sm"
+          />
+        </div>
+        {desktop && (
+          <Button type="button" variant="secondary" onClick={() => void handleBrowse()}>
+            Browse…
+          </Button>
+        )}
+        <Button type="submit" loading={addDir.isPending}>
+          Add directory
+        </Button>
+      </form>
+
+      {error && (
+        <p role="alert" className={ERROR_CLASS}>
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function lastPathSegment(path: string): string {
+  return path.replace(/[/\\]+$/, '').split(/[/\\:]/).pop() ?? path;
+}
+
+/** The clone's folder name, or the repository name from its URL. */
+function repoFolder(install: PluginInstall, produced: Plugin[]): string {
+  const gitRoot = produced.find((plugin) => plugin.gitRoot)?.gitRoot;
+  if (gitRoot) return lastPathSegment(gitRoot);
+  return lastPathSegment(install.gitUrl).replace(/\.git$/, '');
+}
+
+function installSuccessMessage(install: PluginInstall, plugins: Plugin[]): string {
+  if (install.pluginIds.length <= 1) return `Installed ${install.gitUrl}.`;
+  const produced = install.pluginIds
+    .map((id) => plugins.find((plugin) => plugin.id === id))
+    .filter((plugin): plugin is Plugin => plugin !== undefined);
+  const names = produced.length > 0 ? ` (${produced.map((p) => p.name).join(', ')})` : '';
+  return `Installed ${repoFolder(install, produced)}: ${install.pluginIds.length} plugins${names}`;
+}
+
+interface InstallSectionProps {
+  dirs: PluginDir[];
+  plugins: Plugin[];
+  gitUrl: string;
+  onGitUrlChange: (url: string) => void;
+  sectionRef: RefObject<HTMLElement | null>;
+}
+
+function InstallSection({
+  dirs,
+  plugins,
+  gitUrl,
+  onGitUrlChange: setGitUrl,
+  sectionRef,
+}: InstallSectionProps) {
+  const [ref, setRef] = useState('');
+  const [pluginDirId, setPluginDirId] = useState('');
+  const [installId, setInstallId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const installPlugin = useInstallPlugin();
+  const { data: install } = usePluginInstall(installId);
+  const targetDirId = dirs.some((dir) => dir.id === pluginDirId)
+    ? pluginDirId
+    : (dirs[0]?.id ?? '');
+  const running = installPlugin.isPending || install?.status === 'running';
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const url = gitUrl.trim();
+    if (!url) {
+      setError('Git URL is required.');
+      return;
+    }
+    if (!targetDirId) {
+      setError('Add a plugin directory first.');
+      return;
+    }
+    setError(null);
+    setInstallId(null);
+    try {
+      const started = await installPlugin.mutateAsync({
+        gitUrl: url,
+        ref: ref.trim() || undefined,
+        pluginDirId: targetDirId,
+      });
+      setInstallId(started.id);
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Unable to start install.'));
+    }
+  }
+
+  return (
+    <section ref={sectionRef} className="space-y-3">
+      <div>
+        <SubHeading>Install from git</SubHeading>
+        <p className="mt-1 font-body text-sm text-text-secondary">
+          Clones the repository into a plugin directory with your computer's git
+          credentials. Plugins installed this way get an Update button.
+        </p>
+        <a
+          href={PLUGIN_FORMAT_DOCS_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-block font-medium text-moss-700 underline-offset-2 hover:underline"
+        >
+          View required plugin format <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="grid gap-3 rounded-xl border border-border bg-surface-raised p-4 shadow-card sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end"
+      >
+        <div>
+          <label
+            htmlFor="plugin-git-url"
+            className="mb-1 block font-body text-sm font-medium text-bark-800"
+          >
+            Git URL
+          </label>
+          <input
+            id="plugin-git-url"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://github.com/org/plugin.git"
+            value={gitUrl}
+            onChange={(e) => setGitUrl(e.target.value)}
+            className="field-control w-full px-3 py-2 font-mono text-sm"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="plugin-git-ref"
+            className="mb-1 block font-body text-sm font-medium text-bark-800"
+          >
+            Ref <span className="font-normal text-text-muted">(optional)</span>
+          </label>
+          <input
+            id="plugin-git-ref"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="main"
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+            className="field-control w-full px-3 py-2 font-mono text-sm"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="plugin-target-dir"
+            className="mb-1 block font-body text-sm font-medium text-bark-800"
+          >
+            Target directory
+          </label>
+          <Combobox
+            id="plugin-target-dir"
+            value={targetDirId}
+            onValueChange={setPluginDirId}
+            triggerClassName="font-mono"
+            searchPlaceholder="Search directories…"
+            options={dirs.map((dir) => ({ value: dir.id, label: dir.path }))}
+          />
+        </div>
+        <Button type="submit" loading={running}>
+          Install
+        </Button>
+      </form>
+
+      {install?.status === 'running' && (
+        <p className="font-body text-sm text-text-muted">
+          Installing {install.gitUrl}…
+        </p>
+      )}
+      {install?.status === 'succeeded' && (
+        <p className="font-body text-sm text-success">
+          {installSuccessMessage(install, plugins)}
+        </p>
+      )}
+      {install?.status === 'failed' && (
+        <p role="alert" className={ERROR_CLASS}>
+          Install failed: {install.error ?? 'unknown error'}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className={ERROR_CLASS}>
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+interface CustomPluginsSectionProps {
+  dirs: PluginDir[];
+  plugins: Plugin[];
+  gitUrl: string;
+  onGitUrlChange: (url: string) => void;
+  sectionRef: RefObject<HTMLElement | null>;
+}
+
+export function CustomPluginsSection({
+  dirs,
+  plugins,
+  gitUrl,
+  onGitUrlChange,
+  sectionRef,
+}: CustomPluginsSectionProps) {
+  return (
+    <section className="space-y-6">
+      <div>
+        <h2 className="font-display text-lg font-semibold text-bark-900">Custom plugins</h2>
+        <p className="mt-1 font-body text-sm text-text-secondary">
+          Install a plugin from git or scan a folder on your computer.
+        </p>
+      </div>
+      <InstallSection
+        dirs={dirs}
+        plugins={plugins}
+        gitUrl={gitUrl}
+        onGitUrlChange={onGitUrlChange}
+        sectionRef={sectionRef}
+      />
+      <PluginDirsSection dirs={dirs} />
+    </section>
+  );
+}

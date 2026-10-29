@@ -1,7 +1,9 @@
 /** User-facing plugin strings. Content owns this list. */
+export const PLUGIN_DOCS_URL = 'https://getcoppice.app/docs/plugins';
+export const PLUGIN_FORMAT_DOCS_URL = `${PLUGIN_DOCS_URL}#create-a-plugin`;
+
 export const PLUGIN_COPY = {
-  pageIntro:
-    'Plugins add skills and tools to your agents. Add a plugin, enable it, then choose which agents can use it.',
+  pageIntro: 'Give your agents new skills and tools.',
   whichAgents: 'Which agents can use it?',
   allAgents: 'All agents',
   chooseAgents: 'Choose agents',
