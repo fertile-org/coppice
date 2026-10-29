@@ -1,7 +1,13 @@
 import { Children, isValidElement, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { parseFileReference } from '../features/files/fileReference';
+import { FileReferenceLink } from '../features/files/FileReferenceLink';
+import {
+  FILE_REFERENCE_URL_PREFIX,
+  remarkFileReferences,
+} from '../features/files/remarkFileReferences';
 import { MermaidDiagram } from './MermaidDiagram';
 
 function fenceLanguage(className: string | undefined): string | undefined {
@@ -28,6 +34,21 @@ function mermaidFenceSource(children: ReactNode): string | null {
     return codeText(props.children).trim();
   }
   return null;
+}
+
+/** A link to a repo file: one found in prose, or a relative markdown link. */
+function linkedFile(href: string | undefined) {
+  if (!href) return null;
+  if (href.startsWith(FILE_REFERENCE_URL_PREFIX)) {
+    return parseFileReference(decodeURIComponent(href.slice(FILE_REFERENCE_URL_PREFIX.length)));
+  }
+  // Absolute URLs, anchors and site paths keep their normal link behavior.
+  if (/^[a-z][\w+.-]*:|^[#/?]/i.test(href)) return null;
+  return parseFileReference(href);
+}
+
+function urlTransform(url: string): string {
+  return url.startsWith(FILE_REFERENCE_URL_PREFIX) ? url : defaultUrlTransform(url);
 }
 
 const components: Components = {
@@ -65,16 +86,27 @@ const components: Components = {
   strong: ({ children }) => (
     <strong className="font-semibold text-text-primary">{children}</strong>
   ),
-  a: ({ href, children }) => (
-    <a href={href} className="text-accent underline-offset-2 hover:underline">
-      {children}
-    </a>
-  ),
-  code: ({ children }) => (
-    <code className="rounded bg-paper-200 px-1 font-mono text-[0.9em]">
-      {children}
-    </code>
-  ),
+  a: ({ href, children }) => {
+    const file = linkedFile(href);
+    if (file) return <FileReferenceLink file={file}>{children}</FileReferenceLink>;
+    if (href?.startsWith(FILE_REFERENCE_URL_PREFIX)) return <>{children}</>;
+    return (
+      <a href={href} className="text-accent underline-offset-2 hover:underline">
+        {children}
+      </a>
+    );
+  },
+  code: ({ className, children }) => {
+    const inline = (
+      <code className="rounded bg-paper-200 px-1 font-mono text-[0.9em]">
+        {children}
+      </code>
+    );
+    // Only inline spans: fenced blocks carry a language class or a trailing newline.
+    if (className || typeof children !== 'string' || children.includes('\n')) return inline;
+    const file = parseFileReference(children);
+    return file ? <FileReferenceLink file={file}>{inline}</FileReferenceLink> : inline;
+  },
   pre: ({ children }) => {
     const diagram = mermaidFenceSource(children);
     if (diagram !== null) return <MermaidDiagram source={diagram} />;
@@ -134,7 +166,11 @@ export function TicketMarkdown({ children }: { children: string }) {
   if (!text) return null;
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkFileReferences]}
+      components={components}
+      urlTransform={urlTransform}
+    >
       {text}
     </ReactMarkdown>
   );

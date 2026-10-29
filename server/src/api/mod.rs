@@ -19,6 +19,7 @@ mod notifications;
 mod plugins;
 mod repos;
 mod settings;
+mod ticket_files;
 mod tickets;
 mod tool_connectors;
 mod tools;
@@ -42,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(repos::routes())
         .merge(code_reviews::routes())
         .merge(tickets::routes())
+        .merge(ticket_files::routes())
         .merge(comments::routes())
         .merge(mentions::routes())
         .merge(attachments::routes(state.attachments.max_bytes()))

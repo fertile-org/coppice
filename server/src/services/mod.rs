@@ -50,6 +50,7 @@ pub mod secret_service;
 pub mod split_service;
 pub mod stage_owner_service;
 pub mod ticket_attachments;
+pub mod ticket_file_service;
 pub mod ticket_git_service;
 pub mod ticket_service;
 pub mod ticket_thread;
