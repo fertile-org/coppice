@@ -6,6 +6,7 @@ import { Combobox } from '../../components/ui/combobox';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { MarketplaceEntry, MarketplaceSource } from '../../lib/schemas/marketplace';
 import { PLUGIN_COPY } from './copy';
+import { MarketplacePluginIcon } from './MarketplacePluginIcon';
 import {
   useAddMarketplaceSource,
   useInstallMarketplaceEntry,
@@ -20,6 +21,8 @@ const ERROR_CLASS =
   'rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger';
 
 const ALL = 'all';
+
+const PAGE_SIZE = 24;
 
 interface Pending {
   key: string;
@@ -57,6 +60,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
   const [query, setQuery] = useState('');
   const [sourceId, setSourceId] = useState(ALL);
   const [category, setCategory] = useState(ALL);
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
   const installEntry = useInstallMarketplaceEntry();
@@ -78,6 +82,20 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
       (sourceId === ALL || entry.sourceId === sourceId) &&
       (category === ALL || entry.category === category),
   );
+  const shown = visible.slice(0, limit);
+
+  function changeQuery(value: string) {
+    setQuery(value);
+    setLimit(PAGE_SIZE);
+  }
+  function changeSource(value: string) {
+    setSourceId(value);
+    setLimit(PAGE_SIZE);
+  }
+  function changeCategory(value: string) {
+    setCategory(value);
+    setLimit(PAGE_SIZE);
+  }
 
   const jobStatus = pending?.jobId ? job.data?.status : undefined;
   const jobFailure = jobStatus === 'failed' ? (job.data?.error ?? 'unknown error') : null;
@@ -150,7 +168,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
               autoComplete="off"
               placeholder="Search plugins"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => changeQuery(e.target.value)}
               className="field-control w-full px-3 py-2 font-body text-sm"
             />
           </div>
@@ -161,7 +179,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
             <Combobox
               aria-label="Source"
               value={sourceId}
-              onValueChange={setSourceId}
+              onValueChange={changeSource}
               searchPlaceholder="Search sources…"
               options={[
                 { value: ALL, label: 'All sources' },
@@ -176,7 +194,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
             <Combobox
               aria-label="Category"
               value={category}
-              onValueChange={setCategory}
+              onValueChange={changeCategory}
               searchPlaceholder="Search categories…"
               options={[
                 { value: ALL, label: 'All categories' },
@@ -204,8 +222,9 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
           {entries.length === 0 ? 'No plugins in the marketplace yet.' : PLUGIN_COPY.marketplaceEmpty}
         </p>
       ) : (
-        <ul className="grid gap-3 md:grid-cols-2">
-          {visible.map((entry) => {
+        <div className="space-y-4">
+          <ul className="grid gap-3 md:grid-cols-2">
+          {shown.map((entry) => {
             const key = entryKey(entry);
             const working = active && pending?.key === key;
             const installed = entry.installedPluginId !== null;
@@ -215,19 +234,24 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
                 data-testid={`marketplace-entry-${key}`}
                 className="flex flex-col gap-3 rounded-xl border border-border bg-surface-raised p-4 shadow-card"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="truncate font-display text-base font-semibold text-bark-900">
-                      {entry.name}
-                    </h3>
-                    <p className="font-mono text-xs text-text-muted">
-                      {entry.version && `v${entry.version} · `}
-                      {entry.sourceName}
-                    </p>
+                <div className="flex items-start gap-3">
+                  <MarketplacePluginIcon name={entry.name} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate font-display text-base font-semibold text-bark-900">
+                          {entry.name}
+                        </h3>
+                        <p className="font-mono text-xs text-text-muted">
+                          {entry.version && `v${entry.version} · `}
+                          {entry.sourceName}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0">
+                        {trustLabel(sourcesById.get(entry.sourceId))}
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant="outline" className="shrink-0">
-                    {trustLabel(sourcesById.get(entry.sourceId))}
-                  </Badge>
                 </div>
                 {entry.description && (
                   <p className="font-body text-sm text-text-secondary">{entry.description}</p>
@@ -271,7 +295,19 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
               </li>
             );
           })}
-        </ul>
+          </ul>
+          {visible.length > limit && (
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setLimit((n) => n + PAGE_SIZE)}
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       <MarketplaceSources sources={sources} />

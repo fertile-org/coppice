@@ -244,6 +244,48 @@ describe('PluginsPage marketplace tab', () => {
     expect(screen.queryByTestId(`marketplace-entry-${communitySource.id}/review-kit`)).toBeNull();
   });
 
+  it('shows a GitHub brand icon and a generic icon for other entries', async () => {
+    renderPage();
+    await openMarketplace();
+
+    expect(within(entryCard(githubEntry)).getByTestId('marketplace-icon-github')).toBeVisible();
+    expect(within(entryCard(reviewEntry)).getByTestId('marketplace-icon-fallback')).toBeVisible();
+  });
+
+  it('reveals 24 entries at a time and resets the limit for every filter', async () => {
+    const extra = Array.from({ length: 29 }, (_, index) => ({
+      ...reviewEntry,
+      name: `plugin-${String(index).padStart(2, '0')}`,
+      description: `Development helper ${index}`,
+      category: 'code',
+    }));
+    entries = [githubEntry, ...extra];
+    renderPage();
+    await openMarketplace();
+
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(30);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Development helper' } });
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(29);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    selectComboboxOption(screen.getByRole('combobox', { name: 'Source' }), 'acme-plugins');
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    selectComboboxOption(screen.getByRole('combobox', { name: 'Category' }), 'code');
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no such plugin' } });
+    expect(screen.queryAllByTestId(/^marketplace-entry-/)).toHaveLength(0);
+  });
+
   it('a path install posts the entry and lands on the installed plugins with a notice', async () => {
     plugins = [installedPlugin];
     renderPage();
