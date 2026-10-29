@@ -15,7 +15,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 <a id="install-a-plugin"></a>
 
 ## 安裝外掛
-使用 **Add plugins**（新增外掛）。有兩種方式。
+打開 **Custom**（自訂）分頁。有兩種方式。
 
 <a id="from-git"></a>
 

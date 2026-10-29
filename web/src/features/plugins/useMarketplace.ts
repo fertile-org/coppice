@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiFetch } from '../../lib/api';
@@ -103,6 +103,53 @@ export function useMarketplaceEntries() {
     queryKey: MARKETPLACE_ENTRIES_QUERY_KEY,
     queryFn: fetchEntries,
   });
+}
+
+export type RefreshMarketplaceOnce = (
+  source: MarketplaceSource,
+) => Promise<MarketplaceSource>;
+
+/**
+ * Refreshes each never-fetched source once per mount. Kept promises deduplicate
+ * the request across the invalidation that follows success or failure.
+ */
+export function useMarketplaceFirstFetch(sources: MarketplaceSource[]) {
+  const queryClient = useQueryClient();
+  const attempts = useRef(new Map<string, Promise<MarketplaceSource>>());
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+
+  const refreshOnce = useCallback<RefreshMarketplaceOnce>(
+    (source) => {
+      const existing = attempts.current.get(source.id);
+      if (existing) return existing;
+
+      const request = refreshSource(source.id)
+        .then((refreshed) => {
+          invalidateMarketplace(queryClient);
+          return refreshed;
+        })
+        .catch(async (error: unknown) => {
+          await queryClient.invalidateQueries({ queryKey: MARKETPLACE_SOURCES_QUERY_KEY });
+          throw error;
+        })
+        .finally(() => {
+          setPendingIds((ids) => ids.filter((id) => id !== source.id));
+        });
+      attempts.current.set(source.id, request);
+      setPendingIds((ids) => [...ids, source.id]);
+      return request;
+    },
+    [queryClient],
+  );
+
+  useEffect(() => {
+    for (const source of sources) {
+      if (source.refreshedAt !== null || attempts.current.has(source.id)) continue;
+      void refreshOnce(source).catch(() => undefined);
+    }
+  }, [sources, refreshOnce]);
+
+  return { refreshOnce, pendingCount: pendingIds.length };
 }
 
 function invalidateMarketplace(queryClient: ReturnType<typeof useQueryClient>) {

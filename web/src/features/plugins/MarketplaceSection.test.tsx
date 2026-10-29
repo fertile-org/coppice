@@ -53,6 +53,14 @@ const communitySource: MarketplaceSource = {
   position: 1,
 };
 
+const unfetchedSource: MarketplaceSource = {
+  ...communitySource,
+  id: '00000000-0000-4000-8000-000000000102',
+  name: 'anthropic-test',
+  refreshedAt: null,
+  commitSha: null,
+};
+
 const githubEntry: MarketplaceEntry = {
   sourceId: coppiceSource.id,
   sourceName: 'coppice',
@@ -135,6 +143,7 @@ let entries: MarketplaceEntry[];
 let sources: MarketplaceSource[];
 let plugins: Plugin[];
 let jobResult: PluginInstall;
+let addedFetchError: string | null;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -163,6 +172,11 @@ async function openMarketplace() {
   return screen.findByTestId(`marketplace-entry-${githubEntry.sourceId}/github`);
 }
 
+async function openSources() {
+  fireEvent.click(screen.getByRole('button', { name: 'Manage sources' }));
+  return screen.findByRole('dialog', { name: 'Marketplace sources' });
+}
+
 function entryCard(entry: MarketplaceEntry): HTMLElement {
   return screen.getByTestId(`marketplace-entry-${entry.sourceId}/${entry.name}`);
 }
@@ -172,8 +186,12 @@ describe('PluginsPage marketplace tab', () => {
     vi.clearAllMocks();
     localStorage.clear();
     entries = [githubEntry, reviewEntry, npmEntry, installedUpdatable];
-    sources = [coppiceSource, communitySource];
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      communitySource,
+    ];
     plugins = [];
+    addedFetchError = null;
     jobResult = {
       id: '00000000-0000-4000-8000-000000000020',
       pluginDirId: defaultDir.id,
@@ -209,6 +227,26 @@ describe('PluginsPage marketplace tab', () => {
       if (path.startsWith('/api/plugin-installs/')) {
         return Promise.resolve(json(jobResult));
       }
+      if (path === '/api/marketplace/sources' && method === 'POST') {
+        const body = JSON.parse(init.body as string) as { name: string; gitUrl: string };
+        const added: MarketplaceSource = {
+          ...unfetchedSource,
+          id: '00000000-0000-4000-8000-000000000103',
+          name: body.name,
+          gitUrl: body.gitUrl,
+          lastError: addedFetchError,
+        };
+        sources = [...sources, added];
+        return Promise.resolve(json(added, 201));
+      }
+      if (path.match(/^\/api\/marketplace\/sources\/.+\/refresh$/) && method === 'POST') {
+        const id = path.split('/')[4];
+        const source = sources.find((item) => item.id === id);
+        if (source?.lastError) return Promise.reject(new Error(source.lastError));
+        const refreshed = { ...source!, refreshedAt: '2026-10-28T10:00:00Z' };
+        sources = sources.map((item) => (item.id === id ? refreshed : item));
+        return Promise.resolve(json(refreshed));
+      }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
   });
@@ -222,12 +260,13 @@ describe('PluginsPage marketplace tab', () => {
     );
     await openMarketplace();
 
-    expect(screen.getByRole('heading', { name: 'Coppice marketplace' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Plugin marketplace' })).toBeVisible();
     expect(within(entryCard(githubEntry)).getByText('Coppice')).toBeVisible();
     expect(
       within(entryCard(reviewEntry)).getByText('Community: not reviewed by Coppice'),
     ).toBeVisible();
-    expect(screen.getByText(/Plugins you can install with one click/)).toBeVisible();
+    expect(screen.getByText(/Install with one click/)).toBeVisible();
+    expect(screen.queryByTestId(`marketplace-source-${communitySource.id}`)).toBeNull();
   });
 
   it('filters by search text and category', async () => {
@@ -242,6 +281,86 @@ describe('PluginsPage marketplace tab', () => {
     selectComboboxOption(screen.getByRole('combobox', { name: 'Category' }), 'code');
     expect(entryCard(githubEntry)).toBeVisible();
     expect(screen.queryByTestId(`marketplace-entry-${communitySource.id}/review-kit`)).toBeNull();
+  });
+
+  it('shows a GitHub brand icon and a generic icon for other entries', async () => {
+    renderPage();
+    await openMarketplace();
+
+    expect(within(entryCard(githubEntry)).getByTestId('marketplace-icon-github')).toBeVisible();
+    expect(within(entryCard(reviewEntry)).getByTestId('marketplace-icon-fallback')).toBeVisible();
+  });
+
+  it('reveals 24 entries at a time and resets the limit for every filter', async () => {
+    const extra = Array.from({ length: 29 }, (_, index) => ({
+      ...reviewEntry,
+      name: `plugin-${String(index).padStart(2, '0')}`,
+      description: `Development helper ${index}`,
+      category: 'code',
+    }));
+    entries = [githubEntry, ...extra];
+    renderPage();
+    await openMarketplace();
+
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(30);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Development helper' } });
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(29);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    selectComboboxOption(screen.getByRole('combobox', { name: 'Source' }), 'acme-plugins');
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    selectComboboxOption(screen.getByRole('combobox', { name: 'Category' }), 'code');
+    expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no such plugin' } });
+    expect(screen.queryAllByTestId(/^marketplace-entry-/)).toHaveLength(0);
+  });
+
+  it('fetches each never-loaded source once when Marketplace opens', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      unfetchedSource,
+    ];
+    renderPage();
+    await openMarketplace();
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/marketplace/sources/${unfetchedSource.id}/refresh`,
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText('Loading marketplace sources…')).toBeNull(),
+    );
+    const calls = mocks.apiFetch.mock.calls.filter(
+      ([path, init]) =>
+        path === `/api/marketplace/sources/${unfetchedSource.id}/refresh` &&
+        (init?.method ?? 'GET') === 'POST',
+    );
+    expect(calls).toHaveLength(1);
+    expect(entryCard(githubEntry)).toBeVisible();
+  });
+
+  it('keeps healthy entries visible when a first fetch fails', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...unfetchedSource, lastError: 'network offline' },
+    ];
+    renderPage();
+    await openMarketplace();
+
+    expect(entryCard(githubEntry)).toBeVisible();
+    expect(screen.getByText(/Some sources couldn’t load/)).toBeVisible();
   });
 
   it('a path install posts the entry and lands on the installed plugins with a notice', async () => {
@@ -348,10 +467,11 @@ describe('PluginsPage marketplace tab', () => {
   it('requires a name and git URL before adding a marketplace', async () => {
     renderPage();
     await openMarketplace();
+    const dialog = await openSources();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add marketplace' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add marketplace' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
       'Name and git URL are required.',
     );
     expect(mocks.apiFetch).not.toHaveBeenCalledWith(
@@ -363,13 +483,89 @@ describe('PluginsPage marketplace tab', () => {
   it('cannot remove the Coppice source but can remove a community one', async () => {
     renderPage();
     await openMarketplace();
+    const sourcesDialog = await openSources();
 
-    expect(screen.queryByRole('button', { name: 'Remove coppice' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove acme-plugins' }));
+    expect(within(sourcesDialog).queryByRole('button', { name: 'Remove coppice' })).toBeNull();
+    fireEvent.click(within(sourcesDialog).getByRole('button', { name: 'Remove acme-plugins' }));
 
     const dialog = await screen.findByRole('dialog', {
       name: 'Remove marketplace "acme-plugins"?',
     });
     expect(within(dialog).getByText(/lose their Update button/)).toBeVisible();
+  });
+
+  function addSourceFromDialog(dialog: HTMLElement) {
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'team-tools' } });
+    fireEvent.change(within(dialog).getByLabelText('Git URL'), {
+      target: { value: 'https://github.com/team/tools.git' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add marketplace' }));
+  }
+
+  function refreshCalls(id: string) {
+    return mocks.apiFetch.mock.calls.filter(
+      ([path, init]) =>
+        path === `/api/marketplace/sources/${id}/refresh` && (init?.method ?? 'GET') === 'POST',
+    );
+  }
+
+  it('adding a source registers it and fetches its catalog once', async () => {
+    renderPage();
+    await openMarketplace();
+    const dialog = await openSources();
+
+    addSourceFromDialog(dialog);
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        '/api/marketplace/sources',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'team-tools', gitUrl: 'https://github.com/team/tools.git' }),
+        }),
+      ),
+    );
+    const source = await within(dialog).findByTestId(
+      'marketplace-source-00000000-0000-4000-8000-000000000103',
+    );
+    await waitFor(() => expect(within(source).getByText(/^Refreshed /)).toBeVisible());
+    expect(refreshCalls('00000000-0000-4000-8000-000000000103')).toHaveLength(1);
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+  });
+
+  it('explains when a source is added but its catalog cannot be fetched', async () => {
+    addedFetchError = 'repository not found';
+    renderPage();
+    await openMarketplace();
+    const dialog = await openSources();
+
+    addSourceFromDialog(dialog);
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Added team-tools, but its catalog could not be fetched.',
+    );
+    const source = await within(dialog).findByTestId(
+      'marketplace-source-00000000-0000-4000-8000-000000000103',
+    );
+    expect(within(source).getByRole('button', { name: 'Retry team-tools' })).toBeVisible();
+    expect(refreshCalls('00000000-0000-4000-8000-000000000103')).toHaveLength(1);
+  });
+
+  it('refreshes a source from the dialog and opens it from the failure warning', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      communitySource,
+      { ...unfetchedSource, refreshedAt: '2026-10-25T10:00:00Z', lastError: 'network offline' },
+    ];
+    renderPage();
+    await openMarketplace();
+
+    fireEvent.click(screen.getByRole('button', { name: /Some sources couldn’t load/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Marketplace sources' });
+    expect(within(dialog).getByText('Last refresh failed: network offline')).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: 'Retry anthropic-test' })).toBeVisible();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh acme-plugins' }));
+    await waitFor(() => expect(refreshCalls(communitySource.id)).toHaveLength(1));
   });
 });

@@ -3207,6 +3207,89 @@ async fn marketplace_seed_builtin_is_idempotent_and_lists_catalog() {
 }
 
 #[tokio::test]
+async fn marketplace_anthropic_default_source_is_non_destructive() {
+    use coppice_server::services::marketplace_service::MarketplaceService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let service = MarketplaceService::new(&pool);
+    let seed = include_str!("../migrations/056_seed_anthropic_marketplace.sql");
+
+    // Upgrade path: the built-in source already exists when the seed applies.
+    service
+        .seed_builtin(cache.path())
+        .await
+        .expect("seed builtin");
+    sqlx::raw_sql(seed)
+        .execute(&pool)
+        .await
+        .expect("seed Anthropic");
+    let sources = service.list_sources().await.unwrap();
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["coppice", "claude-plugins-official"]
+    );
+    let anthropic = &sources[1];
+    assert_eq!(anthropic.kind, "git");
+    assert_eq!(
+        anthropic.git_url.as_deref(),
+        Some("https://github.com/anthropics/claude-plugins-official.git")
+    );
+    assert_eq!(anthropic.git_ref.as_deref(), Some("main"));
+    assert_eq!(anthropic.position, 1);
+    assert!(anthropic.refreshed_at.is_none(), "{anthropic:?}");
+    assert!(anthropic.commit_sha.is_none(), "{anthropic:?}");
+
+    service
+        .remove_source(anthropic.id, cache.path())
+        .await
+        .expect("remove default git source");
+    service
+        .seed_builtin(cache.path())
+        .await
+        .expect("re-seed builtin");
+    assert!(
+        service
+            .list_sources()
+            .await
+            .unwrap()
+            .iter()
+            .all(|source| source.name != "claude-plugins-official"),
+        "startup must not restore a removed default source"
+    );
+
+    let custom = service
+        .add_git_source(
+            "claude-plugins-official",
+            "https://github.com/acme/already-there.git",
+            Some("main"),
+            true,
+        )
+        .await
+        .expect("insert name collision");
+    sqlx::raw_sql(seed)
+        .execute(&pool)
+        .await
+        .expect("repeat seed");
+    assert_eq!(
+        service
+            .get_source(custom.id)
+            .await
+            .unwrap()
+            .git_url
+            .as_deref(),
+        Some("https://github.com/acme/already-there.git"),
+        "the default seed must not overwrite a user's source"
+    );
+}
+
+#[tokio::test]
 async fn marketplace_seed_rejects_cache_inside_plugin_dir() {
     use coppice_server::services::marketplace_service::MarketplaceService;
     use coppice_server::services::plugin_service::PluginService;

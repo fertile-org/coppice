@@ -111,6 +111,10 @@ function renderPage() {
   );
 }
 
+async function openCustom() {
+  fireEvent.click(await screen.findByRole('tab', { name: 'Custom' }));
+}
+
 describe('PluginsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -242,6 +246,7 @@ describe('PluginsPage', () => {
 
   it('install posts git url and shows failure', async () => {
     renderPage();
+    await openCustom();
 
     fireEvent.change(await screen.findByLabelText('Git URL'), {
       target: { value: 'https://github.com/org/missing.git' },
@@ -268,48 +273,33 @@ describe('PluginsPage', () => {
     expect(await screen.findByText(/repository not found/)).toBeVisible();
   });
 
-  it('guide is open when no plugins are installed and explains the flow', async () => {
-    plugins = [];
+  it('separates installed and custom controls and links the plugin guide', async () => {
     renderPage();
 
-    const toggle = await screen.findByRole('button', { name: 'How plugins work' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    const guide = screen.getByTestId('plugins-guide');
-    expect(within(guide).getByText('Skills')).toBeVisible();
-    expect(within(guide).getByText('Tools')).toBeVisible();
-    expect(within(guide).getByText('Settings')).toBeVisible();
-    expect(within(guide).getByRole('link', { name: 'Agents' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Installed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('tab', { name: 'Marketplace' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Custom' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'How plugins work' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Add plugins' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Plugin guide' })).toHaveAttribute(
       'href',
-      '/agents',
+      'https://getcoppice.app/docs/plugins',
     );
-    expect(screen.getByText(/examples\/plugins/, { selector: 'p *' })).toBeVisible();
-  });
 
-  it('guide starts collapsed when plugins exist and remembers the choice', async () => {
-    const view = renderPage();
-
-    const toggle = await screen.findByRole('button', { name: 'How plugins work' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByTestId('plugins-guide')).not.toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    expect(screen.getByTestId('plugins-guide')).toBeVisible();
-
-    view.unmount();
-    renderPage();
-    expect(await screen.findByTestId('plugins-guide')).toBeVisible();
-  });
-
-  it('installed plugins come before the add sections', async () => {
-    renderPage();
-
-    const headings = (await screen.findAllByRole('heading', { level: 2 })).map(
-      (h) => h.textContent,
+    await openCustom();
+    expect(screen.getByRole('heading', { name: 'Custom plugins' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'View required plugin format' })).toHaveAttribute(
+      'href',
+      'https://getcoppice.app/docs/plugins#create-a-plugin',
     );
-    expect(headings).toEqual(['Installed plugins', 'Add plugins']);
+    expect(screen.getByLabelText('Git URL')).toBeVisible();
+    expect(screen.getByLabelText('Directory path')).toBeVisible();
   });
 
-  it('Install from git on an external card fills the install form', async () => {
+  it('Install from git on an external card opens and focuses the Custom form', async () => {
     const url = 'https://github.com/acme/r.git';
     plugins = [
       {
@@ -328,7 +318,13 @@ describe('PluginsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Install from git' }));
 
-    expect(screen.getByLabelText('Git URL')).toHaveValue(url);
+    expect(screen.getByRole('tab', { name: 'Custom' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const input = screen.getByLabelText('Git URL');
+    expect(input).toHaveValue(url);
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it('install success lists every plugin from the clone', async () => {
@@ -353,6 +349,7 @@ describe('PluginsPage', () => {
       error: null,
     };
     renderPage();
+    await openCustom();
 
     fireEvent.change(await screen.findByLabelText('Git URL'), {
       target: { value: 'https://github.com/acme/marketplace-repo.git' },
@@ -363,7 +360,8 @@ describe('PluginsPage', () => {
     expect(
       await screen.findByText('Installed marketplace-repo: 2 plugins (alpha, beta-skills)'),
     ).toBeVisible();
-    const update = within(screen.getByTestId(`plugin-card-${alpha.id}`)).getByRole(
+    fireEvent.click(screen.getByRole('tab', { name: 'Installed' }));
+    const update = within(await screen.findByTestId(`plugin-card-${alpha.id}`)).getByRole(
       'button',
       { name: 'Update' },
     );
@@ -380,6 +378,7 @@ describe('PluginsPage', () => {
       error: null,
     };
     renderPage();
+    await openCustom();
 
     fireEvent.change(await screen.findByLabelText('Git URL'), {
       target: { value: 'https://github.com/org/sample-plugin.git' },
@@ -401,6 +400,8 @@ describe('PluginsPage', () => {
       'https://github.com/fertile-org/coppice/tree/main/examples/plugins',
     );
     expect(examples).toHaveAttribute('target', '_blank');
+
+    await openCustom();
     expect(screen.getByText(/with your computer's git credentials/)).toBeVisible();
     expect(screen.getByLabelText('Directory path')).toHaveAttribute(
       'placeholder',
@@ -410,6 +411,7 @@ describe('PluginsPage', () => {
 
   it('default directory cannot be removed', async () => {
     renderPage();
+    await openCustom();
 
     const defaultRow = await screen.findByTestId(`plugin-dir-${defaultDir.id}`);
     expect(within(defaultRow).queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument();
@@ -419,6 +421,7 @@ describe('PluginsPage', () => {
 
   it('canceling remove plugin directory leaves the directory in place', async () => {
     renderPage();
+    await openCustom();
 
     const extraRow = await screen.findByTestId(`plugin-dir-${extraDir.id}`);
     fireEvent.click(within(extraRow).getByRole('button', { name: /Remove/ }));
@@ -451,6 +454,7 @@ describe('PluginsPage', () => {
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
     renderPage();
+    await openCustom();
 
     const extraRow = await screen.findByTestId(`plugin-dir-${extraDir.id}`);
     fireEvent.click(within(extraRow).getByRole('button', { name: /Remove/ }));

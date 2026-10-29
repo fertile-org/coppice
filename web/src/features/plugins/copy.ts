@@ -1,7 +1,9 @@
 /** User-facing plugin strings. Content owns this list. */
+export const PLUGIN_DOCS_URL = 'https://getcoppice.app/docs/plugins';
+export const PLUGIN_FORMAT_DOCS_URL = `${PLUGIN_DOCS_URL}#create-a-plugin`;
+
 export const PLUGIN_COPY = {
-  pageIntro:
-    'Plugins add skills and tools to your agents. Add a plugin, enable it, then choose which agents can use it.',
+  pageIntro: 'Give your agents new skills and tools.',
   whichAgents: 'Which agents can use it?',
   allAgents: 'All agents',
   chooseAgents: 'Choose agents',
@@ -12,12 +14,9 @@ export const PLUGIN_COPY = {
   loadAgentsFailed: "Couldn't load agents. Try again.",
   updateAgentsFailed: "Couldn't update which agents can use it. Try again.",
   nextRun: "Changes apply from each agent's next run.",
-  guideChooseTitle: 'Choose',
-  guideChooseBefore: 'pick All agents, or check specific agents here or in',
-  guideChooseLink: 'Agents',
-  marketplaceTitle: 'Coppice marketplace',
+  marketplaceTitle: 'Plugin marketplace',
   marketplaceIntro:
-    'Plugins you can install with one click. Once installed, a plugin is available to all agents you give access to, whatever CLI they run on.',
+    'Install with one click, then enable the plugin and choose which agents can use it.',
   trustCoppice: 'Coppice',
   trustCommunity: 'Community: not reviewed by Coppice',
   marketplaceEmpty: 'No plugins match these filters.',
@@ -28,9 +27,8 @@ export const PLUGIN_COPY = {
   installedNotice: (name: string) =>
     `Installed ${name}. Enable it and choose which agents can use it.`,
   updatedNotice: (name: string) => `Updated ${name}. Changes apply from each agent's next run.`,
-  sourcesTitle: 'Sources',
   sourcesIntro:
-    'Coppice is always listed. Add a git repository that has a .claude-plugin/marketplace.json to list its plugins too.',
+    'Coppice is always listed. Add a git repository with .claude-plugin/marketplace.json to list its plugins too.',
 } as const;
 
 export interface PluginSettingHelp {

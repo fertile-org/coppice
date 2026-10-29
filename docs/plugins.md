@@ -18,10 +18,13 @@ A plugin is not a rule set and does not change workflow, statuses, or permission
 
 ### Marketplace
 
-The **Marketplace** tab on the Plugins page lists plugins you can install with one click. It has two kinds of source:
+The Plugins page has three tabs: **Installed** (every installed plugin, whatever its origin), **Marketplace**, and **Custom** (install from git, plugin directories). The **Marketplace** tab lists plugins you can install with one click, with search, source and category filters, 24 entries at a time (**Load more** shows more). **Manage sources** opens a dialog with the source list. There are two kinds of source:
 
 - **Coppice** (built in, always listed). The catalog lives in `server/marketplace/coppice/`. It is embedded in the server and written to the marketplace cache on every start, so it works offline. The first entry is `github`: skills for issues, pull requests, reviews and CI, plus an MCP server that needs a `GITHUB_PERSONAL_ACCESS_TOKEN` setting.
-- **Git sources** you add by URL. Coppice shallow-clones the repository, reads its `.claude-plugin/marketplace.json`, and lists its entries. **Refresh** pulls it again; removing a source keeps the plugins you installed from it.
+- **Git sources** you add by URL. Coppice shallow-clones the repository, reads its `.claude-plugin/marketplace.json`, and lists its entries. Adding a source fetches it right away; if that fetch fails, the source stays registered and the dialog says so. **Refresh** (or **Retry**) pulls it again; removing a source keeps the plugins you installed from it.
+- **claude-plugins-official** (`https://github.com/anthropics/claude-plugins-official.git`, `main`), Anthropic's official directory, is seeded once by migration `056`. It is a normal git source: it is labelled **Community**, can be removed, and does not come back after removal. If a source with that name already existed, it is left unchanged.
+
+When the **Marketplace** tab opens, each source that has never been fetched is refreshed once (per page visit). Entries from healthy sources stay usable while others load or fail; a failed source shows a warning that opens **Manage sources**. Recognized entries (such as `github`) get a bundled brand icon, others a generic one; no icons are fetched at runtime.
 
 Entries with a path `source` install from the source folder. Entries with a `github`, `url` or `git-subdir` source are cloned as a background install job, the same as **Install from git**. `npm` entries are listed but cannot be installed yet.
 
@@ -35,7 +38,7 @@ Placeholders such as `${GITHUB_PERSONAL_ACCESS_TOKEN}` resolve from the plugin's
 
 **Two GitHub tokens:** the forge token from Settings (used by the git and PR features, M07) and the `github` plugin's `GITHUB_PERSONAL_ACCESS_TOKEN` (used by its MCP server) are separate. Setting one does not set the other.
 
-Design: [plugin marketplace spec](superpowers/specs/2026-10-25-plugin-marketplace-design.md).
+Design: [plugin marketplace spec](superpowers/specs/2026-10-25-plugin-marketplace-design.md), [Plugins page UI/UX](superpowers/specs/2026-10-28-plugins-page-uiux-design.md).
 
 ### Supported layouts
 
@@ -55,7 +58,7 @@ Skills are found up to 3 folders deep inside each skills folder (`skills/<catego
 
 ### 1. Add a plugin
 
-On **Plugins → Add plugins**, either:
+On **Plugins → Custom**, either:
 
 - **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. Coppice clones it with your computer's git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
 - **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored, and so are folders whose name starts with `.` (Coppice uses those for in-progress marketplace installs). Press **Rescan** after changing files. **Browse…** opens a folder picker.

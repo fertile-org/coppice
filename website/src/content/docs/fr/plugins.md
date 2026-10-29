@@ -15,7 +15,7 @@ Le plugin intégré `coppice` est toujours là. Ses skills ne peuvent pas être 
 <a id="install-a-plugin"></a>
 
 ## Installer un plugin
-Utilisez **Add plugins**. Il y a deux façons de faire.
+Ouvrez l’onglet **Custom**. Il y a deux façons de faire.
 
 <a id="from-git"></a>
 
