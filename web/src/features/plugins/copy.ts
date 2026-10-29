@@ -17,9 +17,9 @@ export const PLUGIN_COPY = {
   guideChooseTitle: 'Choose',
   guideChooseBefore: 'pick All agents, or check specific agents here or in',
   guideChooseLink: 'Agents',
-  marketplaceTitle: 'Coppice marketplace',
+  marketplaceTitle: 'Plugin marketplace',
   marketplaceIntro:
-    'Plugins you can install with one click. Once installed, a plugin is available to all agents you give access to, whatever CLI they run on.',
+    'Install with one click, then enable the plugin and choose which agents can use it.',
   trustCoppice: 'Coppice',
   trustCommunity: 'Community: not reviewed by Coppice',
   marketplaceEmpty: 'No plugins match these filters.',
@@ -32,7 +32,7 @@ export const PLUGIN_COPY = {
   updatedNotice: (name: string) => `Updated ${name}. Changes apply from each agent's next run.`,
   sourcesTitle: 'Sources',
   sourcesIntro:
-    'Coppice is always listed. Add a git repository that has a .claude-plugin/marketplace.json to list its plugins too.',
+    'Coppice and claude-plugins-official are provided by default. Add another git repository with .claude-plugin/marketplace.json to list its plugins too.',
 } as const;
 
 export interface PluginSettingHelp {

@@ -208,7 +208,6 @@ export function PluginsPage() {
               aria-labelledby="plugins-tab-marketplace"
               className="space-y-4"
             >
-              <SectionHeading>{PLUGIN_COPY.marketplaceTitle}</SectionHeading>
               {sourcesQuery.isError || entriesQuery.isError ? (
                 <p className="font-body text-sm text-danger">Unable to load the marketplace.</p>
               ) : sourcesQuery.isLoading || entriesQuery.isLoading ? (

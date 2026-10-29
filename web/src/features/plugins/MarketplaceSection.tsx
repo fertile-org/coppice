@@ -1,19 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { MarketplaceEntry, MarketplaceSource } from '../../lib/schemas/marketplace';
 import { PLUGIN_COPY } from './copy';
 import { MarketplacePluginIcon } from './MarketplacePluginIcon';
+import { MarketplaceSourcesDialog } from './MarketplaceSourcesDialog';
+import { trustLabel } from './marketplaceTrust';
 import {
-  useAddMarketplaceSource,
   useInstallMarketplaceEntry,
   useMarketplaceFirstFetch,
   useMarketplaceJob,
-  useRefreshMarketplaceSource,
-  useRemoveMarketplaceSource,
   useUpdateMarketplacePlugin,
   type MarketplaceStart,
 } from './useMarketplace';
@@ -31,14 +29,6 @@ interface Pending {
   /** Set only for object entries, which install as a background job. */
   jobId: string | null;
   update: boolean;
-}
-
-function isCoppiceSource(source: MarketplaceSource | undefined): boolean {
-  return source?.kind === 'builtin';
-}
-
-function trustLabel(source: MarketplaceSource | undefined): string {
-  return isCoppiceSource(source) ? PLUGIN_COPY.trustCoppice : PLUGIN_COPY.trustCommunity;
 }
 
 function matches(entry: MarketplaceEntry, query: string): boolean {
@@ -64,6 +54,7 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const installEntry = useInstallMarketplaceEntry();
   const updatePlugin = useUpdateMarketplacePlugin();
   const job = useMarketplaceJob(pending?.jobId ?? null);
@@ -155,6 +146,14 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold text-bark-900">
+          {PLUGIN_COPY.marketplaceTitle}
+        </h2>
+        <Button type="button" variant="secondary" onClick={() => setSourcesOpen(true)}>
+          Manage sources
+        </Button>
+      </div>
       <div className="space-y-3">
         <div className="flex flex-wrap gap-3">
           <div className="min-w-[14rem] flex-[2]">
@@ -224,9 +223,13 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
         </p>
       )}
       {sources.some((source) => source.lastError) && (
-        <p role="alert" className={ERROR_CLASS}>
+        <button
+          type="button"
+          onClick={() => setSourcesOpen(true)}
+          className={`${ERROR_CLASS} text-left`}
+        >
           Some sources couldn’t load. Open Manage sources to see the error and retry.
-        </p>
+        </button>
       )}
 
       {visible.length === 0 ? (
@@ -322,199 +325,16 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
         </div>
       )}
 
-      <MarketplaceSources sources={sources} />
+      <MarketplaceSourcesDialog
+        sources={sources}
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+        refreshOnce={firstFetch.refreshOnce}
+      />
     </div>
   );
 }
 
 function entryKey(entry: MarketplaceEntry): string {
   return `${entry.sourceId}/${entry.name}`;
-}
-
-function MarketplaceSources({ sources }: { sources: MarketplaceSource[] }) {
-  const [gitUrl, setGitUrl] = useState('');
-  const [name, setName] = useState('');
-  const [ref, setRef] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const addSource = useAddMarketplaceSource();
-  const refreshSource = useRefreshMarketplaceSource();
-  const removeSource = useRemoveMarketplaceSource();
-  const confirm = useConfirm();
-  const busy = refreshSource.isPending || removeSource.isPending;
-
-  async function handleAdd(e: FormEvent) {
-    e.preventDefault();
-    const trimmedName = name.trim();
-    const trimmedUrl = gitUrl.trim();
-    if (!trimmedName || !trimmedUrl) {
-      setError('Name and git URL are required.');
-      return;
-    }
-    setError(null);
-    try {
-      await addSource.mutateAsync({
-        name: trimmedName,
-        gitUrl: trimmedUrl,
-        ref: ref.trim() || undefined,
-      });
-      setName('');
-      setGitUrl('');
-      setRef('');
-    } catch (err) {
-      setError(parseApiErrorMessage(err, 'Unable to add marketplace.'));
-    }
-  }
-
-  async function handleRefresh(source: MarketplaceSource) {
-    setError(null);
-    try {
-      await refreshSource.mutateAsync(source.id);
-    } catch (err) {
-      setError(parseApiErrorMessage(err, 'Unable to refresh marketplace.'));
-    }
-  }
-
-  async function handleRemove(source: MarketplaceSource) {
-    if (
-      !(await confirm({
-        title: `Remove marketplace "${source.name}"?`,
-        description: 'Plugins installed from it stay installed, but lose their Update button.',
-        danger: true,
-      }))
-    ) {
-      return;
-    }
-    setError(null);
-    try {
-      await removeSource.mutateAsync(source.id);
-    } catch (err) {
-      setError(parseApiErrorMessage(err, 'Unable to remove marketplace.'));
-    }
-  }
-
-  return (
-    <section className="space-y-3">
-      <div>
-        <h3 className="font-display text-base font-semibold text-bark-900">
-          {PLUGIN_COPY.sourcesTitle}
-        </h3>
-        <p className="mt-1 font-body text-sm text-text-secondary">{PLUGIN_COPY.sourcesIntro}</p>
-      </div>
-
-      <ol className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
-        {sources.map((source) => {
-          const coppice = isCoppiceSource(source);
-          return (
-            <li
-              key={source.id}
-              data-testid={`marketplace-source-${source.id}`}
-              className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
-            >
-              <span className="font-body text-sm font-medium text-text-primary">{source.name}</span>
-              <Badge variant="outline">{trustLabel(source)}</Badge>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
-                {source.gitUrl ?? ''}
-              </span>
-              <span className="font-body text-xs text-text-muted">
-                {source.lastError
-                  ? `Last refresh failed: ${source.lastError}`
-                  : source.refreshedAt
-                    ? `Refreshed ${new Date(source.refreshedAt).toLocaleString()}`
-                    : 'Not fetched yet'}
-              </span>
-              {!coppice && (
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Refresh ${source.name}`}
-                    disabled={busy}
-                    onClick={() => void handleRefresh(source)}
-                  >
-                    Refresh
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    aria-label={`Remove ${source.name}`}
-                    disabled={busy}
-                    onClick={() => void handleRemove(source)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-
-      <form onSubmit={(e) => void handleAdd(e)} className="grid gap-3 sm:grid-cols-[1fr_2fr_1fr_auto] sm:items-end">
-        <div>
-          <label
-            htmlFor="marketplace-source-name"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Name
-          </label>
-          <input
-            id="marketplace-source-name"
-            type="text"
-            autoComplete="off"
-            placeholder="acme-plugins"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="field-control w-full px-3 py-2 font-body text-sm"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="marketplace-source-url"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Git URL
-          </label>
-          <input
-            id="marketplace-source-url"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="https://github.com/org/plugins.git"
-            value={gitUrl}
-            onChange={(e) => setGitUrl(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="marketplace-source-ref"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Ref <span className="font-normal text-text-muted">(optional)</span>
-          </label>
-          <input
-            id="marketplace-source-ref"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="main"
-            value={ref}
-            onChange={(e) => setRef(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-        <Button type="submit" loading={addSource.isPending}>
-          Add marketplace
-        </Button>
-      </form>
-
-      {error && (
-        <p role="alert" className={ERROR_CLASS}>
-          {error}
-        </p>
-      )}
-    </section>
-  );
 }
