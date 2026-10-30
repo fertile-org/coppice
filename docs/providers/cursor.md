@@ -84,7 +84,7 @@ Start at **System → Connectors** (admin): it shows whether `cursor-agent` is f
 - **Agent Chat:** On, in the per-chat folder, with the untested banner: "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer." Chat passes `--mode ask` and omits `--force`. A per-chat copy only changes the working directory: absolute paths and `git push` can still reach the real checkout, and `--mode ask` was not shown to block shell. Cursor CLI `2026.10.14-941492e` was installed here and not signed in, and the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell writes unless `--sandbox enabled`, and that sandbox also blocks network and MCP. Ticket runs still pass `--force`. Plan runs use `--mode plan`.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
-- **MCP:** For the run, Coppice writes `<worktree>/.cursor/mcp.json` (merged if that file already exists) and a per-run `CURSOR_CONFIG_DIR` allow rule. `HOME` is not remapped, so `cursor-agent login` / Keychain still work. The worktree file is restored when the run ends.
+- **MCP:** For the run, Coppice merges the gateway into `$HOME/.cursor/mcp.json` on macOS (restored after the run; real `HOME` stays so Keychain login works) or into a per-run home under the artifacts dir on Linux. It also writes `CURSOR_CONFIG_DIR` with a `Mcp(coppice:*)` allow rule. Do not rely on `<worktree>/.cursor/mcp.json`: headless runs leave workspace MCP on "needs approval" and never load Coppice tools.
 
 ## How Coppice runs Cursor (reference)
 

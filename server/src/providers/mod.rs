@@ -121,8 +121,8 @@ pub fn artifacts_path(artifacts_dir: &str, segments: &[&str]) -> std::io::Result
 }
 
 /// Absolute `<artifacts_dir>/runs/<run_id>/`. Per-run MCP configuration
-/// lives here, except Cursor, which has to write `<worktree>/.cursor/mcp.json`
-/// (no `--mcp-config`; remapping `HOME` hides Keychain login) and restore it.
+/// lives under `$HOME/.cursor/mcp.json` (operator home on macOS, per-run
+/// `cursor-home` elsewhere) plus `$CURSOR_CONFIG_DIR/cli-config.json`.
 pub fn run_dir(input: &AgentRunInput, connector: &str) -> Result<PathBuf, ProviderError> {
     let (Some(artifacts_dir), Some(run_id)) = (&input.artifacts_dir, &input.run_id) else {
         return Err(mcp_unavailable(&format!(

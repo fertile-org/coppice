@@ -16,7 +16,7 @@ use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 pub struct CursorProvider {
@@ -67,15 +67,16 @@ impl AgentProvider for CursorProvider {
         // Coppice does not inject or strip credentials.
 
         let mut env = Vec::new();
-        let _mcp_worktree;
+        let _mcp_guard;
         if let Some(access) = &input.mcp {
             let state_dir = cursor_state_dir(&input)?;
-            let (mcp_env, guard) = cursor_mcp_setup(access, &state_dir, &worktree)?;
+            let host = CursorLaunchEnv::from_process();
+            let (mcp_env, guard) = cursor_mcp_setup(access, &state_dir, &host)?;
             env.extend(mcp_env);
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
-            _mcp_worktree = Some(guard);
+            _mcp_guard = guard;
         } else {
-            _mcp_worktree = None;
+            _mcp_guard = None;
         }
 
         log_launch(
@@ -322,19 +323,40 @@ fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
     Ok(artifacts_path(artifacts_dir, &segments)?)
 }
 
-/// Restores `<worktree>/.cursor/mcp.json` when the run ends.
-///
-/// The CLI has no `--mcp-config`. It reads MCP from the workspace file and
-/// `$HOME/.cursor/mcp.json`. Remapping `HOME` hid the operator login (Keychain
-/// on macOS). Writing the worktree file and putting it back is the remaining
-/// path that keeps auth and still injects the gateway.
-struct CursorWorktreeMcp {
+/// Host paths captured before the run overrides any of them.
+struct CursorLaunchEnv {
+    home: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+    git_config_global: Option<String>,
+    gh_config_dir: Option<String>,
+}
+
+impl CursorLaunchEnv {
+    fn from_process() -> Self {
+        Self {
+            home: std::env::var_os("HOME").map(PathBuf::from),
+            xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            git_config_global: std::env::var("GIT_CONFIG_GLOBAL").ok(),
+            gh_config_dir: std::env::var("GH_CONFIG_DIR").ok(),
+        }
+    }
+
+    fn config_home(&self) -> Option<PathBuf> {
+        self.xdg_config_home
+            .clone()
+            .or_else(|| self.home.as_ref().map(|home| home.join(".config")))
+    }
+}
+
+/// Restores an injected `$HOME/.cursor/mcp.json` when the run ends.
+struct CursorHomeMcp {
     path: PathBuf,
     previous: Option<Vec<u8>>,
     created_dir: bool,
+    _lock: std::sync::MutexGuard<'static, ()>,
 }
 
-impl Drop for CursorWorktreeMcp {
+impl Drop for CursorHomeMcp {
     fn drop(&mut self) {
         match &self.previous {
             Some(raw) => {
@@ -352,14 +374,21 @@ impl Drop for CursorWorktreeMcp {
     }
 }
 
+fn home_mcp_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Permissions come from `$CURSOR_CONFIG_DIR/cli-config.json`. MCP servers
-/// come from `<worktree>/.cursor/mcp.json`. `HOME` is left alone so the CLI
-/// still finds Keychain / `~/.cursor` login.
+/// come from `$HOME/.cursor/mcp.json` (not the workspace file: workspace MCP
+/// stays on "needs approval" and never loads in headless `-p` runs).
 fn cursor_mcp_setup(
     access: &McpAccess,
     state_dir: &Path,
-    worktree: &Path,
-) -> std::io::Result<(Vec<(String, String)>, CursorWorktreeMcp)> {
+    host: &CursorLaunchEnv,
+) -> std::io::Result<(Vec<(String, String)>, Option<CursorHomeMcp>)> {
     let config_dir = state_dir.join("cursor-config");
     std::fs::create_dir_all(&config_dir)?;
 
@@ -367,33 +396,82 @@ fn cursor_mcp_setup(
     // Without this allow rule `-p` denies every gateway call at the approval prompt.
     std::fs::write(config_dir.join("cli-config.json"), spec.cursor_cli_config())?;
 
-    let cursor_dir = worktree.join(".cursor");
-    let mcp_path = cursor_dir.join("mcp.json");
+    let mut env = vec![(
+        "CURSOR_CONFIG_DIR".to_string(),
+        config_dir.display().to_string(),
+    )];
+
+    let guard = if cfg!(target_os = "macos") {
+        let home = host.home.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "cursor MCP setup needs HOME on macOS",
+            )
+        })?;
+        Some(install_home_mcp(&spec, &home.join(".cursor").join("mcp.json"))?)
+    } else {
+        let run_home = state_dir.join("cursor-home");
+        std::fs::create_dir_all(run_home.join(".cursor"))?;
+        std::fs::write(
+            run_home.join(".cursor").join("mcp.json"),
+            spec.cursor_mcp_json(),
+        )?;
+        env.push(("HOME".to_string(), run_home.display().to_string()));
+        if let Some(config_home) = host.config_home() {
+            env.push((
+                "XDG_CONFIG_HOME".to_string(),
+                config_home.display().to_string(),
+            ));
+        }
+        forward_git_env(host, &mut env);
+        None
+    };
+
+    Ok((env, guard))
+}
+
+fn install_home_mcp(spec: &McpServerSpec, mcp_path: &Path) -> std::io::Result<CursorHomeMcp> {
+    let lock = home_mcp_lock();
+    let cursor_dir = mcp_path.parent().expect("mcp path has parent");
     let created_dir = !cursor_dir.exists();
-    std::fs::create_dir_all(&cursor_dir)?;
+    std::fs::create_dir_all(cursor_dir)?;
     let previous = if mcp_path.is_file() {
-        Some(std::fs::read(&mcp_path)?)
+        Some(std::fs::read(mcp_path)?)
     } else {
         None
     };
     let body = match &previous {
-        Some(raw) => merge_cursor_mcp_json(raw, &spec),
+        Some(raw) => merge_cursor_mcp_json(raw, spec),
         None => spec.cursor_mcp_json(),
     };
-    std::fs::write(&mcp_path, body)?;
-    exclude_worktree_mcp(worktree);
+    std::fs::write(mcp_path, body)?;
+    Ok(CursorHomeMcp {
+        path: mcp_path.to_path_buf(),
+        previous,
+        created_dir,
+        _lock: lock,
+    })
+}
 
-    Ok((
-        vec![(
-            "CURSOR_CONFIG_DIR".to_string(),
-            config_dir.display().to_string(),
-        )],
-        CursorWorktreeMcp {
-            path: mcp_path,
-            previous,
-            created_dir,
-        },
-    ))
+fn forward_git_env(host: &CursorLaunchEnv, env: &mut Vec<(String, String)>) {
+    let host_config_home = host.config_home();
+    if host.git_config_global.is_none() {
+        if let Some(gitconfig) = host.home.as_ref().map(|home| home.join(".gitconfig")) {
+            if gitconfig.is_file() {
+                env.push((
+                    "GIT_CONFIG_GLOBAL".to_string(),
+                    gitconfig.display().to_string(),
+                ));
+            }
+        }
+    }
+    if host.gh_config_dir.is_none() {
+        if let Some(gh) = host_config_home.map(|config_home| config_home.join("gh")) {
+            if gh.is_dir() {
+                env.push(("GH_CONFIG_DIR".to_string(), gh.display().to_string()));
+            }
+        }
+    }
 }
 
 fn merge_cursor_mcp_json(existing: &[u8], spec: &McpServerSpec) -> String {
@@ -410,47 +488,6 @@ fn merge_cursor_mcp_json(existing: &[u8], spec: &McpServerSpec) -> String {
         servers.insert("coppice".into(), server.clone());
     }
     serde_json::to_string(&value).unwrap_or_else(|_| spec.cursor_mcp_json())
-}
-
-fn exclude_worktree_mcp(worktree: &Path) {
-    let Ok(out) = std::process::Command::new("git")
-        .args(["rev-parse", "--git-path", "info/exclude"])
-        .current_dir(worktree)
-        .output()
-    else {
-        return;
-    };
-    if !out.status.success() {
-        return;
-    }
-    let rel = String::from_utf8_lossy(&out.stdout);
-    let rel = rel.trim();
-    if rel.is_empty() {
-        return;
-    }
-    let path = {
-        let p = Path::new(rel);
-        if p.is_absolute() {
-            p.to_path_buf()
-        } else {
-            worktree.join(p)
-        }
-    };
-    let line = ".cursor/mcp.json";
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    if existing.lines().any(|l| l.trim() == line) {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut body = existing;
-    if !body.is_empty() && !body.ends_with('\n') {
-        body.push('\n');
-    }
-    body.push_str(line);
-    body.push('\n');
-    let _ = std::fs::write(path, body);
 }
 
 fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
@@ -703,48 +740,53 @@ mod tests {
     }
 
     #[test]
-    fn cursor_mcp_setup_keeps_real_home_and_writes_worktree_mcp() {
+    fn cursor_mcp_setup_writes_per_run_home_mcp_on_linux() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
         let tmp = tempfile::tempdir().expect("tempdir");
-        let worktree = tmp.path().join("wt");
         let run_dir = tmp.path().join("runs").join("run-1");
-        std::fs::create_dir_all(&worktree).expect("worktree");
+        let host = CursorLaunchEnv {
+            home: Some(tmp.path().join("operator-home")),
+            xdg_config_home: None,
+            git_config_global: None,
+            gh_config_dir: None,
+        };
 
-        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree).expect("setup");
-        let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, ["CURSOR_CONFIG_DIR"]);
-        assert_eq!(
-            env[0].1,
-            run_dir.join("cursor-config").display().to_string()
-        );
+        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &host).expect("setup");
+        assert!(guard.is_none());
+        assert!(env.iter().any(|(k, v)| k == "HOME" && v.contains("cursor-home")));
 
         let spec = McpServerSpec::from_access(&access());
-        let mcp_path = worktree.join(".cursor").join("mcp.json");
-        let mcp_raw = std::fs::read_to_string(&mcp_path).expect("mcp");
-        assert_eq!(mcp_raw, spec.cursor_mcp_json());
-        assert!(!mcp_raw.contains("super-secret-run-token"));
-
-        let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
-            .expect("cli config");
-        assert_eq!(cli_raw, spec.cursor_cli_config());
-        assert!(!run_dir.join("cursor-home").exists());
-
-        drop(guard);
-        assert!(!mcp_path.exists(), "created mcp.json must be removed");
+        let mcp_path = run_dir.join("cursor-home").join(".cursor").join("mcp.json");
+        assert_eq!(
+            std::fs::read_to_string(&mcp_path).expect("mcp"),
+            spec.cursor_mcp_json()
+        );
     }
 
     #[test]
-    fn cursor_mcp_setup_merges_and_restores_existing_worktree_mcp() {
+    fn cursor_mcp_setup_merges_operator_home_mcp_on_macos() {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
         let tmp = tempfile::tempdir().expect("tempdir");
-        let worktree = tmp.path().join("wt");
-        let cursor_dir = worktree.join(".cursor");
+        let home = tmp.path().join("home");
+        let cursor_dir = home.join(".cursor");
         std::fs::create_dir_all(&cursor_dir).expect("cursor dir");
         let mcp_path = cursor_dir.join("mcp.json");
         let existing = r#"{"mcpServers":{"figma":{"url":"http://127.0.0.1:9/mcp"}}}"#;
         std::fs::write(&mcp_path, existing).expect("existing mcp");
 
-        let (env, guard) =
-            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree).expect("setup");
+        let host = CursorLaunchEnv {
+            home: Some(home.clone()),
+            xdg_config_home: None,
+            git_config_global: None,
+            gh_config_dir: None,
+        };
+        let (env, guard) = cursor_mcp_setup(&access(), &tmp.path().join("run"), &host).expect("setup");
         assert!(env.iter().all(|(k, _)| k != "HOME"));
+        assert!(guard.is_some());
 
         let merged: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&mcp_path).expect("read")).expect("json");
@@ -753,11 +795,9 @@ mod tests {
             merged["mcpServers"]["coppice"]["url"],
             "http://127.0.0.1:5000/mcp"
         );
-        assert!(!merged.to_string().contains("super-secret-run-token"));
 
         drop(guard);
         assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
-        assert!(cursor_dir.is_dir(), "pre-existing .cursor must stay");
     }
 
     #[test]

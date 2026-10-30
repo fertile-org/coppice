@@ -169,7 +169,7 @@ Implement `ToolSource` in `mcp/` and add it to the list in `ToolRegistry::builti
 
 The gateway is authenticated by a per-run bearer token, minted when the run starts and revoked when it finishes, fails, or is stopped. Base URL comes from `mcp.base_url` (default `http://127.0.0.1:<server.port>/mcp`), which is correct in Docker, on the desktop, and in the cloud because the CLIs run beside the server.
 
-Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Cursor also writes `<worktree>/.cursor/mcp.json` for the run (no `--mcp-config`; remapping `HOME` hides Keychain login) and restores it after. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
+Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Cursor merges the gateway into `$HOME/.cursor/mcp.json` (operator home on macOS, per-run home on Linux) and sets `CURSOR_CONFIG_DIR`; workspace `.cursor/mcp.json` is not used in headless runs. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
 
 Agents finish with `result_submit`; a submitted result wins over a final JSON blob in the transcript.
 
@@ -177,7 +177,7 @@ Agents finish with `result_submit`; a submitted result wins over a final JSON bl
 
 ### Plugin MCP proxy
 
-Plugin MCP servers (`.mcp.json` stdio and streamable HTTP entries) are proxied through the gateway as `<plugin>__<tool>`. `rmcp` is used only as a client inside the transports. The first-party **`design`** plugin's `design__*` tools are an in-process **`DesignToolSource`** on the gateway, not a plugin stdio MCP server; the Cursor connector writing `.cursor/mcp.json` in the worktree is unrelated. The user-facing guide (plugin format, settings, writing a plugin) is [plugins.md](plugins.md); `examples/plugins/hello-coppice` is a working example covered by `integration_plugins.rs`.
+Plugin MCP servers (`.mcp.json` stdio and streamable HTTP entries) are proxied through the gateway as `<plugin>__<tool>`. `rmcp` is used only as a client inside the transports. The first-party **`design`** plugin's `design__*` tools are an in-process **`DesignToolSource`** on the gateway, not a plugin stdio MCP server. The user-facing guide (plugin format, settings, writing a plugin) is [plugins.md](plugins.md); `examples/plugins/hello-coppice` is a working example covered by `integration_plugins.rs`.
 
 ```text
 mcp/proxy/transport.rs  McpTransport (kind, connect) → McpConnection; Transports registry; ProxyError

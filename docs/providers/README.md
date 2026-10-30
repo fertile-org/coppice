@@ -93,7 +93,7 @@ Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, hande
 | --- | --- | --- |
 | `claude-code` | `--mcp-config <run dir>/mcp.json --strict-mcp-config`, plus `mcp__coppice__*` in `--allowedTools` | Not yet |
 | `codex` | `-c mcp_servers.coppice.url=…` and `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` | Not yet |
-| `cursor` | `<worktree>/.cursor/mcp.json` (restored after the run) and `CURSOR_CONFIG_DIR` with a `cli-config.json` allowing `Mcp(coppice:*)`. Real `HOME` is kept so Keychain login still works | Yes (`2026.10.22-27dcf5f`) |
+| `cursor` | `$HOME/.cursor/mcp.json` (operator home on macOS, per-run home on Linux) plus `CURSOR_CONFIG_DIR` with `Mcp(coppice:*)`. Workspace `.cursor/mcp.json` is not used — it stays on "needs approval" in headless runs | Yes (`2026.10.22-27dcf5f`) |
 | `opencode` | `OPENCODE_CONFIG=<run dir>/opencode.json` for the per-run `opencode serve` | Yes (`1.18.33`) |
 | `kilo-code` | `KILO_CONFIG=<run dir>/kilo-config.json` (name follows OpenCode's convention; may differ in Kilo) | Not yet |
 
