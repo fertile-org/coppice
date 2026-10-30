@@ -231,17 +231,20 @@ impl<'a> PluginService<'a> {
 
     /// Records `path` as a non-default plugin dir. Creates it, accepts a
     /// relative path, and succeeds when that canonical path is already registered.
-    pub(crate) async fn ensure_dir(&self, path: &str) -> Result<(), PluginError> {
+    pub(crate) async fn ensure_dir(&self, path: &str) -> Result<PluginDir, PluginError> {
         std::fs::create_dir_all(path)?;
         let canonical = canonical_string(Path::new(path))?;
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM plugin_dirs WHERE path = $1)")
-                .bind(&canonical)
-                .fetch_one(&mut *tx)
-                .await?;
-        if !exists {
+        let existing = sqlx::query(&format!(
+            "SELECT {DIR_COLUMNS} FROM plugin_dirs WHERE path = $1"
+        ))
+        .bind(&canonical)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let row = if let Some(row) = existing {
+            row
+        } else {
             sqlx::query(
                 r#"
                 INSERT INTO plugin_dirs (id, path, position, is_default)
@@ -252,9 +255,15 @@ impl<'a> PluginService<'a> {
             .bind(&canonical)
             .execute(&mut *tx)
             .await?;
-        }
+            sqlx::query(&format!(
+                "SELECT {DIR_COLUMNS} FROM plugin_dirs WHERE path = $1"
+            ))
+            .bind(&canonical)
+            .fetch_one(&mut *tx)
+            .await?
+        };
         tx.commit().await?;
-        Ok(())
+        Ok(row_to_dir(&row))
     }
 
     /// Rejects a plugin dir that would contain the marketplace cache, so a
@@ -398,6 +407,16 @@ impl<'a> PluginService<'a> {
     /// (keeping `enabled` and git metadata), marks vanished ones `missing`,
     /// and shadows same-name `ok` plugins in later dirs.
     pub async fn rescan(&self) -> Result<Vec<PluginRow>, PluginError> {
+        self.rescan_with_builtin(None).await
+    }
+
+    /// Like [`rescan`], but the first insert of `design` at rel path `design`
+    /// inside `builtin_dir_id` is enabled for all agents. Later scans pass
+    /// `None`, so a user-added folder of the same name is not.
+    pub(crate) async fn rescan_with_builtin(
+        &self,
+        builtin_dir_id: Option<Uuid>,
+    ) -> Result<Vec<PluginRow>, PluginError> {
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
         let dirs: Vec<PluginDir> = sqlx::query(&format!(
@@ -412,7 +431,7 @@ impl<'a> PluginService<'a> {
         for dir in &dirs {
             let found = scan_dir(Path::new(&dir.path));
             for discovered in &found {
-                upsert_discovered(&mut tx, dir.id, dir.is_default, discovered).await?;
+                upsert_discovered(&mut tx, dir.id, builtin_dir_id, discovered).await?;
             }
             let seen: Vec<String> = found.into_iter().map(|d| d.rel_path).collect();
             sqlx::query(
@@ -1386,7 +1405,7 @@ fn scan_dir(dir: &Path) -> Vec<Discovered> {
 async fn upsert_discovered(
     tx: &mut Transaction<'_, Postgres>,
     dir_id: Uuid,
-    dir_is_default: bool,
+    builtin_dir_id: Option<Uuid>,
     discovered: &Discovered,
 ) -> Result<(), PluginError> {
     let (version, description, manifest, status, error) = match &discovered.result {
@@ -1413,10 +1432,9 @@ async fn upsert_discovered(
         Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
         Err(_) => Vec::new(),
     };
-    // First-party folder only. A user plugin named design, including one in
-    // the default dir or nested under another path, stays disabled. plugin.json
-    // makes this layout Plugin, so the manifest default would be explicit.
-    let builtin_design = !dir_is_default
+    // Only the dir registered at startup. A later rescan, including add_dir,
+    // passes None so a user folder named design is not auto-enabled.
+    let builtin_design = builtin_dir_id == Some(dir_id)
         && discovered.name == "design"
         && discovered.rel_path == "design";
     let agent_access = if builtin_design {

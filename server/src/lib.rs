@@ -150,7 +150,7 @@ impl AppState {
                     config.plugins.dir
                 )
             })?;
-        service
+        let builtin = service
             .ensure_dir(&config.mcp.builtin_plugins_dir)
             .await
             .map_err(|e| {
@@ -159,7 +159,7 @@ impl AppState {
                     config.mcp.builtin_plugins_dir
                 )
             })?;
-        if let Err(err) = service.rescan().await {
+        if let Err(err) = service.rescan_with_builtin(Some(builtin.id)).await {
             tracing::warn!(error = %err, "plugin scan failed");
         }
         if let Err(err) = service.refresh_catalog(skills).await {
