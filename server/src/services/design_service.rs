@@ -117,14 +117,25 @@ impl<'a> DesignService<'a> {
         Ok(CreatedSet { id, dir })
     }
 
-    pub async fn write(&self, set_id: Uuid, rel: &str, bytes: &[u8]) -> Result<(), DesignError> {
+    pub async fn write(
+        &self,
+        set_id: Uuid,
+        run_id: Uuid,
+        rel: &str,
+        bytes: &[u8],
+    ) -> Result<(), DesignError> {
         if let Some(reason) = reject_rel_path(rel) {
             return Err(DesignError::Invalid(reason.into()));
         }
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(DesignError::Invalid("file exceeds 512 KiB".into()));
         }
-        let dir = self.dir_of(set_id).await?;
+        let row = self.load(set_id).await?;
+        let row_run: Uuid = row.get("run_id");
+        if row_run != run_id {
+            return Err(DesignError::Invalid("run does not match design set".into()));
+        }
+        let dir: String = row.get("dir");
         let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
         let dest = dest_under(&artifacts, &root, rel, true)?;
         if dest.is_dir() {
@@ -295,11 +306,6 @@ impl<'a> DesignService<'a> {
         .fetch_all(self.pool)
         .await?;
         rows.iter().map(summary_from_row).collect()
-    }
-
-    async fn dir_of(&self, set_id: Uuid) -> Result<String, DesignError> {
-        let row = self.load(set_id).await?;
-        Ok(row.get("dir"))
     }
 
     async fn load(&self, set_id: Uuid) -> Result<sqlx::postgres::PgRow, DesignError> {

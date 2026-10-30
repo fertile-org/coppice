@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 use axum::Router;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
-use coppice_server::services::design_service::{CreateScope, DesignOption, DesignService};
+use coppice_server::services::design_service::{
+    CreateScope, DesignError, DesignOption, DesignService,
+};
 use coppice_server::services::run_service::RunService;
 use coppice_server::AppState;
 use serde_json::{json, Value};
@@ -102,10 +104,19 @@ async fn create_write_publish_choose_roundtrip() {
         format!("<!doctype html><title>A</title>design-preview-marker-a-{stamp}").into_bytes();
     let html_b =
         format!("<!doctype html><title>B</title>design-preview-marker-b-{stamp}").into_bytes();
-    svc.write(created.id, "a/index.html", &html_a)
+    svc.write(created.id, run.id, "a/index.html", &html_a)
         .await
         .expect("write a");
-    svc.write(created.id, "b/index.html", &html_b)
+    let wrong_run = svc
+        .write(created.id, Uuid::new_v4(), "a/index.html", b"hijack")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(wrong_run, DesignError::Invalid(ref msg) if msg.contains("run")),
+        "{wrong_run}"
+    );
+    assert_eq!(fs::read(set_dir.join("a/index.html")).unwrap(), html_a);
+    svc.write(created.id, run.id, "b/index.html", &html_b)
         .await
         .expect("write b");
     assert_eq!(fs::read(set_dir.join("a/index.html")).unwrap(), html_a);

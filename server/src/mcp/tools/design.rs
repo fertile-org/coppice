@@ -18,7 +18,7 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
             let set_id = required_uuid(&args, "setId")?;
             let path = required_str(&args, "path")?;
             let content = required_str(&args, "content")?;
-            svc.write(set_id, path, content.as_bytes())
+            svc.write(set_id, ctx.scope.run_id, path, content.as_bytes())
                 .await
                 .map_err(map_err)?;
             Ok(json!({ "path": path }))
