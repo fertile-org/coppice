@@ -38,7 +38,7 @@ pub struct DesignOption {
     pub entry: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ChosenOption {
     pub id: String,
     pub title: String,
@@ -55,8 +55,15 @@ pub struct CreatedSet {
 pub struct DesignSetSummary {
     pub id: Uuid,
     pub title: String,
+    pub run_id: Uuid,
     pub options: Vec<DesignOption>,
     pub chosen: Option<ChosenOption>,
+}
+
+pub struct DesignSetRecord {
+    pub summary: DesignSetSummary,
+    pub ticket_id: Option<Uuid>,
+    pub chat_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -244,6 +251,29 @@ impl<'a> DesignService<'a> {
         Ok(set_id)
     }
 
+    pub async fn get(&self, set_id: Uuid) -> Result<DesignSetRecord, DesignError> {
+        let row = self.load(set_id).await?;
+        Ok(DesignSetRecord {
+            summary: summary_from_row(&row)?,
+            ticket_id: row.get("ticket_id"),
+            chat_session_id: row.get("chat_session_id"),
+        })
+    }
+
+    pub async fn read_file(&self, set_id: Uuid, rel: &str) -> Result<Vec<u8>, DesignError> {
+        if let Some(reason) = reject_rel_path(rel) {
+            return Err(DesignError::Invalid(reason.into()));
+        }
+        let row = self.load(set_id).await?;
+        let dir: String = row.get("dir");
+        let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
+        let dest = dest_under(&artifacts, &root, rel, false)?;
+        if !dest.is_file() {
+            return Err(DesignError::NotFound);
+        }
+        std::fs::read(&dest).map_err(invalid_io)
+    }
+
     pub async fn list_for_ticket(
         &self,
         ticket_id: Uuid,
@@ -291,7 +321,7 @@ impl<'a> DesignService<'a> {
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, title, options, chosen_option_id
+            SELECT id, title, run_id, options, chosen_option_id
             FROM design_sets
             WHERE published_at IS NOT NULL
               AND (
@@ -349,6 +379,7 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
     Ok(DesignSetSummary {
         id: row.get("id"),
         title: row.get("title"),
+        run_id: row.get("run_id"),
         options,
         chosen,
     })

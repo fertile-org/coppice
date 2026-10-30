@@ -1,6 +1,7 @@
 mod common;
 
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
@@ -9,6 +10,7 @@ use coppice_server::services::design_service::{
 };
 use coppice_server::services::run_service::RunService;
 use coppice_server::AppState;
+use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::fs;
@@ -514,4 +516,482 @@ async fn mcp_plan_ticket_lists_design_tools() {
         .find(|tool| tool["name"] == "design__list")
         .unwrap();
     assert_eq!(list["annotations"]["readOnlyHint"], true);
+}
+
+struct TicketHttp {
+    state: Arc<AppState>,
+    app: Router,
+    cookie: String,
+    csrf: String,
+    pool: PgPool,
+    ticket_id: Uuid,
+    agent_id: Uuid,
+    design_id: Uuid,
+    _git_dir: Option<tempfile::TempDir>,
+}
+
+async fn ticket_http() -> TicketHttp {
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let pool = state.db.clone().expect("db pool");
+    let design_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
+            .fetch_one(&pool)
+            .await
+            .expect("design plugin");
+    TicketHttp {
+        state,
+        app,
+        cookie,
+        csrf,
+        pool,
+        ticket_id: ticket_id.parse().unwrap(),
+        agent_id: agent_id.parse().unwrap(),
+        design_id,
+        _git_dir: Some(git_dir),
+    }
+}
+
+async fn start_ticket_run(fx: &TicketHttp, agent_id: Uuid) -> Uuid {
+    RunService::new(&fx.pool)
+        .start_run_for_agent(fx.ticket_id, agent_id, "work_on_ticket", Default::default())
+        .await
+        .expect("start run")
+        .id
+}
+
+fn two_options() -> Vec<DesignOption> {
+    vec![
+        DesignOption {
+            id: "a".into(),
+            title: "A".into(),
+            entry: "a/index.html".into(),
+        },
+        DesignOption {
+            id: "b".into(),
+            title: "B".into(),
+            entry: "b/index.html".into(),
+        },
+    ]
+}
+
+async fn publish_html(
+    fx: &TicketHttp,
+    run_id: Uuid,
+    agent_id: Uuid,
+    title: &str,
+    ticket_id: Option<Uuid>,
+    chat_session_id: Option<Uuid>,
+    html_a: &str,
+    html_b: &str,
+) -> Uuid {
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let svc = DesignService::new(&fx.pool, &artifacts);
+    let created = svc
+        .create(
+            title,
+            CreateScope {
+                ticket_id,
+                chat_session_id,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    svc.write(created.id, run_id, "a/index.html", html_a.as_bytes())
+        .await
+        .expect("write a");
+    svc.write(created.id, run_id, "b/index.html", html_b.as_bytes())
+        .await
+        .expect("write b");
+    svc.publish(created.id, run_id, two_options())
+        .await
+        .expect("publish");
+    created.id
+}
+
+#[tokio::test]
+async fn choose_requires_session_and_known_option() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+
+    let chosen = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{set_id}/choose"),
+            r#"{"optionId":"a"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("choose");
+    assert_eq!(chosen.status(), StatusCode::NO_CONTENT);
+
+    let listed = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{}/designs", fx.ticket_id),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("list");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let sets = common::json_body(listed).await;
+    let sets = sets.as_array().expect("design list");
+    assert_eq!(sets[0]["id"], set_id.to_string());
+    assert_eq!(sets[0]["chosen"]["id"], "a");
+    assert_eq!(sets[0]["chosen"]["title"], "A");
+    assert_eq!(sets[0]["runId"], run_id.to_string());
+
+    let got = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/designs/{set_id}"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("get");
+    assert_eq!(got.status(), StatusCode::OK);
+    let got = common::json_body(got).await;
+    assert_eq!(got["chosen"]["id"], "a");
+    assert_eq!(got["runId"], run_id.to_string());
+    assert_eq!(got["options"][0]["entry"], "a/index.html");
+
+    let wrong = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{set_id}/choose"),
+            r#"{"optionId":"nope"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("wrong option");
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+
+    let missing = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{}/choose", Uuid::new_v4()),
+            r#"{"optionId":"a"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("missing set");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let unauth = fx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/designs/{set_id}/choose"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"optionId":"a"}"#))
+                .unwrap(),
+        )
+        .await
+        .expect("unauth");
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn ticket_design_list_is_published_newest_first() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let older_run = start_ticket_run(&fx, fx.agent_id).await;
+    let older = publish_html(
+        &fx,
+        older_run,
+        fx.agent_id,
+        "Older",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>old-a</title>",
+        "<!doctype html><title>old-b</title>",
+    )
+    .await;
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    DesignService::new(&fx.pool, &artifacts)
+        .create(
+            "Draft",
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id: older_run,
+                agent_id: fx.agent_id,
+            },
+        )
+        .await
+        .expect("draft");
+
+    let reviewer =
+        common::create_test_agent_from_preset(&fx.app, "Reviewer", &fx.cookie, &fx.csrf).await;
+    let newer_run = start_ticket_run(&fx, reviewer.parse().unwrap()).await;
+    let newer = publish_html(
+        &fx,
+        newer_run,
+        reviewer.parse().unwrap(),
+        "Newer",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>new-a</title>",
+        "<!doctype html><title>new-b</title>",
+    )
+    .await;
+
+    let listed = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{}/designs", fx.ticket_id),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("list");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let sets = common::json_body(listed).await;
+    let sets = sets.as_array().expect("design list");
+    assert_eq!(sets.len(), 2, "{sets:?}");
+    assert_eq!(sets[0]["id"], newer.to_string());
+    assert_eq!(sets[0]["title"], "Newer");
+    assert_eq!(sets[0]["runId"], newer_run.to_string());
+    assert_eq!(sets[0]["options"][0]["id"], "a");
+    assert_eq!(sets[0]["options"][0]["entry"], "a/index.html");
+    assert!(sets[0]["chosen"].is_null());
+    assert_eq!(sets[1]["id"], older.to_string());
+    assert_eq!(sets[1]["title"], "Older");
+    assert_eq!(sets[1]["runId"], older_run.to_string());
+}
+
+#[tokio::test]
+async fn design_file_is_html_without_attachment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let html_a = "<!doctype html><title>A</title>design-preview-marker";
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        html_a,
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/designs/{set_id}/files/a/index.html"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("file");
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/html")
+    );
+    if let Some(disposition) = res.headers().get(header::CONTENT_DISPOSITION) {
+        let disposition = disposition.to_str().unwrap_or("");
+        assert!(
+            !disposition.to_ascii_lowercase().contains("attachment"),
+            "{disposition}"
+        );
+    }
+    let bytes = BodyExt::collect(res.into_body())
+        .await
+        .expect("body")
+        .to_bytes();
+    assert_eq!(bytes.as_ref(), html_a.as_bytes());
+}
+
+#[tokio::test]
+async fn ticket_get_includes_design_summary_without_html() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let marker = "design-preview-marker-ticket-get";
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        &format!("<!doctype html><title>A</title>{marker}"),
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&fx.pool)
+        .await
+        .expect("user");
+    DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    )
+    .choose(set_id, "a", user_id)
+    .await
+    .expect("choose");
+
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![fx.design_id],
+    )
+    .await;
+    let url = mcp_url(fx.app).await;
+    let body = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"ticket_get","arguments":{}}),
+        )
+        .await,
+    );
+    let designs = body["designs"].as_array().expect("designs");
+    assert_eq!(designs[0]["title"], "Home");
+    assert_eq!(designs[0]["options"][0]["id"], "a");
+    assert_eq!(designs[0]["options"][0]["title"], "A");
+    assert_eq!(designs[0]["options"][1]["id"], "b");
+    assert!(designs[0]["options"][0].get("entry").is_none());
+    assert_eq!(designs[0]["chosen"]["id"], "a");
+    assert_eq!(designs[0]["chosen"]["title"], "A");
+    assert!(!body.to_string().contains(marker));
+    assert!(!body.to_string().contains("<!doctype"));
+}
+
+#[tokio::test]
+async fn chat_design_list_returns_published_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("session");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id = Uuid::parse_str(common::json_body(created).await["id"].as_str().unwrap())
+        .expect("session id");
+    let pool = state.db.clone().expect("db pool");
+    let message_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO chat_messages (id, session_id, seq, role, body) VALUES ($1, $2, 0, 'human', 'hi')",
+    )
+    .bind(message_id)
+    .bind(session_id)
+    .execute(&pool)
+    .await
+    .expect("message");
+    let run = RunService::new(&pool)
+        .start_chat_turn(session_id, message_id, agent_id.parse().unwrap())
+        .await
+        .expect("chat run");
+    let fx = TicketHttp {
+        state,
+        app: app.clone(),
+        cookie: cookie.clone(),
+        csrf: csrf.clone(),
+        pool,
+        ticket_id: Uuid::nil(),
+        agent_id: agent_id.parse().unwrap(),
+        design_id: Uuid::nil(),
+        _git_dir: None,
+    };
+    let set_id = publish_html(
+        &fx,
+        run.id,
+        fx.agent_id,
+        "Chat home",
+        None,
+        Some(session_id),
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+
+    let listed = app
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/designs"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("chat designs");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let sets = common::json_body(listed).await;
+    let sets = sets.as_array().expect("design list");
+    assert_eq!(sets[0]["id"], set_id.to_string());
+    assert_eq!(sets[0]["title"], "Chat home");
+    assert_eq!(sets[0]["runId"], run.id.to_string());
+    assert!(sets[0]["chosen"].is_null());
 }

@@ -8,6 +8,7 @@ use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::agent_service::AgentService;
 use crate::services::board_service::BoardService;
 use crate::services::comment_service::CommentService;
+use crate::services::design_service::DesignService;
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::result_contract::ACCEPTANCE_CRITERIA_HEADER;
 use crate::services::run_service::{AgentRunWithConnector, RunService};
@@ -213,6 +214,28 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         let names = board_names(ctx).await?;
         body["boardName"] = json!(names.get(&ticket.ticket.board_id));
     }
+    let designs = DesignService::new(ctx.pool, &ctx.state.config.storage.artifacts_dir)
+        .list_for_ticket(ticket.ticket.id)
+        .await
+        .map_err(|err| ToolError::Internal(err.into()))?;
+    body["designs"] = json!(
+        designs
+            .iter()
+            .map(|set| {
+                json!({
+                    "title": set.title,
+                    "options": set.options.iter().map(|option| json!({
+                        "id": option.id,
+                        "title": option.title,
+                    })).collect::<Vec<_>>(),
+                    "chosen": set.chosen.as_ref().map(|chosen| json!({
+                        "id": chosen.id,
+                        "title": chosen.title,
+                    })),
+                })
+            })
+            .collect::<Vec<_>>()
+    );
     Ok(body)
 }
 

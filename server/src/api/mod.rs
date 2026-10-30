@@ -6,6 +6,7 @@ mod boards;
 mod chat;
 mod code_reviews;
 mod comments;
+mod designs;
 mod connectors;
 mod health;
 mod init_wizard;
@@ -45,6 +46,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tickets::routes())
         .merge(ticket_files::routes())
         .merge(comments::routes())
+        .merge(designs::routes())
         .merge(mentions::routes())
         .merge(attachments::routes(state.attachments.max_bytes()))
         .merge(agents::routes())
