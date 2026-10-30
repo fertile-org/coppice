@@ -14,6 +14,8 @@ A plugin is a folder in the Claude Code / Cursor plugin format. It can contain:
 
 A plugin is not a rule set and does not change workflow, statuses, or permissions. Coppice's own rules (collaboration, splitting, role stages) ship as the built-in `coppice` plugin, which every agent always has.
 
+Coppice also ships a first-party **`design`** plugin for UI work. It is **auto-enabled** and granted to **All agents** by default. Agents use gateway tools `design__create`, `design__write`, `design__publish`, and `design__list` to draft HTML previews and **publish** two or three options for the human to **Choose** in the run UI (not via a stdio MCP child from `.mcp.json`). The skill **`design-ui-options`** tells agents when to publish instead of putting HTML in the ticket. Turn the plugin off on its Plugins card, or drop it from an agent's access list, if you do not want that flow.
+
 `commands/`, `agents/`, and `hooks/` folders are detected and listed as **Not supported yet**; they never run.
 
 ### Marketplace
