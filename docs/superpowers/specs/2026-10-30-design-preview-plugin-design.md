@@ -24,7 +24,7 @@ Coppice drives many CLIs. A live “wait for click” MCP call is not portable (
 
 `design` is a built-in plugin materialized next to `coppice` (extend `materialize_builtin`). It is **enabled** and **All agents** on first start. The Plugins page and the agent form can disable it or drop agents. Only enabled + assigned agents get the tools and the skill.
 
-The skill (`design-ui-options`) says: on UI work, call `design__list` first; if the human has not chosen, draft 2–3 options, `design__create` then `design__write` then `design__publish`; do not put HTML in the ticket body. Next turn, honor `chosen`.
+The skill (`design-ui-options`) says: on UI work, call `design__list` first; if the human has not chosen, draft 2–3 options, `design__create` then `design__write` (not the editor Write tool) then `design__publish`; do not put HTML in the ticket body. Next turn, honor `chosen`.
 
 ### Tools
 
@@ -33,13 +33,13 @@ Gateway tools, namespaced `design__`. Available on ticket runs and chat turns wh
 | Tool | Args | Result |
 | --- | --- | --- |
 | `design__create` | `title` | `setId`, absolute `dir` under artifacts |
-| `design__write` | `setId`, `path` (relative), `content` (utf-8) | `{ path }` written under that set’s dir |
+| `design__write` | `setId`, `path` (relative), `content` (utf-8) | `{ path }` written under that set’s dir (max one file 512 KiB) |
 | `design__publish` | `setId`, `options`: 2–4 items `{ id, title, entry }` | `{ setId }` and a visible card on this run’s comment or chat message |
 | `design__list` | none (scope = this ticket or chat) | sets newest first: title, options, `chosen` (`null` or `{ id, title }`) |
 
 `entry` is a path relative to that set’s `dir` (must be `*.html`). `id` is a short slug (`a`, `list`). A second publish on the **same run** replaces that run’s card. A later run creates a new set; the old card stays and is marked superseded when a newer published set exists.
 
-Rejected with a short tool error: plugin off, not 2–4 options, missing entry file, path escape (`..` or absolute), folder over 2 MB, disallowed file types (not `html` / `css` / `png` / `jpg` / `jpeg` / `gif` / `webp`). No `svg` (scriptable). Failed publish leaves no card.
+Rejected with a short tool error: plugin off, not 2–4 options, missing entry file, path escape (`..` or absolute), folder over 2 MB, disallowed file types (not `html` / `css` / `png` / `jpg` / `jpeg` / `gif` / `webp`). No `svg` (scriptable). `design__write` uses the same reject rules as publish (escape, type, 2 MB folder), plus a 512 KiB per-file cap. Failed publish leaves no card.
 
 There is no Choose tool.
 

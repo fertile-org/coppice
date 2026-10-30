@@ -1,6 +1,8 @@
 const ALLOWED_EXT: &[&str] = &["html", "css", "png", "jpg", "jpeg", "gif", "webp"];
-const MAX_FILE_BYTES: u64 = 512 * 1024;
-const MAX_SET_BYTES: u64 = 2 * 1024 * 1024;
+#[allow(dead_code)]
+pub(crate) const MAX_FILE_BYTES: u64 = 512 * 1024;
+#[allow(dead_code)]
+pub(crate) const MAX_SET_BYTES: u64 = 2 * 1024 * 1024;
 
 pub fn reject_rel_path(path: &str) -> Option<&'static str> {
     let p = std::path::Path::new(path);
