@@ -55,8 +55,7 @@ impl McpServerSpec {
         .to_string()
     }
 
-    /// Operator `$HOME/.cursor/mcp.json` (macOS) or per-run home (Linux). Fields
-    /// keep the verified layout order.
+    /// `<worktree>/.cursor/mcp.json`. Fields keep the verified layout order.
     pub fn cursor_mcp_json(&self) -> String {
         #[derive(Serialize)]
         struct McpFile<'a> {

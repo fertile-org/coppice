@@ -3,6 +3,7 @@
 
 use coppice_config::{CursorProviderConfig, KiloCodeProviderConfig};
 use coppice_server::domain::context_profile::ContextProfile;
+use coppice_server::mcp::grant::McpAccess;
 use coppice_server::providers::cursor::CursorProvider;
 use coppice_server::providers::kilo_code::KiloCodeProvider;
 use coppice_server::providers::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
@@ -113,6 +114,28 @@ async fn cursor_returns_done_while_process_keeps_running() {
     assert!(log.contains("--output-format"), "{log}");
     assert!(log.contains("--workspace"), "{log}");
     assert!(!log.contains("FAKE_CLI"), "{log}");
+    assert!(!log.contains("--approve-mcps"), "{log}");
+}
+
+#[tokio::test]
+async fn cursor_mcp_run_approves_the_gateway_for_every_job_type() {
+    for job_type in ["work_on_ticket", "plan_ticket"] {
+        let lines = fixture("cursor/done.jsonl");
+        let artifacts = tempfile::tempdir().expect("artifacts");
+        let wt = worktree(&[("FAKE_CLI_LINES", &lines)]);
+        let mut input = run_input(wt.path());
+        input.job_type = job_type.into();
+        input.artifacts_dir = Some(artifacts.path().display().to_string());
+        input.mcp = Some(McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "run-token".into(),
+        });
+        cursor(30).run(input).await.expect("cursor run");
+        let log =
+            std::fs::read_to_string(artifacts.path().join("runs").join("run-1").join("run.log"))
+                .expect("run.log");
+        assert!(log.contains("--approve-mcps"), "{job_type}: {log}");
+    }
 }
 
 #[tokio::test]
