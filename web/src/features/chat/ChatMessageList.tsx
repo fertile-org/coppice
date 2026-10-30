@@ -14,6 +14,9 @@ import {
   type ChatMessage,
   type ChatProposal,
 } from '../../lib/schemas/chat';
+import type { DesignSet } from '../../lib/schemas/design';
+import { DesignCard } from '../designs/DesignCard';
+import { useDesigns, type DesignScope } from '../designs/useDesigns';
 import { cn } from '../../lib/utils';
 import { useBoards } from '../boards/useBoards';
 import { CommentAttachments } from '../tickets/CommentAttachments';
@@ -297,16 +300,29 @@ function ChatProposalCard({
   );
 }
 
+function designsForRun(
+  sets: DesignSet[] | undefined,
+  runId: string | null | undefined,
+): DesignSet[] | undefined {
+  if (!runId || !sets?.length) return undefined;
+  const matched = sets.filter((set) => set.runId === runId);
+  return matched.length > 0 ? matched : undefined;
+}
+
 export function ChatMessageBubble({
   message,
   streaming,
   streamingText,
   proposalContext,
+  designs,
+  designScope,
 }: {
   message?: ChatMessage;
   streaming?: boolean;
   streamingText?: string;
   proposalContext?: ChatProposalContext;
+  designs?: DesignSet[];
+  designScope?: DesignScope;
 }) {
   if (streaming) {
     const text = streamingText?.trim() ?? '';
@@ -354,8 +370,8 @@ export function ChatMessageBubble({
   return (
     <div
       className={cn(
-        'flex w-full',
-        isHuman ? 'justify-end' : 'justify-start',
+        'flex w-full flex-col gap-2',
+        isHuman ? 'items-end justify-end' : 'items-start justify-start',
       )}
     >
       <article
@@ -403,6 +419,11 @@ export function ChatMessageBubble({
             ))
           : null}
       </article>
+      {designs?.map((set) => (
+        <div key={set.id} className="w-full max-w-[85%]">
+          <DesignCard design={set} scope={designScope} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -412,12 +433,17 @@ export function ChatMessageList({
   thinking,
   streamingAgent,
   proposalContext,
+  chatSessionId,
 }: {
   messages: ChatMessage[];
   thinking?: boolean;
   streamingAgent?: { runId: string; text: string; error?: string | null };
   proposalContext?: ChatProposalContext;
+  chatSessionId?: string;
 }) {
+  const { data: designSets } = useDesigns(
+    chatSessionId ? { chatSessionId } : undefined,
+  );
   const parentRef = useRef<HTMLDivElement>(null);
   const streamingRow = streamingAgent ? 1 : 0;
   const rowCount = messages.length + streamingRow;
@@ -467,6 +493,8 @@ export function ChatMessageList({
                 <ChatMessageBubble
                   message={messages[item.index]!}
                   proposalContext={proposalContext}
+                  designs={designsForRun(designSets, messages[item.index]?.agentRunId)}
+                  designScope={chatSessionId ? { chatSessionId } : undefined}
                 />
               ) : (
                 <ChatMessageBubble

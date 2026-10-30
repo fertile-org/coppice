@@ -6,6 +6,9 @@ import { LOGS_COPY } from '../logs/copy';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
+import type { DesignSet } from '../../lib/schemas/design';
+import { DesignCard } from '../designs/DesignCard';
+import { useDesigns } from '../designs/useDesigns';
 import { NOT_COVERED_BY_PLAN, reportedModelLabel } from '../runs/reportedModel';
 import { useOpenTicket } from './useOpenTicket';
 import { useAgentRuns } from './useAgentRuns';
@@ -74,9 +77,13 @@ function agentName(
 function RunRow({
   run,
   agents,
+  ticketId,
+  designs,
 }: {
   run: AgentRun;
   agents: { id: string; name: string }[] | undefined;
+  ticketId: string;
+  designs: DesignSet[] | undefined;
 }) {
   const [errorExpanded, setErrorExpanded] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
@@ -174,6 +181,13 @@ function RunRow({
       {detailsExpanded && (
         <RunDetailsTabs runId={run.id} onOpenTicket={openTicket} />
       )}
+      {designs
+        ?.filter((set) => set.runId === run.id)
+        .map((set) => (
+          <div key={set.id} className="mt-3">
+            <DesignCard design={set} scope={ticketId} />
+          </div>
+        ))}
     </article>
   );
 }
@@ -252,6 +266,7 @@ function RunDetailsTabs({
 export function TicketRunsTab({ ticketId }: TicketRunsTabProps) {
   const { data: runs, isLoading, isError } = useAgentRuns(ticketId);
   const { data: agents } = useAgents();
+  const { data: designs } = useDesigns(ticketId);
 
   if (isLoading) {
     return (
@@ -276,7 +291,13 @@ export function TicketRunsTab({ ticketId }: TicketRunsTabProps) {
   return (
     <div className="space-y-3">
       {runs?.map((run) => (
-        <RunRow key={run.id} run={run} agents={agents} />
+        <RunRow
+          key={run.id}
+          run={run}
+          agents={agents}
+          ticketId={ticketId}
+          designs={designs}
+        />
       ))}
     </div>
   );

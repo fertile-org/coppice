@@ -441,6 +441,7 @@ function ChatTranscript({
             messages={messages}
             thinking={awaiting && !activeRunId}
             streamingAgent={streamingAgent}
+            chatSessionId={session?.id}
             proposalContext={
               session
                 ? {
