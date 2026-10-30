@@ -1,7 +1,9 @@
+use sqlx::{PgPool, Row};
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
+
 const ALLOWED_EXT: &[&str] = &["html", "css", "png", "jpg", "jpeg", "gif", "webp"];
-#[allow(dead_code)]
 pub(crate) const MAX_FILE_BYTES: u64 = 512 * 1024;
-#[allow(dead_code)]
 pub(crate) const MAX_SET_BYTES: u64 = 2 * 1024 * 1024;
 
 pub fn reject_rel_path(path: &str) -> Option<&'static str> {
@@ -9,7 +11,9 @@ pub fn reject_rel_path(path: &str) -> Option<&'static str> {
     if p.is_absolute() {
         return Some("path must be relative");
     }
-    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Some("path escapes the design folder");
     }
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -17,6 +21,390 @@ pub fn reject_rel_path(path: &str) -> Option<&'static str> {
         return Some("file type not allowed");
     }
     None
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateScope {
+    pub ticket_id: Option<Uuid>,
+    pub chat_session_id: Option<Uuid>,
+    pub run_id: Uuid,
+    pub agent_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DesignOption {
+    pub id: String,
+    pub title: String,
+    pub entry: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChosenOption {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedSet {
+    pub id: Uuid,
+    /// Relative to the artifacts dir: `designs/{id}`.
+    pub dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignSetSummary {
+    pub id: Uuid,
+    pub title: String,
+    pub options: Vec<DesignOption>,
+    pub chosen: Option<ChosenOption>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DesignError {
+    #[error("{0}")]
+    Invalid(String),
+    #[error("design set not found")]
+    NotFound,
+    #[error("denied")]
+    Denied,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+pub struct DesignService<'a> {
+    pool: &'a PgPool,
+    artifacts_dir: PathBuf,
+}
+
+impl<'a> DesignService<'a> {
+    pub fn new(pool: &'a PgPool, artifacts_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            pool,
+            artifacts_dir: artifacts_dir.into(),
+        }
+    }
+
+    pub async fn create(&self, title: &str, scope: CreateScope) -> Result<CreatedSet, DesignError> {
+        let (ticket_id, chat_session_id) = match (scope.ticket_id, scope.chat_session_id) {
+            (Some(ticket_id), None) => (Some(ticket_id), None),
+            (None, Some(chat_session_id)) => (None, Some(chat_session_id)),
+            _ => {
+                return Err(DesignError::Invalid(
+                    "design set needs a ticket or a chat, not both".into(),
+                ));
+            }
+        };
+        let id = Uuid::new_v4();
+        let dir = format!("designs/{id}");
+        std::fs::create_dir_all(self.artifacts_dir.join(&dir)).map_err(invalid_io)?;
+        sqlx::query(
+            r#"
+            INSERT INTO design_sets (
+                id, title, ticket_id, chat_session_id, run_id, agent_id, dir
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(id)
+        .bind(title)
+        .bind(ticket_id)
+        .bind(chat_session_id)
+        .bind(scope.run_id)
+        .bind(scope.agent_id)
+        .bind(&dir)
+        .execute(self.pool)
+        .await?;
+        Ok(CreatedSet { id, dir })
+    }
+
+    pub async fn write(&self, set_id: Uuid, rel: &str, bytes: &[u8]) -> Result<(), DesignError> {
+        if let Some(reason) = reject_rel_path(rel) {
+            return Err(DesignError::Invalid(reason.into()));
+        }
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(DesignError::Invalid("file exceeds 512 KiB".into()));
+        }
+        let dir = self.dir_of(set_id).await?;
+        let root = self.canonical_set_dir(&dir)?;
+        let dest = dest_under(&root, rel, true)?;
+        if dest.is_dir() {
+            return Err(DesignError::Invalid("path is a directory".into()));
+        }
+        let old = if dest.is_file() {
+            std::fs::metadata(&dest).map_err(invalid_io)?.len()
+        } else {
+            0
+        };
+        let next = dir_size(&root)?
+            .saturating_sub(old)
+            .saturating_add(bytes.len() as u64);
+        if next > MAX_SET_BYTES {
+            return Err(DesignError::Invalid("design folder exceeds 2 MB".into()));
+        }
+        std::fs::write(&dest, bytes).map_err(invalid_io)?;
+        Ok(())
+    }
+
+    pub async fn publish(
+        &self,
+        set_id: Uuid,
+        run_id: Uuid,
+        options: Vec<DesignOption>,
+    ) -> Result<Uuid, DesignError> {
+        if !(2..=4).contains(&options.len()) {
+            return Err(DesignError::Invalid("publish 2 to 4 options".into()));
+        }
+        let row = self.load(set_id).await?;
+        let row_run: Uuid = row.get("run_id");
+        if row_run != run_id {
+            return Err(DesignError::Invalid("run does not match design set".into()));
+        }
+        let dir: String = row.get("dir");
+        let ticket_id: Option<Uuid> = row.get("ticket_id");
+        let chat_session_id: Option<Uuid> = row.get("chat_session_id");
+        let root = self.canonical_set_dir(&dir)?;
+        for option in &options {
+            if let Some(reason) = reject_rel_path(&option.entry) {
+                return Err(DesignError::Invalid(reason.into()));
+            }
+            let ext = Path::new(&option.entry)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
+            if !ext.eq_ignore_ascii_case("html") {
+                return Err(DesignError::Invalid("entry must be html".into()));
+            }
+            let dest = dest_under(&root, &option.entry, false)?;
+            if !dest.is_file() {
+                return Err(DesignError::Invalid("missing entry file".into()));
+            }
+        }
+        let options_json =
+            serde_json::to_value(&options).map_err(|err| DesignError::Invalid(err.to_string()))?;
+
+        let mut tx = self.pool.begin().await?;
+        // One published row per run. A later publish on this run replaces that card.
+        sqlx::query(
+            r#"
+            UPDATE design_sets
+            SET published_at = NULL
+            WHERE run_id = $1 AND published_at IS NOT NULL AND id <> $2
+            "#,
+        )
+        .bind(run_id)
+        .bind(set_id)
+        .execute(&mut *tx)
+        .await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE design_sets
+            SET options = $1, published_at = COALESCE(published_at, now())
+            WHERE id = $2
+            "#,
+        )
+        .bind(&options_json)
+        .bind(set_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            tx.rollback().await?;
+            return Err(DesignError::NotFound);
+        }
+        sqlx::query(
+            r#"
+            UPDATE design_sets
+            SET superseded_by = $1
+            WHERE id <> $1
+              AND published_at IS NOT NULL
+              AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
+              AND (
+                  ($2::uuid IS NOT NULL AND ticket_id = $2)
+                  OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
+              )
+            "#,
+        )
+        .bind(set_id)
+        .bind(ticket_id)
+        .bind(chat_session_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(set_id)
+    }
+
+    pub async fn list_for_ticket(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Vec<DesignSetSummary>, DesignError> {
+        self.list_scoped(Some(ticket_id), None).await
+    }
+
+    pub async fn list_for_chat(
+        &self,
+        chat_session_id: Uuid,
+    ) -> Result<Vec<DesignSetSummary>, DesignError> {
+        self.list_scoped(None, Some(chat_session_id)).await
+    }
+
+    pub async fn choose(
+        &self,
+        set_id: Uuid,
+        option_id: &str,
+        user_id: Uuid,
+    ) -> Result<(), DesignError> {
+        let row = self.load(set_id).await?;
+        let options = options_from_row(&row)?;
+        if !options.iter().any(|option| option.id == option_id) {
+            return Err(DesignError::Invalid("unknown option".into()));
+        }
+        sqlx::query(
+            r#"
+            UPDATE design_sets
+            SET chosen_option_id = $1, chosen_by_user_id = $2, chosen_at = now()
+            WHERE id = $3
+            "#,
+        )
+        .bind(option_id)
+        .bind(user_id)
+        .bind(set_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_scoped(
+        &self,
+        ticket_id: Option<Uuid>,
+        chat_session_id: Option<Uuid>,
+    ) -> Result<Vec<DesignSetSummary>, DesignError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, title, options, chosen_option_id
+            FROM design_sets
+            WHERE published_at IS NOT NULL
+              AND (
+                  ($1::uuid IS NOT NULL AND ticket_id = $1)
+                  OR ($2::uuid IS NOT NULL AND chat_session_id = $2)
+              )
+            ORDER BY created_at DESC, id DESC
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(chat_session_id)
+        .fetch_all(self.pool)
+        .await?;
+        rows.iter().map(summary_from_row).collect()
+    }
+
+    async fn dir_of(&self, set_id: Uuid) -> Result<String, DesignError> {
+        let row = self.load(set_id).await?;
+        Ok(row.get("dir"))
+    }
+
+    async fn load(&self, set_id: Uuid) -> Result<sqlx::postgres::PgRow, DesignError> {
+        sqlx::query(
+            r#"
+            SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id
+            FROM design_sets
+            WHERE id = $1
+            "#,
+        )
+        .bind(set_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(DesignError::NotFound)
+    }
+
+    fn canonical_set_dir(&self, dir: &str) -> Result<PathBuf, DesignError> {
+        std::fs::canonicalize(self.artifacts_dir.join(dir)).map_err(invalid_io)
+    }
+}
+
+fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, DesignError> {
+    let options = options_from_row(row)?;
+    let chosen_id: Option<String> = row.get("chosen_option_id");
+    let chosen = chosen_id.and_then(|id| {
+        options
+            .iter()
+            .find(|option| option.id == id)
+            .map(|option| ChosenOption {
+                id: option.id.clone(),
+                title: option.title.clone(),
+            })
+    });
+    Ok(DesignSetSummary {
+        id: row.get("id"),
+        title: row.get("title"),
+        options,
+        chosen,
+    })
+}
+
+fn options_from_row(row: &sqlx::postgres::PgRow) -> Result<Vec<DesignOption>, DesignError> {
+    let value: serde_json::Value = row.get("options");
+    serde_json::from_value(value).map_err(|err| DesignError::Invalid(err.to_string()))
+}
+
+fn dest_under(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, DesignError> {
+    let dest = root.join(rel);
+    let parent = dest
+        .parent()
+        .ok_or_else(|| DesignError::Invalid("path escapes the design folder".into()))?;
+    if create_parents {
+        std::fs::create_dir_all(parent).map_err(invalid_io)?;
+    } else if !parent.exists() {
+        return Err(DesignError::Invalid("missing entry file".into()));
+    }
+    let parent = std::fs::canonicalize(parent).map_err(invalid_io)?;
+    if !parent.starts_with(root) {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
+    }
+    let name = dest
+        .file_name()
+        .ok_or_else(|| DesignError::Invalid("path escapes the design folder".into()))?;
+    let dest = parent.join(name);
+    if dest
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+    {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
+    }
+    if dest.exists() {
+        let canon = std::fs::canonicalize(&dest).map_err(invalid_io)?;
+        if !canon.starts_with(root) {
+            return Err(DesignError::Invalid(
+                "path escapes the design folder".into(),
+            ));
+        }
+    }
+    Ok(dest)
+}
+
+fn dir_size(root: &Path) -> Result<u64, DesignError> {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).map_err(invalid_io)?;
+        for entry in entries {
+            let entry = entry.map_err(invalid_io)?;
+            let kind = entry.file_type().map_err(invalid_io)?;
+            if kind.is_dir() {
+                stack.push(entry.path());
+            } else if kind.is_file() {
+                total = total.saturating_add(entry.metadata().map_err(invalid_io)?.len());
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn invalid_io(err: std::io::Error) -> DesignError {
+    DesignError::Invalid(err.to_string())
 }
 
 #[cfg(test)]
@@ -34,13 +422,7 @@ mod tests {
             reject_rel_path("/tmp/x.html"),
             Some("path must be relative")
         );
-        assert_eq!(
-            reject_rel_path("x.svg"),
-            Some("file type not allowed")
-        );
-        assert_eq!(
-            reject_rel_path("x.exe"),
-            Some("file type not allowed")
-        );
+        assert_eq!(reject_rel_path("x.svg"), Some("file type not allowed"));
+        assert_eq!(reject_rel_path("x.exe"), Some("file type not allowed"));
     }
 }
