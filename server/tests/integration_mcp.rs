@@ -2461,7 +2461,7 @@ async fn plugin_skill_not_assigned_is_not_found() {
     if !common::db_available().await {
         return;
     }
-    let (state, run_id, _plugin_id, _dirs, _env) = run_ticket_with_sample_plugin(false).await;
+    let (state, run_id, plugin_id, _dirs, _env) = run_ticket_with_sample_plugin(false).await;
     let pool = state.db.clone().unwrap();
     assert_eq!(
         tool_call_rows(&pool, run_id).await,
@@ -2471,7 +2471,15 @@ async fn plugin_skill_not_assigned_is_not_found() {
             ("result_submit".into(), "core".into(), "ok".into()),
         ]
     );
-    assert!(token_plugin_ids(&pool, run_id).await.is_empty());
+    let ids = token_plugin_ids(&pool, run_id).await;
+    assert!(!ids.contains(&plugin_id), "{ids:?}");
+    assert_eq!(ids.len(), 1, "{ids:?}");
+    let name: String = sqlx::query_scalar("SELECT name FROM plugins WHERE id = $1")
+        .bind(ids[0])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(name, "design");
     // The finished run no longer holds the payload; its summary was posted.
     assert!(submitted_result(&pool, run_id).await.is_none());
     assert!(

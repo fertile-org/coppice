@@ -229,6 +229,34 @@ impl<'a> PluginService<'a> {
         Ok(dir)
     }
 
+    /// Records `path` as a non-default plugin dir. Creates it, accepts a
+    /// relative path, and succeeds when that canonical path is already registered.
+    pub(crate) async fn ensure_dir(&self, path: &str) -> Result<(), PluginError> {
+        std::fs::create_dir_all(path)?;
+        let canonical = canonical_string(Path::new(path))?;
+        let mut tx = self.pool.begin().await?;
+        lock_plugin_state(&mut tx).await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM plugin_dirs WHERE path = $1)")
+                .bind(&canonical)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !exists {
+            sqlx::query(
+                r#"
+                INSERT INTO plugin_dirs (id, path, position, is_default)
+                SELECT $1, $2, COALESCE(MAX(position) + 1, 0), false FROM plugin_dirs
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&canonical)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Rejects a plugin dir that would contain the marketplace cache, so a
     /// rescan cannot turn catalog entries into plugin rows. `candidate` is the
     /// canonical path about to be registered.
@@ -1384,15 +1412,20 @@ async fn upsert_discovered(
         Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
         Err(_) => Vec::new(),
     };
-    let agent_access = match &discovered.result {
-        Ok(manifest) => default_agent_access(manifest),
-        Err(_) => "explicit",
+    let design = discovered.name == "design";
+    let agent_access = if design {
+        "all"
+    } else {
+        match &discovered.result {
+            Ok(manifest) => default_agent_access(manifest),
+            Err(_) => "explicit",
+        }
     };
     sqlx::query(
         r#"
         INSERT INTO plugins
-            (id, plugin_dir_id, rel_path, name, version, description, manifest, status, error, agent_access)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $11)
+            (id, plugin_dir_id, rel_path, name, version, description, manifest, status, error, agent_access, enabled)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $11, $12)
         ON CONFLICT (plugin_dir_id, rel_path) DO UPDATE SET
             name = EXCLUDED.name,
             version = EXCLUDED.version,
@@ -1421,6 +1454,7 @@ async fn upsert_discovered(
     .bind(error)
     .bind(skill_names)
     .bind(agent_access)
+    .bind(design)
     .execute(&mut **tx)
     .await?;
     Ok(())

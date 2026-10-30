@@ -163,6 +163,15 @@ async fn init_test_plugins(
         .join(format!("{}-marketplaces", uuid::Uuid::new_v4()))
         .to_string_lossy()
         .into_owned();
+    let builtin = base
+        .path()
+        .join(format!("builtin-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&builtin).expect("builtin plugins dir");
+    coppice_server::plugins::builtin::materialize_builtin(&builtin).expect("materialize builtins");
+    config.mcp.builtin_plugins_dir = std::fs::canonicalize(&builtin)
+        .expect("canonicalize builtin plugins")
+        .to_string_lossy()
+        .into_owned();
     let skills = AppState::test_skills();
     AppState::init_plugins(pool, config, &skills)
         .await

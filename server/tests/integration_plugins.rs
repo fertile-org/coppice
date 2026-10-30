@@ -101,6 +101,19 @@ fn plugins_in_dir<'a>(plugins: &'a Value, dir_id: &str) -> Vec<&'a Value> {
         .collect()
 }
 
+async fn builtin_design_id(app: &Router, cookie: &str, csrf: &str) -> String {
+    let plugins = get(app, "/api/plugins", cookie, csrf).await;
+    plugins
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|plugin| plugin["name"] == "design")
+        .expect("built-in design plugin")["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 fn find<'a>(plugins: &'a Value, dir_id: &str, name: &str) -> &'a Value {
     plugins_in_dir(plugins, dir_id)
         .into_iter()
@@ -150,7 +163,7 @@ async fn default_dir_exists_after_bootstrap_and_cannot_be_removed() {
 
     let dirs = get(&app, "/api/plugin-dirs", &cookie, &csrf).await;
     let dirs = dirs.as_array().unwrap();
-    assert_eq!(dirs.len(), 1);
+    assert_eq!(dirs.len(), 2);
     assert_eq!(dirs[0]["isDefault"], true);
     assert_eq!(dirs[0]["position"], 0);
     assert_eq!(
@@ -181,7 +194,7 @@ async fn add_dir_scans_plugins_disabled_by_default() {
 
     let added = add_dir(&app, dir.path(), &cookie, &csrf).await;
     assert_eq!(added["path"], canonical(dir.path()));
-    assert_eq!(added["position"], 1);
+    assert_eq!(added["position"], 2);
     assert_eq!(added["isDefault"], false);
     let dir_id = added["id"].as_str().unwrap();
 
@@ -532,7 +545,7 @@ async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
         .map(|d| (d["id"].as_str().unwrap(), d["position"].as_i64().unwrap()))
         .collect();
     assert_eq!(order[0], (b_id.as_str(), 0));
-    assert_eq!(order[2], (a_id.as_str(), 2));
+    assert_eq!(order[3], (a_id.as_str(), 3));
 
     let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
     assert_eq!(find(&plugins, &b_id, "sample-plugin")["status"], "ok");
@@ -959,12 +972,13 @@ async fn set_agent_plugins_accepts_only_enabled_ok_plugins() {
         .unwrap()
         .to_string();
     let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
     let uri = format!("/api/agents/{agent_id}/plugins");
 
     assert_eq!(
         get(&app, &uri, &cookie, &csrf).await,
-        json!({ "pluginIds": [] })
+        json!({ "pluginIds": [design_id] })
     );
     let (status, body) = send(
         &app,
@@ -1106,8 +1120,15 @@ async fn preset_default_plugins_applied_when_enabled() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(assigned, json!({ "pluginIds": [plugin_id] }));
-    assert_eq!(unassigned, json!({ "pluginIds": [] }));
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
+    assert_eq!(
+        id_set(&assigned["pluginIds"]),
+        id_set(&json!([plugin_id, design_id]))
+    );
+    assert_eq!(
+        id_set(&unassigned["pluginIds"]),
+        id_set(&json!([design_id]))
+    );
 }
 
 #[tokio::test]
@@ -2301,9 +2322,10 @@ async fn external_not_assignable_to_agents() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     assert_eq!(
         get(&app, &uri, &cookie, &csrf).await,
-        json!({ "pluginIds": [] })
+        json!({ "pluginIds": [design_id] })
     );
 }
 
@@ -2907,6 +2929,7 @@ async fn skills_only_plugin_defaults_to_all_agents_including_later_ones() {
     assert_eq!(plugin["agentIds"], json!([]));
 
     let before = common::create_test_agent_from_preset(&app, "Before", &cookie, &csrf).await;
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     assert_eq!(
         get(
             &app,
@@ -2915,7 +2938,7 @@ async fn skills_only_plugin_defaults_to_all_agents_including_later_ones() {
             &csrf
         )
         .await,
-        json!({ "pluginIds": [] }),
+        json!({ "pluginIds": [design_id] }),
         "a disabled all-agents plugin is not in use yet"
     );
 
@@ -2930,7 +2953,7 @@ async fn skills_only_plugin_defaults_to_all_agents_including_later_ones() {
             )
             .await["pluginIds"]
         ),
-        id_set(&json!([plugin_id]))
+        id_set(&json!([plugin_id, design_id]))
     );
 
     let later = common::create_test_agent_from_preset(&app, "Later", &cookie, &csrf).await;
@@ -2944,7 +2967,7 @@ async fn skills_only_plugin_defaults_to_all_agents_including_later_ones() {
             )
             .await["pluginIds"]
         ),
-        id_set(&json!([plugin_id]))
+        id_set(&json!([plugin_id, design_id]))
     );
     assert_eq!(
         plugin_agents(&app, &plugin_id, &cookie, &csrf).await,
@@ -2963,6 +2986,7 @@ async fn local_mcp_plugin_defaults_to_no_agents() {
     assert_eq!(plugin["agentIds"], json!([]));
 
     set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
     assert_eq!(
         get(
@@ -2972,9 +2996,12 @@ async fn local_mcp_plugin_defaults_to_no_agents() {
             &csrf,
         )
         .await,
-        json!({ "pluginIds": [] })
+        json!({ "pluginIds": [design_id] })
     );
-    assert!(run_plugin_ids(&state, &agent_id).await.is_empty());
+    assert_eq!(
+        run_plugin_ids(&state, &agent_id).await,
+        vec![design_id.parse::<uuid::Uuid>().unwrap()]
+    );
 }
 
 #[tokio::test]
@@ -3000,6 +3027,7 @@ async fn rescan_keeps_the_agent_access_choice() {
         "all"
     );
     let later = common::create_test_agent_from_preset(&app, "Later", &cookie, &csrf).await;
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     assert_eq!(
         id_set(
             &get(
@@ -3010,7 +3038,7 @@ async fn rescan_keeps_the_agent_access_choice() {
             )
             .await["pluginIds"]
         ),
-        id_set(&json!([plugin_id]))
+        id_set(&json!([plugin_id, design_id]))
     );
 }
 
@@ -3024,6 +3052,7 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
     let agent_a = common::create_test_agent_from_preset(&app, "Ada", &cookie, &csrf).await;
     let agent_b = common::create_test_agent_from_preset(&app, "Bea", &cookie, &csrf).await;
 
+    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
     let chosen = put_plugin_agents(
         &app,
         &plugin_id,
@@ -3044,7 +3073,7 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
             )
             .await["pluginIds"]
         ),
-        id_set(&json!([plugin_id]))
+        id_set(&json!([plugin_id, design_id]))
     );
     assert_eq!(
         get(
@@ -3054,7 +3083,7 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
             &csrf,
         )
         .await,
-        json!({ "pluginIds": [] })
+        json!({ "pluginIds": [design_id] })
     );
 
     let (status, body) = send(

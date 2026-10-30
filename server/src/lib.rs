@@ -129,9 +129,9 @@ impl AppState {
         Ok(Arc::new(crate::plugins::skills::load_builtin(dir)?))
     }
 
-    /// Records the default plugin dir (fatal on failure), scans all plugin
-    /// dirs and loads enabled plugin skills; scan failures are logged so the
-    /// server still starts.
+    /// Records the default plugin dir and the built-in plugin dir (fatal on
+    /// failure), scans all plugin dirs and loads enabled plugin skills; scan
+    /// failures are logged so the server still starts.
     pub async fn init_plugins(
         db: &PgPool,
         config: &AppConfig,
@@ -148,6 +148,15 @@ impl AppState {
                 anyhow::anyhow!(
                     "failed to set up default plugin dir {}: {e}",
                     config.plugins.dir
+                )
+            })?;
+        service
+            .ensure_dir(&config.mcp.builtin_plugins_dir)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to register built-in plugin dir {}: {e}",
+                    config.mcp.builtin_plugins_dir
                 )
             })?;
         if let Err(err) = service.rescan().await {

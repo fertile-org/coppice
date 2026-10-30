@@ -1,9 +1,11 @@
 mod common;
 
+use axum::http::StatusCode;
 use coppice_server::services::design_service::{CreateScope, DesignOption, DesignService};
 use coppice_server::services::run_service::RunService;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tower::ServiceExt;
 use uuid::Uuid;
 
 macro_rules! require_db {
@@ -145,4 +147,56 @@ async fn create_write_publish_choose_roundtrip() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let (enabled, agent_access): (bool, String) =
+        sqlx::query_as("SELECT enabled, agent_access FROM plugins WHERE name = 'design'")
+            .fetch_one(&pool)
+            .await
+            .expect("design plugin");
+    assert!(enabled);
+    assert_eq!(agent_access, "all");
+
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design'")
+        .fetch_one(&pool)
+        .await
+        .expect("design id");
+    let patched = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/plugins/{id}"),
+            r#"{"enabled":false}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("patch");
+    assert_eq!(patched.status(), StatusCode::OK);
+    let rescanned = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/plugins/rescan",
+            "null",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("rescan");
+    assert_eq!(rescanned.status(), StatusCode::OK);
+
+    let still: bool = sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .expect("design enabled");
+    assert!(!still);
 }
