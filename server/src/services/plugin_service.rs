@@ -1413,15 +1413,21 @@ async fn upsert_discovered(
         Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
         Err(_) => Vec::new(),
     };
-    let agent_access = match &discovered.result {
-        Ok(manifest) => default_agent_access(manifest),
-        Err(_) => "explicit",
-    };
     // First-party folder only. A user plugin named design, including one in
-    // the default dir or nested under another path, stays disabled.
-    let enabled = !dir_is_default
+    // the default dir or nested under another path, stays disabled. plugin.json
+    // makes this layout Plugin, so the manifest default would be explicit.
+    let builtin_design = !dir_is_default
         && discovered.name == "design"
         && discovered.rel_path == "design";
+    let agent_access = if builtin_design {
+        "all"
+    } else {
+        match &discovered.result {
+            Ok(manifest) => default_agent_access(manifest),
+            Err(_) => "explicit",
+        }
+    };
+    let enabled = builtin_design;
     sqlx::query(
         r#"
         INSERT INTO plugins

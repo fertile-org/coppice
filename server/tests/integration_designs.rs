@@ -162,7 +162,7 @@ async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
             .await
             .expect("design plugin");
     assert!(enabled);
-    assert_eq!(agent_access, "explicit");
+    assert_eq!(agent_access, "all");
 
     let id: Uuid = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design'")
         .fetch_one(&pool)
