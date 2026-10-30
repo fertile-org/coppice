@@ -412,7 +412,7 @@ impl<'a> PluginService<'a> {
         for dir in &dirs {
             let found = scan_dir(Path::new(&dir.path));
             for discovered in &found {
-                upsert_discovered(&mut tx, dir.id, discovered).await?;
+                upsert_discovered(&mut tx, dir.id, dir.is_default, discovered).await?;
             }
             let seen: Vec<String> = found.into_iter().map(|d| d.rel_path).collect();
             sqlx::query(
@@ -1386,6 +1386,7 @@ fn scan_dir(dir: &Path) -> Vec<Discovered> {
 async fn upsert_discovered(
     tx: &mut Transaction<'_, Postgres>,
     dir_id: Uuid,
+    dir_is_default: bool,
     discovered: &Discovered,
 ) -> Result<(), PluginError> {
     let (version, description, manifest, status, error) = match &discovered.result {
@@ -1412,15 +1413,15 @@ async fn upsert_discovered(
         Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
         Err(_) => Vec::new(),
     };
-    let design = discovered.name == "design";
-    let agent_access = if design {
-        "all"
-    } else {
-        match &discovered.result {
-            Ok(manifest) => default_agent_access(manifest),
-            Err(_) => "explicit",
-        }
+    let agent_access = match &discovered.result {
+        Ok(manifest) => default_agent_access(manifest),
+        Err(_) => "explicit",
     };
+    // First-party folder only. A user plugin named design, including one in
+    // the default dir or nested under another path, stays disabled.
+    let enabled = !dir_is_default
+        && discovered.name == "design"
+        && discovered.rel_path == "design";
     sqlx::query(
         r#"
         INSERT INTO plugins
@@ -1454,7 +1455,7 @@ async fn upsert_discovered(
     .bind(error)
     .bind(skill_names)
     .bind(agent_access)
-    .bind(design)
+    .bind(enabled)
     .execute(&mut **tx)
     .await?;
     Ok(())

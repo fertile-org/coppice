@@ -162,7 +162,7 @@ async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
             .await
             .expect("design plugin");
     assert!(enabled);
-    assert_eq!(agent_access, "all");
+    assert_eq!(agent_access, "explicit");
 
     let id: Uuid = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design'")
         .fetch_one(&pool)
@@ -199,4 +199,46 @@ async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
         .await
         .expect("design enabled");
     assert!(!still);
+}
+
+#[tokio::test]
+async fn design_named_plugin_in_default_dir_stays_disabled() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let manifest =
+        PathBuf::from(&state.config.plugins.dir).join("design/.claude-plugin/plugin.json");
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    fs::write(
+        &manifest,
+        r#"{"name":"design","description":"A user plugin, not the built-in."}"#,
+    )
+    .unwrap();
+
+    let rescanned = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/plugins/rescan",
+            "null",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("rescan");
+    assert_eq!(rescanned.status(), StatusCode::OK);
+
+    let enabled: bool = sqlx::query_scalar(
+        r#"
+        SELECT p.enabled FROM plugins p
+        JOIN plugin_dirs d ON d.id = p.plugin_dir_id
+        WHERE p.name = 'design' AND d.is_default
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("user design plugin");
+    assert!(!enabled);
 }
