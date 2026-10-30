@@ -5,6 +5,17 @@ import { apiFetch } from '../../lib/api';
 const ATTR_REF = /\b(src|href)\s*=\s*(["'])([^"']+)\2/gi;
 const CSS_URL_REF = /url\(\s*(["']?)([^"')]+)\1\s*\)/gi;
 
+const PREVIEW_CSP =
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'";
+
+function withPreviewCsp(html: string): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">${html}`;
+}
+
+function aborted(err: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || (err instanceof Error && err.name === 'AbortError');
+}
+
 function fresh(re: RegExp): RegExp {
   return new RegExp(re.source, re.flags);
 }
@@ -111,7 +122,8 @@ async function loadAsset(
     try {
       const asset = await loadAsset(setId, resolved, track, false, signal);
       urls.set(ref, track(asset));
-    } catch {
+    } catch (err) {
+      if (aborted(err, signal)) throw err;
       // A missing image leaves the authored url(); the page still opens.
     }
   }
@@ -125,28 +137,34 @@ export async function rewriteDesignHtml(
 ): Promise<{ url: string; revoke: () => void }> {
   if (!entry) throw new Error('missing');
   const created: string[] = [];
+  const revoke = () => {
+    if (typeof URL.revokeObjectURL !== 'function') return;
+    for (const blobUrl of created) URL.revokeObjectURL(blobUrl);
+  };
   const track = (blob: Blob) => {
     const url = URL.createObjectURL(blob);
     created.push(url);
     return url;
   };
-  const html = new TextDecoder().decode(await fetchDesignFile(setId, entry, signal));
-  const urls = new Map<string, string>();
-  for (const ref of collectRefs(html)) {
-    const resolved = resolveDesignRef(entry, ref);
-    if (!resolved) continue;
-    try {
-      urls.set(ref, track(await loadAsset(setId, resolved, track, true, signal)));
-    } catch {
-      // Missing stylesheet or image: leave the relative url and still show the page.
+  try {
+    const html = new TextDecoder().decode(await fetchDesignFile(setId, entry, signal));
+    const urls = new Map<string, string>();
+    for (const ref of collectRefs(html)) {
+      const resolved = resolveDesignRef(entry, ref);
+      if (!resolved) continue;
+      try {
+        urls.set(ref, track(await loadAsset(setId, resolved, track, true, signal)));
+      } catch (err) {
+        if (aborted(err, signal)) throw err;
+        // Missing stylesheet or image: leave the relative url and still show the page.
+      }
     }
+    const url = track(
+      new Blob([withPreviewCsp(applyRewrites(html, urls))], { type: 'text/html' }),
+    );
+    return { url, revoke };
+  } catch (err) {
+    revoke();
+    throw err;
   }
-  const url = track(new Blob([applyRewrites(html, urls)], { type: 'text/html' }));
-  return {
-    url,
-    revoke: () => {
-      if (typeof URL.revokeObjectURL !== 'function') return;
-      for (const blobUrl of created) URL.revokeObjectURL(blobUrl);
-    },
-  };
 }

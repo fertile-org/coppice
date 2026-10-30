@@ -35,6 +35,8 @@ export function useDesigns(scope?: DesignScope) {
     },
     enabled: scopeEnabled(scope),
     retry: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 }
 

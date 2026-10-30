@@ -419,11 +419,13 @@ export function ChatMessageBubble({
             ))
           : null}
       </article>
-      {designs?.map((set) => (
-        <div key={set.id} className="w-full max-w-[85%]">
-          <DesignCard design={set} scope={designScope} />
-        </div>
-      ))}
+      {message.role === 'agent'
+        ? designs?.map((set) => (
+            <div key={set.id} className="w-full max-w-[85%]">
+              <DesignCard design={set} scope={designScope} />
+            </div>
+          ))
+        : null}
     </div>
   );
 }

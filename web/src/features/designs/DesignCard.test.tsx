@@ -133,11 +133,37 @@ describe('DesignCard', () => {
     const html = blobs.at(-1);
     expect(html?.type).toBe('text/html');
     expect(await readBlob(html)).toBe(
-      '<link rel="stylesheet" href="blob:asset-2"><img src="blob:asset-3"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">',
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'"><link rel="stylesheet" href="blob:asset-2"><img src="blob:asset-3"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">`,
     );
     const css = blobs.find((blob) => blob.type === 'text/css');
     expect(await readBlob(css)).toBe('body{background:url("blob:asset-1")}');
     expect(page.url).toBe('blob:asset-4');
     page.revoke();
+  });
+
+  it('revokes blob urls when a later file aborts', async () => {
+    const revoked: string[] = [];
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: (url: string) => {
+        revoked.push(url);
+      },
+    });
+    apiFetch.mockImplementation((path: string) => {
+      const file = String(path);
+      if (file.endsWith('/a/index.html')) {
+        return Promise.resolve(new Response('<img src="ok.png"><img src="later.png">', { status: 200 }));
+      }
+      if (file.endsWith('/a/ok.png')) {
+        return Promise.resolve(new Response(new Uint8Array([1]), { status: 200 }));
+      }
+      const abort = new Error('aborted');
+      abort.name = 'AbortError';
+      return Promise.reject(abort);
+    });
+
+    await expect(rewriteDesignHtml(published.id, 'a/index.html')).rejects.toThrow(/aborted/);
+    expect(revoked).toEqual(['blob:asset-1']);
   });
 });

@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ChatMessage } from '../../lib/schemas/chat';
-import { ChatMessageList, ThinkingIndicator } from './ChatMessageList';
+import { ChatMessageBubble, ChatMessageList, ThinkingIndicator } from './ChatMessageList';
 
 vi.mock('../tickets/useOpenTicket', () => ({
   useOpenTicket: () => vi.fn(),
@@ -60,6 +60,53 @@ describe('ChatMessageList', () => {
       'true',
     );
     expect(screen.getByRole('status')).toHaveTextContent('Thinking…');
+  });
+
+  it('shows a design card on the agent message only', () => {
+    const runId = '22222222-2222-4222-8222-222222222222';
+    const design = {
+      id: '11111111-1111-4111-8111-111111111111',
+      title: 'Landing page',
+      runId,
+      options: [{ id: 'a', title: 'A', entry: 'a/index.html' }],
+      chosen: null,
+    };
+    const shared = {
+      sessionId: '00000000-0000-4000-8000-000000000099',
+      agentRunId: runId,
+      actionMetadata: null,
+      attachmentIds: [] as string[],
+      attachments: [],
+      createdAt: '2026-09-08T00:00:00Z',
+    };
+    renderList(
+      <>
+        <ChatMessageBubble
+          message={{
+            ...shared,
+            id: '00000000-0000-4000-8000-000000000001',
+            seq: 1,
+            role: 'human',
+            body: 'Hello from me',
+          }}
+          designs={[design]}
+        />
+        <ChatMessageBubble
+          message={{
+            ...shared,
+            id: '00000000-0000-4000-8000-000000000002',
+            seq: 2,
+            role: 'agent',
+            body: 'Here are two options',
+          }}
+          designs={[design]}
+        />
+      </>,
+    );
+
+    const open = screen.getByRole('button', { name: 'Open' });
+    expect(screen.getByLabelText('Agent').parentElement).toContainElement(open);
+    expect(screen.getByLabelText('You').parentElement).not.toContainElement(open);
   });
 
   it('aligns human and agent bubbles for a messenger thread', () => {
