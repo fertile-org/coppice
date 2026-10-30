@@ -24,7 +24,7 @@ Coppice drives many CLIs. A live “wait for click” MCP call is not portable (
 
 `design` is a built-in plugin materialized next to `coppice` (extend `materialize_builtin`). It is **enabled** and **All agents** on first start. The Plugins page and the agent form can disable it or drop agents. Only enabled + assigned agents get the tools and the skill.
 
-The skill (`design-ui-options`) says: on UI work, call `design__list` first; if the human has not chosen, draft 2–3 options, write HTML into the folder from `design__create`, then `design__publish`; do not put HTML in the ticket body. Next turn, honor `chosen`.
+The skill (`design-ui-options`) says: on UI work, call `design__list` first; if the human has not chosen, draft 2–3 options, `design__create` then `design__write` then `design__publish`; do not put HTML in the ticket body. Next turn, honor `chosen`.
 
 ### Tools
 
@@ -33,6 +33,7 @@ Gateway tools, namespaced `design__`. Available on ticket runs and chat turns wh
 | Tool | Args | Result |
 | --- | --- | --- |
 | `design__create` | `title` | `setId`, absolute `dir` under artifacts |
+| `design__write` | `setId`, `path` (relative), `content` (utf-8) | `{ path }` written under that set’s dir |
 | `design__publish` | `setId`, `options`: 2–4 items `{ id, title, entry }` | `{ setId }` and a visible card on this run’s comment or chat message |
 | `design__list` | none (scope = this ticket or chat) | sets newest first: title, options, `chosen` (`null` or `{ id, title }`) |
 
