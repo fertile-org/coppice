@@ -845,6 +845,24 @@ async fn design_file_is_html_without_attachment() {
             .and_then(|value| value.to_str().ok()),
         Some("text/html")
     );
+    assert_eq!(
+        res.headers()
+            .get(header::X_CONTENT_TYPE_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        res.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(
+        res.headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|value| value.to_str().ok()),
+        Some("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    );
     if let Some(disposition) = res.headers().get(header::CONTENT_DISPOSITION) {
         let disposition = disposition.to_str().unwrap_or("");
         assert!(
@@ -978,6 +996,7 @@ async fn chat_design_list_returns_published_set() {
     .await;
 
     let listed = app
+        .clone()
         .oneshot(common::json_request(
             "GET",
             &format!("/api/chat/sessions/{session_id}/designs"),
@@ -994,4 +1013,172 @@ async fn chat_design_list_returns_published_set() {
     assert_eq!(sets[0]["title"], "Chat home");
     assert_eq!(sets[0]["runId"], run.id.to_string());
     assert!(sets[0]["chosen"].is_null());
+
+    let member_email = format!("member-{}@localhost", Uuid::new_v4());
+    create_member(&app, &cookie, &csrf, &member_email).await;
+    let (member_cookie, member_csrf) = login_as(&app, &member_email, "secret123").await;
+    let denied = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{set_id}/choose"),
+            r#"{"optionId":"a"}"#,
+            &member_cookie,
+            &member_csrf,
+        ))
+        .await
+        .expect("member choose");
+    assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+    let still = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/designs"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .expect("owner list");
+    assert_eq!(still.status(), StatusCode::OK);
+    let still = common::json_body(still).await;
+    assert!(still.as_array().expect("design list")[0]["chosen"].is_null());
+}
+
+#[tokio::test]
+async fn unpublished_design_is_hidden() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let svc = DesignService::new(&fx.pool, &artifacts);
+    let created = svc
+        .create(
+            "Draft",
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id: fx.agent_id,
+            },
+        )
+        .await
+        .expect("draft");
+    svc.write(created.id, run_id, "a/index.html", b"<p>draft</p>")
+        .await
+        .expect("write");
+
+    for (method, uri) in [
+        ("GET", format!("/api/designs/{}", created.id)),
+        ("POST", format!("/api/designs/{}/choose", created.id)),
+        (
+            "GET",
+            format!("/api/designs/{}/files/a/index.html", created.id),
+        ),
+    ] {
+        let body = if method == "POST" {
+            r#"{"optionId":"a"}"#
+        } else {
+            ""
+        };
+        let res = fx
+            .app
+            .clone()
+            .oneshot(common::json_request(
+                method,
+                &uri,
+                body,
+                &fx.cookie,
+                &fx.csrf,
+            ))
+            .await
+            .expect(method);
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn design_file_rejects_oversize() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    let path = PathBuf::from(&fx.state.config.storage.artifacts_dir)
+        .join(format!("designs/{set_id}/a/index.html"));
+    fs::write(&path, vec![b'x'; 512 * 1024 + 1]).expect("oversize");
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/designs/{set_id}/files/a/index.html"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("oversize file");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+async fn create_member(app: &Router, admin_cookie: &str, admin_csrf: &str, email: &str) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/users",
+            &format!(r#"{{"email":"{email}","password":"secret123"}}"#),
+            admin_cookie,
+            admin_csrf,
+        ))
+        .await
+        .expect("create member");
+    assert_eq!(res.status(), StatusCode::CREATED);
+}
+
+async fn login_as(app: &Router, email: &str, password: &str) -> (String, String) {
+    use coppice_server::middleware::session::parse_session_cookie;
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"email":"{email}","password":"{password}"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .expect("login");
+    assert_eq!(login.status(), StatusCode::OK);
+    let set_cookie = login
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie");
+    let session_token = parse_session_cookie(set_cookie.to_str().unwrap()).expect("session token");
+    let cookie = format!("coppice_session={session_token}");
+    let login_json = common::json_body(login).await;
+    let csrf = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+    (cookie, csrf)
 }

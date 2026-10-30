@@ -64,6 +64,7 @@ pub struct DesignSetRecord {
     pub summary: DesignSetSummary,
     pub ticket_id: Option<Uuid>,
     pub chat_session_id: Option<Uuid>,
+    pub published: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -257,6 +258,7 @@ impl<'a> DesignService<'a> {
             summary: summary_from_row(&row)?,
             ticket_id: row.get("ticket_id"),
             chat_session_id: row.get("chat_session_id"),
+            published: row.get("published"),
         })
     }
 
@@ -268,8 +270,18 @@ impl<'a> DesignService<'a> {
         let dir: String = row.get("dir");
         let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
         let dest = dest_under(&artifacts, &root, rel, false)?;
-        if !dest.is_file() {
+        let meta = match std::fs::metadata(&dest) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(DesignError::NotFound);
+            }
+            Err(err) => return Err(invalid_io(err)),
+        };
+        if !meta.is_file() {
             return Err(DesignError::NotFound);
+        }
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(DesignError::Invalid("file exceeds 512 KiB".into()));
         }
         std::fs::read(&dest).map_err(invalid_io)
     }
@@ -341,7 +353,8 @@ impl<'a> DesignService<'a> {
     async fn load(&self, set_id: Uuid) -> Result<sqlx::postgres::PgRow, DesignError> {
         sqlx::query(
             r#"
-            SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id
+            SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
+                   published_at IS NOT NULL AS published
             FROM design_sets
             WHERE id = $1
             "#,

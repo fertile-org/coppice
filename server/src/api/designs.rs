@@ -1,7 +1,7 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::services::chat_service::{ChatError, ChatService};
 use crate::services::design_service::{
-    ChosenOption, DesignError, DesignOption, DesignService, DesignSetSummary,
+    ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord, DesignSetSummary,
 };
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
@@ -126,23 +126,34 @@ async fn list_for_chat(
     Ok(Json(sets.into_iter().map(to_response).collect()))
 }
 
+async fn open_published(
+    svc: &DesignService<'_>,
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    set_id: Uuid,
+) -> Result<DesignSetRecord, StatusCode> {
+    let record = svc.get(set_id).await.map_err(map_design)?;
+    visible(
+        pool,
+        user_id,
+        record.ticket_id,
+        record.chat_session_id,
+    )
+    .await?;
+    if !record.published {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(record)
+}
+
 async fn get_set(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Path(set_id): Path<Uuid>,
 ) -> Result<Json<DesignSetResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let record = DesignService::new(pool, artifacts(&state))
-        .get(set_id)
-        .await
-        .map_err(map_design)?;
-    visible(
-        pool,
-        user.id,
-        record.ticket_id,
-        record.chat_session_id,
-    )
-    .await?;
+    let svc = DesignService::new(pool, artifacts(&state));
+    let record = open_published(&svc, pool, user.id, set_id).await?;
     Ok(Json(to_response(record.summary)))
 }
 
@@ -153,8 +164,9 @@ async fn choose(
     Json(body): Json<ChooseBody>,
 ) -> Result<StatusCode, StatusCode> {
     let pool = pool_from_state(&state)?;
-    DesignService::new(pool, artifacts(&state))
-        .choose(set_id, &body.option_id, user.id)
+    let svc = DesignService::new(pool, artifacts(&state));
+    open_published(&svc, pool, user.id, set_id).await?;
+    svc.choose(set_id, &body.option_id, user.id)
         .await
         .map_err(map_design)?;
     Ok(StatusCode::NO_CONTENT)
@@ -185,14 +197,18 @@ async fn get_file(
 ) -> Result<impl IntoResponse, StatusCode> {
     let pool = pool_from_state(&state)?;
     let svc = DesignService::new(pool, artifacts(&state));
-    let record = svc.get(set_id).await.map_err(map_design)?;
-    visible(
-        pool,
-        user.id,
-        record.ticket_id,
-        record.chat_session_id,
-    )
-    .await?;
+    open_published(&svc, pool, user.id, set_id).await?;
     let bytes = svc.read_file(set_id, &path).await.map_err(map_design)?;
-    Ok(([(header::CONTENT_TYPE, media_type(&path))], Body::from(bytes)))
+    Ok((
+        [
+            (header::CONTENT_TYPE, media_type(&path).to_string()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox".to_string(),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        Body::from(bytes),
+    ))
 }
