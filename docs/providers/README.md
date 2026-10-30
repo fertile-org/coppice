@@ -87,13 +87,13 @@ Ticket runs can resume a prior session on `claude-code` and `cursor`. The other 
 
 ## Coppice MCP gateway (tool-first runs)
 
-Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, handed to the CLI as `COPPICE_MCP_URL` / `COPPICE_MCP_TOKEN`. Each connector wires the gateway for that run only, through flags, process env, or a file under `<artifacts_dir>/runs/<run id>/`. Nothing is written to the worktree, a registered repo, or your global CLI config. The token is never written to a file. If a connector can't be wired, the run fails with `mcp_unavailable`.
+Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, handed to the CLI as `COPPICE_MCP_URL` / `COPPICE_MCP_TOKEN`. Each connector wires the gateway for that run only, through flags, process env, or a file under `<artifacts_dir>/runs/<run id>/`. Cursor is the exception: the CLI has no MCP flag, so Coppice writes `<worktree>/.cursor/mcp.json` for the run and restores it after. The token is never written to a file. If a connector can't be wired, the run fails with `mcp_unavailable`.
 
 | Connector | Mechanism | Checked against a live CLI |
 | --- | --- | --- |
 | `claude-code` | `--mcp-config <run dir>/mcp.json --strict-mcp-config`, plus `mcp__coppice__*` in `--allowedTools` | Not yet |
 | `codex` | `-c mcp_servers.coppice.url=…` and `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` | Not yet |
-| `cursor` | Coppice-owned `HOME` with `.cursor/mcp.json`, and `CURSOR_CONFIG_DIR` with a `cli-config.json` allowing `Mcp(coppice:*)` | Yes (`2026.09.28-64d2043`) |
+| `cursor` | `<worktree>/.cursor/mcp.json` (restored after the run) and `CURSOR_CONFIG_DIR` with a `cli-config.json` allowing `Mcp(coppice:*)`. Real `HOME` is kept so Keychain login still works | Yes (`2026.10.22-27dcf5f`) |
 | `opencode` | `OPENCODE_CONFIG=<run dir>/opencode.json` for the per-run `opencode serve` | Yes (`1.18.33`) |
 | `kilo-code` | `KILO_CONFIG=<run dir>/kilo-config.json` (name follows OpenCode's convention; may differ in Kilo) | Not yet |
 

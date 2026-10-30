@@ -169,7 +169,7 @@ Implement `ToolSource` in `mcp/` and add it to the list in `ToolRegistry::builti
 
 The gateway is authenticated by a per-run bearer token, minted when the run starts and revoked when it finishes, fails, or is stopped. Base URL comes from `mcp.base_url` (default `http://127.0.0.1:<server.port>/mcp`), which is correct in Docker, on the desktop, and in the cloud because the CLIs run beside the server.
 
-Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Never the worktree, a registered repo checkout, or the operator's global CLI config. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
+Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Cursor also writes `<worktree>/.cursor/mcp.json` for the run (no `--mcp-config`; remapping `HOME` hides Keychain login) and restores it after. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
 
 Agents finish with `result_submit`; a submitted result wins over a final JSON blob in the transcript.
 
