@@ -273,7 +273,8 @@ async fn design_named_plugin_in_default_dir_stays_disabled() {
     .fetch_one(&pool)
     .await
     .expect("builtin design plugin");
-    assert_eq!(status, "ok");
+    // Earlier dir wins, even when that row is disabled.
+    assert_eq!(status, "shadowed");
     assert!(builtin_enabled);
 }
 

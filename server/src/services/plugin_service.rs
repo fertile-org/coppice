@@ -405,7 +405,7 @@ impl<'a> PluginService<'a> {
 
     /// Reconciles `plugins` with what is on disk: upserts discovered plugins
     /// (keeping `enabled` and git metadata), marks vanished ones `missing`,
-    /// and shadows same-name enabled `ok` plugins in later dirs.
+    /// and shadows same-name `ok` plugins in later dirs.
     pub async fn rescan(&self) -> Result<Vec<PluginRow>, PluginError> {
         self.rescan_with_builtin(None).await
     }
@@ -454,7 +454,7 @@ impl<'a> PluginService<'a> {
                     PARTITION BY p.name ORDER BY d.position, p.rel_path
                 ) AS rank
                 FROM plugins p JOIN plugin_dirs d ON d.id = p.plugin_dir_id
-                WHERE p.status = 'ok' AND p.enabled
+                WHERE p.status = 'ok'
             ) ranked
             WHERE plugins.id = ranked.id AND ranked.rank > 1
             "#,
