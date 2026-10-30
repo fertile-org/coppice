@@ -269,13 +269,17 @@ impl ToolRegistry {
     }
 }
 
+fn is_design_tool(name: &str) -> bool {
+    name.starts_with("design__")
+}
+
 fn allowed_for(profile: ContextProfile, job_type: &str, def: &ToolDefinition) -> bool {
     if crate::domain::workflow::is_read_only_job(job_type) {
-        return def.read_only || def.name == REPLY_TOOL;
+        return def.read_only || def.name == REPLY_TOOL || is_design_tool(&def.name);
     }
     match profile {
         ContextProfile::HumanChat | ContextProfile::Conversation => {
-            def.read_only || def.name == REPLY_TOOL
+            def.read_only || def.name == REPLY_TOOL || is_design_tool(&def.name)
         }
         ContextProfile::Full | ContextProfile::HumanAgent | ContextProfile::KnowledgeCompaction => {
             true
@@ -616,6 +620,32 @@ mod tests {
                 vec!["reader", "result_submit"]
             );
         }
+    }
+
+    #[tokio::test]
+    async fn read_only_jobs_keep_design_tools() {
+        let def = ToolDefinition {
+            name: "design__create".into(),
+            description: String::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            read_only: false,
+        };
+        assert!(allowed_for(
+            ContextProfile::Conversation,
+            "conversation",
+            &def
+        ));
+        assert!(allowed_for(ContextProfile::Full, "plan_ticket", &def));
+        assert!(!allowed_for(
+            ContextProfile::Conversation,
+            "conversation",
+            &ToolDefinition {
+                name: "comment_post".into(),
+                description: String::new(),
+                input_schema: serde_json::json!({"type":"object"}),
+                read_only: false,
+            }
+        ));
     }
 
     struct HungSource;

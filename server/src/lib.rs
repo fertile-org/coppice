@@ -227,6 +227,9 @@ impl AppState {
         let mut sources: Vec<Arc<dyn ToolSource>> =
             vec![Arc::new(CoreToolSource), Arc::new(SkillToolSource)];
         if let Some(db) = db {
+            sources.push(Arc::new(crate::mcp::design_source::DesignToolSource {
+                pool: db.clone(),
+            }));
             let catalog =
                 crate::mcp::proxy::DbPluginServerCatalog::new(db.clone(), secret_store.clone());
             sources.push(Arc::new(crate::mcp::proxy::PluginMcpSource::new(

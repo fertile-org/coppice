@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod design_source;
 pub mod grant;
 pub mod host;
 pub mod protocol;

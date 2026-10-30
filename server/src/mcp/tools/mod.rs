@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod comments;
+pub mod design;
 pub mod knowledge;
 pub mod open_repo;
 pub mod result;

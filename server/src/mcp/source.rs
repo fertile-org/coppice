@@ -62,7 +62,7 @@ pub trait ToolSource: Send + Sync {
     }
 }
 
-fn json_result(value: Value) -> ToolResult {
+pub(crate) fn json_result(value: Value) -> ToolResult {
     let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
     ToolResult::text(text, false)
 }
