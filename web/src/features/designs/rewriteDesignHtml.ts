@@ -111,6 +111,9 @@ async function loadAsset(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const bytes = await fetchDesignFile(setId, filePath, signal);
+  if (filePath.toLowerCase().endsWith('.html')) {
+    return new Blob([withPreviewCsp(new TextDecoder().decode(bytes))], { type: 'text/html' });
+  }
   if (!rewriteCss || !filePath.toLowerCase().endsWith('.css')) {
     return new Blob([bytes], { type: mime(filePath) });
   }

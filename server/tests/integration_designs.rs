@@ -262,6 +262,19 @@ async fn design_named_plugin_in_default_dir_stays_disabled() {
     .await
     .expect("user design plugin");
     assert!(!enabled);
+
+    let (status, builtin_enabled): (String, bool) = sqlx::query_as(
+        r#"
+        SELECT p.status, p.enabled FROM plugins p
+        JOIN plugin_dirs d ON d.id = p.plugin_dir_id
+        WHERE p.name = 'design' AND NOT d.is_default
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("builtin design plugin");
+    assert_eq!(status, "ok");
+    assert!(builtin_enabled);
 }
 
 struct DesignRun {

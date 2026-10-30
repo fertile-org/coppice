@@ -141,6 +141,24 @@ describe('DesignCard', () => {
     page.revoke();
   });
 
+  it('adds the preview CSP to a nested html file', async () => {
+    apiFetch.mockImplementation((path: string) => {
+      const file = String(path);
+      if (file.endsWith('/a/index.html')) {
+        return Promise.resolve(new Response('<a href="page.HTML">Next</a>', { status: 200 }));
+      }
+      if (file.endsWith('/a/page.HTML')) {
+        return Promise.resolve(new Response('<p>Nested</p>', { status: 200 }));
+      }
+      return Promise.resolve(new Response('missing', { status: 404 }));
+    });
+
+    await rewriteDesignHtml(published.id, 'a/index.html');
+    expect(await readBlob(blobs[0])).toBe(
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'"><p>Nested</p>`,
+    );
+  });
+
   it('revokes blob urls when a later file aborts', async () => {
     const revoked: string[] = [];
     Object.defineProperty(URL, 'revokeObjectURL', {
