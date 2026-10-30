@@ -87,12 +87,15 @@ async fn create_write_publish_choose_roundtrip() {
     let set_dir = artifacts.join(format!("designs/{}", created.id));
     assert!(set_dir.is_dir(), "dir on disk is designs/{{set_id}}");
 
-    let html_a = b"<!doctype html><title>A</title>design-preview-marker-a";
-    let html_b = b"<!doctype html><title>B</title>design-preview-marker-b";
-    svc.write(created.id, "a/index.html", html_a)
+    let stamp = Uuid::new_v4();
+    let html_a =
+        format!("<!doctype html><title>A</title>design-preview-marker-a-{stamp}").into_bytes();
+    let html_b =
+        format!("<!doctype html><title>B</title>design-preview-marker-b-{stamp}").into_bytes();
+    svc.write(created.id, "a/index.html", &html_a)
         .await
         .expect("write a");
-    svc.write(created.id, "b/index.html", html_b)
+    svc.write(created.id, "b/index.html", &html_b)
         .await
         .expect("write b");
     assert_eq!(fs::read(set_dir.join("a/index.html")).unwrap(), html_a);

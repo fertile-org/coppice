@@ -125,8 +125,8 @@ impl<'a> DesignService<'a> {
             return Err(DesignError::Invalid("file exceeds 512 KiB".into()));
         }
         let dir = self.dir_of(set_id).await?;
-        let root = self.canonical_set_dir(&dir)?;
-        let dest = dest_under(&root, rel, true)?;
+        let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
+        let dest = dest_under(&artifacts, &root, rel, true)?;
         if dest.is_dir() {
             return Err(DesignError::Invalid("path is a directory".into()));
         }
@@ -162,7 +162,7 @@ impl<'a> DesignService<'a> {
         let dir: String = row.get("dir");
         let ticket_id: Option<Uuid> = row.get("ticket_id");
         let chat_session_id: Option<Uuid> = row.get("chat_session_id");
-        let root = self.canonical_set_dir(&dir)?;
+        let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
         for option in &options {
             if let Some(reason) = reject_rel_path(&option.entry) {
                 return Err(DesignError::Invalid(reason.into()));
@@ -174,7 +174,7 @@ impl<'a> DesignService<'a> {
             if !ext.eq_ignore_ascii_case("html") {
                 return Err(DesignError::Invalid("entry must be html".into()));
             }
-            let dest = dest_under(&root, &option.entry, false)?;
+            let dest = dest_under(&artifacts, &root, &option.entry, false)?;
             if !dest.is_file() {
                 return Err(DesignError::Invalid("missing entry file".into()));
             }
@@ -315,10 +315,17 @@ impl<'a> DesignService<'a> {
         .await?
         .ok_or(DesignError::NotFound)
     }
+}
 
-    fn canonical_set_dir(&self, dir: &str) -> Result<PathBuf, DesignError> {
-        std::fs::canonicalize(self.artifacts_dir.join(dir)).map_err(invalid_io)
+fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf), DesignError> {
+    let artifacts = std::fs::canonicalize(artifacts_dir).map_err(invalid_io)?;
+    let set_dir = std::fs::canonicalize(artifacts.join(dir)).map_err(invalid_io)?;
+    if !set_dir.starts_with(&artifacts) {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
     }
+    Ok((artifacts, set_dir))
 }
 
 fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, DesignError> {
@@ -346,41 +353,56 @@ fn options_from_row(row: &sqlx::postgres::PgRow) -> Result<Vec<DesignOption>, De
     serde_json::from_value(value).map_err(|err| DesignError::Invalid(err.to_string()))
 }
 
-fn dest_under(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, DesignError> {
-    let dest = root.join(rel);
-    let parent = dest
-        .parent()
-        .ok_or_else(|| DesignError::Invalid("path escapes the design folder".into()))?;
-    if create_parents {
-        std::fs::create_dir_all(parent).map_err(invalid_io)?;
-    } else if !parent.exists() {
-        return Err(DesignError::Invalid("missing entry file".into()));
-    }
-    let parent = std::fs::canonicalize(parent).map_err(invalid_io)?;
-    if !parent.starts_with(root) {
+fn dest_under(
+    artifacts: &Path,
+    set_dir: &Path,
+    rel: &str,
+    create_parents: bool,
+) -> Result<PathBuf, DesignError> {
+    if !set_dir.starts_with(artifacts) {
         return Err(DesignError::Invalid(
             "path escapes the design folder".into(),
         ));
     }
-    let name = dest
-        .file_name()
-        .ok_or_else(|| DesignError::Invalid("path escapes the design folder".into()))?;
-    let dest = parent.join(name);
-    if dest
-        .symlink_metadata()
-        .is_ok_and(|meta| meta.file_type().is_symlink())
-    {
-        return Err(DesignError::Invalid(
-            "path escapes the design folder".into(),
-        ));
-    }
-    if dest.exists() {
-        let canon = std::fs::canonicalize(&dest).map_err(invalid_io)?;
-        if !canon.starts_with(root) {
+    let mut dest = set_dir.to_path_buf();
+    for comp in Path::new(rel).components() {
+        match comp {
+            std::path::Component::CurDir => continue,
+            std::path::Component::Normal(part) => dest.push(part),
+            _ => {
+                return Err(DesignError::Invalid(
+                    "path escapes the design folder".into(),
+                ));
+            }
+        }
+        if !dest.starts_with(set_dir) {
             return Err(DesignError::Invalid(
                 "path escapes the design folder".into(),
             ));
         }
+        if std::fs::symlink_metadata(&dest).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(DesignError::Invalid(
+                "path escapes the design folder".into(),
+            ));
+        }
+    }
+    if dest == set_dir {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
+    }
+    let parent = dest
+        .parent()
+        .ok_or_else(|| DesignError::Invalid("path escapes the design folder".into()))?;
+    if !parent.starts_with(set_dir) {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
+    }
+    if create_parents {
+        std::fs::create_dir_all(parent).map_err(invalid_io)?;
+    } else if !parent.exists() {
+        return Err(DesignError::Invalid("missing entry file".into()));
     }
     Ok(dest)
 }
@@ -409,7 +431,7 @@ fn invalid_io(err: std::io::Error) -> DesignError {
 
 #[cfg(test)]
 mod tests {
-    use super::reject_rel_path;
+    use super::{reject_rel_path, resolve_set_dir, DesignError};
 
     #[test]
     fn reject_rel_path_blocks_escape_and_bad_types() {
@@ -424,5 +446,22 @@ mod tests {
         );
         assert_eq!(reject_rel_path("x.svg"), Some("file type not allowed"));
         assert_eq!(reject_rel_path("x.exe"), Some("file type not allowed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_dir_symlink_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let artifacts = tmp.path().join("artifacts");
+        std::fs::create_dir_all(artifacts.join("designs")).unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, artifacts.join("designs").join("set")).unwrap();
+
+        let err = resolve_set_dir(&artifacts, "designs/set").unwrap_err();
+        assert!(
+            matches!(err, DesignError::Invalid(ref msg) if msg.contains("escapes")),
+            "{err}"
+        );
     }
 }
