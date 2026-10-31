@@ -12,13 +12,14 @@ pub enum CoreTool {
     TicketRuns,
     TicketSearch,
     KnowledgeSearch,
+    KnowledgeGet,
     CommentPost,
     ResultSubmit,
     OpenRepo,
 }
 
 impl CoreTool {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::BoardList,
         Self::BoardAgents,
         Self::TicketGet,
@@ -26,6 +27,7 @@ impl CoreTool {
         Self::TicketRuns,
         Self::TicketSearch,
         Self::KnowledgeSearch,
+        Self::KnowledgeGet,
         Self::CommentPost,
         Self::ResultSubmit,
         Self::OpenRepo,
@@ -40,6 +42,7 @@ impl CoreTool {
             Self::TicketRuns => "ticket_runs",
             Self::TicketSearch => "ticket_search",
             Self::KnowledgeSearch => "knowledge_search",
+            Self::KnowledgeGet => "knowledge_get",
             Self::CommentPost => "comment_post",
             Self::ResultSubmit => "result_submit",
             Self::OpenRepo => "open_repo",
@@ -103,16 +106,32 @@ impl CoreTool {
                 true,
             ),
             Self::KnowledgeSearch => (
-                concat!(
-                    "Search approved project knowledge relevant to this work. ",
-                    crate::services::context_budget::knowledge_data_note!()
-                ),
+                "Search approved project knowledge relevant to this work. Returns short rows (id, title, type, snippet, tokens); read the ones you need in full with knowledge_get.",
                 object(
                     json!({
                         "query": { "type": "string" },
                         "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Default 5." },
                     }),
                     &["query"],
+                ),
+                true,
+            ),
+            Self::KnowledgeGet => (
+                concat!(
+                    "Read approved knowledge in full by id (from knowledge_search). Up to 5 ids per call. ",
+                    crate::services::context_budget::knowledge_data_note!()
+                ),
+                object(
+                    json!({
+                        "ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "minItems": 1,
+                            "maxItems": 5,
+                            "description": "Knowledge item ids from knowledge_search.",
+                        },
+                    }),
+                    &["ids"],
                 ),
                 true,
             ),
@@ -155,10 +174,7 @@ impl CoreTool {
                     def.description = "Search tickets on every board by text and optional status. Each result includes the board name.".into();
                 }
                 Self::KnowledgeSearch => {
-                    def.description = format!(
-                        "Search approved knowledge on every board. Each result includes the board name. {}",
-                        crate::services::context_budget::KNOWLEDGE_DATA_NOTE
-                    );
+                    def.description = "Search approved knowledge on every board. Each row includes the board name; read the ones you need in full with knowledge_get.".into();
                 }
                 _ => {}
             }
@@ -307,6 +323,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketRuns,
             TicketSearch,
             KnowledgeSearch,
+            KnowledgeGet,
             CommentPost,
             ResultSubmit,
         ],
@@ -317,6 +334,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketRuns,
             TicketSearch,
             KnowledgeSearch,
+            KnowledgeGet,
             ResultSubmit,
         ],
         ContextProfile::Conversation => vec![
@@ -326,6 +344,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketRuns,
             TicketSearch,
             KnowledgeSearch,
+            KnowledgeGet,
             OpenRepo,
             ResultSubmit,
         ],
@@ -334,6 +353,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketComments,
             TicketRuns,
             KnowledgeSearch,
+            KnowledgeGet,
             ResultSubmit,
         ],
         ContextProfile::ConnectorCheck => vec![TicketGet, ResultSubmit],
@@ -360,6 +380,7 @@ mod tests {
             "ticket_runs",
             "ticket_search",
             "knowledge_search",
+            "knowledge_get",
             "comment_post",
             "result_submit",
         ];
@@ -384,6 +405,7 @@ mod tests {
                 "ticket_comments",
                 "ticket_runs",
                 "knowledge_search",
+                "knowledge_get",
                 "result_submit",
             ]
         );

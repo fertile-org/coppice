@@ -12,6 +12,7 @@
         "query": "governed knowledge marker exact retrieval make test-unit",
         "limit": 20
       }
-    }
+    },
+    { "tool": "knowledge_get", "args": { "ids": "$previousIds" } }
   ]
 }

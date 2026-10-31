@@ -265,7 +265,7 @@ fn write_contract(out: &mut String) {
          `scope` is `board`, `workspace`, or `agent` (agent scope also needs `agentId`). \
          `confidence` is `low`, `medium`, or `high`. Every `sourceTicketIds` entry must be a ticket id listed above. \
          Use `ticket_get` / `ticket_comments` for more detail on a listed ticket and `knowledge_search` \
-         to check existing knowledge."
+         and `knowledge_get` to check existing knowledge."
     );
 }
 

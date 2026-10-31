@@ -6,6 +6,7 @@
   "mentionAgents": [],
   "blockers": [],
   "toolCalls": [
-    { "tool": "knowledge_search", "args": { "query": "zebrafish" } }
+    { "tool": "knowledge_search", "args": { "query": "zebrafish" } },
+    { "tool": "knowledge_get", "args": { "ids": "$previousIds" } }
   ]
 }

@@ -55,6 +55,7 @@ pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<
         CoreTool::TicketRuns => tickets::call_ticket_runs(ctx, args).await,
         CoreTool::TicketSearch => tickets::call_ticket_search(ctx, args).await,
         CoreTool::KnowledgeSearch => knowledge::call_knowledge_search(ctx, args).await,
+        CoreTool::KnowledgeGet => knowledge::call_knowledge_get(ctx, args).await,
         CoreTool::CommentPost => comments::call_comment_post(ctx, args).await,
         CoreTool::ResultSubmit => result::call_result_submit(ctx, args).await,
         CoreTool::OpenRepo => open_repo::call_open_repo(ctx, args).await,

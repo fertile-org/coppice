@@ -5,10 +5,10 @@
  * Proves the default stack can govern a manual candidate, compact a Done
  * ticket into a Pending candidate with the configured compaction agent
  * (MockProvider fixtures, no notification on success), and retrieve both
- * approved revisions through the `knowledge_search` MCP tool in a Full run with
+ * approved revisions through the `knowledge_search` and `knowledge_get` MCP tools in a Full run with
  * an exact audit. Knowledge is no longer injected into the run context: the
  * worker agent's mock fixture (`m06-knowledge-search-worker/work_on_ticket.json`)
- * calls `knowledge_search` through the gateway, which logs usage. Restores the
+ * calls `knowledge_search` then `knowledge_get` through the gateway; `knowledge_get` logs usage. Restores the
  * previous compaction agent setting when done.
  *
  * Env:
@@ -29,7 +29,7 @@ const PASSWORD = process.env.COPPICE_SMOKE_PASSWORD ?? 'changeme';
 const SMOKE_REPO_PATH =
   process.env.COPPICE_SMOKE_REPO_PATH ?? '/tmp/smoke-repo';
 // Custom (preset-less) agent: its mock fixture key is the slug of this name, so
-// `fixtures/agent-responses/<slug>/work_on_ticket.json` drives knowledge_search.
+// `fixtures/agent-responses/<slug>/work_on_ticket.json` drives knowledge_search and knowledge_get.
 const SEARCH_WORKER_NAME = 'm06-knowledge-search-worker';
 
 const MAX_HEALTH_ATTEMPTS = 90;
@@ -423,7 +423,7 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     200,
     'get Knowledge Used',
   );
-  // Only approved revisions may be returned by knowledge_search: the pending
+  // Only approved revisions may be returned by knowledge_get: the pending
   // compaction candidate (CSRF rule) must not appear in the audit.
   for (const pending of await inbox(board.id, auth)) {
     if (usage.items.some((entry) => entry.itemId === pending.id)) {

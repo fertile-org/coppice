@@ -15,17 +15,50 @@ pub const INBOX_SIMILAR_CANDIDATES: i64 = 50;
 /// Lowest [`near_duplicate_score`] shown as a near duplicate.
 pub const NEAR_DUPLICATE_MIN_SCORE: f64 = 0.25;
 
+/// Base predicates for approved, live knowledge.
+macro_rules! live_knowledge_predicates {
+    () => {
+        r#"i.status = 'approved'
+      AND i.superseded_by IS NULL
+      AND (i.expires_at IS NULL OR i.expires_at > now())
+"#
+    };
+}
+
+/// What one agent may read: confidence, type and scope filters. Parameters:
+/// `$1` board ids (NULL means every board), `$2` agent id, `$3` minimum
+/// confidence, `$5` allowed types. Shared by [`retrieve`] and [`fetch_visible`]
+/// so search and get can never disagree about visibility.
+macro_rules! agent_visible_predicates {
+    () => {
+        r#"
+      AND CASE $3
+            WHEN 'high' THEN r.confidence = 'high'
+            WHEN 'medium' THEN r.confidence IN ('medium', 'high')
+            ELSE r.confidence IN ('low', 'medium', 'high')
+          END
+      AND (cardinality($5::text[]) = 0 OR r.knowledge_type = ANY($5::text[]))
+      AND (
+            r.scope = 'workspace'
+            OR (r.scope = 'board' AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
+            OR (r.scope = 'agent' AND r.agent_id = $2
+                AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
+          )
+"#
+    };
+}
+
 /// Shared join + base predicates for approved, live knowledge.
 /// Agent retrieval adds confidence/type/scope filters on top; inbox assist does not.
 macro_rules! eligible_knowledge_from {
     () => {
-        r#"
+        concat!(
+            r#"
     FROM knowledge_items i
     JOIN knowledge_revisions r ON r.id = i.active_revision_id
-    WHERE i.status = 'approved'
-      AND i.superseded_by IS NULL
-      AND (i.expires_at IS NULL OR i.expires_at > now())
-"#
+    WHERE "#,
+            live_knowledge_predicates!()
+        )
     };
 }
 
@@ -69,7 +102,8 @@ pub struct SimilarKnowledgeNeighbor {
 /// set so words common across these notes count little; a title match counts
 /// double. `matches` is the one scan of notes against terms; document frequency
 /// and scores both come from it.
-pub const RETRIEVAL_QUERY_SQL: &str = r#"
+pub const RETRIEVAL_QUERY_SQL: &str = concat!(
+    r#"
 WITH eligible AS MATERIALIZED (
     SELECT
         i.id AS item_id,
@@ -87,21 +121,10 @@ WITH eligible AS MATERIALIZED (
     FROM knowledge_items i
     JOIN knowledge_revisions r ON r.id = i.active_revision_id
     LEFT JOIN boards b ON b.id = r.board_id
-    WHERE i.status = 'approved'
-      AND i.superseded_by IS NULL
-      AND (i.expires_at IS NULL OR i.expires_at > now())
-      AND CASE $3
-            WHEN 'high' THEN r.confidence = 'high'
-            WHEN 'medium' THEN r.confidence IN ('medium', 'high')
-            ELSE r.confidence IN ('low', 'medium', 'high')
-          END
-      AND (cardinality($5::text[]) = 0 OR r.knowledge_type = ANY($5::text[]))
-      AND (
-            r.scope = 'workspace'
-            OR (r.scope = 'board' AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
-            OR (r.scope = 'agent' AND r.agent_id = $2
-                AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
-          )
+    WHERE "#,
+    live_knowledge_predicates!(),
+    agent_visible_predicates!(),
+    r#"
 ), terms AS MATERIALIZED (
     SELECT
         t,
@@ -134,7 +157,28 @@ FROM eligible
 LEFT JOIN scored USING (item_id)
 ORDER BY score DESC, revision_created_at DESC, item_id ASC
 LIMIT $6
-"#;
+"#
+);
+
+/// Visibility check for `knowledge_get`: the same predicates as retrieval,
+/// for the requested items only. `$4` is the item ids; `$1`, `$2`, `$3`, `$5`
+/// as in [`RETRIEVAL_QUERY_SQL`].
+const FETCH_VISIBLE_SQL: &str = concat!(
+    r#"
+SELECT
+    i.id AS item_id, r.id AS revision_id, r.scope, r.knowledge_type, r.title, r.content,
+    r.source_type, r.source_id, r.confidence, r.created_at AS revision_created_at,
+    b.name AS board_name
+FROM knowledge_items i
+JOIN knowledge_revisions r ON r.id = i.active_revision_id
+LEFT JOIN boards b ON b.id = r.board_id
+WHERE "#,
+    live_knowledge_predicates!(),
+    agent_visible_predicates!(),
+    r#"
+  AND i.id = ANY($4::uuid[])
+"#
+);
 
 /// Text comes back folded by `coppice_unaccent`, the pending item's too, so
 /// both sides of [`near_duplicate_score`] fold accents the way `search_vector`
@@ -196,10 +240,7 @@ pub async fn retrieve(
     config: &KnowledgeRetrievalConfig,
 ) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
     let terms = query_terms(query_title, query_body);
-    let (board_ids, with_board_name) = match scope {
-        RetrievalScope::Boards(ids) => (Some(ids.clone()), false),
-        RetrievalScope::AllBoards => (None, true),
-    };
+    let (board_ids, with_board_name) = scope_binding(scope);
     let rows = sqlx::query(RETRIEVAL_QUERY_SQL)
         .bind(board_ids)
         .bind(agent_id)
@@ -209,28 +250,69 @@ pub async fn retrieve(
         .bind(MAX_ELIGIBLE_CANDIDATES)
         .fetch_all(pool)
         .await?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(RetrievedKnowledge {
-                item_id: row.try_get("item_id")?,
-                revision_id: row.try_get("revision_id")?,
-                scope: row.try_get("scope")?,
-                knowledge_type: row.try_get("knowledge_type")?,
-                title: row.try_get("title")?,
-                content: row.try_get("content")?,
-                source_type: row.try_get("source_type")?,
-                source_id: row.try_get("source_id")?,
-                confidence: row.try_get("confidence")?,
-                score: row.try_get("score")?,
-                revision_created_at: row.try_get("revision_created_at")?,
-                board_name: if with_board_name {
-                    row.try_get("board_name")?
-                } else {
-                    None
-                },
-            })
-        })
+    rows.iter()
+        .map(|row| retrieved_from_row(row, with_board_name, row.try_get("score")?))
         .collect()
+}
+
+/// The requested items, only those this agent may read under `scope`: the
+/// same predicates as [`retrieve`]. Anything not visible is simply absent, so
+/// callers cannot tell "hidden" from "unknown". Rows come back in the order of
+/// `item_ids`; `score` is `0.0`.
+pub async fn fetch_visible(
+    pool: &PgPool,
+    scope: &RetrievalScope,
+    agent_id: Uuid,
+    item_ids: &[Uuid],
+    config: &KnowledgeRetrievalConfig,
+) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
+    let (board_ids, with_board_name) = scope_binding(scope);
+    let rows = sqlx::query(FETCH_VISIBLE_SQL)
+        .bind(board_ids)
+        .bind(agent_id)
+        .bind(&config.minimum_confidence)
+        .bind(item_ids)
+        .bind(&config.allowed_types)
+        .fetch_all(pool)
+        .await?;
+    let mut found = rows
+        .iter()
+        .map(|row| retrieved_from_row(row, with_board_name, 0.0))
+        .collect::<Result<Vec<_>, _>>()?;
+    found.sort_by_key(|k| item_ids.iter().position(|id| *id == k.item_id));
+    Ok(found)
+}
+
+fn scope_binding(scope: &RetrievalScope) -> (Option<Vec<Uuid>>, bool) {
+    match scope {
+        RetrievalScope::Boards(ids) => (Some(ids.clone()), false),
+        RetrievalScope::AllBoards => (None, true),
+    }
+}
+
+fn retrieved_from_row(
+    row: &sqlx::postgres::PgRow,
+    with_board_name: bool,
+    score: f64,
+) -> Result<RetrievedKnowledge, sqlx::Error> {
+    Ok(RetrievedKnowledge {
+        item_id: row.try_get("item_id")?,
+        revision_id: row.try_get("revision_id")?,
+        scope: row.try_get("scope")?,
+        knowledge_type: row.try_get("knowledge_type")?,
+        title: row.try_get("title")?,
+        content: row.try_get("content")?,
+        source_type: row.try_get("source_type")?,
+        source_id: row.try_get("source_id")?,
+        confidence: row.try_get("confidence")?,
+        score,
+        revision_created_at: row.try_get("revision_created_at")?,
+        board_name: if with_board_name {
+            row.try_get("board_name")?
+        } else {
+            None
+        },
+    })
 }
 
 /// Approved, live notes that are near duplicates of a pending one, best first.
@@ -348,6 +430,8 @@ mod tests {
         assert!(RETRIEVAL_QUERY_SQL.contains("$1::uuid[] IS NULL"));
         assert!(RETRIEVAL_QUERY_SQL.contains("r.agent_id = $2"));
         assert!(RETRIEVAL_QUERY_SQL.contains("LEFT JOIN boards"));
+        assert!(FETCH_VISIBLE_SQL.contains("r.agent_id = $2"));
+        assert!(FETCH_VISIBLE_SQL.contains("i.status = 'approved'"));
     }
 
     // Notes like the ones that showed up as near duplicates of each other.

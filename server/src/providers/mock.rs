@@ -339,12 +339,13 @@ async fn run_tool_calls(
     )
     .await?;
 
-    let mut outputs = Vec::with_capacity(calls.len());
+    let mut outputs: Vec<String> = Vec::with_capacity(calls.len());
     for (index, call) in calls.iter().enumerate() {
+        let args = resolve_previous_ids(&call.args, outputs.last());
         let response = rpc(
             index as u64 + 2,
             "tools/call",
-            serde_json::json!({ "name": call.tool, "arguments": call.args }),
+            serde_json::json!({ "name": call.tool, "arguments": args }),
         )
         .await?;
         let text = response["result"]["content"][0]["text"]
@@ -355,6 +356,24 @@ async fn run_tool_calls(
         outputs.push(text);
     }
     Ok(outputs)
+}
+
+/// A mock call can read what the previous call found: an `ids` argument of
+/// `"$previousIds"` becomes the `id` of every item in the previous result
+/// (`knowledge_search` then `knowledge_get`).
+fn resolve_previous_ids(args: &serde_json::Value, previous: Option<&String>) -> serde_json::Value {
+    let mut args = args.clone();
+    if args.get("ids").and_then(serde_json::Value::as_str) == Some("$previousIds") {
+        let ids: Vec<serde_json::Value> = previous
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|value| value["items"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|item| item["id"].clone())
+            .collect();
+        args["ids"] = serde_json::Value::Array(ids);
+    }
+    args
 }
 
 /// Hold the run open (still cancellable) after its tool calls.
@@ -743,6 +762,22 @@ mod tests {
         let content = std::fs::read_to_string(stdout_path).expect("read stdout");
         assert!(content.contains("Mock agent starting"));
         assert!(content.contains("Done."));
+    }
+
+    #[test]
+    fn previous_ids_come_from_the_previous_result() {
+        let previous = r#"{"items":[{"id":"a"},{"id":"b"}]}"#.to_string();
+        let args = serde_json::json!({ "ids": "$previousIds" });
+        assert_eq!(
+            resolve_previous_ids(&args, Some(&previous)),
+            serde_json::json!({ "ids": ["a", "b"] })
+        );
+        assert_eq!(
+            resolve_previous_ids(&args, None),
+            serde_json::json!({ "ids": [] })
+        );
+        let plain = serde_json::json!({ "query": "x" });
+        assert_eq!(resolve_previous_ids(&plain, Some(&previous)), plain);
     }
 
     #[tokio::test]

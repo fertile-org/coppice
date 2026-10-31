@@ -1,5 +1,5 @@
 use crate::domain::context_profile::ContextProfile;
-use crate::knowledge::retrieval::{retrieve, RetrievalScope};
+use crate::knowledge::retrieval::{fetch_visible, retrieve, RetrievalScope};
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::context_budget::{
     record_usage, render_knowledge, ByteTokenCounter, RenderedKnowledge, KNOWLEDGE_DATA_NOTE,
@@ -10,6 +10,8 @@ use uuid::Uuid;
 const DEFAULT_LIMIT: usize = 5;
 const MAX_LIMIT: usize = 20;
 const MAX_QUERY_CHARS: usize = 2_000;
+const SNIPPET_CHARS: usize = 200;
+const MAX_GET_IDS: usize = 5;
 
 fn parse_limit(args: &Value) -> Result<usize, ToolError> {
     match args.get("limit").filter(|v| !v.is_null()) {
@@ -59,10 +61,55 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
     found.retain(|k| k.score > 0.0);
     found.truncate(limit);
 
-    // The tool returns whole entries, so render without a token cap.
+    // Rows carry a snippet and the token cost of reading the whole entry with
+    // `knowledge_get`; usage is logged there, not here.
+    let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
+    let items: Vec<Value> = found
+        .iter()
+        .zip(&section.entries)
+        .map(|(k, entry)| {
+            let mut item = json!({
+                "id": k.item_id,
+                "title": k.title,
+                "type": k.knowledge_type,
+                "snippet": k.content.chars().take(SNIPPET_CHARS).collect::<String>(),
+                "tokens": entry.token_count,
+            });
+            if workspace {
+                item["boardName"] = json!(k.board_name.as_deref());
+            }
+            item
+        })
+        .collect();
+    Ok(response(items))
+}
+
+/// Returns whole entries for up to five ids from `knowledge_search`, and logs
+/// each revision once per run. An id the run cannot see fails the call the
+/// same way an unknown id does.
+pub async fn call_knowledge_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
+    let ids = parse_ids(&args)?;
+    let not_found = || ToolError::NotFound("knowledge item not found".into());
+    if !ctx.state.config.knowledge.enabled {
+        return Err(not_found());
+    }
+    let Some(scope) = tool_scope(ctx).await? else {
+        return Err(not_found());
+    };
+    let found = fetch_visible(
+        ctx.pool,
+        &scope,
+        ctx.scope.agent_id,
+        &ids,
+        &ctx.state.config.knowledge.retrieval,
+    )
+    .await?;
+    if found.len() != ids.len() {
+        return Err(not_found());
+    }
     let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
     log_usage(ctx, &section.entries).await?;
-
+    let workspace = ctx.scope.workspace_chat();
     let items: Vec<Value> = found
         .iter()
         .zip(&section.entries)
@@ -81,6 +128,30 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
         })
         .collect();
     Ok(response(items))
+}
+
+fn parse_ids(args: &Value) -> Result<Vec<Uuid>, ToolError> {
+    let raw = args
+        .get("ids")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| ToolError::InvalidArgs("ids must be a non-empty array".into()))?;
+    if raw.len() > MAX_GET_IDS {
+        return Err(ToolError::InvalidArgs(format!(
+            "ids takes at most {MAX_GET_IDS} entries"
+        )));
+    }
+    let mut ids: Vec<Uuid> = Vec::with_capacity(raw.len());
+    for value in raw {
+        let id = value
+            .as_str()
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or_else(|| ToolError::InvalidArgs("ids must be knowledge item ids".into()))?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 /// The boards a run's knowledge tools may read; `None` when it has no board.

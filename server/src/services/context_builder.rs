@@ -77,7 +77,7 @@ pub fn build_tool_first_context(
     out.push_str(
         "\n# Coppice tools\n\n\
          Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.\n\
-         Use `knowledge_search` for approved project knowledge.\n\
+         Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.\n\
          Use `board_agents` to find agent keys for handoff.\n\
          Finish by calling `result_submit` with your result; fix and resubmit if it returns errors.\n",
     );
@@ -417,7 +417,7 @@ mod tests {
         ));
         for line in [
             "Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.",
-            "Use `knowledge_search` for approved project knowledge.",
+            "Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.",
             "Use `board_agents` to find agent keys for handoff.",
         ] {
             assert!(md.contains(line), "missing {line}");
