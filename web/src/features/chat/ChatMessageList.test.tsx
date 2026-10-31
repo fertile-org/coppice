@@ -106,6 +106,51 @@ describe('ChatMessageList', () => {
     expect(screen.getByLabelText('You').parentElement).not.toContainElement(open);
   });
 
+  it('keeps proposal cards outside the agent prose size override', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000099';
+    const boardId = '00000000-0000-4000-8000-000000000010';
+    renderList(
+      <ChatMessageBubble
+        message={{
+          id: '00000000-0000-4000-8000-000000000002',
+          sessionId,
+          seq: 1,
+          role: 'agent',
+          body: 'Draft ready for you to confirm.',
+          agentRunId: null,
+          actionMetadata: {
+            proposals: [
+              {
+                id: '00000000-0000-4000-8000-000000000071',
+                type: 'create_ticket',
+                status: 'pending',
+                title: 'Harden chat cwd resolution',
+                description: 'Unbound chat sessions need a safe cwd.',
+                boardId,
+              },
+            ],
+          },
+          attachmentIds: [],
+          attachments: [],
+          createdAt: '2026-09-08T00:00:00Z',
+        }}
+        proposalContext={{ sessionId, boardId, readOnly: false }}
+      />,
+    );
+
+    const card = screen.getByTestId('chat-proposal-card');
+    const article = screen.getByLabelText('Agent');
+    expect(article.contains(card)).toBe(true);
+    expect(article.className).not.toMatch(/\[&_p\]/);
+    let node = card.parentElement;
+    while (node && node !== article) {
+      expect(node.className).not.toMatch(/\[&_p\]/);
+      node = node.parentElement;
+    }
+    expect(node).toBe(article);
+    expect(article.querySelector('p')?.closest('[class*="[&_p]"]')).not.toBeNull();
+  });
+
   it('aligns human and agent bubbles for a messenger thread', () => {
     const pair: ChatMessage[] = [
       {

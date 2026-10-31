@@ -24,6 +24,10 @@ import { useOpenTicket } from '../tickets/useOpenTicket';
 import { useAcceptChatProposal, useRejectChatProposal } from './useChat';
 
 const ESTIMATED_ROW_HEIGHT = 72;
+const AGENT_PROSE_CLASS =
+  '[&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]';
+const SYSTEM_PROSE_CLASS =
+  '[&_li]:text-text-secondary [&_ol]:text-text-secondary [&_p]:text-text-secondary [&_td]:text-text-secondary [&_ul]:text-text-secondary';
 
 export interface ChatProposalContext {
   sessionId: string;
@@ -341,10 +345,12 @@ export function ChatMessageBubble({
           aria-label="Agent"
           aria-live="polite"
           aria-busy="true"
-          className="w-full min-w-0 font-body text-text-primary [&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]"
+          className="w-full min-w-0 font-body text-text-primary"
           data-testid="chat-streaming-bubble"
         >
-          <TicketMarkdown mermaidAsCode>{text}</TicketMarkdown>
+          <div className={AGENT_PROSE_CLASS}>
+            <TicketMarkdown mermaidAsCode>{text}</TicketMarkdown>
+          </div>
         </article>
       </div>
     );
@@ -379,10 +385,9 @@ export function ChatMessageBubble({
           'font-body text-sm',
           isHuman &&
             'max-w-[85%] rounded-2xl rounded-br-md bg-paper-200 px-3 py-1.5 text-text-primary shadow-sm',
-          message.role === 'agent' &&
-            'w-full min-w-0 text-text-primary [&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]',
+          message.role === 'agent' && 'w-full min-w-0 text-text-primary',
           isSystem &&
-            'w-full min-w-0 border-l-2 border-info pl-3 text-text-secondary [&_li]:text-text-secondary [&_ol]:text-text-secondary [&_p]:text-text-secondary [&_td]:text-text-secondary [&_ul]:text-text-secondary',
+            'w-full min-w-0 border-l-2 border-info pl-3 text-text-secondary',
         )}
       >
         {isSystem ? (
@@ -394,7 +399,9 @@ export function ChatMessageBubble({
           isHuman ? (
             <p className="whitespace-pre-wrap leading-relaxed">{message.body}</p>
           ) : (
-            <TicketMarkdown>{message.body}</TicketMarkdown>
+            <div className={isSystem ? SYSTEM_PROSE_CLASS : AGENT_PROSE_CLASS}>
+              <TicketMarkdown>{message.body}</TicketMarkdown>
+            </div>
           )
         ) : null}
         <CommentAttachments attachments={attachments} />
