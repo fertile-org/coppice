@@ -12,6 +12,16 @@ pub const REVIEW_CAP_HINT: &str =
 /// Disclosure that holds the review cap field.
 pub const BOARD_SETTINGS_LABEL: &str = "Board settings";
 
+/// Name field on the board settings drawer.
+pub const BOARD_NAME_LABEL: &str = "Name";
+
+/// Rejected board name: blank, whitespace, or a slug that would be empty.
+pub const BOARD_NAME_INVALID: &str =
+    "Enter a board name that includes letters or numbers.";
+
+/// Slug collision with another board (`foo-bar` matches `foobar`).
+pub const BOARD_NAME_CONFLICT: &str = "This name is too similar to another board's name.";
+
 /// Checkbox: In Review tickets count toward the cap.
 pub const COUNT_IN_REVIEW_LABEL: &str = "Also count In Review";
 
@@ -111,6 +121,15 @@ mod tests {
             "How many tickets can wait for your review at once. Leave it empty for no cap."
         );
         assert_eq!(BOARD_SETTINGS_LABEL, "Board settings");
+        assert_eq!(BOARD_NAME_LABEL, "Name");
+        assert_eq!(
+            BOARD_NAME_INVALID,
+            "Enter a board name that includes letters or numbers."
+        );
+        assert_eq!(
+            BOARD_NAME_CONFLICT,
+            "This name is too similar to another board's name."
+        );
         assert_eq!(COUNT_IN_REVIEW_LABEL, "Also count In Review");
         assert_eq!(
             review_didnt_pass(3),

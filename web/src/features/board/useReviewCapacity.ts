@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 
 const reviewCapacitySchema = z.object({
+  name: z.string(),
+  nameLabel: z.string(),
   reviewCap: z.number().int().nullable(),
   countInReview: z.boolean(),
   waitingOnReview: z.string().nullable(),
@@ -13,6 +15,10 @@ const reviewCapacitySchema = z.object({
   countInReviewLabel: z.string(),
   reviewCapInvalid: z.string(),
 });
+
+export function reviewCapacityQueryKey(boardId: string) {
+  return ['board-review-capacity', boardId] as const;
+}
 
 export type ReviewCapacity = z.infer<typeof reviewCapacitySchema>;
 
@@ -32,7 +38,7 @@ export interface ReviewCapacityState {
 }
 
 function queryKey(boardId: string) {
-  return ['board-review-capacity', boardId] as const;
+  return reviewCapacityQueryKey(boardId);
 }
 
 async function fetchReviewCapacity(boardId: string): Promise<ReviewCapacity> {

@@ -1,7 +1,7 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::copy::review::{
-    BOARD_SETTINGS_LABEL, COUNT_IN_REVIEW_LABEL, REVIEW_CAP_HINT, REVIEW_CAP_INVALID,
-    REVIEW_CAP_LABEL,
+    BOARD_NAME_CONFLICT, BOARD_NAME_INVALID, BOARD_NAME_LABEL, BOARD_SETTINGS_LABEL,
+    COUNT_IN_REVIEW_LABEL, REVIEW_CAP_HINT, REVIEW_CAP_INVALID, REVIEW_CAP_LABEL,
 };
 use crate::domain::board::Board;
 use crate::services::board_service::{BoardError, BoardService};
@@ -42,6 +42,7 @@ struct BoardResponse {
     count_in_review: bool,
     waiting_on_review: Option<String>,
     board_settings_label: &'static str,
+    name_label: &'static str,
     review_cap_label: &'static str,
     review_cap_hint: &'static str,
     count_in_review_label: &'static str,
@@ -98,6 +99,7 @@ fn board_to_response(board: Board, waiting_on_review: Option<String>) -> BoardRe
         count_in_review: board.count_in_review,
         waiting_on_review,
         board_settings_label: BOARD_SETTINGS_LABEL,
+        name_label: BOARD_NAME_LABEL,
         review_cap_label: REVIEW_CAP_LABEL,
         review_cap_hint: REVIEW_CAP_HINT,
         count_in_review_label: COUNT_IN_REVIEW_LABEL,
@@ -117,6 +119,8 @@ fn map_error(err: BoardError) -> StatusCode {
     match err {
         BoardError::BoardNotFound => StatusCode::NOT_FOUND,
         BoardError::RepoNotFound => StatusCode::NOT_FOUND,
+        BoardError::InvalidName => StatusCode::BAD_REQUEST,
+        BoardError::NameConflict => StatusCode::CONFLICT,
         BoardError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -203,7 +207,15 @@ async fn put_review_capacity(
 }
 
 fn map_board_error(err: BoardError) -> BoardApiError {
-    BoardApiError::Status(map_error(err))
+    match err {
+        BoardError::InvalidName => {
+            BoardApiError::Message(StatusCode::BAD_REQUEST, BOARD_NAME_INVALID.to_string())
+        }
+        BoardError::NameConflict => {
+            BoardApiError::Message(StatusCode::CONFLICT, BOARD_NAME_CONFLICT.to_string())
+        }
+        other => BoardApiError::Status(map_error(other)),
+    }
 }
 
 fn map_capacity_error(err: ReviewCapacityError) -> BoardApiError {

@@ -3,6 +3,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { RepoDrawer } from '../repos/RepoDrawer';
+import { useBoardRename } from './useBoardRename';
 import type { ReviewCapacity, ReviewCapacityState } from './useReviewCapacity';
 
 export interface BoardSettingsDrawerProps {
@@ -19,15 +20,24 @@ export function BoardSettingsDrawer({
   onClose,
 }: BoardSettingsDrawerProps) {
   const { saved, draft, setDraft, error, commit, isPending } = capacity;
+  const rename = useBoardRename(boardId, saved?.name);
   if (!saved || !draft) return null;
 
   // Escape and the backdrop can unmount the input before blur fires, so close
   // commits the draft too. A pending blur save already carries it.
-  function close() {
+  // Cap validation stays synchronous. Rename is async: wait for it (including a
+  // blur already in flight) and only close when it succeeds.
+  async function close() {
     if (!isPending && draft && !commit(draft)) return;
+    try {
+      await rename.commit(rename.draft);
+    } catch {
+      return;
+    }
     onClose();
   }
 
+  const nameId = `${boardId}-name`;
   const capId = `${boardId}-review-cap`;
 
   return (
@@ -35,9 +45,24 @@ export function BoardSettingsDrawer({
       open={open}
       ariaLabel="Board settings"
       title={saved.boardSettingsLabel}
-      onClose={close}
+      onClose={() => {
+        void close();
+      }}
     >
       <div className="flex h-full flex-col gap-6">
+        <div className="space-y-2">
+          <Label htmlFor={nameId}>{saved.nameLabel}</Label>
+          <Input
+            id={nameId}
+            value={rename.draft}
+            onChange={(e) => rename.setDraft(e.target.value)}
+            onBlur={() => {
+              void rename.commit(rename.draft).catch(() => undefined);
+            }}
+            autoFocus
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor={capId}>{saved.reviewCapLabel}</Label>
           <Input
@@ -50,7 +75,6 @@ export function BoardSettingsDrawer({
             onChange={(e) => setDraft({ ...draft, cap: e.target.value })}
             onBlur={() => commit(draft)}
             aria-describedby={`${capId}-hint`}
-            autoFocus
           />
           <p id={`${capId}-hint`} className="font-body text-xs text-text-muted">
             {saved.reviewCapHint}
@@ -72,9 +96,9 @@ export function BoardSettingsDrawer({
           {saved.countInReviewLabel}
         </label>
 
-        {error && (
+        {(rename.error || error) && (
           <p className="font-body text-sm text-danger" role="alert">
-            {error}
+            {rename.error ?? error}
           </p>
         )}
 
