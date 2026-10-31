@@ -229,9 +229,10 @@ export function useUpdateTicketStatus(
     onMutate: async ({ ticketId, status }) => {
       await queryClient.cancelQueries({ queryKey: ticketsQueryKey(boardId) });
       const previous = queryClient.getQueryData<Ticket[]>(listKey);
+      const updatedAt = new Date().toISOString();
       queryClient.setQueryData<Ticket[]>(listKey, (old) =>
         old?.map((ticket) =>
-          ticket.id === ticketId ? { ...ticket, status } : ticket,
+          ticket.id === ticketId ? { ...ticket, status, updatedAt } : ticket,
         ),
       );
       return { previous };
