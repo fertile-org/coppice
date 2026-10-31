@@ -182,7 +182,7 @@ async fn resolve_suffix(
         }
     };
 
-    let mut matches = Vec::new();
+    let mut listed = Vec::new();
     for raw in output.stdout.split(|byte| *byte == 0) {
         if raw.is_empty() {
             continue;
@@ -193,7 +193,14 @@ async fn resolve_suffix(
         if !is_path_suffix(candidate, relative) || has_git_segment(candidate) {
             continue;
         }
-        let Ok(file) = canonical_root.join(candidate).canonicalize() else {
+        listed.push(candidate.to_string());
+    }
+    listed.sort();
+    listed.dedup();
+
+    let mut matches = Vec::new();
+    for candidate in listed {
+        let Ok(file) = canonical_root.join(&candidate).canonicalize() else {
             continue;
         };
         if !file.starts_with(canonical_root) {
@@ -205,7 +212,7 @@ async fn resolve_suffix(
         if !metadata.is_file() {
             continue;
         }
-        matches.push((file, candidate.to_string()));
+        matches.push((file, candidate));
     }
 
     match matches.len() {
