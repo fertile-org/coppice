@@ -425,7 +425,10 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
         .await
         .unwrap();
     let ticket: serde_json::Value = common::json_body(ticket).await;
-    assert_eq!(ticket["status"], "done", "a conflict leaves the ticket in Done");
+    assert_eq!(
+        ticket["status"], "done",
+        "a conflict leaves the ticket in Done"
+    );
     assert!(ticket["assigneeAgentId"].is_null());
     assert_eq!(ticket["humanReview"]["stale"], false);
     assert_eq!(ticket["humanReview"]["merged"], false);
@@ -600,8 +603,14 @@ async fn archiving_removes_the_worktree_and_the_ticket_branch() {
 
     archive(&app, ticket_id, &cookie, &csrf).await;
 
-    assert!(wait_until(|| !worktree.exists()).await, "worktree left behind");
-    assert!(wait_until(|| !branch_exists(&repo, ticket_id)).await, "branch left behind");
+    assert!(
+        wait_until(|| !worktree.exists()).await,
+        "worktree left behind"
+    );
+    assert!(
+        wait_until(|| !branch_exists(&repo, ticket_id)).await,
+        "branch left behind"
+    );
 }
 
 #[tokio::test]
@@ -725,4 +734,156 @@ async fn the_sweep_cleans_merged_tickets_and_repeats_safely() {
     )
     .await;
     assert_eq!(again, WorktreeCleanup::NothingToDo);
+}
+
+async fn register_repo_with_remote(
+    app: &axum::Router,
+    local_path: &str,
+    remote_url: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let body = serde_json::json!({
+        "name": "test-repo",
+        "localPath": local_path,
+        "defaultBranch": "main",
+        "remoteUrl": remote_url,
+    });
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/repos",
+            &body.to_string(),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body: serde_json::Value = common::json_body(res).await;
+    body["id"].as_str().unwrap().to_string()
+}
+
+async fn set_forge_token(app: &axum::Router, repo_id: &str, cookie: &str, csrf: &str) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/repos/{repo_id}/forge-token"),
+            r#"{"token":"ghs_testtoken"}"#,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+async fn ticket_with_remote(
+    remote_url: &str,
+) -> (
+    tempfile::TempDir,
+    common::AgentTestEnv,
+    axum::Router,
+    String,
+    String,
+    String,
+) {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let (_state, app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local_path.display().to_string(),
+        remote_url,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    set_forge_token(&app, &repo_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    (git_dir, env, app, cookie, csrf, ticket_id)
+}
+
+#[tokio::test]
+async fn create_pr_refuses_non_github_com_host() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git, _env, app, cookie, csrf, ticket_id) =
+        ticket_with_remote("https://github.example.com/acme/coppice.git").await;
+
+    let info = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/git-info"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(info.status(), StatusCode::OK);
+    let info: serde_json::Value = common::json_body(info).await;
+    assert_eq!(info["canCreatePr"], false);
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/create-pr"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    let message = body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("GitHub remote_url"),
+        "expected GitHub remote error, got {body}"
+    );
+}
+
+#[tokio::test]
+async fn create_pr_gate_still_allows_github_com_https_and_ssh() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    for remote in [
+        "https://github.com/acme/coppice.git",
+        "git@github.com:acme/coppice.git",
+    ] {
+        let (_git, _env, app, cookie, csrf, ticket_id) = ticket_with_remote(remote).await;
+        let info = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/tickets/{ticket_id}/git-info"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(info.status(), StatusCode::OK, "{remote}");
+        let info: serde_json::Value = common::json_body(info).await;
+        assert_eq!(
+            info["canCreatePr"], true,
+            "github.com remote should still allow Create PR: {remote} {info}"
+        );
+    }
 }
