@@ -353,21 +353,28 @@ fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
 /// worktree of the repo, so a committed hooks file is at the root.
 const EMPTY_CURSOR_HOOKS: &str = r#"{"version":1,"hooks":{}}"#;
 
-/// Restores files under `<worktree>/.cursor/` when the run ends.
+/// Empty Claude-format project settings. `.claude/settings.json` and
+/// `.claude/settings.local.json` still run `SessionStart` / `PreToolUse`
+/// under the deny and an empty `.cursor/hooks.json` (`cursor-agent`
+/// 2026.10.22-27dcf5f, ask and plan).
+const EMPTY_CLAUDE_SETTINGS: &str = "{}";
+
+/// Restores files under the worktree when the run ends.
 ///
 /// The CLI has no `--mcp-config`. It reads MCP from the workspace file and
 /// `$HOME/.cursor/mcp.json`. Remapping `HOME` hid the operator login (Keychain
 /// on macOS). Writing the worktree file and putting it back is the remaining
 /// path that keeps auth and still injects the gateway.
 ///
-/// Read-only runs also replace `.cursor/cli.json` and `.cursor/hooks.json`.
-/// A project allow list in `cli.json` replaces `CURSOR_CONFIG_DIR`
-/// permissions, which would drop the deny and the `Mcp(coppice:*)` allow.
-/// Repo hooks still run commands even when Shell is denied.
+/// Read-only runs also replace `.cursor/cli.json`, `.cursor/hooks.json`,
+/// `.claude/settings.json`, and `.claude/settings.local.json`. A project
+/// allow list in `cli.json` replaces `CURSOR_CONFIG_DIR` permissions.
+/// Repo hooks still run commands even when Shell is denied. Coppice only
+/// overlays the hook paths it knows about; `$HOME/.claude/settings.json`
+/// is left alone (operator-owned).
 struct CursorWorktreeMcp {
     files: Vec<(PathBuf, Option<Vec<u8>>)>,
-    cursor_dir: PathBuf,
-    created_dir: bool,
+    created_dirs: Vec<PathBuf>,
 }
 
 impl Drop for CursorWorktreeMcp {
@@ -382,8 +389,8 @@ impl Drop for CursorWorktreeMcp {
                 }
             }
         }
-        if self.created_dir {
-            let _ = std::fs::remove_dir(&self.cursor_dir);
+        for dir in self.created_dirs.iter().rev() {
+            let _ = std::fs::remove_dir(dir);
         }
     }
 }
@@ -423,11 +430,23 @@ fn cursor_mcp_setup(
     )?;
 
     let cursor_dir = worktree.join(".cursor");
+    let claude_dir = worktree.join(".claude");
     let mcp_path = cursor_dir.join("mcp.json");
     let cli_path = cursor_dir.join("cli.json");
     let hooks_path = cursor_dir.join("hooks.json");
-    let created_dir = !cursor_dir.exists();
+    let claude_settings = claude_dir.join("settings.json");
+    let claude_local = claude_dir.join("settings.local.json");
+    let mut created_dirs = Vec::new();
+    if !cursor_dir.exists() {
+        created_dirs.push(cursor_dir.clone());
+    }
     std::fs::create_dir_all(&cursor_dir)?;
+    if read_only && !claude_dir.exists() {
+        created_dirs.push(claude_dir.clone());
+    }
+    if read_only {
+        std::fs::create_dir_all(&claude_dir)?;
+    }
 
     // Snapshot every file we may overwrite before the first write, so a
     // later write failure still restores through Drop.
@@ -436,11 +455,15 @@ fn cursor_mcp_setup(
     if read_only {
         files.push((cli_path.clone(), snapshot_worktree_file(&cli_path)?));
         files.push((hooks_path.clone(), snapshot_worktree_file(&hooks_path)?));
+        files.push((
+            claude_settings.clone(),
+            snapshot_worktree_file(&claude_settings)?,
+        ));
+        files.push((claude_local.clone(), snapshot_worktree_file(&claude_local)?));
     }
     let guard = CursorWorktreeMcp {
         files,
-        cursor_dir,
-        created_dir,
+        created_dirs,
     };
 
     let body = if read_only {
@@ -458,6 +481,8 @@ fn cursor_mcp_setup(
         // Project `.cursor/cli.json` replaces CURSOR_CONFIG_DIR permissions.
         std::fs::write(&cli_path, spec.cursor_project_cli_json(true))?;
         std::fs::write(&hooks_path, EMPTY_CURSOR_HOOKS)?;
+        std::fs::write(&claude_settings, EMPTY_CLAUDE_SETTINGS)?;
+        std::fs::write(&claude_local, EMPTY_CLAUDE_SETTINGS)?;
     }
 
     Ok((
@@ -896,6 +921,10 @@ mod tests {
             !worktree.join(".cursor").join("hooks.json").exists(),
             "created hooks.json must be removed"
         );
+        assert!(
+            !worktree.join(".claude").exists(),
+            "created .claude must be removed"
+        );
     }
 
     #[test]
@@ -945,6 +974,44 @@ mod tests {
             std::fs::read_to_string(&hooks_path).expect("restored"),
             existing
         );
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_disables_claude_hooks_and_restores_them() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let claude_dir = worktree.join(".claude");
+        std::fs::create_dir_all(&claude_dir).expect("claude dir");
+        let settings = claude_dir.join("settings.json");
+        let local = claude_dir.join("settings.local.json");
+        let existing_settings =
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch fired"}]}]}}"#;
+        let existing_local =
+            r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"touch local"}]}]}}"#;
+        std::fs::write(&settings, existing_settings).expect("settings");
+        std::fs::write(&local, existing_local).expect("local");
+
+        let (_env, guard) =
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, true).expect("setup");
+
+        assert_eq!(
+            std::fs::read_to_string(&settings).expect("live settings"),
+            EMPTY_CLAUDE_SETTINGS
+        );
+        assert_eq!(
+            std::fs::read_to_string(&local).expect("live local"),
+            EMPTY_CLAUDE_SETTINGS
+        );
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(&settings).expect("restored settings"),
+            existing_settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(&local).expect("restored local"),
+            existing_local
+        );
+        assert!(claude_dir.is_dir(), "pre-existing .claude must stay");
     }
 
     #[test]

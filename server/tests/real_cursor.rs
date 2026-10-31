@@ -195,6 +195,77 @@ fn cursor_version() -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+fn write_touch_script(script: &Path, marker: &Path) {
+    std::fs::write(
+        script,
+        format!("#!/bin/sh\ntouch \"{}\"\n", marker.display()),
+    )
+    .expect("hook script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+}
+
+fn claude_hooks_json(command: &Path) -> Value {
+    json!({
+        "hooks": {
+            "SessionStart": [{
+                "hooks": [{ "type": "command", "command": command.display().to_string() }]
+            }],
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{ "type": "command", "command": command.display().to_string() }]
+            }]
+        }
+    })
+}
+
+async fn run_read_only_probe(
+    worktree: &Path,
+    artifacts: &Path,
+    job_type: &str,
+    run_id: &str,
+    mcp_url: String,
+) -> Result<AgentRunResult, coppice_server::providers::ProviderError> {
+    let provider = CursorProvider::new(CursorProviderConfig {
+        run_timeout_secs: 180,
+        ..CursorProviderConfig::default()
+    });
+    provider
+        .run(AgentRunInput {
+            agent_id: "a".into(),
+            agent_key: "pm".into(),
+            agent_role: "PM".into(),
+            job_type: job_type.into(),
+            ticket_id: Some("ticket-probe".into()),
+            ticket_status: None,
+            context_profile: ContextProfile::Conversation,
+            context_path: worktree
+                .join(".agent")
+                .join("context.md")
+                .display()
+                .to_string(),
+            run_id: Some(run_id.into()),
+            chat_session_id: None,
+            artifacts_dir: Some(artifacts.display().to_string()),
+            stream: None,
+            cancel_rx: None,
+            model_provider: None,
+            model: None,
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: true,
+            mcp: Some(McpAccess {
+                url: mcp_url,
+                token: "probe-token".into(),
+            }),
+        })
+        .await
+}
+
 #[tokio::test]
 #[ignore = "needs a signed-in cursor-agent"]
 async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
@@ -218,20 +289,12 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
     )
     .unwrap();
     // Repo hooks still run commands under the Shell deny unless we overlay
-    // an empty hooks.json. sessionStart / beforeReadFile both fire on
-    // cursor-agent 2026.10.22-27dcf5f in ask mode.
+    // empty hook files. `.cursor/hooks.json` and Claude-format
+    // `.claude/settings.json` / `settings.local.json` all fire on
+    // cursor-agent 2026.10.22-27dcf5f in ask and plan.
     let hook_script = worktree.join("hook.sh");
     let hook_fired = outside.join("hook-fired");
-    std::fs::write(
-        &hook_script,
-        format!("#!/bin/sh\ntouch \"{}\"\n", hook_fired.display()),
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&hook_script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    write_touch_script(&hook_script, &hook_fired);
     std::fs::write(
         worktree.join(".cursor").join("hooks.json"),
         serde_json::to_string(&json!({
@@ -242,6 +305,27 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
             }
         }))
         .unwrap(),
+    )
+    .unwrap();
+    let claude_script = worktree.join("claude-hook.sh");
+    let claude_fired = outside.join("claude-hook-fired");
+    write_touch_script(&claude_script, &claude_fired);
+    std::fs::create_dir_all(worktree.join(".claude")).unwrap();
+    let claude_hooks = serde_json::to_string(&claude_hooks_json(&claude_script)).unwrap();
+    std::fs::write(worktree.join(".claude").join("settings.json"), &claude_hooks).unwrap();
+    std::fs::write(
+        worktree.join(".claude").join("settings.local.json"),
+        &claude_hooks,
+    )
+    .unwrap();
+    // Nested copy, matching a chat folder with a linked-repo checkout.
+    let nested_script = worktree.join("nested-hook.sh");
+    let nested_fired = outside.join("nested-claude-hook");
+    write_touch_script(&nested_script, &nested_fired);
+    std::fs::create_dir_all(worktree.join("copy").join(".claude")).unwrap();
+    std::fs::write(
+        worktree.join("copy").join(".claude").join("settings.json"),
+        serde_json::to_string(&claude_hooks_json(&nested_script)).unwrap(),
     )
     .unwrap();
     let leak_path = outside.join("mcp-leaked");
@@ -282,85 +366,55 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
 
     let (mcp_url, gateway) = spawn_probe_gateway().await;
     let artifacts = dir.path().join("artifacts");
-    let provider = CursorProvider::new(CursorProviderConfig {
-        run_timeout_secs: 180,
-        ..CursorProviderConfig::default()
-    });
-    let result = provider
-        .run(AgentRunInput {
-            agent_id: "a".into(),
-            agent_key: "pm".into(),
-            agent_role: "PM".into(),
-            job_type: "chat_turn".into(),
-            ticket_id: None,
-            ticket_status: None,
-            context_profile: ContextProfile::Conversation,
-            context_path: worktree
-                .join(".agent")
-                .join("context.md")
-                .display()
-                .to_string(),
-            run_id: Some("cursor-probe".into()),
-            chat_session_id: None,
-            artifacts_dir: Some(artifacts.display().to_string()),
-            stream: None,
-            cancel_rx: None,
-            model_provider: None,
-            model: None,
-            session_created_tx: None,
-            resume_context: None,
-            resume_session_id: None,
-            read_only_tools: true,
-            mcp: Some(McpAccess {
-                url: mcp_url,
-                token: "probe-token".into(),
-            }),
-        })
-        .await;
-    eprintln!("probe result: {result:?}");
-    eprintln!("probe mcp calls: {:?}", gateway.calls.lock().expect("calls"));
-
-    eprintln!("probe worktree listing:");
-    for entry in walkdir_sorted(&worktree) {
-        eprintln!("  {entry}");
-    }
-    eprintln!("outside listing:");
-    for entry in walkdir_sorted(&outside) {
-        eprintln!("  {entry}");
-    }
-    if let Ok(cfg) = std::fs::read_to_string(artifacts.join("runs/cursor-probe/cursor-config/cli-config.json"))
+    for (job_type, run_id) in [("chat_turn", "cursor-probe-ask"), ("plan_ticket", "cursor-probe-plan")]
     {
-        let parsed: Value = serde_json::from_str(&cfg).unwrap_or(Value::Null);
+        *gateway.submitted.lock().expect("submitted") = None;
+        gateway.calls.lock().expect("calls").clear();
+        let result = run_read_only_probe(&worktree, &artifacts, job_type, run_id, mcp_url.clone()).await;
+        eprintln!("{job_type} probe result: {result:?}");
         eprintln!(
-            "cli-config permissions: {}",
-            parsed.get("permissions").unwrap_or(&Value::Null)
+            "{job_type} probe mcp calls: {:?}",
+            gateway.calls.lock().expect("calls")
         );
-    }
-    assert!(!worktree.join("bash-ran").exists(), "shell ran in worktree");
-    assert!(!worktree.join("wrote.txt").exists(), "write ran in worktree");
-    assert!(!outside_write.exists(), "absolute write ran");
-    assert!(!outside_shell.exists(), "absolute shell write ran");
-    assert!(!leak_path.exists(), "repo MCP server was started");
-    assert!(!hook_fired.exists(), "repo hook command ran");
-    let submitted = gateway
-        .submitted
-        .lock()
-        .expect("submitted")
-        .clone()
-        .expect("result_submit was not called");
-    assert_eq!(submitted["status"], "done");
-    assert!(
-        submitted["summary"]
-            .as_str()
-            .is_some_and(|s| s.contains("first line of readme")),
-        "{submitted}"
-    );
-    // Without a completed turn the file checks prove nothing.
-    match result.expect("turn") {
-        AgentRunResult::Done { summary, .. } => {
-            assert!(summary.contains("first line of readme"), "{summary}");
+        eprintln!("{job_type} outside listing:");
+        for entry in walkdir_sorted(&outside) {
+            eprintln!("  {entry}");
         }
-        other => panic!("probe did not complete: {other:?}"),
+        assert!(!worktree.join("bash-ran").exists(), "{job_type}: shell ran");
+        assert!(!worktree.join("wrote.txt").exists(), "{job_type}: write ran");
+        assert!(!outside_write.exists(), "{job_type}: absolute write ran");
+        assert!(!outside_shell.exists(), "{job_type}: absolute shell write ran");
+        assert!(!leak_path.exists(), "{job_type}: repo MCP server was started");
+        assert!(!hook_fired.exists(), "{job_type}: .cursor hook ran");
+        assert!(!claude_fired.exists(), "{job_type}: .claude hook ran");
+        assert!(
+            !nested_fired.exists(),
+            "{job_type}: nested .claude hook ran"
+        );
+        let submitted = gateway.submitted.lock().expect("submitted").clone();
+        if job_type == "chat_turn" {
+            let submitted = submitted.expect("result_submit was not called");
+            assert_eq!(submitted["status"], "done", "{job_type}");
+            assert!(
+                submitted["summary"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("first line of readme")),
+                "{job_type}: {submitted}"
+            );
+        }
+        // Plan mode writes a plan and often skips result_submit. The hook
+        // and write checks still prove the deny; require a finished turn.
+        match result.expect("turn") {
+            AgentRunResult::Done { summary, .. } => {
+                if job_type == "chat_turn" {
+                    assert!(
+                        summary.contains("first line of readme"),
+                        "{job_type}: {summary}"
+                    );
+                }
+            }
+            other => panic!("{job_type} probe did not complete: {other:?}"),
+        }
     }
-    eprintln!("live probe passed on cursor-agent {version}");
+    eprintln!("live probe passed on cursor-agent {version} (ask and plan)");
 }
