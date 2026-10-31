@@ -28,7 +28,6 @@ export function AcceptedNotMerged({
   const [hidden, setHidden] = useState(false);
   const [conflict, setConflict] = useState<GitConflict | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [askedName, setAskedName] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const info = gitInfo.data;
 
@@ -64,16 +63,11 @@ export function AcceptedNotMerged({
 
   function rememberConflict(next: GitConflict | null) {
     setConflict(next);
-    setAskedName(null);
     setSelectedAgentId(next?.defaultAgentId ?? next?.agents[0]?.id ?? null);
   }
 
   function closeDialog() {
     setOpen(false);
-    if (askedName) {
-      setConflict(null);
-      setAskedName(null);
-    }
   }
 
   async function handleAsk() {
@@ -89,7 +83,10 @@ export function AcceptedNotMerged({
         operation: conflict.operation,
         agentId: selected.id,
       });
-      setAskedName(selected.name);
+      toast.success(`${selected.name} is resolving the conflict`);
+      setConflict(null);
+      setSelectedAgentId(null);
+      setOpen(false);
     } catch (err) {
       const message = parseApiErrorMessage(err);
       toast.error(apiErrorToastMessage(message));
@@ -124,8 +121,6 @@ export function AcceptedNotMerged({
           selectedAgentId={selectedAgentId}
           onSelectAgent={setSelectedAgentId}
           asking={asking}
-          askedName={askedName}
-          reopensTicket={ticket.status === 'done'}
           onConflict={rememberConflict}
           onAsk={() => void handleAsk()}
           onMerged={handleMerged}

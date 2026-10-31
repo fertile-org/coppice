@@ -3,8 +3,8 @@ use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
     is_owned_stage, is_qc, is_ready_tech_lead_refinement as matches_ready_tech_lead_refinement,
-    is_stage_eligible, stage_owner_for, stage_owner_label, JobRequest, PendingRecommendation,
-    RunOutcome, TransitionAction, TransitionContext,
+    is_stage_eligible, is_tech_lead_identity, stage_owner_for, stage_owner_label, JobRequest,
+    PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::providers::AgentRunResult;
 use time::format_description::well_known::Rfc3339;
@@ -188,7 +188,7 @@ impl WorkflowService {
             return Ok(action);
         }
 
-        let gate = resolve_succeeded_gate(ctx.current_status, &ctx.agent_role);
+        let gate = resolve_succeeded_gate(ctx.current_status, &ctx.agent_key, &ctx.agent_role);
 
         if let Some(target) = gate.filter(|next| is_owned_stage(*next)) {
             resolve_stage_owner(&mut action, &ctx, target);
@@ -522,7 +522,11 @@ fn status_label(status: TicketStatus) -> &'static str {
     }
 }
 
-fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketStatus> {
+fn resolve_succeeded_gate(
+    current: TicketStatus,
+    agent_key: &str,
+    role: &str,
+) -> Option<TicketStatus> {
     use TicketStatus::*;
     match (current, role) {
         // A PM work run on Backlog must not skip Plan Review. The plan run
@@ -530,7 +534,7 @@ fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketSta
         (Backlog, role) if is_implementer(role) => Some(InReview),
         (Ready, role) if is_implementer(role) => Some(InReview),
         (InProgress, role) if is_implementer(role) => Some(InReview),
-        (InProgress, role) if is_tech_lead(role) => Some(InReview),
+        (InProgress, _) if is_tech_lead_identity(agent_key, role) => Some(InReview),
         (InReview, role) if is_implementer(role) => Some(WaitForFinalReview),
         (InReview, role) if is_reviewer(role) || is_tech_lead(role) => Some(InQa),
         (InQa, role) if is_qc(role) => Some(WaitForFinalReview),
@@ -1848,15 +1852,27 @@ mod tests {
     #[test]
     fn tech_lead_resolve_from_in_progress_reaches_in_review() {
         assert_eq!(
-            resolve_succeeded_gate(TicketStatus::InProgress, "Technical Lead"),
+            resolve_succeeded_gate(TicketStatus::InProgress, "tech_lead", "Technical Lead"),
             Some(TicketStatus::InReview)
         );
         assert_eq!(
-            resolve_succeeded_gate(TicketStatus::InProgress, "Backend Engineer"),
+            resolve_succeeded_gate(
+                TicketStatus::InProgress,
+                "backend_engineer",
+                "Backend Engineer"
+            ),
             Some(TicketStatus::InReview)
         );
         assert_eq!(
-            resolve_succeeded_gate(TicketStatus::Ready, "Technical Lead"),
+            resolve_succeeded_gate(TicketStatus::Ready, "tech_lead", "Technical Lead"),
+            None
+        );
+        assert_eq!(
+            resolve_succeeded_gate(TicketStatus::InProgress, "tech_lead", "Architect"),
+            Some(TicketStatus::InReview)
+        );
+        assert_eq!(
+            resolve_succeeded_gate(TicketStatus::InProgress, "architect", "Architect"),
             None
         );
     }

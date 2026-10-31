@@ -73,15 +73,35 @@ function renderActions(ticket: Ticket) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <ConfirmProvider>
-          <TicketGitActions ticket={ticket} />
-        </ConfirmProvider>
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  function Tree({ ticket }: { ticket: Ticket }) {
+    return (
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ConfirmProvider>
+            <TicketGitActions ticket={ticket} />
+          </ConfirmProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+  const view = render(<Tree ticket={ticket} />);
+  return {
+    ...view,
+    rerenderTicket: (next: Ticket) => view.rerender(<Tree ticket={next} />),
+  };
+}
+
+async function expectResolveToast(agentName: string) {
+  await waitFor(() => {
+    expect(
+      screen
+        .getAllByRole('status')
+        .some((el) => el.textContent?.includes(`${agentName} is resolving the conflict`)),
+    ).toBe(true);
+  });
+  expect(
+    screen.queryByRole('heading', { name: `${agentName} is resolving the conflict` }),
+  ).not.toBeInTheDocument();
 }
 
 describe('TicketGitActions', () => {
@@ -287,12 +307,8 @@ describe('TicketGitActions', () => {
       operation: 'rebase',
       agentId: adaId,
     });
-    expect(
-      await within(dialog).findByRole('heading', {
-        name: 'Ada is resolving the conflict',
-      }),
-    ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent('The run has started.');
+    await expectResolveToast('Ada');
+    expect(screen.queryByRole('dialog', { name: /rebase ticket branch/i })).not.toBeInTheDocument();
   });
 
   it('sends the selected agent and updates the ask label', async () => {
@@ -339,7 +355,7 @@ describe('TicketGitActions', () => {
       ),
     );
 
-    renderActions(makeTicket({ status: 'done' }));
+    const view = renderActions(makeTicket({ status: 'done' }));
     fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
@@ -361,14 +377,43 @@ describe('TicketGitActions', () => {
         agentId: adaId,
       });
     });
-    expect(
-      await within(dialog).findByRole('heading', {
-        name: 'Ada is resolving the conflict',
-      }),
-    ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent(
-      'The ticket moved to In Progress and the run has started.',
-    );
+    await expectResolveToast('Ada');
+    expect(screen.queryByRole('dialog', { name: 'Merge ticket branch' })).not.toBeInTheDocument();
+
+    view.rerenderTicket(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const rebase = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    expect(rebase).not.toHaveTextContent('Ada is resolving the conflict');
+    expect(within(rebase).getByRole('button', { name: 'Rebase' })).toBeInTheDocument();
+  });
+
+  it('toasts after ask from the drawer and keeps Rebase on the form', async () => {
+    rebaseMutateAsync.mockRejectedValue(new ApiError(400, conflictBody()));
+
+    renderActions(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const dialog = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rebase' }));
+
+    await waitFor(() => {
+      expect(dialog).toHaveTextContent(conflictMessage);
+    });
+    const drawerAsk = screen
+      .getAllByRole('button', { name: 'Ask Ada to resolve', hidden: true })
+      .find((button) => !dialog.contains(button));
+    expect(drawerAsk).toBeTruthy();
+    fireEvent.click(drawerAsk!);
+
+    await waitFor(() => {
+      expect(resolveMutateAsync).toHaveBeenCalledTimes(1);
+    });
+    await expectResolveToast('Ada');
+    expect(screen.queryByRole('dialog', { name: /rebase ticket branch/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const rebase = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    expect(rebase).not.toHaveTextContent('Ada is resolving the conflict');
+    expect(within(rebase).getByRole('button', { name: 'Rebase' })).toBeInTheDocument();
   });
 
   it('hides the ask button when no agent can resolve', async () => {

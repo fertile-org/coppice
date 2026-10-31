@@ -1041,6 +1041,44 @@ async fn no_implementer_run_preselects_tech_lead_and_success_reaches_in_review()
 }
 
 #[tokio::test]
+async fn tech_lead_with_custom_role_resolve_reaches_in_review() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_with_workers().await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "tech_lead",
+        "Technical Lead",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE agents SET name = 'Architect', role = 'Architect' WHERE id = $1")
+        .bind(uuid::Uuid::parse_str(&tech_lead_id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("rename tech lead role");
+
+    let conflict = done_with_merge_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], tech_lead_id);
+    assert_eq!(
+        conflict["conflict"]["askLabel"],
+        coppice_server::copy::conflict::ask_to_resolve_label("Architect")
+    );
+
+    let asked = post_resolve_merge(&fx).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let (run, ticket) = wait_until_back_in_review(&fx).await;
+    assert_eq!(run["status"], "succeeded", "error: {}", run["errorMessage"]);
+    assert_eq!(run["agentId"], tech_lead_id);
+    assert_eq!(ticket["status"], "in_review");
+}
+
+#[tokio::test]
 async fn asking_a_not_ready_agent_leaves_the_ticket_unchanged() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

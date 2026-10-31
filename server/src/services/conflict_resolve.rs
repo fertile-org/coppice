@@ -20,7 +20,7 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::AgentRun;
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
-use crate::domain::workflow::{is_qc, is_tech_lead_identity};
+use crate::domain::workflow::{is_qc_identity, is_tech_lead_identity};
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
@@ -135,7 +135,9 @@ fn is_conflict_tech_lead(agent: &Agent) -> bool {
 }
 
 fn is_conflict_implementer(agent: &Agent) -> bool {
-    is_implementer(&agent.role) && !is_qc(&agent.role) && !is_conflict_tech_lead(agent)
+    is_implementer(&agent.role)
+        && !is_qc_identity(&agent_key(agent), &agent.role)
+        && !is_conflict_tech_lead(agent)
 }
 
 fn is_eligible_resolver(agent: &Agent) -> bool {
@@ -559,6 +561,13 @@ mod tests {
         let mut disabled = frontend();
         disabled.enabled = false;
         assert!(!is_eligible_resolver(&disabled));
+    }
+
+    #[test]
+    fn qc_preset_with_engineer_role_is_not_a_conflict_implementer() {
+        let qc = agent(8, "QC Engineer", "Test Engineer", Some("qc"), true, 17);
+        assert!(!is_conflict_implementer(&qc));
+        assert!(!is_eligible_resolver(&qc));
     }
 
     #[test]

@@ -372,14 +372,17 @@ describe('Done card accepted branch', () => {
       );
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByRole('status')
+          .some((el) => el.textContent?.includes('Ada is resolving the conflict')),
+      ).toBe(true);
+    });
     expect(
-      await within(dialog).findByRole('heading', {
-        name: 'Ada is resolving the conflict',
-      }),
-    ).toBeVisible();
-    expect(dialog).toHaveTextContent(
-      'The ticket moved to In Progress and the run has started.',
-    );
+      screen.queryByRole('heading', { name: 'Ada is resolving the conflict' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Merge ticket branch' })).not.toBeInTheDocument();
     invalidateSpy.mockRestore();
   });
 
