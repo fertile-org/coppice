@@ -15,6 +15,19 @@ use uuid::Uuid;
 
 /// Tells the SPA whether the file came from the ticket worktree or the repo checkout.
 const FILE_SOURCE_HEADER: HeaderName = HeaderName::from_static("x-coppice-file-source");
+/// Percent-encoded repo-relative path that was served (ASCII-safe for headers).
+const FILE_PATH_HEADER: HeaderName = HeaderName::from_static("x-coppice-file-path");
+
+fn encode_file_path_header(path: &str) -> String {
+    path.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route(
@@ -31,6 +44,7 @@ struct FileQuery {
 fn map_error(err: TicketFileError) -> StatusCode {
     match err {
         TicketFileError::TicketNotFound | TicketFileError::NotFound => StatusCode::NOT_FOUND,
+        TicketFileError::Ambiguous => StatusCode::CONFLICT,
         TicketFileError::NoRepo | TicketFileError::RepoNotReady | TicketFileError::InvalidPath => {
             StatusCode::BAD_REQUEST
         }
@@ -64,6 +78,10 @@ async fn get_file_content(
             ),
             (header::CACHE_CONTROL, "no-store".to_string()),
             (FILE_SOURCE_HEADER, file.source.as_str().to_string()),
+            (
+                FILE_PATH_HEADER,
+                encode_file_path_header(&file.resolved_path),
+            ),
         ],
         Body::from(file.bytes),
     )

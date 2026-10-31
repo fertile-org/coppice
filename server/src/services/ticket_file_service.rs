@@ -30,6 +30,8 @@ pub enum TicketFileError {
     InvalidPath,
     #[error("file not found")]
     NotFound,
+    #[error("path matches several files")]
+    Ambiguous,
     #[error("file type cannot be previewed")]
     Unsupported,
     #[error("file too large to preview")]
@@ -75,6 +77,8 @@ pub struct TicketFile {
     pub kind: FilePreviewKind,
     pub content_type: &'static str,
     pub source: FileSource,
+    /// Repo-relative path that was actually served (may be a suffix match).
+    pub resolved_path: String,
     pub bytes: Vec<u8>,
 }
 
@@ -113,6 +117,111 @@ fn looks_like_text(bytes: &[u8]) -> bool {
     !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok()
 }
 
+fn is_path_suffix(candidate: &str, requested: &str) -> bool {
+    candidate == requested || candidate.ends_with(&format!("/{requested}"))
+}
+
+fn has_git_segment(path: &str) -> bool {
+    path.split('/').any(|seg| seg == ".git" || seg.is_empty())
+}
+
+enum ExactLookup {
+    Found(PathBuf),
+    Escaped,
+    Missing,
+}
+
+fn try_exact(canonical_root: &Path, relative: &str) -> ExactLookup {
+    match canonical_root.join(relative).canonicalize() {
+        Ok(file) if !file.starts_with(canonical_root) => ExactLookup::Escaped,
+        Ok(file) if file.is_file() => ExactLookup::Found(file),
+        Ok(_) | Err(_) => ExactLookup::Missing,
+    }
+}
+
+async fn resolve_file(
+    canonical_root: &Path,
+    git_cwd: &Path,
+    relative: &str,
+) -> Result<(PathBuf, String), TicketFileError> {
+    match try_exact(canonical_root, relative) {
+        ExactLookup::Found(file) => Ok((file, relative.to_string())),
+        ExactLookup::Escaped => Err(TicketFileError::InvalidPath),
+        ExactLookup::Missing => resolve_suffix(canonical_root, git_cwd, relative).await,
+    }
+}
+
+async fn resolve_suffix(
+    canonical_root: &Path,
+    git_cwd: &Path,
+    relative: &str,
+) -> Result<(PathBuf, String), TicketFileError> {
+    let output = match crate::services::git_cmd::output(
+        Some(git_cwd),
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )
+    .await
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            tracing::warn!(
+                code = ?output.status.code(),
+                "git ls-files failed for file preview"
+            );
+            return Err(TicketFileError::NotFound);
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "git ls-files failed for file preview");
+            return Err(TicketFileError::NotFound);
+        }
+    };
+
+    let mut listed = Vec::new();
+    for raw in output.stdout.split(|byte| *byte == 0) {
+        if raw.is_empty() {
+            continue;
+        }
+        let Ok(candidate) = std::str::from_utf8(raw) else {
+            continue;
+        };
+        if !is_path_suffix(candidate, relative) || has_git_segment(candidate) {
+            continue;
+        }
+        listed.push(candidate.to_string());
+    }
+    listed.sort();
+    listed.dedup();
+
+    let mut matches = Vec::new();
+    for candidate in listed {
+        let Ok(file) = canonical_root.join(&candidate).canonicalize() else {
+            continue;
+        };
+        if !file.starts_with(canonical_root) {
+            continue;
+        }
+        let Ok(metadata) = tokio::fs::metadata(&file).await else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        matches.push((file, candidate));
+    }
+
+    match matches.len() {
+        0 => Err(TicketFileError::NotFound),
+        1 => Ok(matches.remove(0)),
+        _ => Err(TicketFileError::Ambiguous),
+    }
+}
+
 pub struct TicketFileService<'a> {
     pool: &'a PgPool,
     worktrees_root: PathBuf,
@@ -130,14 +239,7 @@ impl<'a> TicketFileService<'a> {
         let relative = normalize_preview_path(path)?;
         let (root, source) = self.resolve_root(ticket_id).await?;
         let canonical_root = root.canonicalize()?;
-        let file = canonical_root
-            .join(&relative)
-            .canonicalize()
-            .map_err(|_| TicketFileError::NotFound)?;
-        // Symlinks may not escape the checkout.
-        if !file.starts_with(&canonical_root) {
-            return Err(TicketFileError::InvalidPath);
-        }
+        let (file, resolved_path) = resolve_file(&canonical_root, &root, &relative).await?;
         let metadata = tokio::fs::metadata(&file)
             .await
             .map_err(|_| TicketFileError::NotFound)?;
@@ -145,7 +247,7 @@ impl<'a> TicketFileService<'a> {
             return Err(TicketFileError::NotFound);
         }
 
-        let image_type = image_content_type(&relative);
+        let image_type = image_content_type(&resolved_path);
         let kind = if image_type.is_some() {
             FilePreviewKind::Image
         } else {
@@ -164,6 +266,7 @@ impl<'a> TicketFileService<'a> {
             kind,
             content_type,
             source,
+            resolved_path,
             bytes,
         })
     }
@@ -243,5 +346,18 @@ mod tests {
         assert!(looks_like_text(b"fn main() {}\n"));
         assert!(!looks_like_text(&[0x89, b'P', b'N', b'G', 0, 1]));
         assert!(!looks_like_text(&[0xff, 0xfe, 0xfd]));
+    }
+
+    #[test]
+    fn path_suffix_matches_whole_segments_only() {
+        assert!(is_path_suffix(
+            "web/src/components/AppShell.test.tsx",
+            "AppShell.test.tsx"
+        ));
+        assert!(is_path_suffix("src/app.rs", "app.rs"));
+        assert!(is_path_suffix("app.rs", "app.rs"));
+        assert!(is_path_suffix("web/src/app.rs", "src/app.rs"));
+        assert!(!is_path_suffix("src/app.rs", "pp.rs"));
+        assert!(!is_path_suffix("src/mapper.rs", "per.rs"));
     }
 }

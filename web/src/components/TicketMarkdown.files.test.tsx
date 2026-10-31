@@ -48,7 +48,10 @@ describe('TicketMarkdown file references', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('line one\nline two\n', {
         status: 200,
-        headers: { 'x-coppice-file-source': 'worktree' },
+        headers: {
+          'x-coppice-file-source': 'worktree',
+          'x-coppice-file-path': 'web%2Fsrc%2FApp.tsx',
+        },
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -61,12 +64,41 @@ describe('TicketMarkdown file references', () => {
     expect(await within(dialog).findByText(/line two/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Ticket worktree/)).toBeInTheDocument();
     expect(within(dialog).getByTestId('file-preview-highlight')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: /open raw/i })).toBeInTheDocument();
     expect(fetchMock.mock.calls[0][0]).toBe(
       '/api/tickets/ticket-1/files/content?path=web%2Fsrc%2FApp.tsx',
     );
   });
 
-  it('explains when a file is missing', async () => {
+  it('shows the resolved path and keeps the line suffix', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('export {}\n', {
+          status: 200,
+          headers: {
+            'x-coppice-file-source': 'repo',
+            'x-coppice-file-path': 'web%2Fsrc%2Fcomponents%2FAppShell.test.tsx',
+          },
+        }),
+      ),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <FilePreviewProvider ticketId="ticket-1">
+          <TicketMarkdown>{'See `AppShell.test.tsx:4`.'}</TicketMarkdown>
+        </FilePreviewProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'AppShell.test.tsx:4' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('web/src/components/AppShell.test.tsx:4')).toBeInTheDocument();
+  });
+
+  it('explains when a file is missing and hides Open raw', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
     renderWithPreview('ticket-1');
 
@@ -75,6 +107,19 @@ describe('TicketMarkdown file references', () => {
     expect(
       await screen.findByText(/not found in the ticket worktree or the repository checkout/),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open raw/i })).not.toBeInTheDocument();
+  });
+
+  it('asks for the full path when several files match', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 409 })));
+    renderWithPreview('ticket-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'server/src/api/mod.rs' }));
+
+    expect(
+      await screen.findByText(/matches several files, use the full path/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open raw/i })).not.toBeInTheDocument();
   });
 
   it('previews images inline', async () => {
@@ -82,5 +127,15 @@ describe('TicketMarkdown file references', () => {
     fireEvent.click(screen.getByRole('button', { name: 'the screenshot' }));
     const image = await screen.findByRole('img', { name: 'docs/shot.png' });
     expect(image).toHaveAttribute('src', '/api/tickets/ticket-1/files/content?path=docs%2Fshot.png');
+    expect(screen.getByRole('link', { name: /open raw/i })).toBeInTheDocument();
+  });
+
+  it('hides Open raw when an image fails to load', async () => {
+    renderWithPreview('ticket-1');
+    fireEvent.click(screen.getByRole('button', { name: 'the screenshot' }));
+    const image = await screen.findByRole('img', { name: 'docs/shot.png' });
+    fireEvent.error(image);
+    expect(await screen.findByText(/unable to load this image/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open raw/i })).not.toBeInTheDocument();
   });
 });

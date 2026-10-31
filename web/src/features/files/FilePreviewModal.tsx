@@ -56,10 +56,20 @@ type FileSource = 'worktree' | 'repo';
 interface TextFile {
   text: string;
   source: FileSource | null;
+  resolvedPath: string | null;
 }
 
 function sourceFromHeader(value: string | null): FileSource | null {
   return value === 'worktree' || value === 'repo' ? value : null;
+}
+
+function decodeResolvedPath(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 const SOURCE_LABEL: Record<FileSource, string> = {
@@ -70,6 +80,8 @@ const SOURCE_LABEL: Record<FileSource, string> = {
 function filePreviewErrorMessage(err: unknown): string {
   const status = err instanceof ApiError ? err.status : 0;
   switch (status) {
+    case 409:
+      return 'This path matches several files, use the full path.';
     case 404:
       return 'This file was not found in the ticket worktree or the repository checkout.';
     case 413:
@@ -93,6 +105,7 @@ function useTextFile(ticketId: string, path: string, enabled: boolean) {
       return {
         text: await res.text(),
         source: sourceFromHeader(res.headers.get('x-coppice-file-source')),
+        resolvedPath: decodeResolvedPath(res.headers.get('x-coppice-file-path')),
       };
     },
   });
@@ -154,8 +167,19 @@ function TextPreview({ file, text }: { file: FileReference; text: string }) {
   );
 }
 
-function ImagePreview({ file, url }: { file: FileReference; url: string }) {
+function ImagePreview({
+  file,
+  url,
+  onFailed,
+}: {
+  file: FileReference;
+  url: string;
+  onFailed: (failed: boolean) => void;
+}) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    onFailed(failed);
+  }, [failed, onFailed]);
   if (failed) {
     return <PreviewMessage>Unable to load this image.</PreviewMessage>;
   }
@@ -191,7 +215,15 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
   const url = ticketFileUrl(ticketId, file.path);
   const isText = file.kind === 'text';
   const textFile = useTextFile(ticketId, file.path, open && isText);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [url]);
   const source = textFile.data?.source;
+  const titleFile = textFile.data?.resolvedPath
+    ? { ...file, path: textFile.data.resolvedPath }
+    : file;
+  const showOpenRaw = isText ? !textFile.isError : !imageFailed;
   const details = [
     source ? SOURCE_LABEL[source] : null,
     textFile.data ? formatFileSize(new Blob([textFile.data.text]).size) : null,
@@ -206,19 +238,21 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <DialogTitle className="truncate font-mono text-sm font-medium text-text-primary">
-              {formatFileReference(file)}
+              {formatFileReference(titleFile)}
             </DialogTitle>
             <DialogDescription className="text-xs text-text-muted">
               {details.length > 0 ? details.join(' · ') : 'File preview'}
             </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="secondary" size="sm" asChild>
-              <a href={url} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="size-3.5" />
-                Open raw
-              </a>
-            </Button>
+            {showOpenRaw ? (
+              <Button variant="secondary" size="sm" asChild>
+                <a href={url} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="size-3.5" />
+                  Open raw
+                </a>
+              </Button>
+            ) : null}
             <DialogClose
               className="rounded-md border border-border p-1.5 text-text-secondary transition-colors duration-fast hover:text-text-primary"
               aria-label="Close preview"
@@ -229,7 +263,7 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
         </header>
 
         {!isText ? (
-          <ImagePreview key={url} file={file} url={url} />
+          <ImagePreview key={url} file={file} url={url} onFailed={setImageFailed} />
         ) : textFile.isError ? (
           <PreviewMessage>{filePreviewErrorMessage(textFile.error)}</PreviewMessage>
         ) : textFile.data ? (
