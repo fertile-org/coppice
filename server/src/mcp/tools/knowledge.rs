@@ -1,4 +1,5 @@
 use crate::domain::context_profile::ContextProfile;
+use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::retrieval::{fetch_visible, retrieve, RetrievalScope};
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::context_budget::{
@@ -12,6 +13,7 @@ const MAX_LIMIT: usize = 20;
 const MAX_QUERY_CHARS: usize = 2_000;
 const SNIPPET_CHARS: usize = 200;
 const MAX_GET_IDS: usize = 5;
+const VERIFY_NOTE: &str = "Cited code changed since this was written. Check it before relying on it, then call knowledge_flag.";
 
 fn parse_limit(args: &Value) -> Result<usize, ToolError> {
     match args.get("limit").filter(|v| !v.is_null()) {
@@ -64,6 +66,8 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
     // Rows carry a snippet and the token cost of reading the whole entry with
     // `knowledge_get`; usage is logged there, not here.
     let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
+    let revision_ids: Vec<Uuid> = found.iter().map(|k| k.revision_id).collect();
+    let freshness = freshness_for(ctx.pool, &revision_ids).await;
     let items: Vec<Value> = found
         .iter()
         .zip(&section.entries)
@@ -74,6 +78,7 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
                 "type": k.knowledge_type,
                 "snippet": k.content.chars().take(SNIPPET_CHARS).collect::<String>(),
                 "tokens": entry.token_count,
+                "freshness": freshness.get(&k.revision_id).map_or(Freshness::Unknown, |r| r.state),
             });
             if workspace {
                 item["boardName"] = json!(k.board_name.as_deref());
@@ -110,17 +115,26 @@ pub async fn call_knowledge_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
     log_usage(ctx, &section.entries).await?;
     let workspace = ctx.scope.workspace_chat();
+    let revision_ids: Vec<Uuid> = found.iter().map(|k| k.revision_id).collect();
+    let freshness = freshness_for(ctx.pool, &revision_ids).await;
     let items: Vec<Value> = found
         .iter()
         .zip(&section.entries)
         .map(|(k, entry)| {
+            let report = freshness.get(&k.revision_id);
+            let state = report.map_or(Freshness::Unknown, |r| r.state);
             let mut item = json!({
                 "id": k.item_id,
                 "revisionId": k.revision_id,
                 "title": k.title,
                 "type": k.knowledge_type,
                 "content": entry.rendered_content,
+                "freshness": state,
+                "changedPaths": report.map_or(&[][..], |r| r.paths.as_slice()),
             });
+            if matches!(state, Freshness::Changed | Freshness::Missing) {
+                item["verify"] = json!(VERIFY_NOTE);
+            }
             if workspace {
                 item["boardName"] = json!(k.board_name.as_deref());
             }

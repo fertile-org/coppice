@@ -10,7 +10,7 @@ use crate::services::git_cmd;
 
 pub const MAX_CITATIONS_PER_CANDIDATE: usize = 10;
 const MAX_PATH_BYTES: usize = 512;
-const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A repo-relative path, safe to hand to git as part of a `<rev>:<path>` argument.
 pub fn validate_citation_path(raw: &str) -> Result<String, String> {
@@ -95,7 +95,7 @@ pub async fn resolve_anchors(
     resolved
 }
 
-async fn head_sha(cwd: &Path, branch: &str) -> Option<String> {
+pub(crate) async fn head_sha(cwd: &Path, branch: &str) -> Option<String> {
     let rev = format!("{branch}^{{commit}}");
     let output = git_cmd::output_within(
         Some(cwd),

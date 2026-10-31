@@ -106,7 +106,7 @@ impl CoreTool {
                 true,
             ),
             Self::KnowledgeSearch => (
-                "Search approved project knowledge relevant to this work. Returns short rows (id, title, type, snippet, tokens); read the ones you need in full with knowledge_get.",
+                "Search approved project knowledge relevant to this work. Returns short rows (id, title, type, snippet, tokens, freshness); read the ones you need in full with knowledge_get.",
                 object(
                     json!({
                         "query": { "type": "string" },

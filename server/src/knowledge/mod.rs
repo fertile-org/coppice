@@ -1,6 +1,7 @@
 pub mod candidates;
 pub mod citations;
 pub mod compaction_context;
+pub mod freshness;
 pub mod fts;
 pub mod index;
 pub mod policy;

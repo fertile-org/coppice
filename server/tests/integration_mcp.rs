@@ -3555,3 +3555,169 @@ async fn tool_calls_requires_auth() {
         .unwrap();
     assert_eq!(res.status(), 401);
 }
+
+// ---- Knowledge freshness from code citations ----
+
+fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+async fn fixture_repo_id(fx: &RunFixture) -> Uuid {
+    let path = fx._git_dir.path().display().to_string();
+    sqlx::query_scalar("SELECT id FROM repos WHERE local_path = $1")
+        .bind(path)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap()
+}
+
+async fn cite(pool: &PgPool, revision_id: Uuid, repo_id: Uuid, path: &str, sha: Option<&str>) {
+    sqlx::query(
+        "INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(revision_id)
+    .bind(repo_id)
+    .bind(path)
+    .bind(sha)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Freshness from `knowledge_search` (query `mulberry`) and `knowledge_get`
+/// for the one seeded revision; asserts both agree and returns the get entry.
+async fn freshness_of(fx: &RunFixture, revision_id: Uuid) -> (String, Value) {
+    let url = serve(fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let search =
+        call_tool_json(&url, &token, "knowledge_search", json!({"query": "mulberry"})).await;
+    let row = &search["items"].as_array().unwrap()[0];
+    let state = row["freshness"].as_str().expect("freshness on row").to_string();
+    let item = item_of(&fx.pool, revision_id).await;
+    let got = call_tool_json(&url, &token, "knowledge_get", json!({"ids": [item]})).await;
+    let entry = got["items"][0].clone();
+    assert_eq!(entry["freshness"], state.as_str(), "{entry}");
+    (state, entry)
+}
+
+async fn seed_mulberry(fx: &RunFixture) -> Uuid {
+    seed_knowledge_with_content(
+        &fx.pool,
+        fx.scope.board_id.unwrap(),
+        "Mulberry tip",
+        "Mulberry notes",
+        "approved",
+    )
+    .await
+}
+
+#[tokio::test]
+async fn knowledge_freshness_covers_every_state() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let dir = fx._git_dir.path().to_path_buf();
+    let repo_id = fixture_repo_id(&fx).await;
+    let rev = seed_mulberry(&fx).await;
+
+    let (state, entry) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "uncited");
+    assert!(entry.get("verify").is_none(), "{entry}");
+
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    git_in(&dir, &["add", "a.txt"]);
+    git_in(&dir, &["commit", "-m", "add a"]);
+    let sha = git_in(&dir, &["rev-parse", "HEAD"]);
+    cite(&fx.pool, rev, repo_id, "a.txt", Some(&sha)).await;
+    let (state, entry) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "current");
+    assert_eq!(entry["changedPaths"], json!([]));
+    assert!(entry.get("verify").is_none(), "{entry}");
+
+    std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+    git_in(&dir, &["commit", "-am", "change a"]);
+    let (state, entry) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "changed");
+    assert_eq!(entry["changedPaths"], json!(["a.txt"]));
+    assert_eq!(
+        entry["verify"],
+        "Cited code changed since this was written. Check it before relying on it, then call knowledge_flag."
+    );
+
+    git_in(&dir, &["rm", "a.txt"]);
+    git_in(&dir, &["commit", "-m", "remove a"]);
+    let (state, entry) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "missing");
+    assert!(entry.get("verify").is_some(), "{entry}");
+}
+
+#[tokio::test]
+async fn knowledge_freshness_unknown_for_null_sha() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let repo_id = fixture_repo_id(&fx).await;
+    let rev = seed_mulberry(&fx).await;
+    cite(&fx.pool, rev, repo_id, "README.md", None).await;
+    let (state, entry) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "unknown");
+    assert!(entry.get("verify").is_none(), "{entry}");
+}
+
+#[tokio::test]
+async fn freshness_unknown_when_repo_path_is_gone() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let dir = fx._git_dir.path().to_path_buf();
+    let repo_id = fixture_repo_id(&fx).await;
+    let sha = git_in(&dir, &["rev-parse", "HEAD"]);
+    let rev = seed_mulberry(&fx).await;
+    cite(&fx.pool, rev, repo_id, "README.md", Some(&sha)).await;
+    std::fs::remove_dir_all(&dir).unwrap();
+    let (state, _) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "unknown");
+}
+
+#[tokio::test]
+async fn knowledge_freshness_reads_unknown_beyond_the_citation_cap() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let dir = fx._git_dir.path().to_path_buf();
+    let repo_id = fixture_repo_id(&fx).await;
+    for n in 0..21 {
+        std::fs::write(dir.join(format!("f{n:02}.txt")), "x\n").unwrap();
+    }
+    git_in(&dir, &["add", "."]);
+    git_in(&dir, &["commit", "-m", "many files"]);
+    let sha = git_in(&dir, &["rev-parse", "HEAD"]);
+    let rev = seed_mulberry(&fx).await;
+    for n in 0..21 {
+        cite(&fx.pool, rev, repo_id, &format!("f{n:02}.txt"), Some(&sha)).await;
+    }
+    // Twenty citations are checked and current; the 21st is not checked.
+    let (state, _) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "unknown");
+}
