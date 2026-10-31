@@ -27,6 +27,21 @@ test('windowOpenAction keeps same-origin pages in the app window', () => {
   assert.equal(windowOpenAction('https://github.com/fertile-org/coppice', origin), 'external');
 });
 
+test('windowOpenAction opens ticket file content in a separate window', () => {
+  const origin = 'http://127.0.0.1:5123';
+  assert.equal(
+    windowOpenAction(
+      'http://127.0.0.1:5123/api/tickets/172edbce-6bee-4a43-8613-baa14b6c98d4/files/content?path=AppShell.test.tsx',
+      origin,
+    ),
+    'file-content',
+  );
+  assert.equal(
+    windowOpenAction('http://127.0.0.1:5123/api/tickets/abc/files', origin),
+    'in-app',
+  );
+});
+
 test('windowOpenAction denies non-http targets and windows without an origin', () => {
   assert.equal(windowOpenAction('file:///etc/passwd', 'http://127.0.0.1:5123'), 'deny');
   assert.equal(windowOpenAction('javascript:alert(1)', 'http://127.0.0.1:5123'), 'deny');

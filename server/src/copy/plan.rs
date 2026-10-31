@@ -80,7 +80,7 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 
 /// A person reviews the plan at Plan Review, so it has to fit on one screen.
 /// Detail belongs to the Tech Lead and the implementer, not the plan.
-pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work. Leave implementation detail to the implementer.";
+pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work; when you name a file, use its full repo-relative path. Leave implementation detail to the implementer.";
 
 /// Above these, `result_submit` warns a planning run. The plan still saves.
 pub const PLAN_MAX_STEPS: usize = 8;
@@ -593,6 +593,7 @@ mod tests {
             requests: vec!["Shorter please."],
         };
         assert!(plan_instructions(Some(&revision)).contains(PLAN_LENGTH_INSTRUCTION));
+        assert!(text.contains("full repo-relative path"));
     }
 
     #[test]

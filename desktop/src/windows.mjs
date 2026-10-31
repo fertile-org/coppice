@@ -1,8 +1,11 @@
 import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { disposeWindow } from './disposeWindow.mjs';
 import { isExternalHttpUrl, isSameOrigin, windowOpenAction } from './navigation.mjs';
 import { attachMainWindowFocus } from './windowFocus.mjs';
+
+const rawFileWindows = new Set();
 
 const DESKTOP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATIC_DIR = path.join(DESKTOP_DIR, 'static');
@@ -38,11 +41,40 @@ export function restrictNavigation(win, origin) {
     const action = windowOpenAction(url, origin);
     if (action === 'in-app') {
       void win.loadURL(url);
+    } else if (action === 'file-content') {
+      openRawFileWindow(url, origin);
     } else if (action === 'external') {
       void shell.openExternal(url);
     }
     return { action: 'deny' };
   });
+}
+
+function openRawFileWindow(url, origin) {
+  const raw = new BrowserWindow({
+    width: 960,
+    height: 720,
+    show: true,
+    icon: LINUX_WINDOW_ICON,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  restrictNavigation(raw, origin);
+  rawFileWindows.add(raw);
+  raw.on('closed', () => {
+    rawFileWindows.delete(raw);
+  });
+  void raw.loadURL(url);
+}
+
+export function closeRawFileWindows() {
+  for (const raw of [...rawFileWindows]) {
+    disposeWindow(raw);
+  }
+  rawFileWindows.clear();
 }
 
 export function createMainWindow({ origin }) {
@@ -64,6 +96,9 @@ export function createMainWindow({ origin }) {
   });
   restrictNavigation(win, origin);
   attachMainWindowFocus(win);
+  win.on('closed', () => {
+    closeRawFileWindows();
+  });
   win.once('ready-to-show', () => win.show());
   return win;
 }

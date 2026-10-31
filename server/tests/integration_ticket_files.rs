@@ -84,3 +84,181 @@ async fn previews_files_from_repo_then_worktree() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["x-coppice-file-source"], "worktree");
 }
+
+fn query_encode(path: &str) -> String {
+    path.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn git_commit(dir: &std::path::Path, message: &str) {
+    let output = std::process::Command::new("git")
+        .args(["commit", "-m", message])
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@localhost")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@localhost")
+        .current_dir(dir)
+        .output()
+        .expect("git commit");
+    assert!(
+        output.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn exact_nested_path_works_without_a_worktree() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+
+    std::fs::create_dir_all(local_path.join("web/src/components")).unwrap();
+    std::fs::write(
+        local_path.join("web/src/components/AppShell.test.tsx"),
+        "export {}\n",
+    )
+    .unwrap();
+
+    let res = get_file(
+        &app,
+        &ticket_id,
+        &query_encode("web/src/components/AppShell.test.tsx"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_bytes(res).await, b"export {}\n");
+}
+
+#[tokio::test]
+async fn resolves_unique_suffix_and_rejects_ambiguous_or_partial_noise() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+
+    std::fs::create_dir_all(local_path.join("web/src/components")).unwrap();
+    std::fs::create_dir_all(local_path.join("src")).unwrap();
+    std::fs::write(
+        local_path.join("web/src/components/AppShell.test.tsx"),
+        "shell test\n",
+    )
+    .unwrap();
+    std::fs::write(local_path.join("app.rs"), "root app\n").unwrap();
+    std::fs::write(local_path.join("src/app.rs"), "src app\n").unwrap();
+
+    let res = get_file(&app, &ticket_id, "AppShell.test.tsx", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()["x-coppice-file-path"],
+        "web%2Fsrc%2Fcomponents%2FAppShell.test.tsx"
+    );
+    assert_eq!(body_bytes(res).await, b"shell test\n");
+
+    let res = get_file(&app, &ticket_id, "app.rs", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["x-coppice-file-path"], "app.rs");
+    assert_eq!(body_bytes(res).await, b"root app\n");
+
+    let res = get_file(&app, &ticket_id, "src%2Fapp.rs", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["x-coppice-file-path"], "src%2Fapp.rs");
+    assert_eq!(body_bytes(res).await, b"src app\n");
+
+    let res = get_file(&app, &ticket_id, "pp.rs", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    std::fs::create_dir_all(local_path.join("desktop/src/components")).unwrap();
+    std::fs::write(
+        local_path.join("desktop/src/components/AppShell.test.tsx"),
+        "other shell\n",
+    )
+    .unwrap();
+    let res = get_file(&app, &ticket_id, "AppShell.test.tsx", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn suffix_match_skips_deleted_and_escaping_and_serves_unicode() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+
+    std::fs::write(local_path.join("gone.rs"), "deleted\n").unwrap();
+    std::process::Command::new("git")
+        .args(["add", "gone.rs"])
+        .current_dir(&local_path)
+        .output()
+        .unwrap();
+    git_commit(&local_path, "track gone.rs");
+    std::fs::remove_file(local_path.join("gone.rs")).unwrap();
+
+    let res = get_file(&app, &ticket_id, "gone.rs", &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    std::fs::create_dir_all(local_path.join("src")).unwrap();
+    std::fs::write(local_path.join("src/ok.txt"), "safe\n").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc/hostname", local_path.join("src/escape.txt")).unwrap();
+        std::os::unix::fs::symlink("/etc/hostname", local_path.join("escape.txt")).unwrap();
+        let res = get_file(&app, &ticket_id, "escape.txt", &cookie, &csrf).await;
+        assert_ne!(res.status(), StatusCode::OK);
+        let res = get_file(&app, &ticket_id, "ok.txt", &cookie, &csrf).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()["x-coppice-file-path"], "src%2Fok.txt");
+        assert_eq!(body_bytes(res).await, b"safe\n");
+    }
+
+    std::fs::create_dir_all(local_path.join("docs")).unwrap();
+    std::fs::write(local_path.join("docs/café.rs"), "fn café() {}\n").unwrap();
+    let res = get_file(&app, &ticket_id, &query_encode("café.rs"), &cookie, &csrf).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()["x-coppice-file-path"],
+        query_encode("docs/café.rs")
+    );
+    assert_eq!(body_bytes(res).await, "fn café() {}\n".as_bytes());
+
+    for unsafe_path in ["..%2Fetc%2Fpasswd", "%2Fetc%2Fpasswd", ".git%2Fconfig"] {
+        let res = get_file(&app, &ticket_id, unsafe_path, &cookie, &csrf).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{unsafe_path}");
+    }
+}
