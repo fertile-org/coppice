@@ -111,6 +111,14 @@ export function useMarketplaceEntriesBySource(sourceIds: string[]) {
       queryFn: () => fetchEntries(sourceId),
       placeholderData: keepPreviousData,
     })),
+    combine: (results) => ({
+      entries: results.flatMap((result) => result.data ?? []),
+      states: results.map((result) => ({
+        isLoading: result.isLoading,
+        isError: result.isError,
+        count: result.data?.length ?? 0,
+      })),
+    }),
   });
 }
 
@@ -147,8 +155,11 @@ export function useMarketplaceFirstFetch(sources: MarketplaceSource[]) {
       if (existing) return existing;
 
       const request = refreshSource(source.id)
-        .then((refreshed) => {
-          invalidateMarketplace(queryClient);
+        .then(async (refreshed) => {
+          await queryClient.invalidateQueries({
+            queryKey: [...MARKETPLACE_ENTRIES_QUERY_KEY, source.id],
+          });
+          await queryClient.invalidateQueries({ queryKey: MARKETPLACE_SOURCES_QUERY_KEY });
           return refreshed;
         })
         .catch(async (error: unknown) => {
@@ -202,7 +213,12 @@ export function useRefreshMarketplaceSource() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: refreshSource,
-    onSuccess: () => invalidateMarketplace(queryClient),
+    onSuccess: (source) => {
+      void queryClient.invalidateQueries({
+        queryKey: [...MARKETPLACE_ENTRIES_QUERY_KEY, source.id],
+      });
+      void queryClient.invalidateQueries({ queryKey: MARKETPLACE_SOURCES_QUERY_KEY });
+    },
   });
 }
 

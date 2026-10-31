@@ -8,6 +8,7 @@ import type { MarketplaceEntry, MarketplaceSource } from '../../lib/schemas/mark
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { selectComboboxOption } from '../../test/combobox';
 import { PluginsPage } from './PluginsPage';
+import { MARKETPLACE_ENTRIES_QUERY_KEY } from './useMarketplace';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
@@ -146,6 +147,18 @@ let jobResult: PluginInstall;
 let addedFetchError: string | null;
 let entryErrors: Record<string, string>;
 let entryDelay: Promise<void> | null;
+let sourcesDelay: Promise<void> | null;
+let refreshDelay: Promise<void> | null;
+let postRefreshEntryDelay: Promise<void> | null;
+const refreshedIds = new Set<string>();
+
+function deferred() {
+  let resolve = () => undefined;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -158,7 +171,7 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ConfirmProvider>
@@ -167,6 +180,7 @@ function renderPage() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { client };
 }
 
 async function openMarketplace() {
@@ -196,6 +210,10 @@ describe('PluginsPage marketplace tab', () => {
     addedFetchError = null;
     entryErrors = {};
     entryDelay = null;
+    sourcesDelay = null;
+    refreshDelay = null;
+    postRefreshEntryDelay = null;
+    refreshedIds.clear();
     jobResult = {
       id: '00000000-0000-4000-8000-000000000020',
       pluginDirId: defaultDir.id,
@@ -225,9 +243,18 @@ describe('PluginsPage marketplace tab', () => {
         if (entryDelay) {
           return entryDelay.then(() => json(listed));
         }
+        if (source && postRefreshEntryDelay) {
+          if (!refreshedIds.has(source)) {
+            return Promise.resolve(json([]));
+          }
+          return postRefreshEntryDelay.then(() => json(listed));
+        }
         return Promise.resolve(json(listed));
       }
       if (path === '/api/marketplace/sources' && method === 'GET') {
+        if (sourcesDelay) {
+          return sourcesDelay.then(() => json(sources));
+        }
         return Promise.resolve(json(sources));
       }
       if (path === '/api/marketplace/install' && method === 'POST') {
@@ -253,12 +280,17 @@ describe('PluginsPage marketplace tab', () => {
         return Promise.resolve(json(added, 201));
       }
       if (path.match(/^\/api\/marketplace\/sources\/.+\/refresh$/) && method === 'POST') {
-        const id = path.split('/')[4];
-        const source = sources.find((item) => item.id === id);
-        if (source?.lastError) return Promise.reject(new Error(source.lastError));
-        const refreshed = { ...source!, refreshedAt: '2026-10-28T10:00:00Z' };
-        sources = sources.map((item) => (item.id === id ? refreshed : item));
-        return Promise.resolve(json(refreshed));
+        const finish = async () => {
+          if (refreshDelay) await refreshDelay;
+          const id = path.split('/')[4];
+          const source = sources.find((item) => item.id === id);
+          if (source?.lastError) return Promise.reject(new Error(source.lastError));
+          refreshedIds.add(id);
+          const refreshed = { ...source!, refreshedAt: '2026-10-28T10:00:00Z' };
+          sources = sources.map((item) => (item.id === id ? refreshed : item));
+          return json(refreshed);
+        };
+        return finish();
       }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
@@ -676,5 +708,112 @@ describe('PluginsPage marketplace tab', () => {
     const card = entryCard(reviewEntry);
     expect(within(card).getByText('already installed as github')).toBeVisible();
     expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
+  });
+
+  function entriesCalls() {
+    return mocks.apiFetch.mock.calls.filter(
+      ([path, init]) =>
+        String(path).startsWith('/api/marketplace/entries') && (init?.method ?? 'GET') === 'GET',
+    );
+  }
+
+  function entriesCallsFor(id: string) {
+    return entriesCalls().filter(([path]) => String(path).includes(`source=${id}`));
+  }
+
+  it('a refresh of one source refetches only that source’s entries', async () => {
+    renderPage();
+    await openMarketplace();
+
+    const coppiceBefore = entriesCallsFor(coppiceSource.id).length;
+    const communityBefore = entriesCallsFor(communitySource.id).length;
+    expect(coppiceBefore).toBeGreaterThan(0);
+    expect(communityBefore).toBeGreaterThan(0);
+
+    const dialog = await openSources();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh acme-plugins' }));
+    await waitFor(() => expect(refreshCalls(communitySource.id)).toHaveLength(1));
+    await waitFor(() => expect(entriesCallsFor(communitySource.id).length).toBe(communityBefore + 1));
+    expect(entriesCallsFor(coppiceSource.id)).toHaveLength(coppiceBefore);
+  });
+
+  it('a background refetch of loaded entries shows no skeletons or spinners', async () => {
+    const { client } = renderPage();
+    await openMarketplace();
+    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
+
+    const hold = deferred();
+    entryDelay = hold.promise;
+    void client.invalidateQueries({ queryKey: MARKETPLACE_ENTRIES_QUERY_KEY });
+    await waitFor(() => expect(entriesCalls().length).toBeGreaterThan(2));
+
+    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
+    expect(screen.queryByLabelText('Loading coppice')).toBeNull();
+    expect(screen.queryByLabelText('Loading acme-plugins')).toBeNull();
+    expect(screen.queryByText(/Fetching \d+ sources/)).toBeNull();
+    expect(entryCard(githubEntry)).toBeVisible();
+
+    hold.resolve();
+    expect(entryCard(githubEntry)).toBeVisible();
+  });
+
+  it('a retry shows the spinner while the refresh is in flight', async () => {
+    sources = [
+      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...communitySource, lastError: 'catalog missing' },
+    ];
+    const hold = deferred();
+    refreshDelay = hold.promise;
+    renderPage();
+    await openMarketplace();
+
+    const failed = screen.getByTestId('marketplace-source-chip-acme-plugins');
+    expect(within(failed).getByLabelText('Retry acme-plugins')).toBeVisible();
+
+    fireEvent.click(failed);
+    expect(await screen.findByLabelText('Loading acme-plugins')).toBeVisible();
+    expect(within(failed).queryByLabelText('Retry acme-plugins')).toBeNull();
+    expect(screen.getByText(/Fetching 1 source/)).toBeVisible();
+    expect(screen.queryByText(/acme-plugins couldn’t load/)).toBeNull();
+
+    hold.resolve();
+  });
+
+  it('does not flash no plugins between a first refresh settling and its entries arriving', async () => {
+    const refreshHold = deferred();
+    const afterHold = deferred();
+    refreshDelay = refreshHold.promise;
+    postRefreshEntryDelay = afterHold.promise;
+    sources = [unfetchedSource];
+    entries = [{ ...reviewEntry, sourceId: unfetchedSource.id, sourceName: unfetchedSource.name }];
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
+
+    expect(await screen.findAllByTestId('marketplace-skeleton')).not.toHaveLength(0);
+    expect(screen.queryByText('No plugins in the marketplace yet.')).toBeNull();
+
+    refreshHold.resolve();
+    await waitFor(() => expect(entriesCallsFor(unfetchedSource.id).length).toBeGreaterThan(1));
+
+    expect(screen.queryByText('No plugins in the marketplace yet.')).toBeNull();
+    expect(screen.queryAllByTestId('marketplace-skeleton').length).toBeGreaterThan(0);
+
+    afterHold.resolve();
+    expect(
+      await screen.findByTestId(`marketplace-entry-${unfetchedSource.id}/review-kit`),
+    ).toBeVisible();
+  });
+
+  it('shows skeletons while sources load instead of a loading sentence', async () => {
+    const hold = deferred();
+    sourcesDelay = hold.promise;
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
+
+    expect(screen.queryByText('Loading marketplace…')).toBeNull();
+    expect(await screen.findAllByTestId('marketplace-skeleton')).not.toHaveLength(0);
+
+    hold.resolve();
+    expect(await screen.findByTestId(`marketplace-entry-${githubEntry.sourceId}/github`)).toBeVisible();
   });
 });

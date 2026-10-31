@@ -206,11 +206,10 @@ export function PluginsPage() {
             >
               {sourcesQuery.isError ? (
                 <p className="font-body text-sm text-danger">Unable to load the marketplace.</p>
-              ) : sourcesQuery.isLoading ? (
-                <p className="font-body text-sm text-text-muted">Loading marketplace…</p>
               ) : (
                 <MarketplaceSection
                   sources={sourcesQuery.data ?? []}
+                  sourcesLoading={sourcesQuery.isLoading}
                   onDone={handleMarketplaceDone}
                 />
               )}

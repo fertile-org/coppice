@@ -61,11 +61,16 @@ export function sortMarketplaceEntries(
 
 interface MarketplaceSectionProps {
   sources: MarketplaceSource[];
+  sourcesLoading?: boolean;
   /** Called with a notice and the installed plugin ids once a plugin is installed or updated. */
   onDone: (notice: string, pluginIds: string[]) => void;
 }
 
-export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps) {
+export function MarketplaceSection({
+  sources,
+  sourcesLoading = false,
+  onDone,
+}: MarketplaceSectionProps) {
   const [query, setQuery] = useState('');
   const [sourceId, setSourceId] = useState(ALL);
   const [category, setCategory] = useState(ALL);
@@ -78,14 +83,11 @@ export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps)
   const job = useMarketplaceJob(pending?.jobId ?? null);
   const firstFetch = useMarketplaceFirstFetch(sources);
   const entryQueries = useMarketplaceEntriesBySource(sources.map((source) => source.id));
+  const { entries, states } = entryQueries;
 
   const sourcesById = useMemo(
     () => new Map(sources.map((source) => [source.id, source])),
     [sources],
-  );
-  const entries = useMemo(
-    () => entryQueries.flatMap((result) => result.data ?? []),
-    [entryQueries],
   );
   const categories = useMemo(
     () =>
@@ -101,18 +103,23 @@ export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps)
     return filtered;
   }, [entries, query, sourceId, category]);
   const shown = visible.slice(0, limit);
-  const loadingCount = sources.filter((source, index) => {
-    const q = entryQueries[index];
-    return firstFetch.pendingIds.includes(source.id) || q?.isLoading || q?.isFetching;
-  }).length;
+  const loadingCount = sourcesLoading
+    ? Math.max(sources.length, 1)
+    : sources.filter((source, index) => {
+        const q = states[index];
+        return firstFetch.pendingIds.includes(source.id) || Boolean(q?.isLoading);
+      }).length;
   const failedSource = sources.find((source, index) => {
-    const q = entryQueries[index];
-    return Boolean(source.lastError) || q?.isError;
+    if (firstFetch.pendingIds.includes(source.id)) return false;
+    const q = states[index];
+    return Boolean(source.lastError) || Boolean(q?.isError);
   });
-  const allSettled = sources.every((source, index) => {
-    const q = entryQueries[index];
-    return !firstFetch.pendingIds.includes(source.id) && q && !q.isLoading && !q.isFetching;
-  });
+  const allSettled =
+    !sourcesLoading &&
+    sources.every((source, index) => {
+      const q = states[index];
+      return !firstFetch.pendingIds.includes(source.id) && q && !q.isLoading;
+    });
   const showSkeletons = !allSettled && loadingCount > 0;
 
   function changeQuery(value: string) {
@@ -181,9 +188,8 @@ export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps)
     void run(entryKey(entry), entry.name, true, () => updatePlugin.mutateAsync(pluginId));
   }
 
-  function retrySource(source: MarketplaceSource, index: number) {
+  function retrySource(source: MarketplaceSource) {
     void firstFetch.refreshOnce(source, { restart: true }).catch(() => undefined);
-    void entryQueries[index]?.refetch();
   }
 
   return (
@@ -233,8 +239,9 @@ export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps)
         </div>
         <SourceStrip
           sources={sources}
-          entryQueries={entryQueries}
+          states={states}
           pendingIds={firstFetch.pendingIds}
+          sourcesLoading={sourcesLoading}
           selected={sourceId}
           onSelect={changeSource}
           onRetry={retrySource}
@@ -381,43 +388,45 @@ export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps)
 
 function SourceStrip({
   sources,
-  entryQueries,
+  states,
   pendingIds,
+  sourcesLoading,
   selected,
   onSelect,
   onRetry,
 }: {
   sources: MarketplaceSource[];
-  entryQueries: ReturnType<typeof useMarketplaceEntriesBySource>;
+  states: ReturnType<typeof useMarketplaceEntriesBySource>['states'];
   pendingIds: string[];
+  sourcesLoading: boolean;
   selected: string;
   onSelect: (value: string) => void;
-  onRetry: (source: MarketplaceSource, index: number) => void;
+  onRetry: (source: MarketplaceSource) => void;
 }) {
-  const total = entryQueries.reduce((sum, result) => sum + (result.data?.length ?? 0), 0);
+  const total = states.reduce((sum, result) => sum + result.count, 0);
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label="Source">
       <SourceChip
         label="All"
         selected={selected === ALL}
         count={total}
-        loading={pendingIds.length > 0 || entryQueries.some((q) => q.isLoading)}
+        loading={sourcesLoading || pendingIds.length > 0 || states.some((q) => q.isLoading)}
         onClick={() => onSelect(ALL)}
       />
       {sources.map((source, index) => {
-        const q = entryQueries[index];
-        const loading = pendingIds.includes(source.id) || Boolean(q?.isLoading || q?.isFetching);
-        const failed = Boolean(source.lastError) || Boolean(q?.isError);
+        const q = states[index];
+        const loading = pendingIds.includes(source.id) || Boolean(q?.isLoading);
+        const failed = !loading && (Boolean(source.lastError) || Boolean(q?.isError));
         return (
           <SourceChip
             key={source.id}
             label={source.name}
             selected={selected === source.id}
-            count={q?.data?.length ?? 0}
-            loading={loading && !failed}
+            count={q?.count ?? 0}
+            loading={loading}
             error={failed}
             onClick={() => onSelect(source.id)}
-            onRetry={failed ? () => onRetry(source, index) : undefined}
+            onRetry={failed ? () => onRetry(source) : undefined}
           />
         );
       })}
