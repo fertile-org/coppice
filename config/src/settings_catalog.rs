@@ -356,6 +356,15 @@ const FIXED_AFTER_CONNECTORS: &[Fixed] = &[
         },
     ),
     fixed(
+        "knowledge.retrieval.index_rows",
+        "Knowledge",
+        "The most titles listed in the start-of-run index. 0 turns the index off.",
+        SettingKind::Integer {
+            min: Some(0),
+            max: Some(50),
+        },
+    ),
+    fixed(
         "knowledge.retrieval.allowed_types",
         "Knowledge",
         "Only return these types. Empty returns every type.",
@@ -782,6 +791,13 @@ mod tests {
             get("knowledge.retrieval.top_k").check(&Value::Integer(21)),
             Err("Set knowledge.retrieval.top_k to 1–20.".into())
         );
+        assert_eq!(
+            get("knowledge.retrieval.index_rows").check(&Value::Integer(51)),
+            Err("Set knowledge.retrieval.index_rows to 0–50.".into())
+        );
+        assert!(get("knowledge.retrieval.index_rows")
+            .check(&Value::Integer(0))
+            .is_ok());
         assert!(get("agent.worker_count")
             .check(&Value::String("8".into()))
             .is_err());

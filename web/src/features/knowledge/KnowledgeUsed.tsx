@@ -77,7 +77,7 @@ export function KnowledgeUsed({
                       {usage.tokenCount} tokens ·{' '}
                       {usage.score > 0
                         ? `match ${usage.score.toFixed(3)}`
-                        : 'whole library fit the budget'}
+                        : 'Opened by the agent'}
                     </p>
                     <p className="mt-1 font-body text-xs text-text-secondary">
                       Revision{' '}

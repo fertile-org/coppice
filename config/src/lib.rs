@@ -402,6 +402,9 @@ impl KnowledgeConfig {
         if self.retrieval.top_k == 0 || self.retrieval.top_k > 20 {
             return Err("knowledge.retrieval.top_k must be between 1 and 20".into());
         }
+        if self.retrieval.index_rows > 50 {
+            return Err("knowledge.retrieval.index_rows must be between 0 and 50".into());
+        }
         for (index, knowledge_type) in self.retrieval.allowed_types.iter().enumerate() {
             if !KNOWLEDGE_TYPES.contains(&knowledge_type.as_str()) {
                 return Err(format!(
@@ -2321,6 +2324,21 @@ mod tests {
             .validate()
             .expect_err("unknown retrieval types must fail closed");
         assert!(error.contains("invented_type"));
+    }
+
+    #[test]
+    fn knowledge_index_rows_allows_zero_to_fifty() {
+        for rows in [0, 50] {
+            let mut cfg = KnowledgeConfig::default();
+            cfg.retrieval.index_rows = rows;
+            assert!(cfg.validate().is_ok(), "{rows}");
+        }
+        let mut cfg = KnowledgeConfig::default();
+        cfg.retrieval.index_rows = 51;
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .contains("knowledge.retrieval.index_rows"));
     }
 
     #[test]

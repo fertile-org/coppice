@@ -104,7 +104,8 @@ describe('KnowledgeUsed', () => {
     expect(screen.getByText('1. Safe deployment')).toBeVisible();
     expect(screen.getByText('2. Review note')).toBeVisible();
     expect(screen.getByText(/18 tokens · match 0.912/)).toBeVisible();
-    expect(screen.getByText(/12 tokens · whole library fit the budget/)).toBeVisible();
+    expect(screen.getByText(/12 tokens · Opened by the agent/)).toBeVisible();
+    expect(screen.queryByText(/whole library/)).toBeNull();
     expect(screen.getByText('00000000-0000-4000-8000-000000000002')).toBeVisible();
     expect(screen.getByText('00000000-0000-4000-8000-000000000005')).toBeVisible();
     expect(screen.getByText(/Agent Summary/)).toBeVisible();
