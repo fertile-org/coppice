@@ -90,6 +90,9 @@ pub struct TicketPlan {
     pub body: String,
     pub content_version: i32,
     pub change_request: Option<String>,
+    /// The design set the plan reflects, and the option it was written against.
+    pub design_set_id: Option<Uuid>,
+    pub design_option_id: Option<String>,
     pub created_at: time::OffsetDateTime,
 }
 
@@ -198,6 +201,20 @@ impl<'a> PlanningService<'a> {
             )
             .await?;
         Ok(())
+    }
+
+    /// Whether a plan run could start: not Skip planning, and a planner exists.
+    /// Unlike starting, this posts no note.
+    pub async fn planner_available(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        if ticket.ticket.skip_planning {
+            return Ok(false);
+        }
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        Ok(planner_for_ticket(&agents).is_some())
     }
 
     async fn start(
@@ -315,15 +332,41 @@ impl<'a> PlanningService<'a> {
                 next
             }
         };
+        // The newest live plan-run design set and the option picked (or
+        // recommended) in it. Picks are refused during a plan run, so reading
+        // here also covers options the run itself published.
+        let design: Option<(Uuid, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
+            FROM design_sets d
+            WHERE d.ticket_id = $1
+              AND d.published_at IS NOT NULL
+              AND d.superseded_by IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM agent_runs r
+                  WHERE r.id = d.run_id AND r.job_type = 'plan_ticket'
+              )
+            ORDER BY d.created_at DESC, d.id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let (design_set_id, design_option_id) = match design {
+            Some((set, option)) => (Some(set), option),
+            None => (None, None),
+        };
         let id = Uuid::new_v4();
         let row = sqlx::query(
             r#"
             INSERT INTO ticket_plans (
-                id, ticket_id, run_id, agent_id, revision, body, content_version
+                id, ticket_id, run_id, agent_id, revision, body, content_version,
+                design_set_id, design_option_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, ticket_id, run_id, agent_id, revision, body, content_version,
-                      change_request, created_at
+                      change_request, design_set_id, design_option_id, created_at
             "#,
         )
         .bind(id)
@@ -333,6 +376,8 @@ impl<'a> PlanningService<'a> {
         .bind(next)
         .bind(body)
         .bind(ticket.ticket.content_version)
+        .bind(design_set_id)
+        .bind(design_option_id)
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -378,6 +423,9 @@ impl<'a> PlanningService<'a> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+        if self.active_plan_run(ticket_id).await?.is_some() {
+            return Err(PlanError::Validation(PLAN_ALREADY_RUNNING.into()));
         }
         if self
             .questions(ticket_id)
@@ -899,7 +947,7 @@ impl<'a> PlanningService<'a> {
         }))
     }
 
-    async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
+    pub async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
         let id = sqlx::query_scalar(
             r#"
             SELECT id FROM agent_runs
@@ -963,7 +1011,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, created_at
+                   change_request, design_set_id, design_option_id, created_at
             FROM ticket_plans
             WHERE ticket_id = $1
             ORDER BY revision DESC
@@ -980,7 +1028,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, created_at
+                   change_request, design_set_id, design_option_id, created_at
             FROM ticket_plans
             WHERE id = $1
             "#,
@@ -1028,6 +1076,8 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
         body: row.get("body"),
         content_version: row.get("content_version"),
         change_request: row.get("change_request"),
+        design_set_id: row.get("design_set_id"),
+        design_option_id: row.get("design_option_id"),
         created_at: row.get("created_at"),
     }
 }

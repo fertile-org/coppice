@@ -3,6 +3,7 @@ export const PLAN_COPY = {
   column: 'Plan Review',
   approvePlan: 'Approve plan',
   approving: 'Approving…',
+  approveWhileRewriting: 'The plan is being rewritten. Approve once it is ready.',
   askForChanges: 'Ask for changes',
   sending: 'Sending…',
   askPlaceholder: 'What should change?',

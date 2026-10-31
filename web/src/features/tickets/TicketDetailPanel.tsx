@@ -23,6 +23,7 @@ import { CommentAttachments } from './CommentAttachments';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { RestartChoice } from './RestartChoice';
 import { TicketCommentsTab } from './TicketCommentsTab';
+import { isActiveRunStatus, useAgentRuns } from './useAgentRuns';
 import { useTicketChildren, useUpdateTicket, useUploadAttachment } from './useTicket';
 
 interface TicketDetailPanelProps {
@@ -74,6 +75,10 @@ export function TicketDetailPanel({
 
   const saving = isSaving || updateTicket.isPending;
   const isArchived = Boolean(ticket.archivedAt);
+  const runs = useAgentRuns(ticket.status === 'plan_review' ? ticket.id : undefined);
+  const planRunActive = (runs.data ?? []).some(
+    (run) => run.jobType === 'plan_ticket' && isActiveRunStatus(run.status),
+  );
   const descriptionFiles = descriptionAttachments(ticket);
 
   async function attachToTicket(incoming: File[]) {
@@ -257,6 +262,7 @@ export function TicketDetailPanel({
           revision={ticket.pendingPlan?.revision}
           changeRequests={ticket.pendingPlan?.changeRequests}
           planQuestions={ticket.planQuestions}
+          planRunActive={planRunActive}
         />
       )}
 

@@ -120,6 +120,7 @@ export function PlanReviewActions({
   revision,
   changeRequests = [],
   planQuestions,
+  planRunActive = false,
 }: {
   ticketId: string;
   boardId: string;
@@ -130,6 +131,8 @@ export function PlanReviewActions({
   revision?: number;
   changeRequests?: string[];
   planQuestions?: PlanQuestions | null;
+  /** A plan run is queued or running: the plan on screen is about to change. */
+  planRunActive?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
@@ -171,7 +174,7 @@ export function PlanReviewActions({
     () => {
       approve.mutate();
     },
-    !busy && hasPlan && !waiting,
+    !busy && hasPlan && !waiting && !planRunActive,
   );
 
   if (waiting && planQuestions) {
@@ -220,7 +223,8 @@ export function PlanReviewActions({
         <button
           type="button"
           onClick={() => approve.mutate()}
-          disabled={busy}
+          disabled={busy || planRunActive}
+          title={planRunActive ? PLAN_COPY.approveWhileRewriting : undefined}
           className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {approve.isPending ? PLAN_COPY.approving : PLAN_COPY.approvePlan}

@@ -46,6 +46,11 @@ describe('PlanReviewActions', () => {
     expect(screen.getByRole('button', { name: 'Send answers' })).toBeDisabled();
   });
 
+  it('disables Approve while a plan run is active', () => {
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" planRunActive />);
+    expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeDisabled();
+  });
+
   it('sends the answers once at least one is given', async () => {
     wrap(<PlanReviewActions ticketId="t1" boardId="b1" hasPlan={false} planQuestions={questions} />);
     fireEvent.click(screen.getByRole('button', { name: 'Postgres' }));
