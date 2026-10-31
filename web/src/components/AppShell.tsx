@@ -4,6 +4,7 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   DatabaseBackup,
   FolderGit2,
   LayoutGrid,
@@ -29,6 +30,7 @@ import { isDesktopShell } from '../lib/desktop';
 import { cn } from '../lib/utils';
 import { LOGS_COPY } from '../features/logs/copy';
 import { SYSTEM_LABEL, SYSTEM_PATHS } from '../features/system/paths';
+import { DOCS_URL } from '../features/tools/connectorCopy';
 import { SkipToBoard } from '../features/keyboard/SkipToBoard';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
@@ -241,6 +243,17 @@ export function AppShell() {
               <SidebarLink item={item} collapsed={sidebarCollapsed} />
             </Fragment>
           ))}
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={sidebarCollapsed ? 'Help' : undefined}
+            title={sidebarCollapsed ? 'Help' : undefined}
+            className={navLinkClass({ isActive: false, collapsed: sidebarCollapsed })}
+          >
+            <CircleHelp className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+            {!sidebarCollapsed && <span>Help</span>}
+          </a>
         </nav>
 
         <div className="shrink-0 border-t border-border p-2">
