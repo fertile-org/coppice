@@ -24,8 +24,6 @@ export type KeyboardContextValue = {
   register: (id: string, registration: ShortcutRegistration) => () => void;
   registerLayer: (layer: LayerHandlers) => () => void;
   setEnvironment: (environment: KeyboardEnvironment) => void;
-  /** Enabled shortcut ids, including Close, and whether the ticket drawer is open. */
-  readShortcutState: () => { enabledIds: string[]; drawerOpen: boolean };
   /** Runs a registered shortcut. Returns false when nothing handled it. */
   runShortcut: (id: string) => boolean;
 };

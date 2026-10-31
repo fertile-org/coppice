@@ -309,21 +309,31 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
   });
 
-  it('places Help directly below Settings for an admin', () => {
+  it('places the Help group directly below Settings for an admin', () => {
     renderShell(['/boards']);
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    const links = within(nav).getAllByRole('link');
-    const settingsIndex = links.findIndex((link) => link.getAttribute('href') === '/settings');
-    const helpIndex = links.findIndex(
-      (link) => link.getAttribute('href') === 'https://getcoppice.app/docs',
-    );
+    const settings = within(nav).getByRole('link', { name: 'Settings' });
+    const help = within(nav).getByRole('button', { name: 'Help' });
+    expect(
+      settings.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(help).toHaveAttribute('aria-expanded', 'false');
+    expect(within(nav).queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
 
-    expect(settingsIndex).toBeGreaterThanOrEqual(0);
-    expect(helpIndex).toBe(settingsIndex + 1);
+    fireEvent.click(help);
+    expect(help).toHaveAttribute('aria-expanded', 'true');
+    expect(within(nav).getByRole('link', { name: 'Documentation' })).toHaveAttribute(
+      'href',
+      'https://getcoppice.app/docs',
+    );
+    expect(within(nav).getByRole('link', { name: 'Keyboard shortcuts' })).toHaveAttribute(
+      'href',
+      '/help/shortcuts',
+    );
   });
 
-  it('shows Help as the last nav item for a member', () => {
+  it('shows Help as the last nav group for a member', () => {
     sessionState.user = { ...sessionState.user, role: 'member' };
 
     renderShell(['/boards']);
@@ -331,38 +341,47 @@ describe('AppShell', () => {
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
+    fireEvent.click(within(nav).getByRole('button', { name: 'Help' }));
     const links = within(nav).getAllByRole('link');
     const last = links[links.length - 1];
-    expect(last).toHaveAccessibleName('Help');
-    expect(last).toHaveAttribute('href', 'https://getcoppice.app/docs');
+    expect(last).toHaveAccessibleName('Keyboard shortcuts');
+    expect(last).toHaveAttribute('href', '/help/shortcuts');
+    expect(within(nav).getByRole('link', { name: 'Documentation' })).toHaveAttribute(
+      'href',
+      'https://getcoppice.app/docs',
+    );
   });
 
-  it('opens Help in a new tab to the public docs', () => {
-    renderShell(['/boards']);
+  it('opens Documentation in a new tab and never marks it active', () => {
+    renderShell(['/help/shortcuts']);
 
-    const help = screen.getByRole('link', { name: 'Help' });
-    expect(help).toHaveAttribute('href', 'https://getcoppice.app/docs');
-    expect(help).toHaveAttribute('target', '_blank');
-    expect(help).toHaveAttribute('rel', 'noreferrer');
+    const docs = screen.getByRole('link', { name: 'Documentation' });
+    expect(docs).toHaveAttribute('href', 'https://getcoppice.app/docs');
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(docs).toHaveAttribute('rel', 'noreferrer');
+    expect(docs).not.toHaveAttribute('aria-current');
+    expect(docs).not.toHaveClass('bg-accent-muted');
+    expect(docs).toHaveClass('text-text-secondary');
+    expect(screen.getByRole('link', { name: 'Keyboard shortcuts' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('button', { name: 'Help' })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('shows only the Help icon when the sidebar is collapsed', () => {
+  it('shows Documentation and Keyboard shortcuts as icon links when the sidebar is collapsed', () => {
     renderShell();
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
 
-    const help = screen.getByRole('link', { name: 'Help' });
-    expect(help).toHaveAttribute('title', 'Help');
-    expect(help).toHaveAttribute('aria-label', 'Help');
-    expect(help).not.toHaveTextContent('Help');
-  });
-
-  it('never marks Help as the active nav item', () => {
-    renderShell(['/settings']);
-
-    const help = screen.getByRole('link', { name: 'Help' });
-    expect(help).not.toHaveAttribute('aria-current');
-    expect(help).not.toHaveClass('bg-accent-muted');
-    expect(help).toHaveClass('text-text-secondary');
+    expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument();
+    const docs = screen.getByRole('link', { name: 'Documentation' });
+    expect(docs).toHaveAttribute('title', 'Documentation');
+    expect(docs).toHaveAttribute('aria-label', 'Documentation');
+    expect(docs).not.toHaveTextContent('Documentation');
+    const shortcuts = screen.getByRole('link', { name: 'Keyboard shortcuts' });
+    expect(shortcuts).toHaveAttribute('title', 'Keyboard shortcuts');
+    expect(shortcuts).toHaveAttribute('href', '/help/shortcuts');
+    expect(shortcuts).not.toHaveTextContent('Keyboard shortcuts');
   });
 });

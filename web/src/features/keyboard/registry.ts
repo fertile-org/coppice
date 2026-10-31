@@ -1,10 +1,10 @@
 import type { Binding, Chord, ShortcutAction } from './types';
 
 /**
- * One registry for the palette, shortcuts, help, and later the app menu.
+ * One registry for shortcuts, help, and later the app menu.
  * Labels and groups are the Content-locked names. Column jumps keep the
- * label "Go to column {n}" here and in the help overlay. The palette shows
- * "Go to {column} column".
+ * label "Go to column {n}" here and in the help overlay. The command
+ * palette lists page jumps and Keyboard shortcuts only.
  */
 function chord(key: string, extras?: Omit<Chord, 'key'>): Binding {
   return { kind: 'chord', chord: { key, ...extras } };

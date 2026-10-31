@@ -22,9 +22,8 @@ import {
   boardIdFromPath,
   layoutPalette,
   listPaletteActions,
-  PAGE_ACTION_ROUTES,
   PALETTE_COPY,
-  paletteScopes,
+  PALETTE_ROUTES,
   readRecentIds,
   rememberRecent,
   writeRecentIds,
@@ -126,20 +125,11 @@ export function CommandPalette() {
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [open, paletteAction, platform]);
 
-  const shortcutState = keyboard?.readShortcutState() ?? {
-    enabledIds: [] as string[],
-    drawerOpen: false,
-  };
   const actions = listPaletteActions({
     omitted: omittedActionIds({
       isAdmin: session?.user?.role === 'admin',
       desktopMode: session?.desktopMode ?? false,
     }),
-    scopes: paletteScopes({
-      pathname: location.pathname,
-      drawerOpen: shortcutState.drawerOpen,
-    }),
-    enabled: new Set(shortcutState.enabledIds),
     platform,
     actions: actionsForKeys,
   });
@@ -165,8 +155,7 @@ export function CommandPalette() {
       writeRecentIds(localStorage, next);
       return next;
     });
-    const closesOnly = entry.id === 'close' || entry.id === 'palette.open';
-    ranCommand.current = !closesOnly;
+    ranCommand.current = true;
     if (entry.kind === 'ticket') {
       const ticket = catalog.tickets.find((item) => entry.id === `ticket:${item.id}`);
       if (ticket?.boardId) {
@@ -175,9 +164,8 @@ export function CommandPalette() {
     } else if (entry.kind === 'agent') {
       navigate('/agents');
     } else {
-      const route = PAGE_ACTION_ROUTES[entry.id];
+      const route = PALETTE_ROUTES[entry.id];
       if (route) navigate(route);
-      else if (!closesOnly) keyboard?.runShortcut(entry.id);
     }
     setOpen(false);
     setQuery('');
@@ -236,7 +224,7 @@ export function CommandPalette() {
                 </CommandGroup>
               ) : null}
               {layout.groups.map((group) => (
-                <CommandGroup key={group.group} heading={group.group}>
+                <CommandGroup key={group.group} heading={PALETTE_COPY.pages}>
                   {group.items.map((entry) => (
                     <PaletteRow key={entry.id} entry={entry} onRun={runEntry} />
                   ))}

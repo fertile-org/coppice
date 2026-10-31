@@ -72,13 +72,13 @@ describe('keybinding overrides', () => {
 
     const palette = listPaletteActions({
       omitted: new Set(),
-      scopes: ['global', 'text', 'board'],
-      enabled: new Set(['palette.open', 'ticket.create']),
       platform: 'macos',
       actions,
     });
-    expect(palette.find((entry) => entry.id === 'palette.open')?.shortcut).toBe('⌘+P');
-    expect(palette.find((entry) => entry.id === 'ticket.create')?.shortcut).toBeNull();
+    expect(palette.find((entry) => entry.id === 'nav.boards')?.shortcut).toBe('G then B');
+    expect(palette.find((entry) => entry.id === 'help.show')?.shortcut).toBe('?');
+    expect(palette.find((entry) => entry.id === 'palette.open')).toBeUndefined();
+    expect(palette.find((entry) => entry.id === 'ticket.create')).toBeUndefined();
   });
 
   it('reads chords and an empty unbind from the keybindings API', async () => {
