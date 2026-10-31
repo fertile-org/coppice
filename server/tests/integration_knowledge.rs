@@ -4,7 +4,7 @@ use axum::{http::StatusCode, Router};
 use coppice_server::domain::knowledge::{
     KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType, KnowledgeType,
 };
-use coppice_server::knowledge::retrieval::{retrieve, RETRIEVAL_QUERY_SQL};
+use coppice_server::knowledge::retrieval::{retrieve, RetrievalScope, RETRIEVAL_QUERY_SQL};
 use coppice_server::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
 use coppice_server::services::knowledge_service::{
     activate_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
@@ -276,7 +276,7 @@ async fn explain_production_retrieval(
     };
     let sql = format!("EXPLAIN ({options}) {RETRIEVAL_QUERY_SQL}");
     sqlx::query_scalar(&sql)
-        .bind(board_id)
+        .bind(vec![board_id])
         .bind(Uuid::new_v4())
         .bind("low")
         .bind(Some("retrieval | plan"))
@@ -887,7 +887,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     let query = ("superseding rule", "Run make test-smoke before review.");
     let before = retrieve(
         pool,
-        board_uuid,
+        &RetrievalScope::Boards(vec![board_uuid]),
         Uuid::new_v4(),
         query.0,
         query.1,
@@ -920,7 +920,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
 
     let after = retrieve(
         pool,
-        board_uuid,
+        &RetrievalScope::Boards(vec![board_uuid]),
         Uuid::new_v4(),
         query.0,
         query.1,
@@ -1408,7 +1408,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
 
     let retrieved = retrieve(
         pool,
-        board_uuid,
+        &RetrievalScope::Boards(vec![board_uuid]),
         Uuid::new_v4(),
         "supersession race",
         "",
@@ -1595,7 +1595,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 
     let found = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&board_id).unwrap(),
+        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
         Uuid::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
@@ -1607,7 +1607,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     assert!(found[0].score > 0.0, "\"run\" matches the item content");
     let wrong_board = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&other_board_id).unwrap(),
+        &RetrievalScope::Boards(vec![Uuid::parse_str(&other_board_id).unwrap()]),
         Uuid::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
@@ -1621,7 +1621,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     type_filtered.allowed_types = vec!["bug_pattern".into()];
     let excluded_by_type = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&board_id).unwrap(),
+        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
         Uuid::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
@@ -1634,7 +1634,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     type_filtered.allowed_types = vec!["test_command".into()];
     let included_by_type = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&board_id).unwrap(),
+        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
         Uuid::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
@@ -1818,7 +1818,7 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
 
     let found = retrieve(
         pool,
-        board_id,
+        &RetrievalScope::Boards(vec![board_id]),
         agent_id,
         "valid",
         "",

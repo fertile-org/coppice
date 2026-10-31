@@ -1,4 +1,5 @@
-use crate::knowledge::retrieval::{retrieve, retrieve_across_boards};
+use crate::domain::context_profile::ContextProfile;
+use crate::knowledge::retrieval::{retrieve, RetrievalScope};
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::context_budget::{
     record_usage, render_knowledge, ByteTokenCounter, RenderedKnowledge, KNOWLEDGE_DATA_NOTE,
@@ -23,8 +24,9 @@ fn parse_limit(args: &Value) -> Result<usize, ToolError> {
 }
 
 /// Searches approved knowledge visible to the run's agent.
-/// Conversation chat searches every board. Other runs stay on their board, or
-/// return nothing when they have none. Retrieval already restricts to approved,
+/// Conversation chat searches every board. Compaction runs search the boards of
+/// their batch tickets. Other runs stay on their board, or return nothing when
+/// they have none. Retrieval already restricts to approved,
 /// live, in-scope entries, including agent-scoped notes for this agent only.
 pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let query = args
@@ -41,28 +43,18 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
 
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
     let workspace = ctx.scope.workspace_chat();
-    let mut found = if workspace {
-        retrieve_across_boards(
-            ctx.pool,
-            ctx.scope.agent_id,
-            &query,
-            "",
-            &ctx.state.config.knowledge.retrieval,
-        )
-        .await?
-    } else if let Some(board_id) = ctx.scope.board_id {
-        retrieve(
-            ctx.pool,
-            board_id,
-            ctx.scope.agent_id,
-            &query,
-            "",
-            &ctx.state.config.knowledge.retrieval,
-        )
-        .await?
-    } else {
+    let Some(scope) = tool_scope(ctx).await? else {
         return Ok(response(Vec::new()));
     };
+    let mut found = retrieve(
+        ctx.pool,
+        &scope,
+        ctx.scope.agent_id,
+        &query,
+        "",
+        &ctx.state.config.knowledge.retrieval,
+    )
+    .await?;
     // Retrieval returns the whole eligible set; non-matches carry score 0.
     found.retain(|k| k.score > 0.0);
     found.truncate(limit);
@@ -89,6 +81,23 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
         })
         .collect();
     Ok(response(items))
+}
+
+/// The boards a run's knowledge tools may read; `None` when it has no board.
+pub(crate) async fn tool_scope(ctx: &ToolCtx<'_>) -> Result<Option<RetrievalScope>, ToolError> {
+    if ctx.scope.workspace_chat() {
+        return Ok(Some(RetrievalScope::AllBoards));
+    }
+    if ctx.scope.profile == ContextProfile::KnowledgeCompaction {
+        let boards: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT DISTINCT board_id FROM tickets WHERE id = ANY($1) AND board_id IS NOT NULL",
+        )
+        .bind(&ctx.scope.compaction_ticket_ids)
+        .fetch_all(ctx.pool)
+        .await?;
+        return Ok(Some(RetrievalScope::Boards(boards)));
+    }
+    Ok(ctx.scope.board_id.map(|id| RetrievalScope::Boards(vec![id])))
 }
 
 fn response(items: Vec<Value>) -> Value {

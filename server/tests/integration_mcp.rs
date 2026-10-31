@@ -1589,7 +1589,62 @@ async fn boardless_chat_searches_knowledge_across_boards() {
         json!({"query": "axolotl"}),
     )
     .await;
-    assert!(compaction_out["items"].as_array().unwrap().is_empty(), "{compaction_out}");
+    // The batch ticket is unknown, so no board is covered: only workspace notes.
+    let compaction_titles: Vec<&str> = compaction_out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(compaction_titles, vec!["Axolotl workspace note"], "{compaction_out}");
+}
+
+#[tokio::test]
+async fn knowledge_search_in_compaction_covers_batch_boards_only() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let board_a = fx.scope.board_id.unwrap();
+    let board_b: Uuid = create_other_board(&fx).await.parse().unwrap();
+    seed_knowledge_with_content(
+        &fx.pool,
+        board_a,
+        "Quokka on batch board",
+        "Quokka handling notes",
+        "approved",
+    )
+    .await;
+    seed_knowledge_with_content(
+        &fx.pool,
+        board_b,
+        "Quokka on other board",
+        "Quokka handling notes",
+        "approved",
+    )
+    .await;
+    let token = mint_scope(
+        &fx,
+        NewRunToolScope {
+            ticket_id: None,
+            board_id: None,
+            profile: ContextProfile::KnowledgeCompaction,
+            job_type: "compact_knowledge".into(),
+            compaction_ticket_ids: vec![fx.scope.ticket_id.unwrap()],
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let out = call_tool_json(&url, &token, "knowledge_search", json!({"query": "quokka"})).await;
+    let titles: Vec<&str> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, vec!["Quokka on batch board"], "{out}");
 }
 
 #[tokio::test]
