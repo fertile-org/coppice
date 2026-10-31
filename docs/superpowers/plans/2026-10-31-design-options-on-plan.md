@@ -23,7 +23,7 @@
 ## Review Focus
 
 - Two people or a double click pick options at once: the second is refused with `PLAN_ALREADY_RUNNING` and saves nothing. Test in Task 3.
-- Starting the rewrite fails after the pick was saved: the earlier choice is restored. Test in Task 3.
+- Starting the rewrite fails after the pick was saved: the earlier choice is restored. Test in Task 3. (Implemented instead as one transaction: a failed start rolls the pick back.)
 - A popup left open while the plan is approved in another window: the pick is refused and the choice is unchanged. Test in Task 3.
 - An archived ticket: the popup is read-only and a pick is refused. Test in Task 3.
 - A sub-ticket whose parent has no designs: no card and no error, and `ticket_get` returns no selected design. Test in Task 4.
@@ -104,7 +104,7 @@ git commit -m "feat: record the agent's recommended design option"
 **Interfaces:**
 - Consumes: `DesignSetSummary.selected` from Task 1.
 - Produces: `ticket_plans.design_set_id UUID`, `ticket_plans.design_option_id TEXT`, on `TicketPlan` as `design_set_id: Option<Uuid>`, `design_option_id: Option<String>`.
-- Produces: `PlanningService::planner_available(&self, ticket_id: Uuid) -> Result<bool, PlanError>` (false for `skip_planning` or no planner, without posting a note), and `pub` on `active_plan_run`.
+- Produces (replaced in implementation by `ask_for_changes_in` on one transaction; no `planner_available`): `PlanningService::planner_available(&self, ticket_id: Uuid) -> Result<bool, PlanError>` (false for `skip_planning` or no planner, without posting a note), and `pub` on `active_plan_run`.
 - Produces: `PlanReviewActions` prop `planRunActive: boolean`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -229,7 +229,7 @@ Validate the option. Match on the mode:
 - `SaveOnly`: save.
 - `UpdatePlan`: if `selected` is `None`, save. If the pick equals `selected` and the plan is up to date, save only. Otherwise check `planner_available` (refuse with `NO_PM` when false), save the pick, then call `ask_for_changes` with `plan_design_change_note(title)`. If that errors, restore the earlier `chosen_*` values and return the error.
 
-`ask_for_changes` uses the pool and queues a run, so this is not one database transaction. The run must see the saved pick, so the save comes first and is undone on failure.
+Implementation note: this was replaced. `ask_for_changes_in` runs on the caller's transaction, so the pick and the rewrite request commit together when the run starts, and a failed start rolls the pick back. There is no `planner_available` check and no save-then-restore.
 
 Copy in `server/src/copy/plan.rs`:
 

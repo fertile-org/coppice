@@ -130,6 +130,7 @@ These were decided without asking, and can be overruled:
 - Sets from before this change have no recommendation, and a first pick on one saves without changing the plan.
 - `recommendedOptionId` is required in chat too, for one rule across tools.
 - With no plan yet, a pick saves without starting a run, and the next plan is written around it.
+- The plan's design is recorded when the plan is inserted, because picks are refused while a plan run is active. A pick and its plan rewrite request share one transaction, which commits only when the run starts.
 - Plain "Choose B" wording for work-run, chat and older sets, where nothing else happens.
 
 ## Left to the builder
