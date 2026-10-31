@@ -129,7 +129,7 @@ async fn snapshot_plan_refs(
 }
 
 /// The plugin can be off for this agent, and then its skill is not listed.
-fn has_design_skill(skills: &[SkillInfo]) -> bool {
+pub(crate) fn has_design_skill(skills: &[SkillInfo]) -> bool {
     skills.iter().any(|skill| skill.id == DESIGN_SKILL_ID)
 }
 

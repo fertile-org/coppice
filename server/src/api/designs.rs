@@ -48,6 +48,7 @@ struct DesignSetResponse {
     selected: Option<ChosenOption>,
     superseded: bool,
     from_plan_run: bool,
+    inherited: bool,
     choice: ChoiceState,
 }
 
@@ -66,7 +67,7 @@ async fn to_response(
     set: DesignSetSummary,
     ticket_id: Option<Uuid>,
 ) -> Result<DesignSetResponse, StatusCode> {
-    let choice = choice_state(pool, &set, ticket_id, false)
+    let choice = choice_state(pool, &set, ticket_id, set.inherited)
         .await
         .map_err(|err| {
             tracing::warn!(error = %err, "design choice state failed");
@@ -82,6 +83,7 @@ async fn to_response(
         selected: set.selected,
         superseded: set.superseded,
         from_plan_run: set.from_plan_run,
+        inherited: set.inherited,
         choice,
     })
 }

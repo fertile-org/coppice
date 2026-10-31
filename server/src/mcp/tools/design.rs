@@ -66,12 +66,34 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
                     })
                 })
                 .collect();
-            Ok(json!({ "sets": sets }))
+            let selected_design = match scope.ticket_id {
+                Some(ticket_id) => selected_design_json(&svc, ticket_id).await?,
+                None => Value::Null,
+            };
+            Ok(json!({ "sets": sets, "selectedDesign": selected_design }))
         }
         other => Err(ToolError::Internal(anyhow::anyhow!(
             "unknown design tool {other}"
         ))),
     }
+}
+
+/// The design a run should build, with the mockup's absolute path.
+pub(crate) async fn selected_design_json(
+    svc: &DesignService<'_>,
+    ticket_id: Uuid,
+) -> Result<Value, ToolError> {
+    let effective = svc.effective_for_ticket(ticket_id).await.map_err(map_err)?;
+    Ok(match effective {
+        Some(design) => json!({
+            "setId": design.set_id,
+            "title": design.title,
+            "id": design.selected.id,
+            "optionTitle": design.selected.title,
+            "path": design.entry_path.display().to_string(),
+        }),
+        None => Value::Null,
+    })
 }
 
 fn create_scope(ctx: &ToolCtx<'_>) -> Result<CreateScope, ToolError> {

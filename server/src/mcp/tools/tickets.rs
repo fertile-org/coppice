@@ -244,6 +244,11 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
             })
             .collect::<Vec<_>>()
     );
+    body["selectedDesign"] = crate::mcp::tools::design::selected_design_json(
+        &DesignService::new(ctx.pool, &ctx.state.config.storage.artifacts_dir),
+        ticket.ticket.id,
+    )
+    .await?;
     Ok(body)
 }
 

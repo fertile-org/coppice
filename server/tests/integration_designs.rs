@@ -2089,3 +2089,237 @@ async fn pick_is_refused_with_skip_planning_and_saves_nothing() {
     assert_refused(&fx, set_id, "b", NO_PM).await;
     assert_eq!(change_request(&fx).await, None);
 }
+
+/// Work runs need a repo; the plan-run fixtures have none.
+async fn ensure_repo(fx: &TicketHttp, ticket_id: Uuid) {
+    let has: Option<Uuid> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
+        .bind(ticket_id)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("repo");
+    if has.is_some() {
+        return;
+    }
+    let (dir, path) = common::create_temp_git_checkout();
+    let repo_id = match sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos LIMIT 1")
+        .fetch_optional(&fx.pool)
+        .await
+        .expect("repos")
+    {
+        Some(id) => id.to_string(),
+        None => {
+            common::register_test_repo(&fx.app, &path.display().to_string(), &fx.cookie, &fx.csrf)
+                .await
+        }
+    };
+    std::mem::forget(dir);
+    common::set_ticket_repo(
+        &fx.app,
+        &ticket_id.to_string(),
+        &repo_id,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+}
+
+async fn work_set(fx: &TicketHttp) -> Uuid {
+    ensure_repo(fx, fx.ticket_id).await;
+    // One active run per ticket: finish the earlier work run first.
+    sqlx::query(
+        "UPDATE agent_runs SET status = 'succeeded', ended_at = now()
+         WHERE ticket_id = $1 AND status IN ('queued', 'running')",
+    )
+    .bind(fx.ticket_id)
+    .execute(&fx.pool)
+    .await
+    .expect("finish earlier runs");
+    let run_id = start_ticket_run(fx, fx.agent_id).await;
+    publish_html(
+        fx,
+        run_id,
+        fx.agent_id,
+        "Work mockup",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await
+}
+
+async fn child_ticket(fx: &TicketHttp) -> Uuid {
+    let board_id: Uuid = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
+        .bind(fx.ticket_id)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("board");
+    let child: Uuid =
+        common::create_unplanned_ticket(&fx.app, &board_id.to_string(), &fx.cookie, &fx.csrf)
+            .await
+            .parse()
+            .unwrap();
+    sqlx::query("UPDATE tickets SET parent_ticket_id = $2 WHERE id = $1")
+        .bind(child)
+        .bind(fx.ticket_id)
+        .execute(&fx.pool)
+        .await
+        .expect("link child");
+    child
+}
+
+#[tokio::test]
+async fn work_run_publish_does_not_supersede_the_plan_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, plan_set) = plan_review_with_set().await;
+    let first = work_set(&fx).await;
+    assert_eq!(set_json(&fx, plan_set).await["superseded"], false);
+    assert_eq!(set_json(&fx, first).await["superseded"], false);
+
+    let second = work_set(&fx).await;
+    assert_eq!(set_json(&fx, first).await["superseded"], true);
+    assert_eq!(set_json(&fx, second).await["superseded"], false);
+    assert_eq!(set_json(&fx, plan_set).await["superseded"], false);
+}
+
+#[tokio::test]
+async fn work_run_pick_becomes_the_effective_design() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, plan_set) = plan_review_with_set().await;
+    let work = work_set(&fx).await;
+    assert_eq!(pick(&fx, work, "b").await.status(), StatusCode::NO_CONTENT);
+    let effective = design_svc(&fx)
+        .effective_for_ticket(fx.ticket_id)
+        .await
+        .expect("effective")
+        .expect("some design");
+    assert_eq!(effective.set_id, work);
+    assert_eq!(effective.selected.id, "b");
+    assert_ne!(effective.set_id, plan_set);
+}
+
+#[tokio::test]
+async fn plan_set_is_effective_when_no_work_run_set_was_picked() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, plan_set) = plan_review_with_set().await;
+    let _work = work_set(&fx).await;
+    let effective = design_svc(&fx)
+        .effective_for_ticket(fx.ticket_id)
+        .await
+        .expect("effective")
+        .expect("some design");
+    assert_eq!(effective.set_id, plan_set);
+    assert_eq!(effective.selected.id, "a");
+}
+
+#[tokio::test]
+async fn effective_design_path_is_the_absolute_entry_file() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, _plan_set) = plan_review_with_set().await;
+    let effective = design_svc(&fx)
+        .effective_for_ticket(fx.ticket_id)
+        .await
+        .expect("effective")
+        .expect("some design");
+    assert!(effective.entry_path.is_absolute());
+    assert!(effective.entry_path.ends_with("a/index.html"));
+    assert!(effective.entry_path.is_file());
+}
+
+#[tokio::test]
+async fn sub_ticket_inherits_the_parent_selected_design() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, plan_set) = plan_review_with_set().await;
+    let child = child_ticket(&fx).await;
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{child}/designs"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("list");
+    assert_eq!(res.status(), StatusCode::OK);
+    let sets = common::json_body(res).await;
+    let sets = sets.as_array().expect("array");
+    assert_eq!(sets.len(), 1, "{sets:?}");
+    assert_eq!(sets[0]["id"], plan_set.to_string());
+    assert_eq!(sets[0]["inherited"], true);
+    assert_eq!(sets[0]["choice"]["mode"], "read_only");
+    // The parent's own view is not inherited.
+    assert_eq!(set_json(&fx, plan_set).await["inherited"], false);
+
+    ensure_repo(&fx, child).await;
+    let run_id = RunService::new(&fx.pool)
+        .start_run_for_agent(child, fx.agent_id, "work_on_ticket", Default::default())
+        .await
+        .expect("child run")
+        .id;
+    let design_plugin: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("design plugin");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![design_plugin],
+    )
+    .await;
+    let url = mcp_url(fx.app.clone()).await;
+    let names = tool_names(&rpc(&url, &token, "tools/list", json!({})).await);
+    assert!(names.iter().any(|name| name == "design__list"), "{names:?}");
+    let body = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"ticket_get","arguments":{}}),
+        )
+        .await,
+    );
+    let design = &body["selectedDesign"];
+    assert_eq!(design["setId"], plan_set.to_string());
+    assert_eq!(design["id"], "a");
+    assert_eq!(design["optionTitle"], "A: Quiet button after the last card");
+    assert!(design["path"].as_str().unwrap().ends_with("a/index.html"));
+
+    let listed = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"design__list","arguments":{}}),
+        )
+        .await,
+    );
+    assert_eq!(listed["selectedDesign"]["setId"], plan_set.to_string());
+}
+
+#[tokio::test]
+async fn sub_ticket_of_a_parent_without_designs_has_none() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let child = child_ticket(&fx).await;
+    let svc = design_svc(&fx);
+    assert!(svc.effective_for_ticket(child).await.unwrap().is_none());
+    assert!(svc.list_for_ticket(child).await.unwrap().is_empty());
+}

@@ -63,6 +63,18 @@ pub struct DesignSetSummary {
     pub selected: Option<ChosenOption>,
     pub superseded: bool,
     pub from_plan_run: bool,
+    /// The set belongs to the parent ticket, not this one.
+    pub inherited: bool,
+}
+
+/// The design a ticket's work should follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveDesign {
+    pub set_id: Uuid,
+    pub title: String,
+    pub selected: ChosenOption,
+    /// Absolute path of the selected option's entry file.
+    pub entry_path: PathBuf,
 }
 
 pub struct DesignSetRecord {
@@ -253,6 +265,13 @@ impl<'a> DesignService<'a> {
             WHERE id <> $1
               AND published_at IS NOT NULL
               AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
+              AND (EXISTS (
+                      SELECT 1 FROM agent_runs r
+                      WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                  )) = (EXISTS (
+                      SELECT 1 FROM agent_runs r
+                      WHERE r.id = $4 AND r.job_type = 'plan_ticket'
+                  ))
               AND (
                   ($2::uuid IS NOT NULL AND ticket_id = $2)
                   OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
@@ -262,6 +281,7 @@ impl<'a> DesignService<'a> {
         .bind(set_id)
         .bind(ticket_id)
         .bind(chat_session_id)
+        .bind(run_id)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -306,7 +326,72 @@ impl<'a> DesignService<'a> {
         &self,
         ticket_id: Uuid,
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
-        self.list_scoped(Some(ticket_id), None).await
+        let mut sets = self.list_scoped(Some(ticket_id), None).await?;
+        if let Some(parent_id) = self.parent_of(ticket_id).await? {
+            if let Some(mut parent_set) = self.own_effective(parent_id).await? {
+                parent_set.inherited = true;
+                sets.push(parent_set);
+            }
+        }
+        Ok(sets)
+    }
+
+    /// The design a ticket's work follows: its own, else its parent's.
+    pub async fn effective_for_ticket(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<EffectiveDesign>, DesignError> {
+        let mut set = self.own_effective(ticket_id).await?;
+        if set.is_none() {
+            if let Some(parent_id) = self.parent_of(ticket_id).await? {
+                set = self.own_effective(parent_id).await?;
+            }
+        }
+        let Some(set) = set else {
+            return Ok(None);
+        };
+        let Some(selected) = set.selected.clone() else {
+            return Ok(None);
+        };
+        let Some(option) = set.options.iter().find(|option| option.id == selected.id) else {
+            return Ok(None);
+        };
+        let (_, root) = resolve_set_dir(&self.artifacts_dir, &format!("designs/{}", set.id))?;
+        Ok(Some(EffectiveDesign {
+            set_id: set.id,
+            title: set.title,
+            selected,
+            entry_path: root.join(&option.entry),
+        }))
+    }
+
+    async fn parent_of(&self, ticket_id: Uuid) -> Result<Option<Uuid>, DesignError> {
+        let parent: Option<Option<Uuid>> =
+            sqlx::query_scalar("SELECT parent_ticket_id FROM tickets WHERE id = $1")
+                .bind(ticket_id)
+                .fetch_optional(self.pool)
+                .await?;
+        Ok(parent.flatten())
+    }
+
+    /// Newest live set a person picked from outside a plan run, else the newest
+    /// live plan-run set with a selection. Sets are newest first.
+    async fn own_effective(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<DesignSetSummary>, DesignError> {
+        let sets = self.list_scoped(Some(ticket_id), None).await?;
+        let live = |set: &&DesignSetSummary| !set.superseded;
+        let picked_in_work = sets
+            .iter()
+            .filter(live)
+            .find(|set| !set.from_plan_run && set.chosen.is_some());
+        let found = picked_in_work.or_else(|| {
+            sets.iter()
+                .filter(live)
+                .find(|set| set.from_plan_run && set.selected.is_some())
+        });
+        Ok(found.cloned())
     }
 
     pub async fn list_for_chat(
@@ -441,6 +526,7 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
         selected,
         superseded: row.get("superseded"),
         from_plan_run: row.get("from_plan_run"),
+        inherited: false,
     })
 }
 

@@ -95,6 +95,9 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 /// not wait for a choice, and a person can ask for plan changes after picking.
 pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. Skip this when the ticket has no visible change.";
 
+/// Added to work runs when the agent has the design skill.
+pub const WORK_DESIGN_INSTRUCTION: &str = "If `ticket_get` returns `selectedDesign`, build that option. Read the HTML at its `path` for the layout when you can; otherwise follow its title and the plan.";
+
 /// A person reviews the plan at Plan Review, so it has to fit on one screen.
 /// Detail belongs to the Tech Lead and the implementer, not the plan.
 pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work; when you name a file, use its full repo-relative path. Leave implementation detail to the implementer.";

@@ -598,6 +598,12 @@ async fn execute_job(
         &agent.role,
     );
     let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    if run.job_type == "work_on_ticket" && plan::has_design_skill(&skills) {
+        markdown.push_str(&format!(
+            "\n{}\n",
+            crate::copy::plan::WORK_DESIGN_INSTRUCTION
+        ));
+    }
     if let Some(section) = crate::services::review_rounds::ReviewRoundService::new(pool)
         .context_section(
             ticket_id,
