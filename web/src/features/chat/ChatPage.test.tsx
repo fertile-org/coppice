@@ -579,6 +579,7 @@ describe('ChatPage', () => {
     expect(grid).toHaveClass('min-h-0');
     expect(grid).toHaveClass('flex-1');
     expect(grid).toHaveClass('overflow-hidden');
+    expect(grid.className).toMatch(/lg:grid-cols-\[240px_minmax\(0,1fr\)\]/);
 
     const header = screen.getByTestId('chat-session-header');
     expect(header).toHaveClass('shrink-0');
@@ -589,6 +590,7 @@ describe('ChatPage', () => {
 
     const composer = screen.getByTestId('chat-composer');
     expect(composer).toHaveClass('shrink-0');
+    expect(composer.querySelector('.max-w-\\[720px\\]')).toBeTruthy();
   });
 
   it('uploads attachments then posts message with attachmentIds', async () => {

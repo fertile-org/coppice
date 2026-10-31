@@ -140,7 +140,7 @@ border: 1px solid var(--color-border);
 
 ## Agent Chat transcript
 
-Agent Chat uses the same moss agent bubbles for streaming and final replies. Live runs stream inside the virtualized transcript row; the chat column does not use a separate below-list console block for conversation turns.
+Agent Chat uses an open transcript: agent replies sit on the page in Roboto with no green bubble. Human messages keep a neutral paper bubble. The transcript and composer sit in a centered 720px column; the agent list is 240px at `lg` and wider. Live runs stream inside the virtualized transcript row; mermaid fences stay as code while streaming and draw as diagrams on the final message. The chat column does not use a separate below-list console block for conversation turns.
 
 ## What we are NOT
 

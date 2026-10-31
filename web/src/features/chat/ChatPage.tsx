@@ -186,106 +186,108 @@ function ChatComposer({
       className="shrink-0 border-t border-border bg-paper-50/90 px-3 py-2.5"
       data-testid="chat-composer"
     >
-      {pendingFiles.length > 0 && (
-        <ul className="mb-2 flex flex-wrap gap-2">
-          {pendingFiles.map((pending) => (
-            <li key={pending.key} className="relative">
-              {pending.previewUrl ? (
-                <img
-                  src={pending.previewUrl}
-                  alt={pending.file.name}
-                  className="size-14 rounded-md border border-border object-cover"
-                />
-              ) : (
-                <div className="flex size-14 flex-col items-center justify-center rounded-md border border-border bg-surface px-1 text-center">
-                  <span className="line-clamp-2 font-body text-[10px] leading-tight text-text-secondary">
-                    {pending.file.name}
-                  </span>
-                  <span className="font-body text-[10px] text-text-muted">
-                    {formatFileSize(pending.file.size)}
-                  </span>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => removePendingFile(pending.key)}
-                className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-surface-raised p-0.5 text-text-muted shadow-sm hover:text-text-primary"
-                aria-label={`Remove ${pending.file.name}`}
-                disabled={composerLocked}
-              >
-                <X className="size-3" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="mx-auto w-full max-w-[720px]">
+        {pendingFiles.length > 0 && (
+          <ul className="mb-2 flex flex-wrap gap-2">
+            {pendingFiles.map((pending) => (
+              <li key={pending.key} className="relative">
+                {pending.previewUrl ? (
+                  <img
+                    src={pending.previewUrl}
+                    alt={pending.file.name}
+                    className="size-14 rounded-md border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex size-14 flex-col items-center justify-center rounded-md border border-border bg-surface px-1 text-center">
+                    <span className="line-clamp-2 font-body text-[10px] leading-tight text-text-secondary">
+                      {pending.file.name}
+                    </span>
+                    <span className="font-body text-[10px] text-text-muted">
+                      {formatFileSize(pending.file.size)}
+                    </span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(pending.key)}
+                  className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-surface-raised p-0.5 text-text-muted shadow-sm hover:text-text-primary"
+                  aria-label={`Remove ${pending.file.name}`}
+                  disabled={composerLocked}
+                >
+                  <X className="size-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      <div className="flex items-end gap-2">
-        <input
-          ref={fileInputRef}
-          id="chat-composer-files"
-          type="file"
-          multiple
-          accept={CHAT_ATTACHMENT_ACCEPT}
-          className="sr-only"
-          data-testid="chat-composer-files"
-          tabIndex={-1}
-          disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
-          onChange={(event) => {
-            if (event.target.files) {
-              addPendingFiles(event.target.files);
-            }
-            event.target.value = '';
-          }}
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          className="shrink-0 px-2.5"
-          disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
-          aria-label="Attach files"
-          onClick={() => fileInputRef.current?.click()}
+        <div className="flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            id="chat-composer-files"
+            type="file"
+            multiple
+            accept={CHAT_ATTACHMENT_ACCEPT}
+            className="sr-only"
+            data-testid="chat-composer-files"
+            tabIndex={-1}
+            disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
+            onChange={(event) => {
+              if (event.target.files) {
+                addPendingFiles(event.target.files);
+              }
+              event.target.value = '';
+            }}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            className="shrink-0 px-2.5"
+            disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
+            aria-label="Attach files"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <Label htmlFor="chat-composer-input" className="sr-only">
+            Message
+          </Label>
+          <Textarea
+            id="chat-composer-input"
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Message the agent…"
+            rows={2}
+            disabled={composerLocked}
+            className="min-h-[2.75rem] flex-1 resize-none border-border bg-surface-raised"
+            aria-describedby="chat-composer-hint"
+          />
+          <Button
+            type="submit"
+            disabled={composerLocked || !canSend}
+            className="shrink-0"
+          >
+            {postMessage.isPending ||
+            uploadAttachment.isPending ||
+            createSession.isPending
+              ? 'Sending…'
+              : 'Send'}
+          </Button>
+        </div>
+        <p
+          id="chat-composer-hint"
+          className="mt-1.5 font-body text-[11px] text-text-muted"
         >
-          <Paperclip className="size-4" />
-        </Button>
-        <Label htmlFor="chat-composer-input" className="sr-only">
-          Message
-        </Label>
-        <Textarea
-          id="chat-composer-input"
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Message the agent…"
-          rows={2}
-          disabled={composerLocked}
-          className="min-h-[2.75rem] flex-1 resize-none border-border bg-surface-raised"
-          aria-describedby="chat-composer-hint"
-        />
-        <Button
-          type="submit"
-          disabled={composerLocked || !canSend}
-          className="shrink-0"
-        >
-          {postMessage.isPending ||
-          uploadAttachment.isPending ||
-          createSession.isPending
-            ? 'Sending…'
-            : 'Send'}
-        </Button>
-      </div>
-      <p
-        id="chat-composer-hint"
-        className="mt-1.5 font-body text-[11px] text-text-muted"
-      >
-        Enter to send · Shift+Enter for a new line · up to {MAX_CHAT_ATTACHMENTS}{' '}
-        files
-      </p>
-      {error && (
-        <p className="mt-1 font-body text-sm text-danger" role="alert">
-          {error}
+          Enter to send · Shift+Enter for a new line · up to {MAX_CHAT_ATTACHMENTS}{' '}
+          files
         </p>
-      )}
+        {error && (
+          <p className="mt-1 font-body text-sm text-danger" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
     </form>
   );
 }
@@ -701,7 +703,7 @@ export function ChatPage() {
       </h1>
 
       <div
-        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)]"
+        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)]"
         data-testid="chat-layout-grid"
       >
         <aside

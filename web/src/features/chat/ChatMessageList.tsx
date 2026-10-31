@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
-import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
+import { TicketMarkdown } from '../../components/TicketMarkdown';
 import {
   parseChatActionMetadata,
   parseChatProposals,
@@ -43,7 +43,7 @@ export function ThinkingIndicator({
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 px-3 py-2 font-body text-sm text-bark-600"
+      className="flex items-center gap-2 font-body text-sm text-text-secondary"
       data-testid="thinking-indicator"
     >
       <span
@@ -326,7 +326,7 @@ export function ChatMessageBubble({
 }) {
   if (streaming) {
     const text = streamingText?.trim() ?? '';
-    // The indicator is its own bubble, so it is not wrapped in another one.
+    // The indicator is not wrapped in an article.
     if (!text) {
       return (
         <div className="flex w-full justify-start" data-testid="chat-streaming-bubble">
@@ -341,12 +341,10 @@ export function ChatMessageBubble({
           aria-label="Agent"
           aria-live="polite"
           aria-busy="true"
-          className="max-w-[85%] rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 px-3 py-1.5 font-body text-sm text-text-primary"
+          className="w-full min-w-0 font-body text-text-primary [&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]"
           data-testid="chat-streaming-bubble"
         >
-          <div className="leading-snug text-text-primary">
-            <MarkdownContent>{text}</MarkdownContent>
-          </div>
+          <TicketMarkdown mermaidAsCode>{text}</TicketMarkdown>
         </article>
       </div>
     );
@@ -378,13 +376,13 @@ export function ChatMessageBubble({
         data-role={message.role}
         aria-label={roleLabel(message.role)}
         className={cn(
-          'max-w-[85%] px-3 py-1.5 font-body text-sm',
+          'font-body text-sm',
           isHuman &&
-            'rounded-2xl rounded-br-md bg-bark-800 text-paper-50 shadow-sm',
+            'max-w-[85%] rounded-2xl rounded-br-md bg-paper-200 px-3 py-1.5 text-text-primary shadow-sm',
           message.role === 'agent' &&
-            'rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 text-text-primary',
+            'w-full min-w-0 text-text-primary [&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]',
           isSystem &&
-            'max-w-[92%] rounded-lg border border-info/25 bg-info-muted/60 px-3 py-1.5 text-text-secondary',
+            'w-full min-w-0 border-l-2 border-info pl-3 text-text-secondary [&_li]:text-text-secondary [&_ol]:text-text-secondary [&_p]:text-text-secondary [&_td]:text-text-secondary [&_ul]:text-text-secondary',
         )}
       >
         {isSystem ? (
@@ -394,16 +392,9 @@ export function ChatMessageBubble({
         ) : null}
         {hasBody ? (
           isHuman ? (
-            <p className="whitespace-pre-wrap leading-snug">{message.body}</p>
+            <p className="whitespace-pre-wrap leading-relaxed">{message.body}</p>
           ) : (
-            <div
-              className={cn(
-                'leading-snug',
-                isSystem ? 'text-text-secondary' : 'text-text-primary',
-              )}
-            >
-              <MarkdownContent>{message.body}</MarkdownContent>
-            </div>
+            <TicketMarkdown>{message.body}</TicketMarkdown>
           )
         ) : null}
         <CommentAttachments attachments={attachments} />
@@ -421,7 +412,7 @@ export function ChatMessageBubble({
       </article>
       {message.role === 'agent'
         ? designs?.map((set) => (
-            <div key={set.id} className="w-full max-w-[85%]">
+            <div key={set.id} className="w-full">
               <DesignCard design={set} scope={designScope} />
             </div>
           ))
@@ -486,33 +477,39 @@ export function ChatMessageList({
               key={item.key}
               data-index={item.index}
               ref={virtualizer.measureElement}
-              className="absolute left-0 top-0 w-full py-1"
+              className="absolute left-0 top-0 w-full py-3"
               style={{
                 transform: `translateY(${item.start}px)`,
               }}
             >
-              {item.index < messages.length ? (
-                <ChatMessageBubble
-                  message={messages[item.index]!}
-                  proposalContext={proposalContext}
-                  designs={designsForRun(designSets, messages[item.index]?.agentRunId)}
-                  designScope={chatSessionId ? { chatSessionId } : undefined}
-                />
-              ) : (
-                <ChatMessageBubble
-                  streaming
-                  streamingText={
-                    streamingAgent?.error
-                      ? streamingAgent.error
-                      : streamingAgent?.text
-                  }
-                />
-              )}
+              <div className="mx-auto w-full max-w-[720px]">
+                {item.index < messages.length ? (
+                  <ChatMessageBubble
+                    message={messages[item.index]!}
+                    proposalContext={proposalContext}
+                    designs={designsForRun(designSets, messages[item.index]?.agentRunId)}
+                    designScope={chatSessionId ? { chatSessionId } : undefined}
+                  />
+                ) : (
+                  <ChatMessageBubble
+                    streaming
+                    streamingText={
+                      streamingAgent?.error
+                        ? streamingAgent.error
+                        : streamingAgent?.text
+                    }
+                  />
+                )}
+              </div>
             </div>
           ))}
         </div>
       </div>
-      {thinking && !streamingAgent ? <ThinkingIndicator /> : null}
+      {thinking && !streamingAgent ? (
+        <div className="mx-auto w-full max-w-[720px]">
+          <ThinkingIndicator />
+        </div>
+      ) : null}
     </div>
   );
 }

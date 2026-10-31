@@ -56,11 +56,10 @@ describe('ChatMessageList', () => {
 
   it('shows a thinking indicator while awaiting a reply', () => {
     render(<ThinkingIndicator />);
-    expect(screen.getByTestId('thinking-indicator')).toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
+    const indicator = screen.getByTestId('thinking-indicator');
+    expect(indicator).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('status')).toHaveTextContent('Thinking…');
+    expect(indicator.className).not.toMatch(/bg-moss-50/);
   });
 
   it('shows a design card on the agent message only', () => {
@@ -143,8 +142,59 @@ describe('ChatMessageList', () => {
     expect(agent).toHaveAttribute('data-role', 'agent');
     expect(human.parentElement).toHaveClass('justify-end');
     expect(agent.parentElement).toHaveClass('justify-start');
-    expect(human.className).toMatch(/bg-bark-800/);
-    expect(agent.className).toMatch(/bg-moss-50/);
+    expect(human.className).toMatch(/bg-paper-200/);
+    expect(human.className).toMatch(/text-text-primary/);
+    expect(agent.className).not.toMatch(/bg-moss-50/);
+    expect(agent.className).toMatch(/w-full/);
+    expect(agent.className).toMatch(/min-w-0/);
+  });
+
+  it('renders agent prose in the body font, not the console mono class', () => {
+    const reply: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'agent',
+        body: 'Hello from the agent',
+        agentRunId: null,
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={reply} />);
+
+    const prose = screen.getByLabelText('Agent').querySelector('p');
+    expect(prose).not.toBeNull();
+    expect(prose!.className).toMatch(/font-body/);
+    expect(prose!.className).not.toMatch(/font-mono/);
+  });
+
+  it('opens absolute http links from agent replies in a new tab', () => {
+    const reply: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'agent',
+        body: 'See [docs](https://example.com/a.md).',
+        agentRunId: null,
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={reply} />);
+
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(link).toHaveAttribute('href', 'https://example.com/a.md');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
   });
 
   it('left-aligns system notices like agent replies', () => {
@@ -169,6 +219,9 @@ describe('ChatMessageList', () => {
     expect(system).toHaveAttribute('data-role', 'system');
     expect(system.parentElement).toHaveClass('justify-start');
     expect(system.parentElement).not.toHaveClass('justify-center');
+    expect(system.className).toMatch(/border-l-2/);
+    expect(system.className).toMatch(/border-info/);
+    expect(system.className).not.toMatch(/bg-info-muted|bg-moss/);
   });
 
   it('shows streaming agent row inside the virtualized list', () => {
@@ -180,6 +233,27 @@ describe('ChatMessageList', () => {
     );
     expect(screen.getByText(/Partial/)).toBeInTheDocument();
     expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-streaming-bubble').className).not.toMatch(
+      /bg-moss-50/,
+    );
+  });
+
+  it('renders a streaming mermaid fence as code instead of a diagram', () => {
+    renderList(
+      <ChatMessageList
+        messages={[]}
+        streamingAgent={{
+          runId: 'run-1',
+          text: '```mermaid\nflowchart LR\n  A --> B\n```',
+        }}
+      />,
+    );
+    expect(screen.getByText(/flowchart LR/)).toBeInTheDocument();
+    expect(screen.getByText(/A --> B/).closest('pre')).not.toBeNull();
+    expect(document.querySelector('svg')).toBeNull();
+    expect(
+      screen.queryByText("This diagram couldn't be drawn, so here's its source."),
+    ).not.toBeInTheDocument();
   });
 
   it('shows one thinking bubble, not one inside another, before text arrives', () => {
@@ -197,6 +271,7 @@ describe('ChatMessageList', () => {
     const list = screen.getByTestId('chat-message-list');
     expect(list).toHaveAttribute('role', 'log');
     expect(screen.getByTestId('thinking-indicator')).toBeInTheDocument();
+    expect(list.querySelector('[data-index] > .max-w-\\[720px\\]')).toBeTruthy();
 
     const renderedRows = list.querySelectorAll('[data-index]');
     expect(renderedRows.length).toBeGreaterThan(0);

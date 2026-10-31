@@ -36,6 +36,14 @@ describe('TicketMarkdown file references', () => {
       'href',
       'https://example.com/a.md',
     );
+    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute(
+      'target',
+      '_blank',
+    );
+    expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute(
+      'rel',
+      'noreferrer',
+    );
   });
 
   it('leaves paths as text without a ticket repository', () => {
