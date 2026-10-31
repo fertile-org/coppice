@@ -205,7 +205,7 @@ export const BoardColumn = memo(function BoardColumn({
               type="button"
               onClick={onShowMore}
               className={[
-                'w-full rounded-md border bg-transparent px-2 py-2 font-body text-sm',
+                'keyboard-focus w-full rounded-md border bg-transparent px-2 py-2 font-body text-sm',
                 columnBorderClass(column.colorKey),
                 columnAccentClass(column.colorKey),
                 'hover:bg-surface-raised',

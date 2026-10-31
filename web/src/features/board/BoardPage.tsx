@@ -120,11 +120,12 @@ export function BoardPage() {
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
   const [doneLimit, setDoneLimit] = useState(DONE_COLUMN_PAGE_SIZE);
-  const returnTicketId = useRef<string | null>(null);
-
-  useEffect(() => {
+  const [limitBoardId, setLimitBoardId] = useState(boardId);
+  if (boardId !== limitBoardId) {
+    setLimitBoardId(boardId);
     setDoneLimit(DONE_COLUMN_PAGE_SIZE);
-  }, [boardId]);
+  }
+  const returnTicketId = useRef<string | null>(null);
 
   // Keep the current object when nothing changed so memoized columns skip.
   const focusCard = useCallback((ticketId: string) => {
@@ -235,7 +236,7 @@ export function BoardPage() {
     if (boardId) {
       void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
     }
-    returnTicketId.current ??= selectedTicketId;
+    returnTicketId.current = selectedTicketId ?? returnTicketId.current;
     const ticketId = returnTicketId.current;
     if (!ticketId) return;
     setFocusState({ type: 'card', ticketId });

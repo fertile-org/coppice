@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
@@ -140,13 +140,21 @@ vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
     open = true,
     onClose,
+    onRestoreFocus,
   }: {
     open?: boolean;
     onClose: () => void;
+    onRestoreFocus?: () => void;
   }) =>
     open ? (
       <div role="dialog" data-shortcut-layer="ticket" data-testid="ticket-drawer">
-        <button type="button" onClick={onClose}>
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onRestoreFocus?.();
+          }}
+        >
           Close drawer
         </button>
       </div>
@@ -177,6 +185,22 @@ function LocationProbe() {
   );
 }
 
+function OpenTicketViaUrl({ ticketId }: { ticketId: string }) {
+  const [params, setParams] = useSearchParams();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = new URLSearchParams(params);
+        next.set('ticket', ticketId);
+        setParams(next);
+      }}
+    >
+      Open {ticketId} via url
+    </button>
+  );
+}
+
 function renderBoard(entry = '/boards/board-1') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -188,6 +212,7 @@ function renderBoard(entry = '/boards/board-1') {
           <ToastProvider>
             <SkipToBoard />
             <LocationProbe />
+            <OpenTicketViaUrl ticketId="done-20" />
             <Routes>
               <Route path="/boards/:boardId" element={<BoardPage />} />
               <Route path="*" element={null} />
@@ -720,6 +745,31 @@ describe('board keyboard navigation with a limited Done column', () => {
   it('mounts a hidden Done card and returns focus after closing a ?ticket= drawer', async () => {
     renderBoard('/boards/board-1?ticket=done-20');
 
+    expect(screen.getByTestId('ticket-drawer')).toBeInTheDocument();
+    expect(screen.queryByText('Done 20')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Done 20')).toBeVisible();
+    expect(document.activeElement).toBe(card('Done 20'));
+  });
+
+  it('returns focus to a later ?ticket= card after an earlier drawer, including restoreBoardFocus', async () => {
+    renderBoard();
+
+    press('g');
+    press('8');
+    press('Enter');
+    expect(screen.getByTestId('location')).toHaveTextContent('ticket=done-00');
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    });
+    expect(document.activeElement).toBe(card('Done 00'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open done-20 via url' }));
     expect(screen.getByTestId('ticket-drawer')).toBeInTheDocument();
     expect(screen.queryByText('Done 20')).toBeNull();
 
