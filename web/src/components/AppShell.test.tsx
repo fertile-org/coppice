@@ -196,6 +196,23 @@ describe('AppShell', () => {
     ).toBeInTheDocument();
   });
 
+  it('pins the search box above Boards, outside the scrolling nav', () => {
+    renderShell();
+
+    const brand = screen.getByTestId('app-shell-sidebar-brand');
+    const search = screen.getByRole('button', { name: /Search/ });
+    const boards = screen.getByRole('link', { name: 'Boards' });
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+
+    expect(nav.contains(search)).toBe(false);
+    expect(
+      brand.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      search.compareDocumentPosition(boards) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('collapses the sidebar when the toggle is used', () => {
     renderShell();
 
