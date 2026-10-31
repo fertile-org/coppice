@@ -29,6 +29,7 @@ use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use sqlx::Row;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 pub use crate::domain::workflow::JOB_TYPE_PLAN_TICKET as PLAN_JOB;
@@ -203,20 +204,6 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
-    /// Whether a plan run could start: not Skip planning, and a planner exists.
-    /// Unlike starting, this posts no note.
-    pub async fn planner_available(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
-        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        if ticket.ticket.skip_planning {
-            return Ok(false);
-        }
-        let agents = AgentService::new(self.pool)
-            .list_agents()
-            .await
-            .map_err(|err| PlanError::Validation(err.to_string()))?;
-        Ok(planner_for_ticket(&agents).is_some())
-    }
-
     async fn start(
         &self,
         ticket_id: Uuid,
@@ -239,8 +226,23 @@ impl<'a> PlanningService<'a> {
             return Ok(StartOutcome::NoPlanner);
         };
 
-        let run_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
+        let outcome = self
+            .queue_plan_run(&mut tx, ticket_id, planner.id, trigger_comment_id)
+            .await?;
+        tx.commit().await?;
+        Ok(outcome)
+    }
+
+    /// Insert the plan run and its job on the caller's transaction.
+    async fn queue_plan_run(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Uuid,
+        planner_id: Uuid,
+        trigger_comment_id: Option<Uuid>,
+    ) -> Result<StartOutcome, PlanError> {
+        let run_id = Uuid::new_v4();
         let inserted = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -254,21 +256,18 @@ impl<'a> PlanningService<'a> {
         )
         .bind(run_id)
         .bind(ticket_id)
-        .bind(planner.id)
+        .bind(planner_id)
         .bind(JOB_TYPE_PLAN_TICKET)
         .bind(run_status_to_str(RunStatus::Queued))
         .bind(PROFILE_ID)
         .bind(ContextProfile::Full.as_str())
         .bind(trigger_comment_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
 
         let Some(row) = inserted else {
-            tx.rollback().await?;
-            if let Some(existing) = self.active_plan_run(ticket_id).await? {
-                return Ok(StartOutcome::AlreadyRunning(existing));
-            }
-            return Ok(StartOutcome::AlreadyRunning(run_id));
+            let existing = self.active_plan_run(ticket_id).await?;
+            return Ok(StartOutcome::AlreadyRunning(existing.unwrap_or(run_id)));
         };
         let inserted_id: Uuid = row.get("id");
 
@@ -282,9 +281,8 @@ impl<'a> PlanningService<'a> {
         .bind(inserted_id)
         .bind(JOB_TYPE_PLAN_TICKET)
         .bind(job_status_to_str(JobStatus::Pending))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(StartOutcome::Started(inserted_id))
     }
 
@@ -874,7 +872,35 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
-    pub async fn ask_for_changes(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
+    pub async fn ask_for_changes(
+        &self,
+        ticket_id: Uuid,
+        body: &str,
+    ) -> Result<StartOutcome, PlanError> {
+        let mut tx = self.pool.begin().await?;
+        let outcome = self.ask_for_changes_in(&mut tx, ticket_id, body).await?;
+        tx.commit().await?;
+        if matches!(outcome, StartOutcome::NoPlanner) {
+            self.note(ticket_id, NO_PM).await?;
+        }
+        Ok(outcome)
+    }
+
+    /// Record the change request, drop the approval and any split proposed with
+    /// the plan, and queue the rewrite, all on the caller's transaction. The
+    /// caller reads the outcome and decides whether to commit. A missing planner
+    /// posts no note here.
+    pub async fn ask_for_changes_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Uuid,
+        body: &str,
+    ) -> Result<StartOutcome, PlanError> {
+        // Two requests take turns, so the second sees the first one's run.
+        sqlx::query("SELECT id FROM tickets WHERE id = $1 FOR UPDATE")
+            .bind(ticket_id)
+            .execute(&mut **tx)
+            .await?;
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(ASK_ONLY_FROM_PLAN_REVIEW.into()));
@@ -893,37 +919,43 @@ impl<'a> PlanningService<'a> {
         sqlx::query("UPDATE ticket_plans SET change_request = $2 WHERE id = $1")
             .bind(plan.id)
             .bind(&appended)
-            .execute(self.pool)
+            .execute(&mut **tx)
             .await?;
         // A split proposed with the plan goes with it; the revision may propose another.
-        if ticket
+        let split_from_plan = ticket
             .ticket
             .pending_split_recommendation
             .as_ref()
             .and_then(|pending| pending.get("fromPlan"))
             .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            TicketService::new(self.pool)
-                .clear_pending_split_recommendation(ticket_id)
-                .await?;
-        }
-
+            .unwrap_or(false);
         sqlx::query(
             r#"
             UPDATE tickets
             SET approved_plan_id = NULL,
                 approved_plan_content_version = NULL,
+                pending_split_recommendation =
+                    CASE WHEN $2 THEN NULL ELSE pending_split_recommendation END,
                 updated_at = now()
             WHERE id = $1
             "#,
         )
         .bind(ticket_id)
-        .execute(self.pool)
+        .bind(split_from_plan)
+        .execute(&mut **tx)
         .await?;
 
-        self.start(ticket_id, None).await?;
-        Ok(())
+        if ticket.ticket.skip_planning {
+            return Ok(StartOutcome::Skipped);
+        }
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let Some(planner) = planner_for_ticket(&agents) else {
+            return Ok(StartOutcome::NoPlanner);
+        };
+        self.queue_plan_run(tx, ticket_id, planner.id, None).await
     }
 
     pub async fn approved_plan(&self, ticket_id: Uuid) -> Result<Option<ApprovedPlan>, PlanError> {

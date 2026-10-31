@@ -4,12 +4,13 @@ use crate::copy::plan::{
     plan_design_change_note, DESIGN_SUPERSEDED, NO_PM, PLAN_ALREADY_RUNNING, PLAN_DESIGN_FINAL,
 };
 use crate::domain::substatus::TicketStatus;
-use crate::services::design_service::{DesignError, DesignService, DesignSetSummary};
-use crate::services::planning_service::{PlanError, PlanningService};
+use crate::services::design_service::{
+    save_choice, DesignError, DesignService, DesignSetSummary,
+};
+use crate::services::planning_service::{PlanError, PlanningService, StartOutcome};
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use std::path::Path;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -109,9 +110,8 @@ pub async fn choice_state(
 
 /// Save a pick and, when the plan has to follow it, ask for the rewrite.
 ///
-/// `ask_for_changes` uses the pool and queues a run, so this is not one
-/// transaction. The run must see the saved pick, so the save comes first and
-/// is undone if the request fails.
+/// The pick, the change request and the queued run commit together, so a pick
+/// that starts no run leaves nothing behind.
 pub async fn choose_design(
     pool: &PgPool,
     artifacts: &Path,
@@ -148,53 +148,20 @@ pub async fn choose_design(
         return Ok(());
     };
 
-    let planning = PlanningService::new(pool);
-    if !planning.planner_available(ticket_id).await? {
-        return Err(refusal(NO_PM));
-    }
-    let earlier = read_chosen(pool, set_id).await?;
-    svc.choose(set_id, option_id, user_id).await?;
-    if let Err(err) = planning
-        .ask_for_changes(ticket_id, &plan_design_change_note(&option.title))
+    let mut tx = pool.begin().await.map_err(PlanError::from)?;
+    save_choice(&mut *tx, set_id, option_id, user_id)
         .await
-    {
-        if let Err(restore_err) = restore_chosen(pool, set_id, &earlier).await {
-            tracing::warn!(error = %restore_err, %set_id, "could not restore the earlier design choice");
-        }
-        return Err(err.into());
+        .map_err(PlanError::from)?;
+    let note = plan_design_change_note(&option.title);
+    let outcome = PlanningService::new(pool)
+        .ask_for_changes_in(&mut tx, ticket_id, &note)
+        .await?;
+    // Returning without a commit rolls back the pick and the request together.
+    match outcome {
+        StartOutcome::Started(_) => {}
+        StartOutcome::NoPlanner | StartOutcome::Skipped => return Err(refusal(NO_PM)),
+        StartOutcome::AlreadyRunning(_) => return Err(refusal(PLAN_ALREADY_RUNNING)),
     }
-    Ok(())
-}
-
-type ChosenColumns = (Option<String>, Option<Uuid>, Option<OffsetDateTime>);
-
-async fn read_chosen(pool: &PgPool, set_id: Uuid) -> Result<ChosenColumns, DesignError> {
-    let chosen = sqlx::query_as(
-        "SELECT chosen_option_id, chosen_by_user_id, chosen_at FROM design_sets WHERE id = $1",
-    )
-    .bind(set_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(chosen)
-}
-
-async fn restore_chosen(
-    pool: &PgPool,
-    set_id: Uuid,
-    (option_id, user_id, at): &ChosenColumns,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"
-        UPDATE design_sets
-        SET chosen_option_id = $2, chosen_by_user_id = $3, chosen_at = $4
-        WHERE id = $1
-        "#,
-    )
-    .bind(set_id)
-    .bind(option_id)
-    .bind(user_id)
-    .bind(at)
-    .execute(pool)
-    .await?;
+    tx.commit().await.map_err(PlanError::from)?;
     Ok(())
 }

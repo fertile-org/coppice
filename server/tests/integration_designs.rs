@@ -1935,3 +1935,157 @@ async fn work_run_and_chat_sets_save_and_start_no_run() {
             .expect("all plan runs");
     assert_eq!(all_plan_runs, 0);
 }
+
+#[tokio::test]
+async fn failed_run_insert_leaves_note_split_approval_and_choice_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let split = json!({"fromPlan": true, "reason": "Too big"});
+    sqlx::query(
+        r#"
+        UPDATE ticket_plans SET change_request = 'Earlier request.'
+        WHERE ticket_id = $1 AND revision = (
+            SELECT max(revision) FROM ticket_plans WHERE ticket_id = $1
+        )
+        "#,
+    )
+    .bind(fx.ticket_id)
+    .execute(&fx.pool)
+    .await
+    .expect("earlier request");
+    sqlx::query("UPDATE tickets SET pending_split_recommendation = $2 WHERE id = $1")
+        .bind(fx.ticket_id)
+        .bind(&split)
+        .execute(&fx.pool)
+        .await
+        .expect("split");
+    sqlx::raw_sql(&format!(
+        r#"
+        CREATE OR REPLACE FUNCTION test_refuse_plan_run() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'plan run refused by test';
+        END;
+        $$ LANGUAGE plpgsql;
+        DROP TRIGGER IF EXISTS test_refuse_plan_run ON agent_runs;
+        CREATE TRIGGER test_refuse_plan_run
+            BEFORE INSERT ON agent_runs
+            FOR EACH ROW WHEN (NEW.ticket_id = '{}')
+            EXECUTE FUNCTION test_refuse_plan_run();
+        "#,
+        fx.ticket_id
+    ))
+    .execute(&fx.pool)
+    .await
+    .expect("install trigger");
+    let runs = plan_runs(&fx).await;
+
+    let picked = pick(&fx, set_id, "b").await.status();
+    let after_pick = (
+        change_request(&fx).await,
+        ticket_split(&fx).await,
+        set_json(&fx, set_id).await,
+    );
+
+    // A pick is refused on an approved plan, so approval goes through the ask itself.
+    let plan_id = planning(&fx)
+        .latest_plan(fx.ticket_id)
+        .await
+        .expect("latest plan")
+        .expect("plan")
+        .id;
+    sqlx::query(
+        r#"
+        UPDATE tickets
+        SET approved_plan_id = $2, approved_plan_content_version = content_version
+        WHERE id = $1
+        "#,
+    )
+    .bind(fx.ticket_id)
+    .bind(plan_id)
+    .execute(&fx.pool)
+    .await
+    .expect("approval");
+    let asked = planning(&fx).ask_for_changes(fx.ticket_id, "Change it.").await;
+    let approved: Option<Uuid> =
+        sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
+            .bind(fx.ticket_id)
+            .fetch_one(&fx.pool)
+            .await
+            .expect("approved plan");
+    let after_ask = (change_request(&fx).await, ticket_split(&fx).await);
+    sqlx::raw_sql(
+        r#"
+        DROP TRIGGER test_refuse_plan_run ON agent_runs;
+        DROP FUNCTION test_refuse_plan_run();
+        "#,
+    )
+    .execute(&fx.pool)
+    .await
+    .expect("drop trigger");
+
+    assert_eq!(picked, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(after_pick.0.as_deref(), Some("Earlier request."));
+    assert_eq!(after_pick.1, Some(split.clone()));
+    assert!(after_pick.2["chosen"].is_null(), "{}", after_pick.2);
+    assert_eq!(after_pick.2["selected"]["id"], "a");
+    assert_eq!(plan_runs(&fx).await, runs);
+
+    assert!(asked.is_err());
+    assert_eq!(approved, Some(plan_id));
+    assert_eq!(after_ask.0.as_deref(), Some("Earlier request."));
+    assert_eq!(after_ask.1, Some(split));
+}
+
+async fn ticket_split(fx: &TicketHttp) -> Option<Value> {
+    sqlx::query_scalar("SELECT pending_split_recommendation FROM tickets WHERE id = $1")
+        .bind(fx.ticket_id)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("split")
+}
+
+#[tokio::test]
+async fn pick_is_refused_when_the_planner_has_another_active_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    // One active run per ticket and agent, so queuing the plan run conflicts,
+    // while the active plan run check before it finds nothing.
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id, context_profile
+        )
+        SELECT gen_random_uuid(), ticket_id, agent_id, 'work_on_ticket', 'queued',
+               sandbox_profile_id, context_profile
+        FROM agent_runs WHERE ticket_id = $1 LIMIT 1
+        "#,
+    )
+    .bind(fx.ticket_id)
+    .execute(&fx.pool)
+    .await
+    .expect("other run");
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "update_plan");
+
+    assert_refused(&fx, set_id, "b", PLAN_ALREADY_RUNNING).await;
+    assert_eq!(change_request(&fx).await, None);
+}
+
+#[tokio::test]
+async fn pick_is_refused_with_skip_planning_and_saves_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    sqlx::query("UPDATE tickets SET skip_planning = true WHERE id = $1")
+        .bind(fx.ticket_id)
+        .execute(&fx.pool)
+        .await
+        .expect("skip planning");
+
+    assert_refused(&fx, set_id, "b", NO_PM).await;
+    assert_eq!(change_request(&fx).await, None);
+}

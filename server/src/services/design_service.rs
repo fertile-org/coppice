@@ -327,18 +327,7 @@ impl<'a> DesignService<'a> {
         if !options.iter().any(|option| option.id == option_id) {
             return Err(DesignError::Invalid("unknown option".into()));
         }
-        sqlx::query(
-            r#"
-            UPDATE design_sets
-            SET chosen_option_id = $1, chosen_by_user_id = $2, chosen_at = now()
-            WHERE id = $3
-            "#,
-        )
-        .bind(option_id)
-        .bind(user_id)
-        .bind(set_id)
-        .execute(self.pool)
-        .await?;
+        save_choice(self.pool, set_id, option_id, user_id).await?;
         Ok(())
     }
 
@@ -391,6 +380,28 @@ impl<'a> DesignService<'a> {
         .await?
         .ok_or(DesignError::NotFound)
     }
+}
+
+/// Store a pick without checking it. Callers validate the option first.
+pub(crate) async fn save_choice<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    set_id: Uuid,
+    option_id: &str,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE design_sets
+        SET chosen_option_id = $1, chosen_by_user_id = $2, chosen_at = now()
+        WHERE id = $3
+        "#,
+    )
+    .bind(option_id)
+    .bind(user_id)
+    .bind(set_id)
+    .execute(executor)
+    .await?;
+    Ok(())
 }
 
 fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf), DesignError> {
