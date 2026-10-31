@@ -9,6 +9,8 @@ import { BoardPage } from './BoardPage';
 vi.mock('./useReviewCapacity', () => ({
   useReviewCapacity: () => ({
     saved: {
+      name: 'Test Board',
+      nameLabel: 'Name',
       reviewCap: null,
       countInReview: false,
       waitingOnReview: null,

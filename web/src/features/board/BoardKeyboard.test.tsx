@@ -12,6 +12,8 @@ import type { Ticket } from './useTickets';
 vi.mock('./useReviewCapacity', () => ({
   useReviewCapacity: () => ({
     saved: {
+      name: 'Test Board',
+      nameLabel: 'Name',
       reviewCap: null,
       countInReview: false,
       waitingOnReview: null,

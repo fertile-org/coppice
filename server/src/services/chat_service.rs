@@ -107,6 +107,8 @@ impl From<BoardError> for ChatError {
         match err {
             BoardError::BoardNotFound => ChatError::Validation("board not found".into()),
             BoardError::RepoNotFound => ChatError::Validation("repo not found".into()),
+            BoardError::InvalidName => ChatError::Validation(err.to_string()),
+            BoardError::NameConflict => ChatError::Validation(err.to_string()),
             BoardError::Database(e) => ChatError::Database(e),
         }
     }

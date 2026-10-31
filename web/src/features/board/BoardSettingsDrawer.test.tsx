@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../lib/api';
+import { useBoards } from '../boards/useBoards';
 import { BoardSettingsButton, BoardSettingsDrawer } from './BoardSettingsDrawer';
 import { ReviewWaitingChip } from './ReviewWaitingChip';
 import { useReviewCapacity } from './useReviewCapacity';
@@ -17,7 +19,11 @@ vi.mock('../../lib/api', async (importOriginal) => ({
 const invalid =
   'Enter a whole number of 1 or more, or leave it empty for no cap.';
 
+const conflict = "This name is too similar to another board's name.";
+
 const board = {
+  name: 'Alpha',
+  nameLabel: 'Name',
   reviewCap: 2,
   countInReview: false,
   waitingOnReview: '2 of 2 waiting for review',
@@ -29,11 +35,27 @@ const board = {
   reviewCapInvalid: invalid,
 };
 
+let savedBoard = { ...board, slug: 'alpha' };
+
+function PickerNames() {
+  const { data } = useBoards();
+  return (
+    <ul>
+      {data?.map((item) => (
+        <li key={item.id}>
+          {item.name} {item.slug}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Harness() {
   const capacity = useReviewCapacity('board-1');
   const [open, setOpen] = useState(false);
   return (
     <>
+      <PickerNames />
       <ReviewWaitingChip saved={capacity.saved} />
       <BoardSettingsButton saved={capacity.saved} onClick={() => setOpen(true)} />
       <BoardSettingsDrawer
@@ -63,6 +85,43 @@ function putCalls() {
   );
 }
 
+function patchCalls() {
+  return apiFetch.mock.calls.filter(
+    ([url, init]) =>
+      url === '/api/boards/board-1' &&
+      (init as RequestInit | undefined)?.method === 'PATCH',
+  );
+}
+
+async function mockApi(url: string, init?: RequestInit) {
+  if (url === '/api/boards' && (!init?.method || init.method === 'GET')) {
+    return {
+      json: async () => [
+        {
+          id: 'board-1',
+          name: savedBoard.name,
+          slug: savedBoard.slug,
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    };
+  }
+  if (url === '/api/boards/board-1' && init?.method === 'PATCH') {
+    const body = JSON.parse(String(init.body)) as { name: string };
+    savedBoard = { ...savedBoard, name: body.name, slug: 'beta' };
+    return { json: async () => savedBoard };
+  }
+  if (init?.method === 'PUT') {
+    savedBoard = {
+      ...savedBoard,
+      ...JSON.parse(String(init.body)),
+      waitingOnReview: null,
+    };
+    return { json: async () => savedBoard };
+  }
+  return { json: async () => savedBoard };
+}
+
 function expectPut(body: { reviewCap: number | null; countInReview: boolean }) {
   return waitFor(() => {
     expect(apiFetch).toHaveBeenCalledWith(
@@ -79,13 +138,9 @@ async function openSettings() {
 
 describe('BoardSettingsDrawer', () => {
   beforeEach(() => {
+    savedBoard = { ...board, slug: 'alpha' };
     apiFetch.mockReset();
-    apiFetch.mockImplementation(async (_url: string, init?: RequestInit) => ({
-      json: async () =>
-        init?.method === 'PUT'
-          ? { ...board, ...JSON.parse(String(init.body)), waitingOnReview: null }
-          : board,
-    }));
+    apiFetch.mockImplementation(mockApi);
   });
 
   it('shows the waiting chip and keeps the cap field in the closed drawer', async () => {
@@ -99,7 +154,7 @@ describe('BoardSettingsDrawer', () => {
     expect(dialog).toHaveTextContent('Board settings');
     const cap = screen.getByLabelText('Review cap');
     expect(cap).toHaveValue(2);
-    expect(cap).toHaveFocus();
+    expect(screen.getByLabelText('Name')).toHaveFocus();
     expect(screen.getByLabelText('Also count In Review')).not.toBeChecked();
     expect(
       screen.getByText(
@@ -189,4 +244,97 @@ describe('BoardSettingsDrawer', () => {
       expect(putCalls()).toHaveLength(0);
     },
   );
+
+  it('renames the board and shows the new name and slug without a reload', async () => {
+    renderSettings();
+    expect(await screen.findByText('Alpha alpha')).toBeInTheDocument();
+    await openSettings();
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Beta' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(screen.getByText('Beta beta')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Board settings' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(patchCalls()).toHaveLength(1);
+    expect(patchCalls()[0][1]).toEqual(
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Beta' }),
+      }),
+    );
+  });
+
+  it('sends one rename PATCH for blur followed by Done', async () => {
+    renderSettings();
+    await openSettings();
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Beta' } });
+    fireEvent.blur(name);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Board settings' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(patchCalls()).toHaveLength(1);
+  });
+
+  it.each(['blur', 'Done', 'Escape'] as const)(
+    'keeps the drawer open and shows a 409 on %s',
+    async (trigger) => {
+      apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          throw new ApiError(409, JSON.stringify({ message: conflict }));
+        }
+        return mockApi(url, init);
+      });
+      renderSettings();
+      const dialog = await openSettings();
+      const name = screen.getByLabelText('Name');
+      fireEvent.change(name, { target: { value: 'Taken' } });
+      if (trigger === 'blur') {
+        fireEvent.blur(name);
+      } else if (trigger === 'Done') {
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      } else {
+        fireEvent.keyDown(dialog, { key: 'Escape' });
+      }
+      expect(await screen.findByRole('alert')).toHaveTextContent(conflict);
+      expect(
+        screen.getByRole('dialog', { name: 'Board settings' }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it('keeps the drawer open when Done is clicked while a blur rename is in flight', async () => {
+    let finish!: (error: unknown) => void;
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        await new Promise<never>((_, reject) => {
+          finish = reject;
+        });
+      }
+      return mockApi(url, init);
+    });
+    renderSettings();
+    await openSettings();
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Taken' } });
+    fireEvent.blur(name);
+    await waitFor(() => {
+      expect(patchCalls()).toHaveLength(1);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    finish(new ApiError(409, JSON.stringify({ message: conflict })));
+    expect(await screen.findByRole('alert')).toHaveTextContent(conflict);
+    expect(
+      screen.getByRole('dialog', { name: 'Board settings' }),
+    ).toBeInTheDocument();
+    expect(patchCalls()).toHaveLength(1);
+  });
 });

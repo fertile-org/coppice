@@ -13,6 +13,10 @@ pub enum BoardError {
     BoardNotFound,
     #[error("repo not found")]
     RepoNotFound,
+    #[error("invalid board name")]
+    InvalidName,
+    #[error("board name conflict")]
+    NameConflict,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -77,8 +81,19 @@ impl<'a> BoardService<'a> {
         name: Option<&str>,
     ) -> Result<Board, BoardError> {
         let current = self.get_board(board_id).await?;
-        let name = name.unwrap_or(&current.name);
-        let slug = slugify(name);
+        let (name, slug) = if let Some(provided) = name {
+            let trimmed = provided.trim();
+            if trimmed.is_empty() {
+                return Err(BoardError::InvalidName);
+            }
+            let slug = slugify(trimmed);
+            if slug.is_empty() {
+                return Err(BoardError::InvalidName);
+            }
+            (trimmed.to_string(), slug)
+        } else {
+            (current.name.clone(), slugify(&current.name))
+        };
 
         let row = sqlx::query(
             r#"
@@ -89,14 +104,24 @@ impl<'a> BoardService<'a> {
             "#,
         )
         .bind(board_id)
-        .bind(name)
+        .bind(&name)
         .bind(&slug)
         .fetch_optional(self.pool)
-        .await?
+        .await
+        .map_err(map_slug_conflict)?
         .ok_or(BoardError::BoardNotFound)?;
 
         Ok(row_to_board(&row))
     }
+}
+
+fn map_slug_conflict(err: sqlx::Error) -> BoardError {
+    if let sqlx::Error::Database(db_err) = &err {
+        if let Some("boards_slug_key" | "projects_slug_key") = db_err.constraint() {
+            return BoardError::NameConflict;
+        }
+    }
+    BoardError::Database(err)
 }
 
 fn row_to_board(row: &sqlx::postgres::PgRow) -> Board {
@@ -134,5 +159,8 @@ mod tests {
     fn slugify_normalizes_name() {
         assert_eq!(slugify("Coppice Demo"), "coppice-demo");
         assert_eq!(slugify("Hello World!"), "hello-world");
+        assert_eq!(slugify("foo-bar"), "foobar");
+        assert_eq!(slugify("!!!"), "");
+        assert_eq!(slugify("日本語"), "");
     }
 }
