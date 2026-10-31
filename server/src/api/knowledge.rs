@@ -36,6 +36,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/knowledge/{item_id}/similar", get(similar_knowledge))
         .route("/api/knowledge/{item_id}/freshness", get(knowledge_freshness))
+        .route("/api/knowledge/{item_id}/feedback", get(knowledge_feedback))
+        .route(
+            "/api/knowledge/{item_id}/flags/dismiss",
+            post(dismiss_knowledge_flags),
+        )
         .route("/api/knowledge/{item_id}/approve", post(approve_knowledge))
         .route("/api/knowledge/{item_id}/reject", post(reject_knowledge))
         .route(
@@ -115,6 +120,8 @@ struct ListQuery {
     status: Option<String>,
     board_id: Option<Uuid>,
     knowledge_type: Option<String>,
+    #[serde(default)]
+    flagged: bool,
     cursor: Option<String>,
     limit: Option<usize>,
 }
@@ -305,6 +312,7 @@ fn page_filter(query: ListQuery) -> Result<KnowledgeListFilter, KnowledgeApiErro
                     .ok_or_else(|| KnowledgeApiError::validation("invalid knowledgeType"))
             })
             .transpose()?,
+        flagged: query.flagged,
         cursor: query.cursor,
         limit: query.limit,
     })
@@ -383,6 +391,7 @@ async fn list_inbox(
     Query(mut query): Query<ListQuery>,
 ) -> Result<Json<KnowledgeListResponse>, KnowledgeApiError> {
     query.status = Some("pending".into());
+    query.flagged = false;
     let page = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
         .list(page_filter(query)?)
         .await?;
@@ -435,6 +444,50 @@ async fn knowledge_freshness(
             })
             .collect(),
     }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlagResponse {
+    verdict: String,
+    reason: String,
+    agent_name: Option<String>,
+    created_at: String,
+}
+
+#[derive(Serialize)]
+struct FlagListResponse {
+    items: Vec<FlagResponse>,
+}
+
+async fn knowledge_feedback(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<FlagListResponse>, KnowledgeApiError> {
+    let items = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
+        .open_flags(item_id)
+        .await?
+        .into_iter()
+        .map(|flag| FlagResponse {
+            verdict: flag.verdict,
+            reason: flag.reason,
+            agent_name: flag.agent_name,
+            created_at: flag.created_at.format(&Rfc3339).unwrap_or_default(),
+        })
+        .collect();
+    Ok(Json(FlagListResponse { items }))
+}
+
+async fn dismiss_knowledge_flags(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
+    let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
+        .dismiss_flags(item_id)
+        .await?;
+    Ok(Json(item_response(item)))
 }
 
 #[derive(Deserialize, Default)]

@@ -3844,6 +3844,71 @@ async fn knowledge_flag_repeated_in_a_run_updates_one_row() {
 }
 
 #[tokio::test]
+async fn knowledge_flag_repeat_reopens_a_closed_flag() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let rev = seed_mulberry(&fx).await;
+    let item = item_of(&fx.pool, rev).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let flag = json!({"itemId": item, "verdict": "outdated", "reason": "Moved."});
+    let open_flags = || async {
+        api(
+            &fx.app,
+            "GET",
+            &format!("/api/knowledge/{item}"),
+            Value::Null,
+            &fx.cookie,
+            &fx.csrf,
+        )
+        .await["openFlagCount"]
+            .as_i64()
+            .unwrap()
+    };
+
+    call_tool_json(&url, &token, "knowledge_flag", flag.clone()).await;
+    assert_eq!(open_flags().await, 1);
+
+    // Another run confirms the item, which closes the older flag.
+    sqlx::query(
+        "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, verdict) \
+         VALUES ($1, $2, $3, $4, 'confirmed')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(item)
+    .bind(rev)
+    .bind(Uuid::new_v4())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(open_flags().await, 0);
+
+    // The same run flags again: the one row becomes newer than the confirmation.
+    call_tool_json(&url, &token, "knowledge_flag", flag.clone()).await;
+    assert_eq!(open_flags().await, 1);
+
+    api(
+        &fx.app,
+        "POST",
+        &format!("/api/knowledge/{item}/flags/dismiss"),
+        json!({}),
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    assert_eq!(open_flags().await, 0);
+
+    // And a repeat after a dismissal is a new claim.
+    call_tool_json(&url, &token, "knowledge_flag", flag).await;
+    assert_eq!(open_flags().await, 1);
+    assert_eq!(flag_rows(&fx.pool, item).await.len(), 2);
+}
+
+#[tokio::test]
 async fn knowledge_flag_out_of_scope_is_same_as_unknown() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

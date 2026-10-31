@@ -224,7 +224,8 @@ pub async fn call_knowledge_flag(ctx: &ToolCtx<'_>, args: Value) -> Result<Value
         INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, agent_id, verdict, reason)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (run_id, revision_id)
-        DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason, created_at = now()
+        DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason,
+                      created_at = now(), dismissed_at = NULL
         "#,
     )
     .bind(Uuid::new_v4())

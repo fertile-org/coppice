@@ -531,6 +531,7 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
             status: None,
             board_id: None,
             knowledge_type: None,
+            flagged: false,
             cursor: None,
             limit: Some(1_000),
         })
@@ -548,6 +549,7 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
             status: None,
             board_id: None,
             knowledge_type: None,
+            flagged: false,
             cursor: Some(cursor),
             limit: Some(1_000),
         })
@@ -2796,7 +2798,8 @@ async fn editing_an_item_resets_its_open_flag_count() {
         .unwrap()
         .parse()
         .unwrap();
-    for (verdict, run) in [("outdated", Uuid::new_v4()), ("confirmed", Uuid::new_v4())] {
+    // A confirmed closes only older flags, so this flag comes after it.
+    for (verdict, run) in [("confirmed", Uuid::new_v4()), ("outdated", Uuid::new_v4())] {
         sqlx::query(
             "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, verdict) \
              VALUES ($1, $2, $3, $4, $5)",
@@ -2984,4 +2987,291 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
         citations_of(&pool, rewritten["revisionId"].as_str().unwrap()).await,
         vec![(repo_id, "original.rs".to_string(), sha)]
     );
+}
+
+/// An approved item, ready to be flagged: (item id, active revision id).
+async fn approved_item(app: &Router, board_id: &str, title: &str, cookie: &str, csrf: &str) -> (String, Uuid) {
+    let created = create_candidate(app, board_id, cookie, csrf, title).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let approved = approve_item(app, &id, 1, cookie, csrf).await;
+    (id, approved["activeRevisionId"].as_str().unwrap().parse().unwrap())
+}
+
+/// One agent verdict, `age_secs` old.
+async fn add_feedback(
+    pool: &PgPool,
+    item_id: &str,
+    revision_id: Uuid,
+    verdict: &str,
+    reason: &str,
+    agent_id: Option<Uuid>,
+    age_secs: i32,
+) {
+    sqlx::query(
+        "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, agent_id, verdict, reason, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() - make_interval(secs => $8))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(item_id.parse::<Uuid>().unwrap())
+    .bind(revision_id)
+    .bind(Uuid::new_v4())
+    .bind(agent_id)
+    .bind(verdict)
+    .bind(reason)
+    .bind(f64::from(age_secs))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn get_json(app: &Router, path: &str, cookie: &str, csrf: &str) -> (StatusCode, Value) {
+    mutate(app, "GET", path, Value::Null, cookie, csrf).await
+}
+
+async fn flagged_titles(app: &Router, cookie: &str, csrf: &str) -> Vec<String> {
+    let (status, page) = get_json(app, "/api/knowledge?flagged=true", cookie, csrf).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn flagged_filter_lists_approved_items_with_open_flags_most_recent_first() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (older, older_rev) = approved_item(&app, &board_id, "Flagged first", &cookie, &csrf).await;
+    let (newer, newer_rev) = approved_item(&app, &board_id, "Flagged last", &cookie, &csrf).await;
+    let (confirmed, confirmed_rev) = approved_item(&app, &board_id, "Confirmed", &cookie, &csrf).await;
+    let (superseded, superseded_rev) = approved_item(&app, &board_id, "Replaced", &cookie, &csrf).await;
+    let _unflagged = approved_item(&app, &board_id, "Unflagged", &cookie, &csrf).await;
+    add_feedback(&pool, &older, older_rev, "wrong", "Older", None, 60).await;
+    add_feedback(&pool, &newer, newer_rev, "outdated", "Newer", None, 10).await;
+    add_feedback(&pool, &confirmed, confirmed_rev, "confirmed", "", None, 10).await;
+    add_feedback(&pool, &superseded, superseded_rev, "wrong", "Gone", None, 10).await;
+    let replacement = Uuid::new_v4();
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'pending', 1)")
+        .bind(replacement)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE knowledge_items SET superseded_by = $2 WHERE id = $1")
+        .bind(superseded.parse::<Uuid>().unwrap())
+        .bind(replacement)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Updating the older item must not reorder the list.
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{older}/expire"),
+        serde_json::json!({"expectedVersion": 2, "expiresAt": "2099-01-01T00:00:00Z"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    assert_eq!(flagged_titles(&app, &cookie, &csrf).await, ["Flagged last", "Flagged first"]);
+
+    let (_, first) = get_json(&app, "/api/knowledge?flagged=true&limit=1", &cookie, &csrf).await;
+    assert_eq!(first["items"][0]["title"], "Flagged last");
+    assert_eq!(first["items"][0]["openFlagCount"], 1);
+    let cursor = first["nextCursor"].as_str().expect("second page");
+    let (status, second) = get_json(
+        &app,
+        &format!("/api/knowledge?flagged=true&limit=1&cursor={cursor}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["items"][0]["title"], "Flagged first");
+    assert!(second["nextCursor"].is_null(), "{second}");
+}
+
+#[tokio::test]
+async fn feedback_endpoint_returns_open_flags_with_reason_and_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent: Uuid = common::create_test_agent_from_preset(&app, "Flagger", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let agent_name: String = sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
+        .bind(agent)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (item, rev) = approved_item(&app, &board_id, "Has flags", &cookie, &csrf).await;
+    add_feedback(&pool, &item, rev, "confirmed", "", Some(agent), 300).await;
+    add_feedback(&pool, &item, rev, "wrong", "<b>Not</b> true", None, 120).await;
+    add_feedback(&pool, &item, rev, "outdated", "Moved to make test-unit", Some(agent), 60).await;
+
+    let (status, body) =
+        get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let flags = body["items"].as_array().unwrap();
+    assert_eq!(flags.len(), 2, "{body}");
+    assert_eq!(flags[0]["verdict"], "outdated");
+    assert_eq!(flags[0]["reason"], "Moved to make test-unit");
+    assert_eq!(flags[0]["agentName"], agent_name.as_str());
+    assert!(flags[0]["createdAt"].is_string(), "{body}");
+    assert_eq!(flags[1]["verdict"], "wrong");
+    assert_eq!(flags[1]["reason"], "<b>Not</b> true");
+    assert!(flags[1]["agentName"].is_null(), "{body}");
+}
+
+#[tokio::test]
+async fn dismissing_closes_open_flags_and_later_flags_reopen() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (item, rev) = approved_item(&app, &board_id, "Dismiss me", &cookie, &csrf).await;
+    add_feedback(&pool, &item, rev, "wrong", "One", None, 60).await;
+    add_feedback(&pool, &item, rev, "outdated", "Two", None, 30).await;
+
+    let (status, view) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{item}/flags/dismiss"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["openFlagCount"], 0);
+    assert_eq!(view["status"], "approved", "dismissing leaves the item as it is");
+    assert_eq!(view["version"], 2, "dismissing does not change the item");
+    assert!(flagged_titles(&app, &cookie, &csrf).await.is_empty());
+    let (_, body) = get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    assert!(body["items"].as_array().unwrap().is_empty(), "{body}");
+    let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_feedback WHERE item_id = $1")
+        .bind(item.parse::<Uuid>().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept, 2, "dismissed rows stay for the audit trail");
+
+    add_feedback(&pool, &item, rev, "wrong", "Three", None, 0).await;
+    assert_eq!(flagged_titles(&app, &cookie, &csrf).await, ["Dismiss me"]);
+}
+
+#[tokio::test]
+async fn a_newer_confirmed_closes_older_flags_only() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (item, rev) = approved_item(&app, &board_id, "Confirmed later", &cookie, &csrf).await;
+    add_feedback(&pool, &item, rev, "outdated", "Old claim", None, 120).await;
+    add_feedback(&pool, &item, rev, "confirmed", "", None, 60).await;
+    let path = format!("/api/knowledge/{item}");
+    let (_, view) = get_json(&app, &path, &cookie, &csrf).await;
+    assert_eq!(view["openFlagCount"], 0, "{view}");
+    assert!(flagged_titles(&app, &cookie, &csrf).await.is_empty());
+
+    add_feedback(&pool, &item, rev, "wrong", "New claim", None, 10).await;
+    let (_, view) = get_json(&app, &path, &cookie, &csrf).await;
+    assert_eq!(view["openFlagCount"], 1, "{view}");
+    let (_, body) = get_json(&app, &format!("{path}/feedback"), &cookie, &csrf).await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["items"][0]["reason"], "New claim");
+}
+
+#[tokio::test]
+async fn flag_endpoints_check_auth_and_unknown_ids() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (item, rev) = approved_item(&app, &board_id, "Auth", &cookie, &csrf).await;
+    add_feedback(&pool, &item, rev, "wrong", "Claim", None, 10).await;
+
+    for path in [
+        format!("/api/knowledge/{item}/feedback"),
+        format!("/api/knowledge/{item}/freshness"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(&path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/knowledge/{item}/flags/dismiss"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let unknown = Uuid::new_v4();
+    for path in [
+        format!("/api/knowledge/{unknown}/feedback"),
+        format!("/api/knowledge/{unknown}/freshness"),
+    ] {
+        let (status, _) = get_json(&app, &path, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    let dismiss = |id: String| {
+        let (app, cookie, csrf) = (app.clone(), cookie.clone(), csrf.clone());
+        async move {
+            app.oneshot(common::json_request(
+                "POST",
+                &format!("/api/knowledge/{id}/flags/dismiss"),
+                "{}",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+    assert_eq!(dismiss(unknown.to_string()).await, StatusCode::NOT_FOUND);
+
+    let no_csrf = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/knowledge/{item}/flags/dismiss"))
+                .header("cookie", cookie.as_str())
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_csrf.status(), StatusCode::FORBIDDEN, "CSRF token is required");
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(dismiss(item.clone()).await, StatusCode::FORBIDDEN);
+    let (status, body) = get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "members can read: {body}");
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
 }

@@ -43,8 +43,10 @@ SELECT
     ) AS source_ticket_ids,
     (SELECT count(*) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS usage_count,
     (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at,
-    (SELECT count(*) FROM knowledge_feedback f
-     WHERE f.revision_id = i.active_revision_id AND f.verdict IN ('outdated', 'wrong')) AS open_flag_count
+    (SELECT count(*) FROM knowledge_open_flags f
+     WHERE f.revision_id = i.active_revision_id) AS open_flag_count,
+    (SELECT max(f.created_at) FROM knowledge_open_flags f
+     WHERE f.revision_id = i.active_revision_id) AS last_flagged_at
 FROM knowledge_items i
 JOIN knowledge_revisions r ON r.id = i.current_revision_id
 LEFT JOIN knowledge_provenance provenance ON provenance.id = r.provenance_id
@@ -65,6 +67,15 @@ pub struct KnowledgeCitationView {
 pub struct KnowledgeFreshness {
     pub state: Freshness,
     pub citations: Vec<KnowledgeCitationView>,
+}
+
+/// An open `outdated` or `wrong` verdict. `reason` is agent-written text.
+#[derive(Debug, Clone)]
+pub struct KnowledgeFlagView {
+    pub verdict: String,
+    pub reason: String,
+    pub agent_name: Option<String>,
+    pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Error)]
@@ -110,6 +121,8 @@ pub struct KnowledgeListFilter {
     pub status: Option<KnowledgeStatus>,
     pub board_id: Option<Uuid>,
     pub knowledge_type: Option<KnowledgeType>,
+    /// Only live approved items with open flags, most recently flagged first.
+    pub flagged: bool,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
 }
@@ -316,6 +329,63 @@ impl<'a> KnowledgeService<'a> {
         Ok(KnowledgeFreshness { state, citations })
     }
 
+    /// Open flags on the item's active revision, newest first.
+    pub async fn open_flags(&self, item_id: Uuid) -> Result<Vec<KnowledgeFlagView>, KnowledgeError> {
+        let active_revision_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT active_revision_id FROM knowledge_items WHERE id = $1")
+                .bind(item_id)
+                .fetch_optional(self.pool)
+                .await?
+                .ok_or(KnowledgeError::NotFound)?;
+        let rows: Vec<(String, String, Option<String>, OffsetDateTime)> = sqlx::query_as(
+            r#"
+            SELECT f.verdict, f.reason, a.name, f.created_at
+            FROM knowledge_open_flags f
+            LEFT JOIN agents a ON a.id = f.agent_id
+            WHERE f.revision_id = $1
+            ORDER BY f.created_at DESC, f.id
+            "#,
+        )
+        .bind(active_revision_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(verdict, reason, agent_name, created_at)| KnowledgeFlagView {
+                verdict,
+                reason,
+                agent_name,
+                created_at,
+            })
+            .collect())
+    }
+
+    /// Close every open flag on the item's active revision. The rows stay, and
+    /// the item itself does not change.
+    pub async fn dismiss_flags(&self, item_id: Uuid) -> Result<KnowledgeItemView, KnowledgeError> {
+        let mut tx = self.pool.begin().await?;
+        let active_revision_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT active_revision_id FROM knowledge_items WHERE id = $1 FOR UPDATE",
+        )
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(KnowledgeError::NotFound)?;
+        sqlx::query(
+            r#"
+            UPDATE knowledge_feedback SET dismissed_at = now()
+            WHERE revision_id = $1
+              AND verdict IN ('outdated', 'wrong')
+              AND dismissed_at IS NULL
+            "#,
+        )
+        .bind(active_revision_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.get(item_id).await
+    }
+
     /// Near-duplicate assist for pending inbox review via full-text match
     /// against approved, live knowledge.
     pub async fn find_similar(
@@ -357,15 +427,35 @@ impl<'a> KnowledgeService<'a> {
             }
             None => (None, None),
         };
-        let sql = format!(
-            r#"{VIEW_SELECT}
+        let sql = if filter.flagged {
+            format!(
+                r#"{VIEW_SELECT}
+CROSS JOIN LATERAL (
+    SELECT max(o.created_at) AS flagged_at FROM knowledge_open_flags o
+    WHERE o.revision_id = i.active_revision_id
+) flags
+WHERE flags.flagged_at IS NOT NULL
+  AND i.status = 'approved'
+  AND i.superseded_by IS NULL
+  AND (i.expires_at IS NULL OR i.expires_at > now())
+  AND ($1::text IS NULL OR i.status = $1)
+  AND ($2::uuid IS NULL OR r.board_id = $2)
+  AND ($3::text IS NULL OR r.knowledge_type = $3)
+  AND ($4::timestamptz IS NULL OR (flags.flagged_at, i.id) < ($4, $5))
+ORDER BY flags.flagged_at DESC, i.id DESC
+LIMIT $6"#
+            )
+        } else {
+            format!(
+                r#"{VIEW_SELECT}
 WHERE ($1::text IS NULL OR i.status = $1)
   AND ($2::uuid IS NULL OR r.board_id = $2)
   AND ($3::text IS NULL OR r.knowledge_type = $3)
   AND ($4::timestamptz IS NULL OR (i.updated_at, i.id) < ($4, $5))
 ORDER BY i.updated_at DESC, i.id DESC
 LIMIT $6"#
-        );
+            )
+        };
         let rows = sqlx::query(&sql)
             .bind(filter.status.map(status_to_str))
             .bind(filter.board_id)
@@ -381,12 +471,13 @@ LIMIT $6"#
             .take(limit)
             .map(row_to_view)
             .collect::<Result<Vec<_>, _>>()?;
-        let next_cursor = if has_more {
-            items
-                .last()
-                .map(|item| format_cursor(item.updated_at, item.id))
-        } else {
-            None
+        let next_cursor = match (has_more, items.last()) {
+            (true, Some(item)) if filter.flagged => {
+                let flagged_at: OffsetDateTime = rows[limit - 1].try_get("last_flagged_at")?;
+                Some(format_cursor(flagged_at, item.id))
+            }
+            (true, Some(item)) => Some(format_cursor(item.updated_at, item.id)),
+            _ => None,
         };
         items.shrink_to_fit();
         Ok(KnowledgePage { items, next_cursor })
