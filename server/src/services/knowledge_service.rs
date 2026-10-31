@@ -880,15 +880,23 @@ async fn enforce_capacity_for_scope(
     Ok(())
 }
 
-/// An approved or pending item on the board (or workspace-wide) that says
-/// nearly the same thing, best match first. `None` when nothing scores at
+/// An existing item that says nearly the same thing as a proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloseItem {
+    pub item_id: Uuid,
+    /// A reviewer already turned this text down.
+    pub rejected: bool,
+}
+
+/// An approved, pending or rejected item on the board (or workspace-wide) that
+/// says nearly the same thing, best match first. `None` when nothing scores at
 /// least [`PROPOSE_DUPLICATE_SCORE`].
 pub async fn find_close_item(
     conn: &mut sqlx::PgConnection,
     board_id: Uuid,
     title: &str,
     content: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<CloseItem>, sqlx::Error> {
     let Some(tsquery) = build_tsquery(title, content) else {
         return Ok(None);
     };
@@ -899,16 +907,16 @@ pub async fn find_close_item(
                    coppice_unaccent($3::text) AS proposed_title,
                    coppice_unaccent($4::text) AS proposed_content
         )
-        SELECT i.id AS item_id,
+        SELECT i.id AS item_id, i.status,
                coppice_unaccent(r.title) AS folded_title,
                coppice_unaccent(r.content) AS folded_content,
                query.proposed_title, query.proposed_content
         FROM knowledge_items i
         JOIN knowledge_revisions r ON r.id = COALESCE(i.active_revision_id, i.current_revision_id)
         CROSS JOIN query
-        WHERE i.status IN ('approved', 'pending')
+        WHERE i.status IN ('approved', 'pending', 'rejected')
           AND i.superseded_by IS NULL
-          AND (i.expires_at IS NULL OR i.expires_at > now())
+          AND (i.status = 'rejected' OR i.expires_at IS NULL OR i.expires_at > now())
           AND (r.scope = 'workspace' OR (r.scope = 'board' AND r.board_id = $1))
           AND r.search_vector @@ query.q
         ORDER BY ts_rank_cd(r.search_vector, query.q) DESC, i.id ASC
@@ -921,7 +929,7 @@ pub async fn find_close_item(
     .bind(content)
     .fetch_all(conn)
     .await?;
-    let mut best: Option<(f64, Uuid)> = None;
+    let mut best: Option<(f64, CloseItem)> = None;
     for row in rows {
         let score = near_duplicate_score(
             row.try_get("proposed_title")?,
@@ -930,10 +938,17 @@ pub async fn find_close_item(
             row.try_get("folded_content")?,
         );
         if score >= PROPOSE_DUPLICATE_SCORE && best.is_none_or(|(top, _)| score > top) {
-            best = Some((score, row.try_get("item_id")?));
+            let status: &str = row.try_get("status")?;
+            best = Some((
+                score,
+                CloseItem {
+                    item_id: row.try_get("item_id")?,
+                    rejected: status == "rejected",
+                },
+            ));
         }
     }
-    Ok(best.map(|(_, id)| id))
+    Ok(best.map(|(_, item)| item))
 }
 
 fn map_database_error(error: sqlx::Error) -> KnowledgeError {

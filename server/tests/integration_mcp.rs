@@ -4148,6 +4148,51 @@ async fn close_match_returns_existing_item() {
 }
 
 #[tokio::test]
+async fn knowledge_propose_near_copy_of_rejected_item_creates_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let board = fx.scope.board_id.unwrap();
+    let rejected = seed_knowledge_with_content(
+        &fx.pool,
+        board,
+        "Quince cache warmup order",
+        "Warm the quince cache before starting the workers.",
+        "rejected",
+    )
+    .await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let out = call_tool_json(
+        &url,
+        &token,
+        "knowledge_propose",
+        proposal(
+            "Quince cache warmup order",
+            "Warm the quince cache before starting all workers.",
+        ),
+    )
+    .await;
+    assert_eq!(out["status"], "rejected", "{out}");
+    assert_eq!(
+        out["itemId"].as_str().unwrap(),
+        item_of(&fx.pool, rejected).await.to_string()
+    );
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+}
+
+#[tokio::test]
 async fn propose_requires_a_ticket_and_board() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

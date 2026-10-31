@@ -154,7 +154,7 @@ impl CoreTool {
                 false,
             ),
             Self::KnowledgePropose => (
-                "Propose a durable rule or fact that a different ticket would need. A reviewer approves it before anyone can search it. Do not propose what this ticket did or decided; that stays in the ticket. At most 3 per run. Returns the existing item instead when a close match is already on the board.",
+                "Propose a durable rule or fact that a different ticket would need. A reviewer approves it before anyone can search it. Do not propose what this ticket did or decided; that stays in the ticket. At most 3 per run. Creates nothing when a close match is on the board: returns that item with status `existing`, or `rejected` when a reviewer already turned it down. Do not propose a rejected rule again.",
                 object(
                     json!({
                         "type": { "type": "string", "enum": KNOWLEDGE_TYPES },

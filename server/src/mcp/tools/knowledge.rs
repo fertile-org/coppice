@@ -245,8 +245,8 @@ pub async fn call_knowledge_flag(ctx: &ToolCtx<'_>, args: Value) -> Result<Value
 
 /// Lets a working agent propose one Pending item for the run's board. Nothing
 /// a run proposes is searchable until a reviewer approves it. A close match
-/// already on the board comes back as `existing` instead of a second copy. A
-/// citation that fails validation is dropped and reported; the item is still
+/// already on the board comes back as `existing` instead of a second copy, or
+/// as `rejected` when a reviewer turned that text down. A citation that fails validation is dropped and reported; the item is still
 /// created.
 pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let (Some(ticket_id), Some(board_id)) = (ctx.scope.ticket_id, ctx.scope.board_id) else {
@@ -350,8 +350,9 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
             "knowledge_propose limit reached for this run ({MAX_PROPOSALS_PER_RUN})"
         )));
     }
-    if let Some(item_id) = find_close_item(&mut tx, board_id, &input.title, &input.content).await? {
-        return Ok(json!({ "itemId": item_id, "status": "existing" }));
+    if let Some(close) = find_close_item(&mut tx, board_id, &input.title, &input.content).await? {
+        let status = if close.rejected { "rejected" } else { "existing" };
+        return Ok(json!({ "itemId": close.item_id, "status": status }));
     }
     let item_id = KnowledgeService::new(ctx.pool, &ctx.state.config.knowledge)
         .create_from_run_in_tx(&mut tx, run, input, &citations)
