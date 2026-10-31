@@ -248,7 +248,7 @@ impl<'a> TicketService<'a> {
 
         let id = Uuid::new_v4();
         let status = TicketStatus::Backlog;
-        let priority_str = priority.map(priority_to_str);
+        let priority_str = priority_to_str(priority_for_create(priority));
 
         let row = sqlx::query(
             r#"
@@ -295,14 +295,15 @@ impl<'a> TicketService<'a> {
 
         let id = Uuid::new_v4();
         let status = TicketStatus::Backlog;
+        let priority_str = priority_to_str(priority_for_create(None));
 
         let row = sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, board_id, repo_id, title, description, status,
+                id, board_id, repo_id, title, description, status, priority,
                 parent_ticket_id, created_by, created_by_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
@@ -320,6 +321,7 @@ impl<'a> TicketService<'a> {
         .bind(title)
         .bind(description)
         .bind(status_to_str(status))
+        .bind(priority_str)
         .bind(parent.id)
         .bind("agent")
         .bind(created_by_id)
@@ -1213,6 +1215,10 @@ impl<'a> TicketService<'a> {
     }
 }
 
+fn priority_for_create(priority: Option<TicketPriority>) -> TicketPriority {
+    priority.unwrap_or(TicketPriority::Medium)
+}
+
 fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
     let status_str: String = row.get("status");
     let status = status_from_str(&status_str).unwrap_or(TicketStatus::Backlog);
@@ -1333,5 +1339,49 @@ mod tests {
             .user_can_access_attachment(attachment_id, other)
             .await
             .expect("access"));
+    }
+
+    #[tokio::test]
+    async fn create_child_defaults_priority_to_medium() {
+        let pool = crate::db::shared_test_pool().await.expect("pool");
+        let user_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
+        )
+        .bind(user_id)
+        .bind(format!("child-pri-{user_id}@example.com"))
+        .execute(&pool)
+        .await
+        .expect("user");
+
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("child priority board")
+            .bind(format!("child-pri-{board_id}"))
+            .execute(&pool)
+            .await
+            .expect("board");
+
+        let tickets = TicketService::new(&pool);
+        let parent = tickets
+            .create(
+                board_id,
+                "Parent",
+                "",
+                None,
+                Some(TicketPriority::High),
+                "ada",
+                user_id,
+            )
+            .await
+            .expect("parent");
+
+        let child = tickets
+            .create_child(&parent.ticket, "Child", "split work", user_id)
+            .await
+            .expect("child");
+        assert_eq!(child.ticket.priority, Some(TicketPriority::Medium));
+        assert_eq!(child.ticket.parent_ticket_id, Some(parent.ticket.id));
     }
 }

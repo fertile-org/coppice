@@ -1524,4 +1524,80 @@ mod tests {
         assert!(!CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"text/html"));
         assert!(!CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"image/svg+xml"));
     }
+
+    #[tokio::test]
+    async fn create_ticket_from_chat_defaults_priority_to_medium() {
+        let pool = crate::db::shared_test_pool().await.expect("pool");
+        let user_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
+        )
+        .bind(user_id)
+        .bind(format!("chat-pri-{user_id}@example.com"))
+        .execute(&pool)
+        .await
+        .expect("user");
+
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("chat priority board")
+            .bind(format!("chat-pri-{board_id}"))
+            .execute(&pool)
+            .await
+            .expect("board");
+
+        let agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
+            "#,
+        )
+        .bind(agent_id)
+        .bind("Chat Agent")
+        .bind("Backend Engineer")
+        .bind("prompt")
+        .bind("mock")
+        .bind("backend_engineer")
+        .execute(&pool)
+        .await
+        .expect("agent");
+
+        let session_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO chat_sessions (id, board_id, owner_user_id, agent_id, status)
+            VALUES ($1, $2, $3, $4, 'active')
+            "#,
+        )
+        .bind(session_id)
+        .bind(board_id)
+        .bind(user_id)
+        .bind(agent_id)
+        .execute(&pool)
+        .await
+        .expect("session");
+
+        let created = ChatService::new(&pool)
+            .create_ticket_from_chat(
+                session_id,
+                user_id,
+                CreateTicketFromChatInput {
+                    board_id,
+                    title: Some("From chat"),
+                    description: Some("Created from chat"),
+                    repo_id: None,
+                    created_by: "ada",
+                },
+            )
+            .await
+            .expect("create from chat");
+        assert_eq!(
+            created.ticket.ticket.priority,
+            Some(crate::domain::ticket::TicketPriority::Medium)
+        );
+    }
 }

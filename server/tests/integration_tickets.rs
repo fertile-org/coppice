@@ -304,3 +304,97 @@ async fn a_large_board_lists_quickly_without_descriptions() {
     let one = common::get_ticket(&app, tickets[0]["id"].as_str().unwrap(), &cookie, &csrf).await;
     assert_eq!(one["description"].as_str().unwrap().len(), 2000);
 }
+
+#[tokio::test]
+async fn create_ticket_without_priority_defaults_to_medium() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    let ticket = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"No priority","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["priority"], "medium");
+}
+
+#[tokio::test]
+async fn create_ticket_with_explicit_high_priority_keeps_high() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    let ticket = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"Urgent","description":"","priority":"high"}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["priority"], "high");
+}
+
+#[tokio::test]
+async fn create_ticket_with_invalid_priority_returns_bad_request() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/boards/{board_id}/tickets"),
+            r#"{"title":"Bad priority","description":"","priority":"normal"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn existing_ticket_without_priority_still_returns_null() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let board = uuid::Uuid::parse_str(&board_id).unwrap();
+    let ticket_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(ticket_id)
+    .bind(board)
+    .bind("Legacy")
+    .bind("")
+    .bind("backlog")
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let ticket = common::get_ticket(&app, &ticket_id.to_string(), &cookie, &csrf).await;
+    assert!(ticket["priority"].is_null());
+}
