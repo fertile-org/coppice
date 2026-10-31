@@ -140,6 +140,46 @@ impl<'a> HumanReviewService<'a> {
         Ok(())
     }
 
+    /// Record a remote merge only while this acceptance is still the live one.
+    ///
+    /// Returns `true` when a row changed. A racing local merge, a re-accept,
+    /// or a stale mark between listing and this write returns `false`.
+    pub async fn record_remote_merge_if_current(
+        &self,
+        ticket_id: Uuid,
+        accepted_sha: &str,
+        merged_sha: &str,
+    ) -> Result<bool, HumanReviewError> {
+        let accepted_sha = normalize_sha(accepted_sha);
+        let merged_sha = normalize_sha(merged_sha);
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET merged_sha = $2, merged_at = now()
+            WHERE ticket_id = $1
+              AND stale = false
+              AND merged_at IS NULL
+              AND lower(head_sha) = lower($3)
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(&merged_sha)
+        .bind(&accepted_sha)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        sqlx::query("UPDATE tickets SET updated_at = now() WHERE id = $1")
+            .bind(ticket_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// Keep the acceptance row and mark it stale. Does not change ticket status,
     /// the accepted commit, or who accepted it.
     /// Takes an executor so a run start can do this in its own transaction.
