@@ -3,11 +3,11 @@ use std::time::Duration;
 
 use crate::plugins::capability::MARKETPLACE_JSON;
 use crate::plugins::catalog::CATALOG_DIR;
-use crate::plugins::git_install::{clone, validate_git_url, validate_ref};
+use crate::plugins::git_install::{clone, is_commit_sha, validate_git_url, validate_ref};
 use crate::plugins::manifest::is_valid_plugin_name;
 use crate::plugins::marketplace::{
-    entry_categories, entry_source, expand_marketplace, github_url, is_github_shorthand,
-    normalize_source, validate_marketplace,
+    entry_source, github_url, is_github_shorthand, load_catalog, normalize_source,
+    validate_marketplace,
 };
 use crate::plugins::skills::SkillCatalog;
 use crate::services::plugin_service::{
@@ -17,11 +17,86 @@ use crate::services::plugin_service::{
 use serde_json::{Map, Value};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub struct MarketplaceService<'a> {
     pool: &'a PgPool,
+    catalog: Option<&'a MarketplaceCatalog>,
+}
+
+type CatalogMap = HashMap<(Uuid, Option<String>), Arc<Vec<CachedCatalogEntry>>>;
+
+/// In-memory parsed catalogs, keyed by source id and commit. Shared on `AppState`.
+#[derive(Default)]
+pub struct MarketplaceCatalog {
+    entries: Mutex<CatalogMap>,
+    refresh_locks: tokio::sync::Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
+    last_refresh: Mutex<HashMap<Uuid, Instant>>,
+    refresh_clones: AtomicU64,
+}
+
+#[derive(Clone, Debug)]
+struct CachedCatalogEntry {
+    name: String,
+    description: String,
+    version: String,
+    kind: String,
+    installable: bool,
+    reason: Option<String>,
+    category: Option<String>,
+}
+
+impl MarketplaceCatalog {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn refresh_clone_count(&self) -> u64 {
+        self.refresh_clones.load(Ordering::SeqCst)
+    }
+
+    fn get(&self, id: Uuid, commit: Option<&str>) -> Option<Arc<Vec<CachedCatalogEntry>>> {
+        let map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+        map.get(&(id, commit.map(str::to_string))).cloned()
+    }
+
+    fn insert(&self, id: Uuid, commit: Option<String>, rows: Vec<CachedCatalogEntry>) {
+        let mut map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+        map.insert((id, commit), Arc::new(rows));
+    }
+
+    fn clear(&self, id: Uuid) {
+        let mut map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+        map.retain(|(source_id, _), _| *source_id != id);
+    }
+
+    async fn refresh_lock(&self, id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
+        let mut map = self.refresh_locks.lock().await;
+        map.entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    fn mark_refresh_finished(&self, id: Uuid) {
+        let mut map = self
+            .last_refresh
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        map.insert(id, Instant::now());
+    }
+
+    fn finished_after(&self, id: Uuid, started: Instant) -> bool {
+        let map = self
+            .last_refresh
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        map.get(&id).is_some_and(|finished| *finished >= started)
+    }
 }
 
 /// One `path`-sourced entry of a marketplace folder, already on disk.
@@ -44,6 +119,7 @@ struct Origin<'a> {
 }
 
 /// Where an entry's files come from once its source is fetched.
+#[derive(Debug)]
 enum EntrySource {
     /// A `path` entry: a folder inside the cached marketplace.
     Path { root: PathBuf, source: String },
@@ -101,7 +177,17 @@ pub struct MarketplaceJob {
 
 impl<'a> MarketplaceService<'a> {
     pub fn new(pool: &'a PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            catalog: None,
+        }
+    }
+
+    pub fn with_catalog(pool: &'a PgPool, catalog: &'a MarketplaceCatalog) -> Self {
+        Self {
+            pool,
+            catalog: Some(catalog),
+        }
     }
 
     /// Copies a path entry into the default plugin dir as `<name>`, rescans,
@@ -450,7 +536,11 @@ impl<'a> MarketplaceService<'a> {
         let dest = base.join(name);
         let staging = base.join(format!(".{name}.staging-{}", Uuid::new_v4()));
         let previous = base.join(format!(".{name}.previous-{}", Uuid::new_v4()));
-        copy_entry_tree(src, &staging).inspect_err(|_| remove_quietly(&staging))?;
+        let src_owned = src.to_path_buf();
+        let staging_owned = staging.clone();
+        run_blocking(move || copy_entry_tree(&src_owned, &staging_owned))
+            .await
+            .inspect_err(|_| remove_quietly(&staging))?;
 
         let claim = async {
             let mut tx = self.pool.begin().await?;
@@ -599,7 +689,12 @@ impl<'a> MarketplaceService<'a> {
                 "marketplace has not been fetched yet".into(),
             ));
         }
-        let value = entry_source(&root, entry).ok_or(PluginError::NotFound)?;
+        let root_owned = root.clone();
+        let entry_owned = entry.to_string();
+        let value = run_blocking(move || {
+            entry_source(&root_owned, &entry_owned).ok_or(PluginError::NotFound)
+        })
+        .await?;
         let from = match value {
             Value::String(path) => EntrySource::Path { root, source: path },
             Value::Object(object) => object_source(&object, allow_file)?,
@@ -674,10 +769,20 @@ fn object_source(
         }
     };
     validate_git_url(&url, allow_file).map_err(PluginError::Validation)?;
-    let git_ref = field("ref").map(str::to_string);
-    if let Some(git_ref) = &git_ref {
-        validate_ref(git_ref).map_err(PluginError::Validation)?;
-    }
+    let git_ref = if let Some(sha) = field("sha") {
+        if !is_commit_sha(sha) {
+            return Err(PluginError::Validation(
+                "source sha must be a 40-character hex commit".into(),
+            ));
+        }
+        Some(sha.to_string())
+    } else {
+        let git_ref = field("ref").map(str::to_string);
+        if let Some(git_ref) = &git_ref {
+            validate_ref(git_ref).map_err(PluginError::Validation)?;
+        }
+        git_ref
+    };
     Ok(EntrySource::Git {
         url,
         git_ref,
@@ -877,6 +982,9 @@ impl<'a> MarketplaceService<'a> {
             .execute(self.pool)
             .await?;
         remove_quietly(&cache.join(id.to_string()));
+        if let Some(catalog) = self.catalog {
+            catalog.clear(id);
+        }
         Ok(())
     }
 
@@ -890,9 +998,42 @@ impl<'a> MarketplaceService<'a> {
         allow_file: bool,
         timeout: Duration,
     ) -> Result<MarketplaceSource, PluginError> {
+        if let Some(catalog) = self.catalog {
+            let lock = catalog.refresh_lock(id).await;
+            let started = Instant::now();
+            let _guard = lock.lock().await;
+            if catalog.finished_after(id, started) {
+                let source = self.get_source(id).await?;
+                if let Some(reason) = source.last_error.clone() {
+                    return Err(PluginError::Validation(reason));
+                }
+                return Ok(source);
+            }
+            catalog.refresh_clones.fetch_add(1, Ordering::SeqCst);
+            let result = self
+                .refresh_source_inner(id, cache, allow_file, timeout)
+                .await;
+            catalog.mark_refresh_finished(id);
+            catalog.clear(id);
+            return result;
+        }
+        self.refresh_source_inner(id, cache, allow_file, timeout)
+            .await
+    }
+
+    async fn refresh_source_inner(
+        &self,
+        id: Uuid,
+        cache: &Path,
+        allow_file: bool,
+        timeout: Duration,
+    ) -> Result<MarketplaceSource, PluginError> {
         let source = self.get_source(id).await?;
         if source.kind == "builtin" {
             crate::plugins::catalog::materialize_catalog(cache)?;
+            if let Some(catalog) = self.catalog {
+                catalog.clear(id);
+            }
             return self.mark_refreshed(id, None).await;
         }
         let url = source
@@ -907,12 +1048,25 @@ impl<'a> MarketplaceService<'a> {
             allow_file,
             timeout,
         )
-        .await
-        .and_then(|commit| {
-            validate_marketplace(&staging)
-                .map(|()| commit)
-                .map_err(|reason| format!("invalid marketplace: {reason}"))
-        });
+        .await;
+        let fetched = match fetched {
+            Ok(commit) => {
+                let staging_owned = staging.clone();
+                run_blocking(move || {
+                    validate_marketplace(&staging_owned)
+                        .map(|()| commit)
+                        .map_err(PluginError::Validation)
+                })
+                .await
+                .map_err(|err| match err {
+                    PluginError::Validation(reason) => {
+                        format!("invalid marketplace: {reason}")
+                    }
+                    other => other.to_string(),
+                })
+            }
+            Err(reason) => Err(reason),
+        };
         let commit = match fetched {
             Ok(commit) => commit,
             Err(reason) => {
@@ -922,10 +1076,24 @@ impl<'a> MarketplaceService<'a> {
             }
         };
         let root = cache.join(id.to_string());
-        remove_quietly(&root);
+        let aside = cache.join(format!(".{id}.previous-{}", Uuid::new_v4()));
+        let had_root = root.symlink_metadata().is_ok();
+        if had_root {
+            if let Err(err) = std::fs::rename(&root, &aside) {
+                remove_quietly(&staging);
+                return Err(err.into());
+            }
+        }
         if let Err(err) = std::fs::rename(&staging, &root) {
+            if had_root {
+                let _ = std::fs::rename(&aside, &root);
+            }
             remove_quietly(&staging);
             return Err(err.into());
+        }
+        remove_quietly(&aside);
+        if let Some(catalog) = self.catalog {
+            catalog.clear(id);
         }
         self.mark_refreshed(id, Some(&commit)).await
     }
@@ -961,96 +1129,66 @@ impl<'a> MarketplaceService<'a> {
     }
 
     /// Lists entries of every source whose cache folder exists. A source with
-    /// no cache (never refreshed, or failed before any fetch) contributes none.
+    /// no cache (never refreshed, or failed before any fetch) contributes none
+    /// unless a parsed catalog is already in memory.
     pub async fn list_entries(
         &self,
         cache: &Path,
         filter: &EntryFilter<'_>,
     ) -> Result<Vec<MarketplaceEntry>, PluginError> {
         let sources = self.list_sources().await?;
-        let installed = self.installed_origins().await?;
+        let (installed, live_by_name) = self.installed_plugins().await?;
         let query = filter.query.map(str::to_lowercase);
         let mut out = Vec::new();
         for source in &sources {
             if filter.source_id.is_some_and(|id| id != source.id) {
                 continue;
             }
-            let (root, rel) = source_root(cache, source);
-            if !root.join(MARKETPLACE_JSON).is_file() {
-                continue;
-            }
-            let categories = entry_categories(&root);
-            for found in expand_marketplace(&root, &rel) {
-                let category = categories.get(&found.name).cloned();
+            let rows = self.source_catalog_rows(cache, source).await?;
+            for row in rows.iter() {
                 if filter
                     .category
-                    .is_some_and(|c| category.as_deref() != Some(c))
+                    .is_some_and(|c| row.category.as_deref() != Some(c))
                 {
                     continue;
                 }
-                let (kind, installable, reason, version, description) = match &found.result {
-                    Ok(manifest) => match &manifest.external {
-                        None => (
-                            "path".to_string(),
-                            true,
-                            None,
-                            manifest.version.clone(),
-                            manifest.description.clone(),
-                        ),
-                        Some(external) => {
-                            let kind = external
-                                .kind
-                                .split(':')
-                                .next()
-                                .unwrap_or_default()
-                                .to_string();
-                            let (installable, reason) = match kind.as_str() {
-                                "github" | "url" | "git-subdir" => (true, None),
-                                "npm" => (false, Some("npm sources are not supported".to_string())),
-                                _ => (false, Some("unknown source kind".to_string())),
-                            };
-                            (
-                                kind,
-                                installable,
-                                reason,
-                                manifest.version.clone(),
-                                manifest.description.clone(),
-                            )
-                        }
-                    },
-                    Err(reason) => (
-                        "unknown".to_string(),
-                        false,
-                        Some(reason.clone()),
-                        String::new(),
-                        String::new(),
-                    ),
-                };
                 if let Some(q) = &query {
-                    let hit = found.name.to_lowercase().contains(q)
-                        || description.to_lowercase().contains(q);
+                    let hit = row.name.to_lowercase().contains(q)
+                        || row.description.to_lowercase().contains(q);
                     if !hit {
                         continue;
                     }
                 }
-                let origin = installed.get(&(source.id, found.name.clone()));
+                let origin = installed.get(&(source.id, row.name.clone()));
+                let mut installable = row.installable;
+                let mut reason = row.reason.clone();
+                if installable {
+                    if let Some(live) = live_by_name.get(&row.name) {
+                        let same = live.origin_source_id == Some(source.id)
+                            && live.origin_entry.as_deref() == Some(row.name.as_str());
+                        if !same {
+                            installable = false;
+                            reason = Some(format!("already installed as {}", live.name));
+                        }
+                    }
+                }
                 let update_available = origin.is_some_and(|o| {
-                    kind == "path"
+                    row.kind == "path"
                         && match source.kind.as_str() {
-                            "builtin" => o.version != version,
+                            "builtin" => o.version != row.version,
                             _ => o.commit.as_deref() != source.commit_sha.as_deref(),
                         }
                 });
                 out.push(MarketplaceEntry {
                     source_id: source.id,
                     source_name: source.name.clone(),
-                    name: found.name.clone(),
-                    description,
-                    version,
-                    kind,
+                    name: row.name.clone(),
+                    description: row.description.clone(),
+                    version: row.version.clone(),
+                    kind: row.kind.clone(),
                     installable,
                     reason,
-                    category,
+                    category: row.category.clone(),
                     installed_plugin_id: origin.map(|o| o.id),
                     update_available,
                 });
@@ -1059,32 +1197,77 @@ impl<'a> MarketplaceService<'a> {
         Ok(out)
     }
 
-    async fn installed_origins(
+    async fn source_catalog_rows(
         &self,
-    ) -> Result<std::collections::HashMap<(Uuid, String), InstalledOrigin>, PluginError> {
+        cache: &Path,
+        source: &MarketplaceSource,
+    ) -> Result<Arc<Vec<CachedCatalogEntry>>, PluginError> {
+        if let Some(catalog) = self.catalog {
+            if let Some(rows) = catalog.get(source.id, source.commit_sha.as_deref()) {
+                return Ok(rows);
+            }
+        }
+        let (root, rel) = source_root(cache, source);
+        let parsed = run_blocking(move || Ok::<_, PluginError>(load_catalog(&root, &rel))).await?;
+        let Some((categories, found)) = parsed else {
+            return Ok(Arc::new(Vec::new()));
+        };
+        let rows: Vec<CachedCatalogEntry> = found
+            .into_iter()
+            .map(|found| cached_from_discovered(found, &categories))
+            .collect();
+        if let Some(catalog) = self.catalog {
+            catalog.insert(source.id, source.commit_sha.clone(), rows.clone());
+            if let Some(cached) = catalog.get(source.id, source.commit_sha.as_deref()) {
+                return Ok(cached);
+            }
+        }
+        Ok(Arc::new(rows))
+    }
+
+    async fn installed_plugins(
+        &self,
+    ) -> Result<
+        (
+            HashMap<(Uuid, String), InstalledOrigin>,
+            HashMap<String, LivePlugin>,
+        ),
+        PluginError,
+    > {
         let rows = sqlx::query(
             r#"
-            SELECT id, origin_source_id, origin_entry, origin_commit, version FROM plugins
-            WHERE origin_source_id IS NOT NULL AND origin_entry IS NOT NULL AND status <> 'missing'
+            SELECT id, name, origin_source_id, origin_entry, origin_commit, version FROM plugins
+            WHERE status <> 'missing'
             "#,
         )
         .fetch_all(self.pool)
         .await?;
-        Ok(rows
-            .iter()
-            .map(|row| {
-                let source: Uuid = row.get("origin_source_id");
-                let entry: String = row.get("origin_entry");
-                (
+        let mut installed = HashMap::new();
+        let mut live_by_name = HashMap::new();
+        for row in &rows {
+            let name: String = row.get("name");
+            let origin_source_id: Option<Uuid> = row.get("origin_source_id");
+            let origin_entry: Option<String> = row.get("origin_entry");
+            live_by_name.insert(
+                name.clone(),
+                LivePlugin {
+                    name: name.clone(),
+                    origin_source_id,
+                    origin_entry: origin_entry.clone(),
+                },
+            );
+            if let (Some(source), Some(entry)) = (origin_source_id, origin_entry) {
+                installed.insert(
                     (source, entry),
                     InstalledOrigin {
                         id: row.get("id"),
                         commit: row.get("origin_commit"),
                         version: row.get("version"),
                     },
-                )
-            })
-            .collect())
+                );
+            }
+        }
+        Ok((installed, live_by_name))
     }
 }
 
@@ -1092,6 +1275,78 @@ struct InstalledOrigin {
     id: Uuid,
     commit: Option<String>,
     version: String,
+}
+
+struct LivePlugin {
+    name: String,
+    origin_source_id: Option<Uuid>,
+    origin_entry: Option<String>,
+}
+
+fn cached_from_discovered(
+    found: crate::plugins::discover::Discovered,
+    categories: &HashMap<String, String>,
+) -> CachedCatalogEntry {
+    let category = categories.get(&found.name).cloned();
+    let (kind, installable, reason, version, description) = match &found.result {
+        Ok(manifest) => match &manifest.external {
+            None => (
+                "path".to_string(),
+                true,
+                None,
+                manifest.version.clone(),
+                manifest.description.clone(),
+            ),
+            Some(external) => {
+                let kind = external
+                    .kind
+                    .split(':')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let (installable, reason) = match kind.as_str() {
+                    "github" | "url" | "git-subdir" => (true, None),
+                    "npm" => (false, Some("npm sources are not supported".to_string())),
+                    _ => (false, Some("unknown source kind".to_string())),
+                };
+                (
+                    kind,
+                    installable,
+                    reason,
+                    manifest.version.clone(),
+                    manifest.description.clone(),
+                )
+            }
+        },
+        Err(reason) => (
+            "unknown".to_string(),
+            false,
+            Some(reason.clone()),
+            String::new(),
+            String::new(),
+        ),
+    };
+    CachedCatalogEntry {
+        name: found.name,
+        description,
+        version,
+        kind,
+        installable,
+        reason,
+        category,
+    }
+}
+
+async fn run_blocking<T, E, F>(work: F) -> Result<T, PluginError>
+where
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: Into<PluginError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|err| PluginError::Validation(err.to_string()))?
+        .map_err(Into::into)
 }
 
 /// The folder a source's entries are read from, and the `folder_rel` prefix
@@ -1124,6 +1379,9 @@ fn copy_entry_tree(src: &Path, dst: &Path) -> Result<(), PluginError> {
     std::fs::create_dir(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
         let from = entry.path();
         let to = dst.join(entry.file_name());
         let kind = entry.file_type()?;
@@ -1179,6 +1437,22 @@ mod tests {
     }
 
     #[test]
+    fn skips_git_directory_and_file_at_any_depth() {
+        let root = tempfile::tempdir().unwrap();
+        let src = root.path().join("src");
+        std::fs::create_dir_all(src.join(".git/objects")).unwrap();
+        std::fs::write(src.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+        std::fs::create_dir_all(src.join("nested")).unwrap();
+        std::fs::write(src.join("nested/.git"), "gitdir: /elsewhere").unwrap();
+        std::fs::write(src.join("SKILL.md"), "x").unwrap();
+        let dst = root.path().join("dst");
+        copy_entry_tree(&src, &dst).expect("copies without .git");
+        assert!(dst.join("SKILL.md").is_file());
+        assert!(!dst.join(".git").exists());
+        assert!(!dst.join("nested/.git").exists());
+    }
+
+    #[test]
     fn object_sources_parse_and_refuse_npm() {
         let parse = |value: Value| object_source(value.as_object().unwrap(), false);
         match parse(serde_json::json!({ "source": "github", "repo": "acme/tools", "ref": "v1" })) {
@@ -1209,5 +1483,27 @@ mod tests {
             Err(PluginError::Validation(_))
         ));
         assert!(parse(serde_json::json!({ "source": "url", "url": "--upload-pack=x" })).is_err());
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        match parse(serde_json::json!({
+            "source": "github",
+            "repo": "acme/tools",
+            "ref": "main",
+            "sha": sha
+        })) {
+            Ok(EntrySource::Git { git_ref, .. }) => assert_eq!(git_ref.as_deref(), Some(sha)),
+            other => panic!("sha should win over ref: {other:?}"),
+        }
+        assert!(parse(serde_json::json!({
+            "source": "github",
+            "repo": "acme/tools",
+            "sha": "not-a-sha"
+        }))
+        .is_err());
+        assert!(parse(serde_json::json!({
+            "source": "github",
+            "repo": "acme/tools",
+            "sha": "0123456789abcdef0123456789abcdef0123456"
+        }))
+        .is_err());
     }
 }

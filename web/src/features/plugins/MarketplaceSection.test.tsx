@@ -48,7 +48,7 @@ const communitySource: MarketplaceSource = {
   gitUrl: 'https://github.com/acme/plugins.git',
   gitRef: null,
   commitSha: 'abc1234',
-  refreshedAt: '2026-10-25T10:00:00Z',
+  refreshedAt: '2026-10-31T10:00:00Z',
   lastError: null,
   position: 1,
 };
@@ -144,6 +144,8 @@ let sources: MarketplaceSource[];
 let plugins: Plugin[];
 let jobResult: PluginInstall;
 let addedFetchError: string | null;
+let entryErrors: Record<string, string>;
+let entryDelay: Promise<void> | null;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -187,11 +189,13 @@ describe('PluginsPage marketplace tab', () => {
     localStorage.clear();
     entries = [githubEntry, reviewEntry, npmEntry, installedUpdatable];
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
       communitySource,
     ];
     plugins = [];
     addedFetchError = null;
+    entryErrors = {};
+    entryDelay = null;
     jobResult = {
       id: '00000000-0000-4000-8000-000000000020',
       pluginDirId: defaultDir.id,
@@ -211,8 +215,17 @@ describe('PluginsPage marketplace tab', () => {
       if (path === '/api/plugins' && method === 'GET') {
         return Promise.resolve(json(plugins));
       }
-      if (path === '/api/marketplace/entries' && method === 'GET') {
-        return Promise.resolve(json(entries));
+      if (path.startsWith('/api/marketplace/entries') && method === 'GET') {
+        const url = new URL(path, 'http://localhost');
+        const source = url.searchParams.get('source');
+        if (source && entryErrors[source]) {
+          return Promise.reject(new Error(entryErrors[source]));
+        }
+        const listed = source ? entries.filter((entry) => entry.sourceId === source) : entries;
+        if (entryDelay) {
+          return entryDelay.then(() => json(listed));
+        }
+        return Promise.resolve(json(listed));
       }
       if (path === '/api/marketplace/sources' && method === 'GET') {
         return Promise.resolve(json(sources));
@@ -314,7 +327,7 @@ describe('PluginsPage marketplace tab', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
     expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
-    selectComboboxOption(screen.getByRole('combobox', { name: 'Source' }), 'acme-plugins');
+    fireEvent.click(screen.getByTestId('marketplace-source-chip-acme-plugins'));
     expect(screen.getAllByTestId(/^marketplace-entry-/)).toHaveLength(24);
 
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
@@ -327,7 +340,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('fetches each never-loaded source once when Marketplace opens', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
       unfetchedSource,
     ];
     renderPage();
@@ -340,7 +353,7 @@ describe('PluginsPage marketplace tab', () => {
       ),
     );
     await waitFor(() =>
-      expect(screen.queryByText('Loading marketplace sources…')).toBeNull(),
+      expect(screen.queryByTestId('marketplace-skeleton')).toBeNull(),
     );
     const calls = mocks.apiFetch.mock.calls.filter(
       ([path, init]) =>
@@ -353,14 +366,15 @@ describe('PluginsPage marketplace tab', () => {
 
   it('keeps healthy entries visible when a first fetch fails', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
       { ...unfetchedSource, lastError: 'network offline' },
     ];
     renderPage();
     await openMarketplace();
 
     expect(entryCard(githubEntry)).toBeVisible();
-    expect(screen.getByText(/Some sources couldn’t load/)).toBeVisible();
+    expect(screen.getByText(/anthropic-test couldn’t load/)).toBeVisible();
+    expect(screen.getByTestId('marketplace-source-chip-anthropic-test')).toBeVisible();
   });
 
   it('a path install posts the entry and lands on the installed plugins with a notice', async () => {
@@ -553,19 +567,114 @@ describe('PluginsPage marketplace tab', () => {
 
   it('refreshes a source from the dialog and opens it from the failure warning', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-25T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
       communitySource,
       { ...unfetchedSource, refreshedAt: '2026-10-25T10:00:00Z', lastError: 'network offline' },
     ];
     renderPage();
     await openMarketplace();
 
-    fireEvent.click(screen.getByRole('button', { name: /Some sources couldn’t load/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Manage sources' }));
     const dialog = await screen.findByRole('dialog', { name: 'Marketplace sources' });
     expect(within(dialog).getByText('Last refresh failed: network offline')).toBeVisible();
     expect(within(dialog).getByRole('button', { name: 'Retry anthropic-test' })).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh acme-plugins' }));
     await waitFor(() => expect(refreshCalls(communitySource.id)).toHaveLength(1));
+  });
+
+  it('shows skeletons and per-source spinners before sources settle', async () => {
+    let release: () => void = () => undefined;
+    entryDelay = new Promise((resolve) => {
+      release = resolve;
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
+
+    expect(await screen.findAllByTestId('marketplace-skeleton')).not.toHaveLength(0);
+    expect(screen.getByLabelText('Loading coppice')).toBeVisible();
+    expect(screen.getByLabelText('Loading acme-plugins')).toBeVisible();
+    expect(screen.queryByText('No plugins in the marketplace yet.')).toBeNull();
+
+    release();
+    expect(await screen.findByTestId(`marketplace-entry-${githubEntry.sourceId}/github`)).toBeVisible();
+    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
+  });
+
+  it('retries a failed source without hiding the others', async () => {
+    entryErrors[communitySource.id] = 'catalog missing';
+    renderPage();
+    await openMarketplace();
+
+    expect(entryCard(githubEntry)).toBeVisible();
+    expect(screen.getByText(/acme-plugins couldn’t load/)).toBeVisible();
+    const failed = screen.getByTestId('marketplace-source-chip-acme-plugins');
+    expect(within(failed).getByLabelText('Retry acme-plugins')).toBeVisible();
+
+    const before = mocks.apiFetch.mock.calls.filter(([path]) =>
+      String(path).includes(`source=${communitySource.id}`),
+    ).length;
+    fireEvent.click(failed);
+    await waitFor(() =>
+      expect(
+        mocks.apiFetch.mock.calls.filter(([path]) =>
+          String(path).includes(`source=${communitySource.id}`),
+        ).length,
+      ).toBeGreaterThan(before),
+    );
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'github' } });
+    expect(entryCard(githubEntry)).toBeVisible();
+  });
+
+  it('ranks name matches ahead of description matches', async () => {
+    const exact: MarketplaceEntry = {
+      ...reviewEntry,
+      name: 'review',
+      description: 'Exact name',
+    };
+    const prefix: MarketplaceEntry = {
+      ...reviewEntry,
+      name: 'review-kit',
+      description: 'Prefix name',
+    };
+    const contains: MarketplaceEntry = {
+      ...reviewEntry,
+      name: 'code-review',
+      description: 'Contains name',
+    };
+    const described: MarketplaceEntry = {
+      ...githubEntry,
+      name: 'github',
+      description: 'Issues, pull requests, reviews and CI',
+    };
+    entries = [described, contains, prefix, exact];
+    renderPage();
+    await openMarketplace();
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'review' } });
+    const cards = screen.getAllByTestId(/^marketplace-entry-/);
+    expect(cards.map((card) => card.getAttribute('data-testid'))).toEqual([
+      `marketplace-entry-${exact.sourceId}/review`,
+      `marketplace-entry-${prefix.sourceId}/review-kit`,
+      `marketplace-entry-${contains.sourceId}/code-review`,
+      `marketplace-entry-${described.sourceId}/github`,
+    ]);
+  });
+
+  it('shows why an entry is already installed from another source', async () => {
+    entries = [
+      githubEntry,
+      {
+        ...reviewEntry,
+        installable: false,
+        reason: 'already installed as github',
+      },
+    ];
+    renderPage();
+    await openMarketplace();
+
+    const card = entryCard(reviewEntry);
+    expect(within(card).getByText('already installed as github')).toBeVisible();
+    expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
   });
 });

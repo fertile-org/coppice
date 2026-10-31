@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiFetch } from '../../lib/api';
 import {
@@ -43,8 +49,8 @@ async function fetchSources(): Promise<MarketplaceSource[]> {
   return sourceListSchema.parse(await res.json());
 }
 
-async function fetchEntries(): Promise<MarketplaceEntry[]> {
-  const res = await apiFetch('/api/marketplace/entries');
+async function fetchEntries(sourceId: string): Promise<MarketplaceEntry[]> {
+  const res = await apiFetch(`/api/marketplace/entries?source=${encodeURIComponent(sourceId)}`);
   return entryListSchema.parse(await res.json());
 }
 
@@ -98,28 +104,45 @@ export function useMarketplaceSources() {
   });
 }
 
-export function useMarketplaceEntries() {
-  return useQuery({
-    queryKey: MARKETPLACE_ENTRIES_QUERY_KEY,
-    queryFn: fetchEntries,
+export function useMarketplaceEntriesBySource(sourceIds: string[]) {
+  return useQueries({
+    queries: sourceIds.map((sourceId) => ({
+      queryKey: [...MARKETPLACE_ENTRIES_QUERY_KEY, sourceId],
+      queryFn: () => fetchEntries(sourceId),
+      placeholderData: keepPreviousData,
+    })),
   });
 }
 
 export type RefreshMarketplaceOnce = (
   source: MarketplaceSource,
+  options?: { restart?: boolean },
 ) => Promise<MarketplaceSource>;
 
+const STALE_MS = 24 * 60 * 60 * 1000;
+
+function isStaleSource(source: MarketplaceSource): boolean {
+  if (source.refreshedAt === null) return true;
+  const at = Date.parse(source.refreshedAt);
+  return Number.isNaN(at) || Date.now() - at > STALE_MS;
+}
+
 /**
- * Refreshes each never-fetched source once per mount. Kept promises deduplicate
- * the request across the invalidation that follows success or failure.
+ * Refreshes never-fetched or 24h-stale sources once per mount. `restart` drops
+ * a settled attempt so chip and dialog retries issue a new request.
  */
 export function useMarketplaceFirstFetch(sources: MarketplaceSource[]) {
   const queryClient = useQueryClient();
   const attempts = useRef(new Map<string, Promise<MarketplaceSource>>());
+  const settled = useRef(new Set<string>());
   const [pendingIds, setPendingIds] = useState<string[]>([]);
 
   const refreshOnce = useCallback<RefreshMarketplaceOnce>(
-    (source) => {
+    (source, options) => {
+      if (options?.restart && settled.current.has(source.id)) {
+        settled.current.delete(source.id);
+        attempts.current.delete(source.id);
+      }
       const existing = attempts.current.get(source.id);
       if (existing) return existing;
 
@@ -133,10 +156,11 @@ export function useMarketplaceFirstFetch(sources: MarketplaceSource[]) {
           throw error;
         })
         .finally(() => {
+          settled.current.add(source.id);
           setPendingIds((ids) => ids.filter((id) => id !== source.id));
         });
       attempts.current.set(source.id, request);
-      setPendingIds((ids) => [...ids, source.id]);
+      setPendingIds((ids) => (ids.includes(source.id) ? ids : [...ids, source.id]));
       return request;
     },
     [queryClient],
@@ -144,12 +168,12 @@ export function useMarketplaceFirstFetch(sources: MarketplaceSource[]) {
 
   useEffect(() => {
     for (const source of sources) {
-      if (source.refreshedAt !== null || attempts.current.has(source.id)) continue;
+      if (!isStaleSource(source) || attempts.current.has(source.id)) continue;
       void refreshOnce(source).catch(() => undefined);
     }
   }, [sources, refreshOnce]);
 
-  return { refreshOnce, pendingCount: pendingIds.length };
+  return { refreshOnce, pendingIds, pendingCount: pendingIds.length };
 }
 
 function invalidateMarketplace(queryClient: ReturnType<typeof useQueryClient>) {

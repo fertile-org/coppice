@@ -355,9 +355,9 @@ async fn rescan_keeps_marketplace_origin() {
         "UPDATE plugins SET origin_entry = 'sample-plugin', origin_commit = 'abc123' WHERE id = $1",
     )
     .bind(plugin_uuid)
-        .execute(&pool)
-        .await
-        .unwrap();
+    .execute(&pool)
+    .await
+    .unwrap();
 
     rescan(&app, &cookie, &csrf).await;
 
@@ -2139,7 +2139,11 @@ async fn example_hello_coppice_plugin_loads_and_tests() {
         json!([{ "key": "HELLO_GREETING", "configured": false, "needsReentry": false, "source": "default" }])
     );
 
-    if std::process::Command::new("node").arg("--version").output().is_err() {
+    if std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("skipping example MCP test: node not installed");
         return;
     }
@@ -3174,9 +3178,7 @@ async fn plugin_card_and_agent_form_share_one_assignment() {
 
 #[tokio::test]
 async fn marketplace_seed_builtin_is_idempotent_and_lists_catalog() {
-    use coppice_server::services::marketplace_service::{
-        EntryFilter, MarketplaceService,
-    };
+    use coppice_server::services::marketplace_service::{EntryFilter, MarketplaceService};
 
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
@@ -3257,14 +3259,14 @@ async fn marketplace_anthropic_default_source_is_non_destructive() {
         .await
         .expect("seed Anthropic");
     let sources = service.list_sources().await.unwrap();
-    assert_eq!(
-        sources
-            .iter()
-            .map(|source| source.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["coppice", "claude-plugins-official"]
+    assert!(
+        sources.iter().any(|source| source.name == "coppice"),
+        "{sources:?}"
     );
-    let anthropic = &sources[1];
+    let anthropic = sources
+        .iter()
+        .find(|source| source.name == "claude-plugins-official")
+        .expect("official source");
     assert_eq!(anthropic.kind, "git");
     assert_eq!(
         anthropic.git_url.as_deref(),
@@ -3430,7 +3432,9 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
     assert_eq!(source.kind, "git");
     assert!(source.commit_sha.is_none());
     assert!(matches!(
-        service.add_git_source("test-market", &url, None, true).await,
+        service
+            .add_git_source("test-market", &url, None, true)
+            .await,
         Err(PluginError::Conflict(_))
     ));
     assert!(matches!(
@@ -3438,7 +3442,9 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         Err(PluginError::Validation(_))
     ));
     assert!(matches!(
-        service.add_git_source("bad", "https://user:pw@example.com/m.git", None, true).await,
+        service
+            .add_git_source("bad", "https://user:pw@example.com/m.git", None, true)
+            .await,
         Err(PluginError::Validation(_))
     ));
 
@@ -3479,7 +3485,13 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         .expect("install");
 
     let entries = service
-        .list_entries(cache.path(), &EntryFilter { source_id: Some(source.id), ..Default::default() })
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                source_id: Some(source.id),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(entries[0].installed_plugin_id, Some(installed.id));
@@ -3494,12 +3506,23 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         .await
         .expect("second refresh");
     let entries = service
-        .list_entries(cache.path(), &EntryFilter { source_id: Some(source.id), ..Default::default() })
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                source_id: Some(source.id),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert!(entries[0].update_available, "{entries:?}");
     assert_eq!(
-        service.get_source(source.id).await.unwrap().commit_sha.as_deref(),
+        service
+            .get_source(source.id)
+            .await
+            .unwrap()
+            .commit_sha
+            .as_deref(),
         Some(second_sha.as_str())
     );
 
@@ -3521,16 +3544,25 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
     assert!(broken.last_error.is_some());
     assert!(broken.commit_sha.is_none());
 
-    service.remove_source(source.id, cache.path()).await.expect("remove");
-    assert!(!root.exists());
-    let origin: Option<uuid::Uuid> = sqlx::query_scalar("SELECT origin_source_id FROM plugins WHERE id = $1")
-        .bind(installed.id)
-        .fetch_one(&pool)
+    service
+        .remove_source(source.id, cache.path())
         .await
-        .unwrap();
+        .expect("remove");
+    assert!(!root.exists());
+    let origin: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT origin_source_id FROM plugins WHERE id = $1")
+            .bind(installed.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(origin.is_none());
     assert_eq!(
-        count(&pool, "SELECT COUNT(*) FROM plugins WHERE name = $1", "sample-plugin").await,
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM plugins WHERE name = $1",
+            "sample-plugin"
+        )
+        .await,
         1,
         "removing the source keeps the installed plugin"
     );
@@ -4339,4 +4371,538 @@ async fn marketplace_plugin_is_served_to_assigned_agents_only() {
             "{agent}: {listed:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn marketplace_extra_default_sources_are_non_destructive() {
+    use coppice_server::services::marketplace_service::MarketplaceService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let service = MarketplaceService::new(&pool);
+    let seed = include_str!("../migrations/061_seed_marketplace_sources.sql");
+
+    service
+        .seed_builtin(cache.path())
+        .await
+        .expect("seed builtin");
+    let names: Vec<String> = service
+        .list_sources()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|source| source.name)
+        .collect();
+    for expected in [
+        "coppice",
+        "claude-plugins-official",
+        "claude-community",
+        "superpowers-marketplace",
+        "ponytail",
+    ] {
+        assert!(names.iter().any(|name| name == expected), "{names:?}");
+    }
+
+    let sources = service.list_sources().await.unwrap();
+    let community = sources
+        .iter()
+        .find(|source| source.name == "claude-community")
+        .expect("community");
+    assert_eq!(
+        community.git_url.as_deref(),
+        Some("https://github.com/anthropics/claude-plugins-community.git")
+    );
+    assert_eq!(community.git_ref.as_deref(), Some("main"));
+
+    service
+        .remove_source(community.id, cache.path())
+        .await
+        .expect("remove community");
+    service
+        .seed_builtin(cache.path())
+        .await
+        .expect("re-seed builtin");
+    assert!(
+        service
+            .list_sources()
+            .await
+            .unwrap()
+            .iter()
+            .all(|source| source.name != "claude-community"),
+        "startup must not restore a removed default source"
+    );
+
+    let ponytail = service
+        .list_sources()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|source| source.name == "ponytail")
+        .expect("ponytail");
+    service
+        .remove_source(ponytail.id, cache.path())
+        .await
+        .expect("remove ponytail");
+    let custom = service
+        .add_git_source(
+            "my-ponytail",
+            "https://github.com/DietrichGebert/ponytail.git",
+            Some("main"),
+            true,
+        )
+        .await
+        .expect("same URL under another name");
+    sqlx::raw_sql(seed)
+        .execute(&pool)
+        .await
+        .expect("repeat seed");
+    let after = service.list_sources().await.unwrap();
+    assert!(
+        after.iter().all(|source| source.name != "ponytail"),
+        "a source already registered by URL must not be re-seeded: {after:?}"
+    );
+    assert_eq!(
+        after
+            .iter()
+            .filter(|source| source.git_url.as_deref()
+                == Some("https://github.com/DietrichGebert/ponytail.git"))
+            .count(),
+        1,
+        "{after:?}"
+    );
+    assert_eq!(
+        service
+            .get_source(custom.id)
+            .await
+            .unwrap()
+            .git_url
+            .as_deref(),
+        Some("https://github.com/DietrichGebert/ponytail.git")
+    );
+
+    service
+        .remove_source(
+            after
+                .iter()
+                .find(|source| source.name == "superpowers-marketplace")
+                .expect("superpowers")
+                .id,
+            cache.path(),
+        )
+        .await
+        .expect("remove superpowers");
+    let renamed = service
+        .add_git_source(
+            "superpowers-marketplace",
+            "https://github.com/acme/already-there.git",
+            Some("main"),
+            true,
+        )
+        .await
+        .expect("name collision");
+    sqlx::raw_sql(seed)
+        .execute(&pool)
+        .await
+        .expect("repeat seed after name collision");
+    assert_eq!(
+        service
+            .get_source(renamed.id)
+            .await
+            .unwrap()
+            .git_url
+            .as_deref(),
+        Some("https://github.com/acme/already-there.git"),
+        "the default seed must not overwrite a user's source"
+    );
+}
+
+#[tokio::test]
+async fn marketplace_root_entry_installs_without_git_and_serves_skill() {
+    use coppice_server::domain::context_profile::ContextProfile;
+    use coppice_server::services::marketplace_service::{EntryOutcome, MarketplaceService};
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let source_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'ponytail-fix', 'git', 'file:///unused', 'abc123', 1)",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let root = cache.path().join(source_id.to_string());
+    copy_tree(&fixtures().join("sample-plugin"), &root);
+    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        root.join(".claude-plugin/marketplace.json"),
+        json!({
+            "name": "ponytail-fix",
+            "plugins": [{ "name": "ponytail", "source": "./" }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "ponytail"]);
+    assert!(root.join(".git").exists());
+
+    let EntryOutcome::Plugin(installed) = MarketplaceService::new(&pool)
+        .install_entry(source_id, cache.path(), "ponytail", false, &state.skills)
+        .await
+        .expect("root entry installs")
+    else {
+        panic!("path entries install immediately");
+    };
+    assert!(!installed.enabled);
+    let default_path = PathBuf::from(
+        coppice_server::services::plugin_service::PluginService::new(&pool)
+            .list_dirs()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|dir| dir.is_default)
+            .unwrap()
+            .path,
+    );
+    assert!(!default_path.join("ponytail/.git").exists());
+    assert!(default_path
+        .join("ponytail/skills/hello/SKILL.md")
+        .is_file());
+
+    set_enabled(&app, &installed.id.to_string(), true, &cookie, &csrf).await;
+    let agent = common::create_test_agent_from_preset(&app, "Pony Agent", &cookie, &csrf).await;
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent}/plugins"),
+        json!({ "pluginIds": [installed.id.to_string()] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_git, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let addr = common::spawn_test_server(app.clone()).await;
+    let run = coppice_server::services::run_service::RunService::new(&pool)
+        .start_run_for_agent(
+            ticket_id.parse().unwrap(),
+            agent.parse().unwrap(),
+            "work_on_ticket",
+            Default::default(),
+        )
+        .await
+        .expect("start run");
+    let ids = run_plugin_ids(&state, &agent).await;
+    let token =
+        common::mint_test_token_with_plugins(&state, run.id, ContextProfile::Full, ids).await;
+    let listed = mcp_skill_ids(&format!("http://{addr}/mcp"), &token).await;
+    assert!(
+        listed.iter().any(|skill| skill == "sample-plugin:hello"),
+        "{listed:?}"
+    );
+}
+
+#[tokio::test]
+async fn marketplace_object_entry_honors_sha_and_rejects_unfetchable() {
+    use coppice_server::services::marketplace_service::{EntryOutcome, MarketplaceService};
+    use std::time::Duration;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let cache = tempfile::tempdir().unwrap();
+    let timeout = Duration::from_secs(60);
+    let plugin = PluginRepo::of("sample-plugin");
+    let first = plugin.head();
+    plugin.push_new_skill("later");
+    let market = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(market.path().join(".claude-plugin")).unwrap();
+    std::fs::write(
+        market.path().join(".claude-plugin/marketplace.json"),
+        json!({
+            "name": "sha-market",
+            "plugins": [
+                {
+                    "name": "pinned",
+                    "source": {
+                        "source": "url",
+                        "url": plugin.url(),
+                        "ref": "main",
+                        "sha": first
+                    }
+                },
+                {
+                    "name": "missing",
+                    "source": {
+                        "source": "url",
+                        "url": plugin.url(),
+                        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    git(market.path(), &["init", "-q"]);
+    git(market.path(), &["add", "-A"]);
+    git(market.path(), &["commit", "-q", "-m", "market"]);
+
+    let service = MarketplaceService::new(&pool);
+    let source = service
+        .add_git_source(
+            "sha-market",
+            &format!("file://{}", market.path().display()),
+            None,
+            true,
+        )
+        .await
+        .expect("add");
+    service
+        .refresh_source(source.id, cache.path(), true, timeout)
+        .await
+        .expect("refresh");
+
+    let EntryOutcome::Job(job) = service
+        .install_entry(source.id, cache.path(), "pinned", true, &catalog)
+        .await
+        .expect("pinned starts")
+    else {
+        panic!("object entries run as jobs");
+    };
+    let installed = service
+        .run_job(*job, true, timeout, &catalog)
+        .await
+        .expect("pinned job");
+    assert_eq!(installed.status, "succeeded", "{installed:?}");
+    let origin: (Option<String>,) =
+        sqlx::query_as("SELECT origin_commit FROM plugins WHERE id = $1")
+            .bind(installed.plugin_id.unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(origin.0.as_deref(), Some(first.as_str()));
+    let default_path = PathBuf::from(
+        coppice_server::services::plugin_service::PluginService::new(&pool)
+            .list_dirs()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|dir| dir.is_default)
+            .unwrap()
+            .path,
+    );
+    assert!(!default_path.join("pinned/skills/later/SKILL.md").exists());
+
+    let EntryOutcome::Job(job) = service
+        .install_entry(source.id, cache.path(), "missing", true, &catalog)
+        .await
+        .expect("missing starts")
+    else {
+        panic!("object entries run as jobs");
+    };
+    let failed = service
+        .run_job(*job, true, timeout, &catalog)
+        .await
+        .expect("missing job records");
+    assert_eq!(failed.status, "failed", "{failed:?}");
+    assert!(failed.error.as_ref().is_some_and(|err| !err.is_empty()));
+}
+
+#[tokio::test]
+async fn marketplace_entry_from_other_source_is_not_installable() {
+    use coppice_server::services::marketplace_service::{
+        EntryFilter, EntryOutcome, MarketplaceService,
+    };
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let catalog = state.skills.clone();
+    let cache = tempfile::tempdir().unwrap();
+    let first_id = uuid::Uuid::new_v4();
+    let second_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'first-market', 'git', 'file:///unused', 'aaa', 1), ($2, 'second-market', 'git', 'file:///unused2', 'bbb', 2)",
+    )
+    .bind(first_id)
+    .bind(second_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    marketplace_fixture(
+        &cache.path().join(first_id.to_string()),
+        "sample-plugin",
+        "sample-plugin",
+    );
+    marketplace_fixture(
+        &cache.path().join(second_id.to_string()),
+        "sample-plugin",
+        "sample-plugin",
+    );
+    let service = MarketplaceService::new(&pool);
+    let EntryOutcome::Plugin(_) = service
+        .install_entry(first_id, cache.path(), "sample-plugin", false, &catalog)
+        .await
+        .expect("first install")
+    else {
+        panic!("path entries install immediately");
+    };
+    let entries = service
+        .list_entries(
+            cache.path(),
+            &EntryFilter {
+                source_id: Some(second_id),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let clash = entries
+        .iter()
+        .find(|entry| entry.name == "sample-plugin")
+        .expect("second source lists the name");
+    assert!(!clash.installable, "{clash:?}");
+    assert_eq!(
+        clash.reason.as_deref(),
+        Some("already installed as sample-plugin")
+    );
+}
+
+#[tokio::test]
+async fn marketplace_concurrent_refresh_is_single_flight() {
+    use coppice_server::services::marketplace_service::{MarketplaceCatalog, MarketplaceService};
+    use std::time::Duration;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    marketplace_fixture(repo.path(), "sample-plugin", "sample-plugin");
+    git(repo.path(), &["init", "-q"]);
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-q", "-m", "market"]);
+    let catalog = MarketplaceCatalog::new();
+    let service = MarketplaceService::with_catalog(&pool, &catalog);
+    let source = service
+        .add_git_source(
+            "single-flight",
+            &format!("file://{}", repo.path().display()),
+            None,
+            true,
+        )
+        .await
+        .expect("add");
+    let timeout = Duration::from_secs(60);
+    let (a, b) = tokio::join!(
+        service.refresh_source(source.id, cache.path(), true, timeout),
+        service.refresh_source(source.id, cache.path(), true, timeout)
+    );
+    a.expect("first refresh");
+    b.expect("second refresh");
+    assert_eq!(catalog.refresh_clone_count(), 1);
+}
+
+#[tokio::test]
+async fn marketplace_list_entries_uses_commit_cache() {
+    use coppice_server::services::marketplace_service::{
+        EntryFilter, MarketplaceCatalog, MarketplaceService,
+    };
+    use std::time::Duration;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    marketplace_fixture(repo.path(), "sample-plugin", "sample-plugin");
+    git(repo.path(), &["init", "-q"]);
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-q", "-m", "first"]);
+    let catalog = MarketplaceCatalog::new();
+    let service = MarketplaceService::with_catalog(&pool, &catalog);
+    let source = service
+        .add_git_source(
+            "cache-market",
+            &format!("file://{}", repo.path().display()),
+            None,
+            true,
+        )
+        .await
+        .expect("add");
+    service
+        .refresh_source(source.id, cache.path(), true, Duration::from_secs(60))
+        .await
+        .expect("refresh");
+    let first = service
+        .list_entries(cache.path(), &EntryFilter::default())
+        .await
+        .unwrap();
+    assert!(
+        first.iter().any(|entry| entry.name == "sample-plugin"),
+        "{first:?}"
+    );
+
+    let root = cache.path().join(source.id.to_string());
+    std::fs::write(
+        root.join(".claude-plugin/marketplace.json"),
+        json!({
+            "name": "cache-market",
+            "plugins": [{ "name": "edited-on-disk", "source": "./plugins/sample-plugin" }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let cached = service
+        .list_entries(cache.path(), &EntryFilter::default())
+        .await
+        .unwrap();
+    assert!(
+        cached.iter().any(|entry| entry.name == "sample-plugin"),
+        "cache must ignore the on-disk edit: {cached:?}"
+    );
+    assert!(cached.iter().all(|entry| entry.name != "edited-on-disk"));
+
+    std::fs::write(
+        repo.path().join(".claude-plugin/marketplace.json"),
+        json!({
+            "name": "cache-market",
+            "plugins": [{ "name": "after-refresh", "source": "./plugins/sample-plugin" }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-q", "-m", "second"]);
+    service
+        .refresh_source(source.id, cache.path(), true, Duration::from_secs(60))
+        .await
+        .expect("refresh new commit");
+    let after = service
+        .list_entries(cache.path(), &EntryFilter::default())
+        .await
+        .unwrap();
+    assert!(
+        after.iter().any(|entry| entry.name == "after-refresh"),
+        "{after:?}"
+    );
 }

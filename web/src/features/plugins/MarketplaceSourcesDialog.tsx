@@ -15,7 +15,6 @@ import { PLUGIN_COPY } from './copy';
 import { isCoppiceSource, trustLabel } from './marketplaceTrust';
 import {
   useAddMarketplaceSource,
-  useRefreshMarketplaceSource,
   useRemoveMarketplaceSource,
   type RefreshMarketplaceOnce,
 } from './useMarketplace';
@@ -62,10 +61,10 @@ function MarketplaceSources({
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const addSource = useAddMarketplaceSource();
-  const refreshSource = useRefreshMarketplaceSource();
   const removeSource = useRemoveMarketplaceSource();
   const confirm = useConfirm();
-  const busy = refreshSource.isPending || removeSource.isPending;
+  const [refreshing, setRefreshing] = useState(false);
+  const busy = refreshing || removeSource.isPending;
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -107,10 +106,13 @@ function MarketplaceSources({
 
   async function handleRefresh(source: MarketplaceSource) {
     setError(null);
+    setRefreshing(true);
     try {
-      await refreshSource.mutateAsync(source.id);
+      await refreshOnce(source, { restart: true });
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Unable to refresh marketplace.'));
+    } finally {
+      setRefreshing(false);
     }
   }
 

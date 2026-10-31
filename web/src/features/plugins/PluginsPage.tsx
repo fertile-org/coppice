@@ -6,10 +6,7 @@ import { missingSettingsNotice, PLUGIN_COPY, PLUGIN_DOCS_URL } from './copy';
 import { CustomPluginsSection } from './CustomPluginsSection';
 import { MarketplaceSection } from './MarketplaceSection';
 import { PluginCard } from './PluginCard';
-import {
-  useMarketplaceEntries,
-  useMarketplaceSources,
-} from './useMarketplace';
+import { useMarketplaceSources } from './useMarketplace';
 import { usePluginDirs, usePlugins } from './usePlugins';
 
 type PluginsTab = 'installed' | 'marketplace' | 'custom';
@@ -31,7 +28,6 @@ export function PluginsPage() {
   const dirsQuery = usePluginDirs();
   const pluginsQuery = usePlugins();
   const sourcesQuery = useMarketplaceSources();
-  const entriesQuery = useMarketplaceEntries();
   const [gitUrl, setGitUrl] = useState('');
   const [tab, setTab] = useState<PluginsTab>('installed');
   const [notice, setNotice] = useState<string | null>(null);
@@ -208,14 +204,13 @@ export function PluginsPage() {
               aria-labelledby="plugins-tab-marketplace"
               className="space-y-4"
             >
-              {sourcesQuery.isError || entriesQuery.isError ? (
+              {sourcesQuery.isError ? (
                 <p className="font-body text-sm text-danger">Unable to load the marketplace.</p>
-              ) : sourcesQuery.isLoading || entriesQuery.isLoading ? (
+              ) : sourcesQuery.isLoading ? (
                 <p className="font-body text-sm text-text-muted">Loading marketplace…</p>
               ) : (
                 <MarketplaceSection
                   sources={sourcesQuery.data ?? []}
-                  entries={entriesQuery.data ?? []}
                   onDone={handleMarketplaceDone}
                 />
               )}

@@ -16,19 +16,47 @@ const ESCAPES_REPO: &str = "source must stay inside the repository";
 /// In-repo rows take the target's `plugin.json` name, else the entry name;
 /// entries are never expanded as marketplaces.
 pub fn expand_marketplace(folder: &Path, folder_rel: &str) -> Vec<Discovered> {
-    let (market, entries) = match read_marketplace(folder) {
-        Ok(parsed) => parsed,
-        Err(reason) => {
-            return vec![Discovered {
+    load_catalog(folder, folder_rel)
+        .map(|(_, rows)| rows)
+        .unwrap_or_default()
+}
+
+/// Parses `marketplace.json` once. `None` if the file is missing.
+pub fn load_catalog(
+    folder: &Path,
+    folder_rel: &str,
+) -> Option<(HashMap<String, String>, Vec<Discovered>)> {
+    if !folder.join(MARKETPLACE_JSON).is_file() {
+        return None;
+    }
+    Some(match read_marketplace(folder) {
+        Ok((market, entries)) => {
+            let categories = categories_from(&entries);
+            let rows = entries
+                .iter()
+                .map(|entry| expand_entry(folder, folder_rel, &market, entry))
+                .collect();
+            (categories, rows)
+        }
+        Err(reason) => (
+            HashMap::new(),
+            vec![Discovered {
                 rel_path: folder_rel.to_string(),
                 name: folder_name(folder),
                 result: Err(format!("invalid marketplace.json: {reason}")),
-            }]
-        }
-    };
+            }],
+        ),
+    })
+}
+
+fn categories_from(entries: &[Value]) -> HashMap<String, String> {
     entries
         .iter()
-        .map(|entry| expand_entry(folder, folder_rel, &market, entry))
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?;
+            let category = entry.get("category")?.as_str()?;
+            Some((name.to_string(), category.to_string()))
+        })
         .collect()
 }
 
@@ -44,14 +72,7 @@ pub fn entry_categories(folder: &Path) -> HashMap<String, String> {
     let Ok((_, entries)) = read_marketplace(folder) else {
         return HashMap::new();
     };
-    entries
-        .iter()
-        .filter_map(|entry| {
-            let name = entry.get("name")?.as_str()?;
-            let category = entry.get("category")?.as_str()?;
-            Some((name.to_string(), category.to_string()))
-        })
-        .collect()
+    categories_from(&entries)
 }
 
 /// The raw `source` value of the first `plugins` entry named `name`.

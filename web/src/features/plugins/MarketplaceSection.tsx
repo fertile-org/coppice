@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
+import { cn } from '../../lib/utils';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { MarketplaceEntry, MarketplaceSource } from '../../lib/schemas/marketplace';
 import { PLUGIN_COPY } from './copy';
@@ -10,6 +12,7 @@ import { MarketplaceSourcesDialog } from './MarketplaceSourcesDialog';
 import { trustLabel } from './marketplaceTrust';
 import {
   useInstallMarketplaceEntry,
+  useMarketplaceEntriesBySource,
   useMarketplaceFirstFetch,
   useMarketplaceJob,
   useUpdateMarketplacePlugin,
@@ -31,23 +34,38 @@ interface Pending {
   update: boolean;
 }
 
-function matches(entry: MarketplaceEntry, query: string): boolean {
-  if (!query) return true;
+export function rankMatch(entry: MarketplaceEntry, query: string): number | null {
+  if (!query) return 0;
   const needle = query.toLowerCase();
-  return (
-    entry.name.toLowerCase().includes(needle) ||
-    entry.description.toLowerCase().includes(needle)
-  );
+  const name = entry.name.toLowerCase();
+  if (name === needle) return 0;
+  if (name.startsWith(needle)) return 1;
+  if (name.includes(needle)) return 2;
+  if (entry.description.toLowerCase().includes(needle)) return 3;
+  return null;
+}
+
+/** Name-exact, then prefix, then contains, then description. Ties keep input order. */
+export function sortMarketplaceEntries(
+  entries: MarketplaceEntry[],
+  query: string,
+): MarketplaceEntry[] {
+  const needle = query.trim();
+  if (!needle) return entries;
+  return entries
+    .map((entry, index) => ({ entry, index, rank: rankMatch(entry, needle) }))
+    .filter((row): row is { entry: MarketplaceEntry; index: number; rank: number } => row.rank !== null)
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((row) => row.entry);
 }
 
 interface MarketplaceSectionProps {
   sources: MarketplaceSource[];
-  entries: MarketplaceEntry[];
   /** Called with a notice and the installed plugin ids once a plugin is installed or updated. */
   onDone: (notice: string, pluginIds: string[]) => void;
 }
 
-export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSectionProps) {
+export function MarketplaceSection({ sources, onDone }: MarketplaceSectionProps) {
   const [query, setQuery] = useState('');
   const [sourceId, setSourceId] = useState(ALL);
   const [category, setCategory] = useState(ALL);
@@ -59,23 +77,43 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
   const updatePlugin = useUpdateMarketplacePlugin();
   const job = useMarketplaceJob(pending?.jobId ?? null);
   const firstFetch = useMarketplaceFirstFetch(sources);
+  const entryQueries = useMarketplaceEntriesBySource(sources.map((source) => source.id));
 
   const sourcesById = useMemo(
     () => new Map(sources.map((source) => [source.id, source])),
     [sources],
+  );
+  const entries = useMemo(
+    () => entryQueries.flatMap((result) => result.data ?? []),
+    [entryQueries],
   );
   const categories = useMemo(
     () =>
       [...new Set(entries.map((entry) => entry.category).filter((c): c is string => Boolean(c)))].sort(),
     [entries],
   );
-  const visible = entries.filter(
-    (entry) =>
-      matches(entry, query.trim()) &&
-      (sourceId === ALL || entry.sourceId === sourceId) &&
-      (category === ALL || entry.category === category),
-  );
+  const visible = useMemo(() => {
+    const filtered = sortMarketplaceEntries(entries, query).filter(
+      (entry) =>
+        (sourceId === ALL || entry.sourceId === sourceId) &&
+        (category === ALL || entry.category === category),
+    );
+    return filtered;
+  }, [entries, query, sourceId, category]);
   const shown = visible.slice(0, limit);
+  const loadingCount = sources.filter((source, index) => {
+    const q = entryQueries[index];
+    return firstFetch.pendingIds.includes(source.id) || q?.isLoading || q?.isFetching;
+  }).length;
+  const failedSource = sources.find((source, index) => {
+    const q = entryQueries[index];
+    return Boolean(source.lastError) || q?.isError;
+  });
+  const allSettled = sources.every((source, index) => {
+    const q = entryQueries[index];
+    return !firstFetch.pendingIds.includes(source.id) && q && !q.isLoading && !q.isFetching;
+  });
+  const showSkeletons = !allSettled && loadingCount > 0;
 
   function changeQuery(value: string) {
     setQuery(value);
@@ -143,6 +181,11 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
     void run(entryKey(entry), entry.name, true, () => updatePlugin.mutateAsync(pluginId));
   }
 
+  function retrySource(source: MarketplaceSource, index: number) {
+    void firstFetch.refreshOnce(source, { restart: true }).catch(() => undefined);
+    void entryQueries[index]?.refetch();
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -174,21 +217,6 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
           </div>
           <div className="min-w-[10rem] flex-1">
             <span className="mb-1 block font-body text-sm font-medium text-bark-800">
-              Source
-            </span>
-            <Combobox
-              aria-label="Source"
-              value={sourceId}
-              onValueChange={changeSource}
-              searchPlaceholder="Search sources…"
-              options={[
-                { value: ALL, label: 'All sources' },
-                ...sources.map((source) => ({ value: source.id, label: source.name })),
-              ]}
-            />
-          </div>
-          <div className="min-w-[10rem] flex-1">
-            <span className="mb-1 block font-body text-sm font-medium text-bark-800">
               Category
             </span>
             <Combobox
@@ -203,7 +231,24 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
             />
           </div>
         </div>
-        <p className="font-body text-sm text-text-secondary">{PLUGIN_COPY.marketplaceIntro}</p>
+        <SourceStrip
+          sources={sources}
+          entryQueries={entryQueries}
+          pendingIds={firstFetch.pendingIds}
+          selected={sourceId}
+          onSelect={changeSource}
+          onRetry={retrySource}
+        />
+        <p
+          className="min-h-[18px] font-body text-sm text-text-secondary"
+          role={failedSource || loadingCount > 0 ? 'status' : undefined}
+        >
+          {failedSource
+            ? PLUGIN_COPY.marketplaceSourceFailed(failedSource.name)
+            : loadingCount > 0
+              ? PLUGIN_COPY.marketplaceFetching(loadingCount)
+              : PLUGIN_COPY.marketplaceIntro}
+        </p>
       </div>
 
       {pending?.jobId && active && (
@@ -216,24 +261,10 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
           {error ?? `Install failed: ${jobFailure}`}
         </p>
       )}
-      {firstFetch.pendingCount > 0 && (
-        <p role="status" className="font-body text-sm text-text-muted">
-          Loading marketplace sources…
-        </p>
-      )}
-      {sources.some((source) => source.lastError) && (
-        <button
-          type="button"
-          onClick={() => setSourcesOpen(true)}
-          className={`${ERROR_CLASS} text-left`}
-        >
-          Some sources couldn’t load. Open Manage sources to see the error and retry.
-        </button>
-      )}
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && !showSkeletons && allSettled ? (
         <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
-          {entries.length === 0 ? 'No plugins in the marketplace yet.' : PLUGIN_COPY.marketplaceEmpty}
+          {entries.length === 0 ? PLUGIN_COPY.marketplaceNoneYet : PLUGIN_COPY.marketplaceEmpty}
         </p>
       ) : (
         <div className="space-y-4">
@@ -309,6 +340,20 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
               </li>
             );
           })}
+          {showSkeletons &&
+            Array.from({ length: Math.max(2, 6 - shown.length) }, (_, index) => (
+              <li
+                key={`skeleton-${index}`}
+                data-testid="marketplace-skeleton"
+                aria-hidden="true"
+                className="flex flex-col gap-3 rounded-xl border border-border bg-surface-raised p-4 shadow-card"
+              >
+                <div className="h-3 w-[45%] animate-pulse rounded-md bg-border" />
+                <div className="h-3 w-[30%] animate-pulse rounded-md bg-border" />
+                <div className="h-3 w-full animate-pulse rounded-md bg-border" />
+                <div className="h-3 w-[70%] animate-pulse rounded-md bg-border" />
+              </li>
+            ))}
           </ul>
           {visible.length > limit && (
             <div className="flex justify-center">
@@ -331,6 +376,94 @@ export function MarketplaceSection({ sources, entries, onDone }: MarketplaceSect
         refreshOnce={firstFetch.refreshOnce}
       />
     </div>
+  );
+}
+
+function SourceStrip({
+  sources,
+  entryQueries,
+  pendingIds,
+  selected,
+  onSelect,
+  onRetry,
+}: {
+  sources: MarketplaceSource[];
+  entryQueries: ReturnType<typeof useMarketplaceEntriesBySource>;
+  pendingIds: string[];
+  selected: string;
+  onSelect: (value: string) => void;
+  onRetry: (source: MarketplaceSource, index: number) => void;
+}) {
+  const total = entryQueries.reduce((sum, result) => sum + (result.data?.length ?? 0), 0);
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Source">
+      <SourceChip
+        label="All"
+        selected={selected === ALL}
+        count={total}
+        loading={pendingIds.length > 0 || entryQueries.some((q) => q.isLoading)}
+        onClick={() => onSelect(ALL)}
+      />
+      {sources.map((source, index) => {
+        const q = entryQueries[index];
+        const loading = pendingIds.includes(source.id) || Boolean(q?.isLoading || q?.isFetching);
+        const failed = Boolean(source.lastError) || Boolean(q?.isError);
+        return (
+          <SourceChip
+            key={source.id}
+            label={source.name}
+            selected={selected === source.id}
+            count={q?.data?.length ?? 0}
+            loading={loading && !failed}
+            error={failed}
+            onClick={() => onSelect(source.id)}
+            onRetry={failed ? () => onRetry(source, index) : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function SourceChip({
+  label,
+  selected,
+  count,
+  loading,
+  error,
+  onClick,
+  onRetry,
+}: {
+  label: string;
+  selected: boolean;
+  count: number;
+  loading?: boolean;
+  error?: boolean;
+  onClick: () => void;
+  onRetry?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`marketplace-source-chip-${label}`}
+      aria-pressed={selected}
+      onClick={error && onRetry ? onRetry : onClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-body text-sm',
+        selected && !error && 'border-moss-600 font-medium text-moss-700',
+        error && 'border-danger bg-danger-muted text-danger',
+        !selected && !error && 'border-border bg-surface-raised text-text-primary',
+      )}
+    >
+      <span>{label}</span>
+      {loading ? (
+        <Loader2 className="size-3 animate-spin" aria-label={`Loading ${label}`} />
+      ) : error ? (
+        <span aria-label={`Retry ${label}`}>⚠</span>
+      ) : (
+        <span className="font-mono text-xs text-text-muted">{count}</span>
+      )}
+    </button>
   );
 }
 

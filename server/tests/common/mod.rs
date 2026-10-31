@@ -248,6 +248,9 @@ where
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
         connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
+        marketplace: Arc::new(
+            coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
+        ),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -301,6 +304,9 @@ where
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
         connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
+        marketplace: Arc::new(
+            coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
+        ),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -352,6 +358,9 @@ where
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
         connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
+        marketplace: Arc::new(
+            coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
+        ),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -967,7 +976,14 @@ pub fn multipart_request(
     cookie: &str,
     csrf: &str,
 ) -> Request<Body> {
-    multipart_request_bytes(uri, filename, content_type, contents.as_bytes(), cookie, csrf)
+    multipart_request_bytes(
+        uri,
+        filename,
+        content_type,
+        contents.as_bytes(),
+        cookie,
+        csrf,
+    )
 }
 
 pub fn multipart_request_bytes(
