@@ -243,6 +243,9 @@ pub struct GitConfig {
     /// When false, push-branch / create-pr APIs return 403.
     #[serde(default)]
     pub push_enabled: bool,
+    /// When true, agents are told to add a Coppice Agent `Co-authored-by` trailer on commits.
+    #[serde(default = "default_true")]
+    pub agent_commit_attribution: bool,
 }
 
 fn default_git_author_name() -> String {
@@ -259,6 +262,7 @@ impl Default for GitConfig {
             author_name: default_git_author_name(),
             author_email: default_git_author_email(),
             push_enabled: false,
+            agent_commit_attribution: true,
         }
     }
 }
@@ -1554,6 +1558,11 @@ impl AppConfig {
                 Env::raw()
                     .only(&["GIT_PUSH_ENABLED"])
                     .map(|_| "git.push_enabled".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["GIT_AGENT_COMMIT_ATTRIBUTION"])
+                    .map(|_| "git.agent_commit_attribution".into()),
             )
     }
 

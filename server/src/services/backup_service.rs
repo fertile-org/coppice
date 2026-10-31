@@ -199,6 +199,7 @@ const IMPORTABLE_SETTINGS: &[&str] = &[
     "logs.retention_days",
     "git.author_name",
     "git.author_email",
+    "git.agent_commit_attribution",
     "knowledge.enabled",
     "knowledge.poll_interval_ms",
     "knowledge.compaction.interval_secs",

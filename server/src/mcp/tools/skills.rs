@@ -1,6 +1,7 @@
 use crate::mcp::catalog::object;
 use crate::mcp::protocol::ToolDefinition;
 use crate::mcp::tools::{ToolCtx, ToolError};
+use crate::plugins::coppice_git_skill::{augment_coppice_git_body, is_coppice_git_skill};
 use serde_json::{json, Value};
 
 pub const SKILL_LIST: &str = "skill_list";
@@ -56,6 +57,14 @@ pub async fn call_skill_load(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         .skills
         .get(&ctx.scope.plugin_ids, name)
         .ok_or_else(|| ToolError::NotFound(format!("skill \"{name}\" not found")))?;
+    let body = if is_coppice_git_skill(&info.id) {
+        augment_coppice_git_body(
+            &body,
+            ctx.state.config.git.agent_commit_attribution,
+        )
+    } else {
+        body
+    };
     Ok(json!({
         "id": info.id,
         "path": info.path.display().to_string(),

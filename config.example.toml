@@ -134,6 +134,7 @@ master_key = "dev-master-key-change-me"
 author_name = "Coppice"
 author_email = "coppice@localhost"
 push_enabled = false
+# agent_commit_attribution = true
 
 # MCP tool gateway for agent CLIs. base_url defaults to http://127.0.0.1:<server.port>/mcp.
 [mcp]

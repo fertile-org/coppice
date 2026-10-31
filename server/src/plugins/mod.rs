@@ -1,4 +1,5 @@
 pub mod builtin;
+pub mod coppice_git_skill;
 pub mod capability;
 pub mod catalog;
 pub mod discover;

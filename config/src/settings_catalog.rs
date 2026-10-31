@@ -411,6 +411,12 @@ const FIXED_AFTER_CONNECTORS: &[Fixed] = &[
         SettingKind::Bool,
     ),
     fixed(
+        "git.agent_commit_attribution",
+        "Git",
+        "Adds a Coppice Agent Co-authored-by trailer to agent commit messages.",
+        SettingKind::Bool,
+    ),
+    fixed(
         "plugins.dir",
         "Plugins",
         "Your default plugin folder. Add more folders on the Plugins page.",

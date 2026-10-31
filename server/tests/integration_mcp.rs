@@ -547,10 +547,12 @@ async fn skill_load_returns_body_and_logs_skill_source() {
 
     let loaded = call_tool_json(&url, &token, "skill_load", json!({"name": "coppice-git"})).await;
     assert_eq!(loaded["id"], "coppice-git");
-    assert!(loaded["body"]
-        .as_str()
-        .unwrap()
-        .contains("Coppice platform rules — git (required)"));
+    let body = loaded["body"].as_str().unwrap();
+    assert!(body.contains("Coppice platform rules — git (required)"));
+    assert!(
+        body.contains("Co-authored-by: Coppice Agent <agent@getcoppice.app>"),
+        "default agent_commit_attribution adds co-author instructions"
+    );
     let path = std::path::Path::new(loaded["path"].as_str().unwrap());
     assert!(path.is_absolute());
     assert!(path.join("SKILL.md").is_file());

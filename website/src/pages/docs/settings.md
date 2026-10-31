@@ -158,6 +158,7 @@ Every count and interval above must be greater than 0.
 | `author_name` | string | `Coppice` | Author name on commits Coppice makes. |
 | `author_email` | string | `coppice@localhost` | Author email on those commits. |
 | `push_enabled` | bool | `false` (`true` in the desktop app) | Lets Coppice push branches and open pull requests. |
+| `agent_commit_attribution` | bool | `true` | Tells agents to add a `Co-authored-by: Coppice Agent <agent@getcoppice.app>` trailer on commits. |
 
 ## `[plugins]`
 
