@@ -78,6 +78,10 @@ pub const PLAN_CRITERIA_INSTRUCTION: &str = "Under Acceptance criteria, write ea
 /// Diagrams support the written plan. They are not a substitute for it.
 pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
 
+/// Added when the agent has the design skill. Guidance only: Plan Review does
+/// not wait for a choice, and a person can ask for plan changes after picking.
+pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, then write the plan around the option you recommend and say which one it is. If you already published options, honor the one the human chose. Skip this when the ticket has no visible change.";
+
 /// A person reviews the plan at Plan Review, so it has to fit on one screen.
 /// Detail belongs to the Tech Lead and the implementer, not the plan.
 pub const PLAN_LENGTH_INSTRUCTION: &str = "Keep the whole plan to about one screen for a human to review. Approach: at most 3 sentences. Steps: at most 8, each one line. Acceptance criteria: at most 6, each one line. Risks and Out of scope: one line each. Name a file, function, or test only where it decides the work. Leave implementation detail to the implementer.";

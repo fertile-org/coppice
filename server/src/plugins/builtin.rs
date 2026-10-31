@@ -36,6 +36,9 @@ const DESIGN_PLUGIN_JSON: &str =
 const DESIGN_SKILL: &str =
     include_str!("../../builtin-plugins/design/skills/design-ui-options/SKILL.md");
 
+/// How agents load the design skill: `<plugin>:<skill>`.
+pub const DESIGN_SKILL_ID: &str = "design:design-ui-options";
+
 /// Writes the embedded built-in skills to `<dir>/coppice/skills/<name>/SKILL.md`.
 /// The `coppice/skills` subtree is replaced wholesale so an upgrade both
 /// refreshes and prunes skills; the rest of `dir` is left alone.
@@ -69,6 +72,13 @@ pub fn materialize_builtin(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn design_skill_id_matches_the_shipped_skill() {
+        let (plugin, name) = DESIGN_SKILL_ID.split_once(':').unwrap();
+        assert_eq!(plugin, "design");
+        assert!(DESIGN_SKILL.contains(&format!("name: {name}\n")));
+    }
 
     #[test]
     fn materialize_builtin_writes_design_skill() {

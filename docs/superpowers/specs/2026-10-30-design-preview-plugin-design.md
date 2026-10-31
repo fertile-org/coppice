@@ -11,7 +11,7 @@ Coppice drives many CLIs. A live “wait for click” MCP call is not portable (
 - Human picks among 2–4 options the agent drafted (not a single review, not preview-only).
 - Agent **publishes** designs during a run (non-blocking). Human **Choose** is stored. The next planning, chat, or ticket-work turn reads the pick. The live CLI is not paused.
 - Cards appear on any agent comment or chat message (planning, chat, ticket work).
-- First-party plugin named `design`: auto-enabled, All agents, can be turned off per agent. Ships a skill that tells agents when and how to publish.
+- First-party plugin named `design`: auto-enabled, All agents, can be turned off per agent. Ships a skill that tells agents when and how to publish. Planning instructions point at that skill when the agent has it, without requiring a publish.
 - Tools run in the Coppice MCP gateway (`design__…`), not a stdio child. Every connector sees the same tools.
 - Coppice owns Choose. The iframe is preview only. Agent HTML cannot steal the pick.
 - Files live in a Coppice-owned folder under artifacts, never the git worktree, never `~/.cursor`.

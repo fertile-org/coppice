@@ -13,6 +13,8 @@ use crate::events::{publish_run_finished, AppEvent};
 use crate::mcp::grant::grant_for_run;
 use crate::mcp::token::NewRunToolScope;
 use crate::mcp::tools::result::prefer_submitted_result;
+use crate::plugins::builtin::DESIGN_SKILL_ID;
+use crate::plugins::skills::SkillInfo;
 use crate::providers::{
     connector_enforces_read_only, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
@@ -124,6 +126,11 @@ async fn snapshot_plan_refs(
             None
         }
     }
+}
+
+/// The plugin can be off for this agent, and then its skill is not listed.
+fn has_design_skill(skills: &[SkillInfo]) -> bool {
+    skills.iter().any(|skill| skill.id == DESIGN_SKILL_ID)
 }
 
 /// The plan task: template, revision context, split option, and the
@@ -340,6 +347,9 @@ async fn drive_plan_run(
         ));
     } else {
         append_plan_sections(pool, ticket_id, revision_input.as_ref(), &mut markdown).await?;
+        if has_design_skill(&skills) {
+            markdown.push_str(&format!("\n{}\n", plan::PLAN_DESIGN_INSTRUCTION));
+        }
     }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,
@@ -594,9 +604,24 @@ async fn drive_plan_run(
 
 #[cfg(test)]
 mod tests {
-    use super::append_plan_ref_diff;
+    use super::{append_plan_ref_diff, has_design_skill};
+    use crate::copy::plan::PLAN_DESIGN_INSTRUCTION;
+    use crate::plugins::builtin::DESIGN_SKILL_ID;
+    use crate::plugins::skills::SkillInfo;
     use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
     use uuid::Uuid;
+
+    #[test]
+    fn design_guidance_needs_the_design_skill() {
+        let skill = |id: &str| SkillInfo {
+            id: id.into(),
+            description: String::new(),
+            path: Default::default(),
+        };
+        assert!(has_design_skill(&[skill("coppice-git"), skill(DESIGN_SKILL_ID)]));
+        assert!(!has_design_skill(&[skill("coppice-git")]));
+        assert!(PLAN_DESIGN_INSTRUCTION.contains(DESIGN_SKILL_ID));
+    }
 
     #[test]
     fn ref_diff_is_appended_to_the_run_log() {
