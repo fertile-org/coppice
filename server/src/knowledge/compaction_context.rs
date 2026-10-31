@@ -11,6 +11,10 @@ pub const MAX_DESCRIPTION_BYTES: usize = 8_000;
 pub const MAX_COMMENTS_PER_TICKET: usize = 8;
 pub const MAX_COMMENT_BYTES: usize = 1_500;
 pub const MAX_EXISTING_ITEMS: i64 = 100;
+pub const MAX_REVIEW_COMMENTS: usize = 4;
+pub const MAX_CHANGED_FILES: usize = 50;
+const MAX_FETCHED_COMMENTS: i64 = 200;
+const MAX_RUN_SUMMARY_BYTES: usize = 2_000;
 const EXISTING_EXCERPT_BYTES: usize = 240;
 
 const LITMUS: &str = "Would a different ticket next month still need this exact rule?";
@@ -37,6 +41,35 @@ pub struct CompactionComment {
     pub body: String,
 }
 
+/// Pick the comments to show: up to `MAX_REVIEW_COMMENTS` of the newest
+/// `review_feedback`, then the latest others, `MAX_COMMENTS_PER_TICKET` in
+/// total. Input is newest first; output is oldest first.
+pub fn select_comments(all_newest_first: Vec<CompactionComment>) -> Vec<CompactionComment> {
+    let mut keep = vec![false; all_newest_first.len()];
+    let mut taken = 0usize;
+    for (index, comment) in all_newest_first.iter().enumerate() {
+        if taken < MAX_REVIEW_COMMENTS && comment.intent == "review_feedback" {
+            keep[index] = true;
+            taken += 1;
+        }
+    }
+    for flag in keep.iter_mut() {
+        if taken >= MAX_COMMENTS_PER_TICKET {
+            break;
+        }
+        if !*flag {
+            *flag = true;
+            taken += 1;
+        }
+    }
+    all_newest_first
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(comment, kept)| kept.then_some(comment))
+        .rev()
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct CompactionTicket {
     pub id: Uuid,
@@ -44,6 +77,10 @@ pub struct CompactionTicket {
     pub board_name: String,
     pub title: String,
     pub description: String,
+    /// Summary the newest succeeded run submitted for this ticket.
+    pub last_run_summary: Option<String>,
+    /// Files that run reported as changed.
+    pub changed_files: Vec<String>,
     /// Most recent last.
     pub comments: Vec<CompactionComment>,
 }
@@ -173,8 +210,30 @@ fn render_ticket(ticket: &CompactionTicket) -> String {
             truncate_with_ellipsis(description, MAX_DESCRIPTION_BYTES)
         );
     }
-    let skip = ticket.comments.len().saturating_sub(MAX_COMMENTS_PER_TICKET);
-    let recent = &ticket.comments[skip..];
+    if let Some(summary) = ticket
+        .last_run_summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+    {
+        let _ = writeln!(
+            section,
+            "Last run summary: {}\n",
+            truncate_with_ellipsis(summary, MAX_RUN_SUMMARY_BYTES).replace('\n', "\n  ")
+        );
+    }
+    if !ticket.changed_files.is_empty() {
+        let _ = writeln!(section, "Changed files:\n");
+        for file in ticket.changed_files.iter().take(MAX_CHANGED_FILES) {
+            let _ = writeln!(section, "- `{file}`");
+        }
+        let more = ticket.changed_files.len().saturating_sub(MAX_CHANGED_FILES);
+        if more > 0 {
+            let _ = writeln!(section, "- ...and {more} more");
+        }
+        section.push('\n');
+    }
+    let recent = &ticket.comments;
     if !recent.is_empty() {
         let _ = writeln!(section, "Latest comments:\n");
         for comment in recent {
@@ -233,20 +292,17 @@ pub async fn load_compaction_context(
     let mut tickets = Vec::with_capacity(rows.len());
     for row in rows {
         let id: Uuid = row.try_get("id")?;
-        let comments = sqlx::query(
+        let newest_first = sqlx::query(
             r#"
-            SELECT author_type, intent, body FROM (
-                SELECT author_type, intent, body, created_at, id
-                FROM ticket_comments
-                WHERE ticket_id = $1
-                ORDER BY created_at DESC, id DESC
-                LIMIT $2
-            ) recent
-            ORDER BY created_at, id
+            SELECT author_type, intent, body
+            FROM ticket_comments
+            WHERE ticket_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2
             "#,
         )
         .bind(id)
-        .bind(MAX_COMMENTS_PER_TICKET as i64)
+        .bind(MAX_FETCHED_COMMENTS)
         .fetch_all(pool)
         .await?
         .into_iter()
@@ -258,12 +314,38 @@ pub async fn load_compaction_context(
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        let comments = select_comments(newest_first);
+        let last_run = sqlx::query(
+            r#"
+            SELECT submitted_result->>'summary' AS summary,
+                   submitted_result->'changedFiles' AS changed_files
+            FROM agent_runs
+            WHERE ticket_id = $1 AND status = 'succeeded' AND submitted_result IS NOT NULL
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        let (last_run_summary, changed_files) = match last_run {
+            Some(run) => {
+                let files: Option<serde_json::Value> = run.try_get("changed_files")?;
+                let files = files
+                    .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
+                    .unwrap_or_default();
+                (run.try_get::<Option<String>, _>("summary")?, files)
+            }
+            None => (None, Vec::new()),
+        };
         tickets.push(CompactionTicket {
             id,
             board_id: row.try_get("board_id")?,
             board_name: row.try_get("board_name")?,
             title: row.try_get("title")?,
             description: row.try_get("description")?,
+            last_run_summary,
+            changed_files,
             comments,
         });
     }
@@ -321,6 +403,8 @@ mod tests {
             board_name: "Core".into(),
             title: title.into(),
             description: description.into(),
+            last_run_summary: None,
+            changed_files: Vec::new(),
             comments: (0..comments)
                 .map(|index| CompactionComment {
                     author_type: "human".into(),
@@ -367,11 +451,49 @@ mod tests {
         assert!(markdown.contains("`performance_note`"));
     }
 
+    fn comment(intent: &str, body: &str) -> CompactionComment {
+        CompactionComment {
+            author_type: "human".into(),
+            intent: intent.into(),
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn old_review_feedback_survives_many_later_comments() {
+        let mut newest_first: Vec<CompactionComment> =
+            (0..12).map(|i| comment("question", &format!("later {i}"))).collect();
+        newest_first.push(comment("review_feedback", "old feedback"));
+        let picked = select_comments(newest_first);
+        assert_eq!(picked.len(), MAX_COMMENTS_PER_TICKET);
+        assert!(picked.iter().any(|c| c.body == "old feedback"));
+        // Oldest first: the feedback predates every kept later comment.
+        assert_eq!(picked[0].body, "old feedback");
+        assert_eq!(picked.last().unwrap().body, "later 0");
+    }
+
+    #[test]
+    fn renders_last_run_summary_and_changed_files() {
+        let mut t = ticket("Run", "d", 0);
+        t.last_run_summary = Some(format!("SUMMARY{}", "s".repeat(3_000)));
+        t.changed_files = (0..60).map(|i| format!("src/file_{i}.rs")).collect();
+        let markdown = render(&[t], &[], 200_000);
+        assert!(markdown.contains("SUMMARY"));
+        assert!(!markdown.contains(&"s".repeat(2_500)));
+        assert!(markdown.contains("src/file_49.rs"));
+        assert!(!markdown.contains("src/file_50.rs"));
+    }
+
     #[test]
     fn bounds_descriptions_and_comments_per_ticket() {
         let long = "x".repeat(MAX_DESCRIPTION_BYTES * 2);
-        let tickets = [ticket("Long", &long, MAX_COMMENTS_PER_TICKET + 4)];
-        let markdown = render(&tickets, &[], 200_000);
+        let mut t = ticket("Long", &long, 0);
+        let newest_first = (0..MAX_COMMENTS_PER_TICKET + 4)
+            .rev()
+            .map(|i| comment("question", &format!("comment {i}")))
+            .collect();
+        t.comments = select_comments(newest_first);
+        let markdown = render(&[t], &[], 200_000);
         assert!(!markdown.contains(&long));
         assert!(!markdown.contains("comment 3\n"));
         assert!(markdown.contains(&format!("comment {}", MAX_COMMENTS_PER_TICKET + 3)));

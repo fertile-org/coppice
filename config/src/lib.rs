@@ -342,8 +342,6 @@ pub struct ContextBudgetConfig {
     pub latest_comments: usize,
     #[serde(default = "default_context_project_rules_tokens")]
     pub project_rules: usize,
-    #[serde(default = "default_context_knowledge_tokens")]
-    pub retrieved_knowledge: usize,
     #[serde(default = "default_context_previous_tokens")]
     pub previous_attempt_summary: usize,
     #[serde(default = "default_context_output_tokens")]
@@ -436,7 +434,6 @@ impl KnowledgeConfig {
                 budget.ticket,
                 budget.latest_comments,
                 budget.project_rules,
-                budget.retrieved_knowledge,
                 budget.previous_attempt_summary,
                 budget.output_contract,
             ]
@@ -505,7 +502,6 @@ impl Default for ContextBudgetConfig {
             ticket: default_context_ticket_tokens(),
             latest_comments: default_context_latest_comments_tokens(),
             project_rules: default_context_project_rules_tokens(),
-            retrieved_knowledge: default_context_knowledge_tokens(),
             previous_attempt_summary: default_context_previous_tokens(),
             output_contract: default_context_output_tokens(),
         }
@@ -562,9 +558,6 @@ fn default_context_latest_comments_tokens() -> usize {
 }
 fn default_context_project_rules_tokens() -> usize {
     3_000
-}
-fn default_context_knowledge_tokens() -> usize {
-    4_000
 }
 fn default_context_previous_tokens() -> usize {
     2_000
@@ -2315,6 +2308,16 @@ mod tests {
             .validate()
             .expect_err("unknown retrieval types must fail closed");
         assert!(error.contains("invented_type"));
+    }
+
+    #[test]
+    fn legacy_retrieved_knowledge_key_still_boots() {
+        let cfg: KnowledgeConfig = toml::from_str(
+            "[context_budget]\nmax_tokens = 24000\nretrieved_knowledge = 4000\n",
+        )
+        .expect("legacy key is ignored");
+        assert_eq!(cfg.context_budget.max_tokens, 24_000);
+        assert!(cfg.validate().is_ok());
     }
 
     #[test]

@@ -221,7 +221,6 @@ const IMPORTABLE_SETTINGS: &[&str] = &[
     "knowledge.context_budget.ticket",
     "knowledge.context_budget.latest_comments",
     "knowledge.context_budget.project_rules",
-    "knowledge.context_budget.retrieved_knowledge",
     "knowledge.context_budget.previous_attempt_summary",
     "knowledge.context_budget.output_contract",
     "workflow.auto_split.default",
