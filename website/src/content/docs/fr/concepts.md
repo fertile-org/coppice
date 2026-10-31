@@ -35,7 +35,7 @@ Chaque agent peut utiliser un modèle différent, même sur la même CLI. Votre 
 
 Ouvrez **Chat** et cliquez sur un agent pour parler de votre code, d’une idée ou d’un ticket. Chaque agent voit tous vos dépôts, tableaux, tickets et votre Knowledge. Il peut rédiger un ticket ou proposer une note Knowledge, mais rien n’est enregistré tant que vous ne l’avez pas approuvé. Choisissez **New chat** pour démarrer une conversation séparée.
 
-Toutes les CLI peuvent discuter. Coppice n’a pas confirmé que Claude Code, Codex, Cursor ou Kilo Code restent en lecture seule, donc leurs conversations affichent un bandeau. L’agent peut quand même lancer des commandes sur votre ordinateur.
+Toutes les CLI peuvent discuter. Coppice n’a pas confirmé que Claude Code, Codex ou Kilo Code restent en lecture seule, donc leurs conversations affichent un bandeau. L’agent peut quand même lancer des commandes sur votre ordinateur.
 
 <a id="everything-is-on-the-card"></a>
 

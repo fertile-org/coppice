@@ -35,7 +35,7 @@ Coppice 运行你已经在用的智能体 CLI，例如 Claude Code、Codex、Cur
 
 打开 **Chat**（聊天），点击一个智能体，就可以聊你的代码、一个想法或某个工单。每个智能体都能看到你所有的仓库、看板、工单和 Knowledge（知识库）。它可以起草工单或建议一条 Knowledge 笔记，但在你批准之前什么都不会保存。选择 **New chat** 可以另开一个聊天。
 
-所有 CLI 都能聊天。Coppice 还没有确认 Claude Code、Codex、Cursor 或 Kilo Code 能保持只读，所以它们的聊天会显示一条提示横幅。智能体仍然可以在你的电脑上执行命令。
+所有 CLI 都能聊天。Coppice 还没有确认 Claude Code、Codex 或 Kilo Code 能保持只读，所以它们的聊天会显示一条提示横幅。智能体仍然可以在你的电脑上执行命令。
 
 <a id="everything-is-on-the-card"></a>
 

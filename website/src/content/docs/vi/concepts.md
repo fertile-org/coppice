@@ -35,7 +35,7 @@ Mỗi agent có thể dùng model riêng, kể cả khi chung một CLI. Ví d�
 
 Mở **Chat** và bấm vào một agent để bàn về code, một ý tưởng hay một ticket. Agent nào cũng xem được mọi repository, bảng, ticket và Knowledge của bạn. Agent có thể soạn sẵn ticket hoặc gợi ý một ghi chú Knowledge, nhưng phải đợi bạn duyệt mới được lưu. Chọn **New chat** để mở một cuộc chat mới.
 
-CLI nào cũng chat được. Coppice chưa xác nhận được Claude Code, Codex, Cursor hay Kilo Code luôn chỉ đọc mà không sửa gì, nên khi chat với chúng sẽ có banner cảnh báo. Agent vẫn có thể chạy lệnh trên máy bạn.
+CLI nào cũng chat được. Coppice chưa xác nhận được Claude Code, Codex hay Kilo Code luôn chỉ đọc mà không sửa gì, nên khi chat với chúng sẽ có banner cảnh báo. Agent vẫn có thể chạy lệnh trên máy bạn.
 
 <a id="everything-is-on-the-card"></a>
 

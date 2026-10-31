@@ -409,10 +409,6 @@ describe('ChatPage', () => {
       "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     ],
     [
-      '00000000-0000-4000-8000-000000000015',
-      "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer.",
-    ],
-    [
       '00000000-0000-4000-8000-000000000012',
       "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer.",
     ],
@@ -432,6 +428,7 @@ describe('ChatPage', () => {
   it.each([
     ['OpenCode', '00000000-0000-4000-8000-000000000014'],
     ['Codex', '00000000-0000-4000-8000-000000000013'],
+    ['Cursor', '00000000-0000-4000-8000-000000000015'],
   ])('hides the isolation banner for a %s session', (_name, agentId) => {
     mocks.sessions = [
       {

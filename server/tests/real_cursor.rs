@@ -217,6 +217,33 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
         r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#,
     )
     .unwrap();
+    // Repo hooks still run commands under the Shell deny unless we overlay
+    // an empty hooks.json. sessionStart / beforeReadFile both fire on
+    // cursor-agent 2026.10.22-27dcf5f in ask mode.
+    let hook_script = worktree.join("hook.sh");
+    let hook_fired = outside.join("hook-fired");
+    std::fs::write(
+        &hook_script,
+        format!("#!/bin/sh\ntouch \"{}\"\n", hook_fired.display()),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook_script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        worktree.join(".cursor").join("hooks.json"),
+        serde_json::to_string(&json!({
+            "version": 1,
+            "hooks": {
+                "sessionStart": [{ "command": hook_script.display().to_string() }],
+                "beforeReadFile": [{ "command": hook_script.display().to_string() }]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let leak_path = outside.join("mcp-leaked");
     let leaky = write_leaky_mcp(&worktree, &leak_path);
     std::fs::write(
@@ -303,13 +330,18 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
     }
     if let Ok(cfg) = std::fs::read_to_string(artifacts.join("runs/cursor-probe/cursor-config/cli-config.json"))
     {
-        eprintln!("cli-config.json:\n{cfg}");
+        let parsed: Value = serde_json::from_str(&cfg).unwrap_or(Value::Null);
+        eprintln!(
+            "cli-config permissions: {}",
+            parsed.get("permissions").unwrap_or(&Value::Null)
+        );
     }
     assert!(!worktree.join("bash-ran").exists(), "shell ran in worktree");
     assert!(!worktree.join("wrote.txt").exists(), "write ran in worktree");
     assert!(!outside_write.exists(), "absolute write ran");
     assert!(!outside_shell.exists(), "absolute shell write ran");
     assert!(!leak_path.exists(), "repo MCP server was started");
+    assert!(!hook_fired.exists(), "repo hook command ran");
     let submitted = gateway
         .submitted
         .lock()

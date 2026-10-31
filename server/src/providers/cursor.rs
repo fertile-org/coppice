@@ -347,6 +347,12 @@ fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
     Ok(artifacts_path(artifacts_dir, &segments)?)
 }
 
+/// Empty project hooks. A workspace `.cursor/hooks.json` still runs its
+/// `sessionStart` / `beforeReadFile` commands under the `Shell(*)` deny
+/// (`cursor-agent` 2026.10.22-27dcf5f, ask and plan). Plan uses a scratch
+/// worktree of the repo, so a committed hooks file is at the root.
+const EMPTY_CURSOR_HOOKS: &str = r#"{"version":1,"hooks":{}}"#;
+
 /// Restores files under `<worktree>/.cursor/` when the run ends.
 ///
 /// The CLI has no `--mcp-config`. It reads MCP from the workspace file and
@@ -354,9 +360,10 @@ fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
 /// on macOS). Writing the worktree file and putting it back is the remaining
 /// path that keeps auth and still injects the gateway.
 ///
-/// Read-only runs also replace `.cursor/cli.json`. A project allow list in
-/// that file replaces `CURSOR_CONFIG_DIR` permissions, which would drop the
-/// deny and the `Mcp(coppice:*)` allow.
+/// Read-only runs also replace `.cursor/cli.json` and `.cursor/hooks.json`.
+/// A project allow list in `cli.json` replaces `CURSOR_CONFIG_DIR`
+/// permissions, which would drop the deny and the `Mcp(coppice:*)` allow.
+/// Repo hooks still run commands even when Shell is denied.
 struct CursorWorktreeMcp {
     files: Vec<(PathBuf, Option<Vec<u8>>)>,
     cursor_dir: PathBuf,
@@ -396,7 +403,9 @@ fn snapshot_worktree_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
 /// Read-only runs deny `Shell(*)` and `Write(**)` and write only the Coppice
 /// gateway into the worktree file. Repo MCP servers are restored after the
 /// run; they are not merged in, because `--approve-mcps` would otherwise
-/// approve them and they can write.
+/// approve them and they can write. `$HOME/.cursor/mcp.json` is still
+/// visible; `Mcp(coppice:*)` should reject those tool calls, but whether
+/// those servers start is untested.
 fn cursor_mcp_setup(
     access: &McpAccess,
     state_dir: &Path,
@@ -415,9 +424,25 @@ fn cursor_mcp_setup(
 
     let cursor_dir = worktree.join(".cursor");
     let mcp_path = cursor_dir.join("mcp.json");
+    let cli_path = cursor_dir.join("cli.json");
+    let hooks_path = cursor_dir.join("hooks.json");
     let created_dir = !cursor_dir.exists();
     std::fs::create_dir_all(&cursor_dir)?;
+
+    // Snapshot every file we may overwrite before the first write, so a
+    // later write failure still restores through Drop.
     let mcp_previous = snapshot_worktree_file(&mcp_path)?;
+    let mut files = vec![(mcp_path.clone(), mcp_previous.clone())];
+    if read_only {
+        files.push((cli_path.clone(), snapshot_worktree_file(&cli_path)?));
+        files.push((hooks_path.clone(), snapshot_worktree_file(&hooks_path)?));
+    }
+    let guard = CursorWorktreeMcp {
+        files,
+        cursor_dir,
+        created_dir,
+    };
+
     let body = if read_only {
         spec.cursor_mcp_json()
     } else {
@@ -429,13 +454,10 @@ fn cursor_mcp_setup(
     std::fs::write(&mcp_path, body)?;
     exclude_worktree_mcp(worktree);
 
-    let mut files = vec![(mcp_path, mcp_previous)];
     if read_only {
         // Project `.cursor/cli.json` replaces CURSOR_CONFIG_DIR permissions.
-        let cli_path = cursor_dir.join("cli.json");
-        let cli_previous = snapshot_worktree_file(&cli_path)?;
         std::fs::write(&cli_path, spec.cursor_project_cli_json(true))?;
-        files.push((cli_path, cli_previous));
+        std::fs::write(&hooks_path, EMPTY_CURSOR_HOOKS)?;
     }
 
     Ok((
@@ -443,11 +465,7 @@ fn cursor_mcp_setup(
             "CURSOR_CONFIG_DIR".to_string(),
             config_dir.display().to_string(),
         )],
-        CursorWorktreeMcp {
-            files,
-            cursor_dir,
-            created_dir,
-        },
+        guard,
     ))
 }
 
@@ -865,10 +883,18 @@ mod tests {
             std::fs::read_to_string(worktree.join(".cursor").join("cli.json")).expect("live"),
             spec.cursor_project_cli_json(true)
         );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor").join("hooks.json")).expect("hooks"),
+            EMPTY_CURSOR_HOOKS
+        );
         drop(guard);
         assert_eq!(
             std::fs::read_to_string(worktree.join(".cursor").join("cli.json")).expect("restored"),
             r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#
+        );
+        assert!(
+            !worktree.join(".cursor").join("hooks.json").exists(),
+            "created hooks.json must be removed"
         );
     }
 
@@ -895,6 +921,30 @@ mod tests {
 
         drop(guard);
         assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_disables_repo_hooks_and_restores_them() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let cursor_dir = worktree.join(".cursor");
+        std::fs::create_dir_all(&cursor_dir).expect("cursor dir");
+        let hooks_path = cursor_dir.join("hooks.json");
+        let existing = r#"{"version":1,"hooks":{"sessionStart":[{"command":"touch hook-fired"}]}}"#;
+        std::fs::write(&hooks_path, existing).expect("existing hooks");
+
+        let (_env, guard) =
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, true).expect("setup");
+
+        assert_eq!(
+            std::fs::read_to_string(&hooks_path).expect("live"),
+            EMPTY_CURSOR_HOOKS
+        );
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(&hooks_path).expect("restored"),
+            existing
+        );
     }
 
     #[test]

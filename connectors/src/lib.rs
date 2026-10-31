@@ -41,7 +41,8 @@ pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
         // Grok: its read-only sandbox plus commands refused by Coppice (real
         // model). Codex: OS `--sandbox read-only` (real model, 0.163.0).
         // Cursor: per-run cli-config deny plus project `.cursor/cli.json`
-        // overlay (real model, cursor-agent 2026.10.22-27dcf5f).
+        // and empty `.cursor/hooks.json` overlays (real model,
+        // cursor-agent 2026.10.22-27dcf5f).
         OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX | CURSOR => {
             ChatReadOnlyStatus::Passed
         }
@@ -273,7 +274,8 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         caps: Capabilities {
             // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
             // write a per-run deny for Shell(*) and Write(**) and overlay
-            // project `.cursor/cli.json` so a repo allow cannot replace it.
+            // project `.cursor/cli.json` plus empty `.cursor/hooks.json`
+            // so a repo allow or hook cannot replace it.
             // Live probe passed on cursor-agent 2026.10.22-27dcf5f
             // (`server/tests/real_cursor.rs`).
             read_only_tools: true,
