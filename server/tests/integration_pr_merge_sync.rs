@@ -11,7 +11,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use coppice_server::events::bus::AppEvent;
 use coppice_server::services::human_review_service::HumanReviewService;
-use coppice_server::services::pr_merge_sync::{self, merge_recorded_comment};
+use coppice_server::services::pr_merge_sync::{
+    self, leftover_local_commits_comment, merge_recorded_comment,
+};
 use coppice_server::services::ticket_attachments;
 use coppice_server::services::worktree_service::compute_paths;
 use serde_json::{json, Value};
@@ -28,6 +30,7 @@ struct GhState {
 #[derive(Default)]
 struct GhInner {
     pulls_status: Option<u16>,
+    pulls_headers: Vec<(String, String)>,
     pulls: Vec<Value>,
     compare: HashMap<String, (u16, Value)>,
     requests: Vec<Recorded>,
@@ -58,7 +61,7 @@ async fn list_pulls(
     AxumPath((_, _)): AxumPath<(String, String)>,
     Query(query): Query<PullsQuery>,
     headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+) -> (StatusCode, HeaderMap, Json<Value>) {
     let mut inner = state.inner.lock().expect("gh lock");
     inner.requests.push(Recorded {
         path: "/pulls".into(),
@@ -70,13 +73,21 @@ async fn list_pulls(
         ),
         authorization: header_text(&headers, "authorization"),
     });
+    let mut out = HeaderMap::new();
+    for (name, value) in &inner.pulls_headers {
+        out.insert(
+            axum::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+            value.parse().expect("header value"),
+        );
+    }
     if let Some(status) = inner.pulls_status {
         return (
             StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            out,
             Json(json!({"message": "mock"})),
         );
     }
-    (StatusCode::OK, Json(Value::Array(inner.pulls.clone())))
+    (StatusCode::OK, out, Json(Value::Array(inner.pulls.clone())))
 }
 
 async fn compare(
@@ -313,16 +324,21 @@ impl Workspace {
         common::json_body(res).await
     }
 
-    async fn merge_comment_count(&self, ticket_id: Uuid, pr_url: &str) -> i64 {
+    async fn comment_count(&self, ticket_id: Uuid, body: &str) -> i64 {
         let pool = self.state.db.clone().unwrap();
         sqlx::query_scalar(
             "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
         )
         .bind(ticket_id)
-        .bind(merge_recorded_comment(pr_url))
+        .bind(body)
         .fetch_one(&pool)
         .await
         .unwrap()
+    }
+
+    async fn merge_comment_count(&self, ticket_id: Uuid, pr_url: &str) -> i64 {
+        self.comment_count(ticket_id, &merge_recorded_comment(pr_url))
+            .await
     }
 
     async fn sweep(&self, api: &str) -> pr_merge_sync::SweepOutcome {
@@ -540,18 +556,33 @@ async fn leftover_local_commits_mark_acceptance_stale() {
     assert_ne!(tip, ticket.accepted_sha);
 
     let api = spawn_github(merged_github(&ticket.accepted_sha)).await;
+    let mut events = ws.state.event_bus.subscribe();
+    assert_eq!(ws.sweep(&api).await.recorded, 0);
     assert_eq!(ws.sweep(&api).await.recorded, 0);
 
     let body = ws.get_ticket(ticket.id).await;
+    assert_eq!(body["status"], "in_review");
     assert_eq!(body["humanReview"]["merged"], false);
     assert_eq!(body["humanReview"]["stale"], true);
     assert!(ticket.worktree.exists());
     assert!(branch_exists(&ws.local_path, ticket.id));
+    let pr_url = "https://github.com/acme/coppice/pull/7";
+    assert_eq!(ws.merge_comment_count(ticket.id, pr_url).await, 0);
     assert_eq!(
-        ws.merge_comment_count(ticket.id, "https://github.com/acme/coppice/pull/7")
+        ws.comment_count(ticket.id, &leftover_local_commits_comment(pr_url))
             .await,
-        0
+        1
     );
+
+    let mut saw_ticket = false;
+    while let Ok(event) = events.try_recv() {
+        if let AppEvent::TicketUpdated { ticket_id, .. } = event {
+            if ticket_id == ticket.id {
+                saw_ticket = true;
+            }
+        }
+    }
+    assert!(saw_ticket, "missing ticket.updated after leftover local commits");
 }
 
 #[tokio::test]
@@ -581,6 +612,33 @@ async fn github_error_skips_ticket_and_rate_limit_stops_sweep() {
     assert_eq!(outcome.recorded, 0);
     assert!(outcome.stopped_for_rate_limit);
     assert_eq!(limited.recorded().len(), 1, "429 must stop the current sweep");
+
+    let forbidden = GhState::default();
+    forbidden.inner.lock().expect("gh lock").pulls_status = Some(403);
+    let api = spawn_github(forbidden.clone()).await;
+    let outcome = ws.sweep(&api).await;
+    assert_eq!(outcome.recorded, 0);
+    assert!(!outcome.stopped_for_rate_limit);
+    assert!(
+        forbidden.recorded().len() >= 2,
+        "plain 403 should continue to the next ticket"
+    );
+
+    let rate_limited_403 = GhState::default();
+    {
+        let mut inner = rate_limited_403.inner.lock().expect("gh lock");
+        inner.pulls_status = Some(403);
+        inner.pulls_headers = vec![("x-ratelimit-remaining".into(), "0".into())];
+    }
+    let api = spawn_github(rate_limited_403.clone()).await;
+    let outcome = ws.sweep(&api).await;
+    assert_eq!(outcome.recorded, 0);
+    assert!(outcome.stopped_for_rate_limit);
+    assert_eq!(
+        rate_limited_403.recorded().len(),
+        1,
+        "403 with x-ratelimit-remaining: 0 must stop the current sweep"
+    );
 }
 
 #[tokio::test]

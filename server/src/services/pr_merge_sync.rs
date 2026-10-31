@@ -69,6 +69,12 @@ pub fn merge_recorded_comment(pr_url: &str) -> String {
     format!("**Merge:** pull request merged on GitHub ({pr_url})")
 }
 
+pub fn leftover_local_commits_comment(pr_url: &str) -> String {
+    format!(
+        "A pull request merged on GitHub ({pr_url}), but this ticket's local branch has commits that did not land. Acceptance is stale; the ticket is back in In Review."
+    )
+}
+
 pub fn spawn_sweep(state: Arc<AppState>) {
     if state.db.is_none() {
         return;
@@ -82,6 +88,7 @@ pub fn spawn_sweep(state: Arc<AppState>) {
             }
         };
         let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
             if let Err(err) = sweep(&state, &client, GITHUB_API_BASE).await {
@@ -189,7 +196,9 @@ async fn sync_ticket(
         }
     };
 
-    if local_work_would_be_lost(pool, worktrees_root, row, &matched.head_sha).await {
+    if local_work_would_be_lost(state, pool, worktrees_root, row, &matched.head_sha, &matched.html_url)
+        .await
+    {
         return Ok(false);
     }
 
@@ -269,10 +278,12 @@ async fn after_recorded_merge(
 }
 
 async fn local_work_would_be_lost(
+    state: &AppState,
     pool: &sqlx::PgPool,
     worktrees_root: &Path,
     row: &EligibleTicket,
     pr_head: &str,
+    pr_url: &str,
 ) -> bool {
     let tip = match TicketGitService::new(pool, worktrees_root.to_path_buf())
         .reviewed_head_sha(row.ticket_id)
@@ -293,17 +304,66 @@ async fn local_work_would_be_lost(
     if reviewed_sha_matches(&tip, &row.accepted_sha) || reviewed_sha_matches(&tip, pr_head) {
         return false;
     }
-    if let Err(err) = TicketGitService::new(pool, worktrees_root.to_path_buf())
+    match TicketGitService::new(pool, worktrees_root.to_path_buf())
         .note_branch_head(row.ticket_id)
         .await
     {
-        tracing::warn!(
-            ticket_id = %row.ticket_id,
-            error = %err,
-            "pr merge sync: could not mark leftover local commits stale"
-        );
+        Ok(true) => announce_leftover_local_commits(state, pool, row.ticket_id, pr_url).await,
+        Ok(false) => {}
+        Err(err) => {
+            tracing::warn!(
+                ticket_id = %row.ticket_id,
+                error = %err,
+                "pr merge sync: could not mark leftover local commits stale"
+            );
+        }
     }
     true
+}
+
+async fn announce_leftover_local_commits(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    pr_url: &str,
+) {
+    match CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::System,
+            None,
+            &leftover_local_commits_comment(pr_url),
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await
+    {
+        Ok(comment) => {
+            state.event_bus.publish(AppEvent::CommentCreated {
+                comment_id: comment.id,
+                ticket_id,
+                author_type: "system".into(),
+            });
+        }
+        Err(err) => {
+            tracing::warn!(
+                %ticket_id,
+                error = %err,
+                "pr merge sync: could not post leftover-commits comment"
+            );
+        }
+    }
+    match TicketService::new(pool).get(ticket_id).await {
+        Ok(ticket) => publish_ticket_updated(&state.event_bus, &ticket),
+        Err(err) => {
+            tracing::warn!(
+                %ticket_id,
+                error = %err,
+                "pr merge sync: could not publish leftover-commits ticket update"
+            );
+        }
+    }
 }
 
 async fn list_eligible(pool: &sqlx::PgPool) -> Result<Vec<EligibleTicket>, sqlx::Error> {
@@ -527,11 +587,12 @@ async fn github_get(
         Err(err) => return GithubOutcome::Failed(err.to_string()),
     };
     let status = response.status();
+    let rate_limited = github_rate_limited(status, response.headers());
     let body = match response.text().await {
         Ok(body) => body,
         Err(err) => return GithubOutcome::Failed(err.to_string()),
     };
-    if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+    if rate_limited {
         return GithubOutcome::RateLimited { status };
     }
     if status == StatusCode::NOT_FOUND {
@@ -541,4 +602,39 @@ async fn github_get(
         return GithubOutcome::Failed(format!("github {status}"));
     }
     GithubOutcome::Ok(body)
+}
+
+fn github_rate_limited(status: StatusCode, headers: &reqwest::header::HeaderMap) -> bool {
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return true;
+    }
+    if status != StatusCode::FORBIDDEN {
+        return false;
+    }
+    let remaining_exhausted = headers
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim() == "0");
+    remaining_exhausted || headers.contains_key("retry-after")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn github_rate_limited_accepts_429_and_rate_limit_403() {
+        let empty = HeaderMap::new();
+        assert!(github_rate_limited(StatusCode::TOO_MANY_REQUESTS, &empty));
+        assert!(!github_rate_limited(StatusCode::FORBIDDEN, &empty));
+
+        let mut remaining = HeaderMap::new();
+        remaining.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+        assert!(github_rate_limited(StatusCode::FORBIDDEN, &remaining));
+
+        let mut retry = HeaderMap::new();
+        retry.insert("retry-after", HeaderValue::from_static("12"));
+        assert!(github_rate_limited(StatusCode::FORBIDDEN, &retry));
+    }
 }

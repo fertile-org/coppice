@@ -43,7 +43,7 @@ The installed desktop app (`coppice-server desktop`) forces `auth.desktop_mode =
 ### Repositories (desktop)
 
 - Electron shell exposes **Browse…** for local checkouts (`window.coppiceDesktop.pickDirectory`).
-- Pull / push / fetch use the checkout’s configured `origin` (SSH agent or credential helper). A stored forge token is optional and only used when present (API Create PR).
+- Pull / push / fetch use the checkout’s configured `origin` (SSH agent or credential helper). A stored forge token is optional; when present it is used for API Create PR and to record GitHub.com merges on accepted Done tickets.
 - Ticket **Open compare URL** is the primary PR path; API Create PR stays available only when a forge token is configured.
 - A background sweep (startup, then every 5 minutes) asks the GitHub API about Done tickets that are accepted but unmerged, when the remote host is exactly `github.com` and a forge token is set. A merge commit, squash, or rebase into the default branch records `merged_at` so the board label clears. GitHub Enterprise hosts are not swept.
 
