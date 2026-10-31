@@ -13,6 +13,8 @@ pub struct PolicyInput {
     pub confidence: KnowledgeConfidence,
     pub requires_human_approval: bool,
     pub supersedes: bool,
+    /// Citations of this candidate that resolved to a commit.
+    pub anchored_citations: usize,
 }
 
 pub fn policy_decision(
@@ -32,7 +34,9 @@ pub fn policy_decision(
     if input.requires_human_approval {
         return human("agent requested human approval");
     }
+    let verified = !config.auto_save.allow_verified_citations || input.anchored_citations >= 1;
     let allowed = config.auto_save.enabled
+        && verified
         && input.confidence == KnowledgeConfidence::High
         && config
             .auto_save
@@ -61,6 +65,7 @@ mod tests {
             confidence: KnowledgeConfidence::High,
             requires_human_approval: false,
             supersedes: false,
+            anchored_citations: 0,
         }
     }
 
@@ -125,5 +130,73 @@ mod tests {
         let mut medium = input(KnowledgeType::CodingConvention);
         medium.confidence = KnowledgeConfidence::Medium;
         assert_eq!(policy_decision(&config, medium).0, KnowledgeStatus::Pending);
+    }
+
+    fn verified_config(types: &[&str]) -> KnowledgeConfig {
+        let mut config = auto_save_config(types);
+        config.auto_save.allow_verified_citations = true;
+        config
+    }
+
+    #[test]
+    fn verified_mode_requires_an_anchored_citation() {
+        let config = verified_config(&["test_command"]);
+        let unanchored = input(KnowledgeType::TestCommand);
+        assert_eq!(
+            policy_decision(&config, unanchored).0,
+            KnowledgeStatus::Pending
+        );
+        let mut anchored = input(KnowledgeType::TestCommand);
+        anchored.anchored_citations = 1;
+        assert_eq!(
+            policy_decision(&config, anchored).0,
+            KnowledgeStatus::Approved
+        );
+        let mut medium = anchored;
+        medium.confidence = KnowledgeConfidence::Medium;
+        assert_eq!(policy_decision(&config, medium).0, KnowledgeStatus::Pending);
+    }
+
+    #[test]
+    fn verified_mode_never_approves_high_impact_workspace_or_supersede() {
+        let config = verified_config(&["test_command"]);
+        let mut high_impact = input(KnowledgeType::SecurityRule);
+        high_impact.anchored_citations = 2;
+        assert_eq!(
+            policy_decision(&config, high_impact).0,
+            KnowledgeStatus::Pending
+        );
+        let mut workspace = input(KnowledgeType::TestCommand);
+        workspace.anchored_citations = 2;
+        workspace.scope = KnowledgeScope::Workspace;
+        assert_eq!(
+            policy_decision(&config, workspace).0,
+            KnowledgeStatus::Pending
+        );
+        let mut supersedes = input(KnowledgeType::TestCommand);
+        supersedes.anchored_citations = 2;
+        supersedes.supersedes = true;
+        assert_eq!(
+            policy_decision(&config, supersedes).0,
+            KnowledgeStatus::Pending
+        );
+    }
+
+    #[test]
+    fn default_config_still_sends_everything_to_review() {
+        let config = KnowledgeConfig::default();
+        assert!(!config.auto_save.allow_verified_citations);
+        let mut anchored = input(KnowledgeType::TestCommand);
+        anchored.anchored_citations = 3;
+        assert_eq!(
+            policy_decision(&config, anchored).0,
+            KnowledgeStatus::Pending
+        );
+        // Without the option, an enabled allowlist ignores citations as before.
+        let enabled = auto_save_config(&["test_command"]);
+        assert_eq!(
+            policy_decision(&enabled, input(KnowledgeType::TestCommand)).0,
+            KnowledgeStatus::Approved
+        );
     }
 }

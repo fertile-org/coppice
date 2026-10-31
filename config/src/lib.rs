@@ -307,6 +307,9 @@ pub struct KnowledgeAutoSaveConfig {
     pub allowed_types: Vec<String>,
     #[serde(default = "default_auto_save_confidence")]
     pub minimum_confidence: String,
+    /// When true (and `enabled`), auto-save also requires at least one citation anchored to a commit.
+    #[serde(default)]
+    pub allow_verified_citations: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -480,6 +483,7 @@ impl Default for KnowledgeAutoSaveConfig {
             enabled: false,
             allowed_types: Vec::new(),
             minimum_confidence: default_auto_save_confidence(),
+            allow_verified_citations: false,
         }
     }
 }
@@ -2241,6 +2245,7 @@ mod tests {
         assert_eq!(cfg.compaction.max_attempts, 3);
         assert!(!cfg.auto_save.enabled);
         assert!(cfg.auto_save.allowed_types.is_empty());
+        assert!(!cfg.auto_save.allow_verified_citations);
         assert_eq!(cfg.retrieval.top_k, 8);
         assert_eq!(cfg.retrieval.index_rows, 10);
         assert!(cfg.retrieval.allowed_types.is_empty());

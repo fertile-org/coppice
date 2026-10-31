@@ -81,6 +81,7 @@ function status(overrides: Partial<CompactionStatus>): CompactionStatus {
     queuedCount: 3,
     blockedCount: 0,
     oldestQueuedAt: null,
+    oldestPendingAt: null,
     activeBatch: null,
     lastBatch: null,
     nextScheduledAt: new Date(Date.now() + 25 * 60_000).toISOString(),
@@ -158,6 +159,23 @@ describe('CompactionStatusStrip', () => {
     expect(strip).toHaveTextContent('next run in 25 minutes');
     fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
     await waitFor(() => expect(mocks.run).toHaveBeenCalled());
+  });
+
+  it('shows the age of the oldest Inbox item, and omits it when the Inbox is empty', () => {
+    mocks.status = status({
+      oldestPendingAt: new Date(Date.now() - 3 * 24 * 3_600_000 - 60_000).toISOString(),
+    });
+    const { unmount } = render(
+      <MemoryRouter>
+        <CompactionStatusStrip />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Oldest in Inbox: 3 days');
+    unmount();
+
+    mocks.status = status({ oldestPendingAt: null });
+    renderStrip();
+    expect(screen.getByRole('status')).not.toHaveTextContent('Oldest in Inbox');
   });
 
   it('disables Compact now when nothing is waiting', () => {

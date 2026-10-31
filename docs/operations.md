@@ -91,6 +91,34 @@ Settings live under `[knowledge]` and `[knowledge.compaction]` in TOML. There is
 
 **Lifecycle.** Moving a ticket to Done queues it. Every `interval_secs`, or on **Compact now** from the Knowledge page, a drain cycle runs batches until the queue is empty or a batch fails. Candidates land in the Pending inbox under the fail-closed approval policy. Success sends no notification. A failure fans out a `knowledge_compaction_failed` notification to every user, returns the tickets to the queue with one more attempt, and shows a Retry banner. Cancel releases the tickets without counting an attempt.
 
+**Optional lighter review.** `knowledge.auto_save.allow_verified_citations` (default `false`) narrows auto-save; it never widens it. Auto-save stays off unless `knowledge.auto_save.enabled = true` and the type is in `allowed_types`. With the option on, a candidate is also saved without review only when at least one of its citations is anchored to a commit, meaning the cited path exists on the default branch of the repo when compaction finishes. Confidence must still be `high`. High-impact types, workspace scope, supersessions and merges, and candidates the agent flagged for review still wait in the Inbox, and `knowledge_propose` items always land Pending. The status strip on the Knowledge page shows `Oldest in Inbox: N days` for the oldest Pending item.
+
+### Measuring serving and freshness
+
+Compare periods with `knowledge.retrieval.index_rows` set to `0` and to `10`. Run these against the Coppice database with `psql`; change the interval as needed.
+
+```sql
+-- Share of Full runs that searched or opened knowledge.
+SELECT count(*) FILTER (WHERE EXISTS (
+         SELECT 1 FROM run_tool_calls t
+         WHERE t.run_id = r.id AND t.tool IN ('knowledge_search', 'knowledge_get')))::float
+       / NULLIF(count(*), 0) AS share_using_knowledge
+FROM agent_runs r
+WHERE r.context_profile = 'full' AND r.created_at > now() - interval '14 days';
+
+-- Flags per opened item (outdated or wrong, over knowledge_get opens).
+SELECT (SELECT count(*) FROM knowledge_feedback
+        WHERE verdict IN ('outdated', 'wrong') AND created_at > now() - interval '14 days')::float
+       / NULLIF((SELECT count(*) FROM knowledge_usage_logs
+                 WHERE included_at > now() - interval '14 days'), 0) AS flags_per_open;
+
+-- Age of the oldest item waiting in the Inbox.
+SELECT now() - min(created_at) AS oldest_pending
+FROM knowledge_items WHERE status = 'pending';
+```
+
+The zero-result search rate is not logged today: `run_tool_calls` keeps only a short argument summary, not the result count, so there is no query for it. Add logging before relying on it, for example before deciding whether embeddings are worth adding.
+
 ## Plugins
 
 The default plugin dir is `[plugins] dir` (`COPPICE_PLUGINS__DIR`). In the default Docker stack it is `/data/plugins`, backed by the `plugin_data` volume, so git-installed plugins survive container rebuilds. Extra dirs are added in Settings → Plugins. Each plugin is available to all agents or to an explicit list of agents; that choice is kept across rescans. Changing `[plugins] dir` repoints the default dir: plugins recorded under the old path are forgotten along with their agent assignments, and plugins in the new dir are scanned as new, disabled plugins.

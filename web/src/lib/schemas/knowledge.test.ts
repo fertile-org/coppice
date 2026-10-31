@@ -107,6 +107,7 @@ describe('knowledge schemas', () => {
       queuedCount: 0,
       blockedCount: 0,
       oldestQueuedAt: null,
+      oldestPendingAt: null,
       activeBatch: {
         id: REVISION_ID,
         agentId: ID,

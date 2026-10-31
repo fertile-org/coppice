@@ -13,7 +13,7 @@ import type { CompactionBatch, CompactionStatus } from '../../lib/schemas/knowle
 import { useConnectors } from '../agents/useAgents';
 import { LiveRunView } from '../runs/LiveRunView';
 import { formatNotificationTimestamp } from '../notifications/notification-format';
-import { formatInterval, pluralTickets } from './compactionFormat';
+import { formatAge, formatInterval, pluralTickets } from './compactionFormat';
 import {
   useCancelCompaction,
   useCompactNow,
@@ -265,6 +265,9 @@ export function CompactionStatusStrip() {
             ? `last run ${relative(last.endedAt ?? last.createdAt)}, ${pluralTickets(last.candidateCount ?? 0, 'candidate')}`
             : 'no runs yet',
           ...(next ? [`next run ${next}`] : []),
+          ...(current.oldestPendingAt
+            ? [`Oldest in Inbox: ${formatAge(current.oldestPendingAt)}`]
+            : []),
           ...(current.blockedCount > 0
             ? [`${pluralTickets(current.blockedCount)} need a retry`]
             : []),

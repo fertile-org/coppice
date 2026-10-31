@@ -210,6 +210,7 @@ const IMPORTABLE_SETTINGS: &[&str] = &[
     "knowledge.auto_save.enabled",
     "knowledge.auto_save.allowed_types",
     "knowledge.auto_save.minimum_confidence",
+    "knowledge.auto_save.allow_verified_citations",
     "knowledge.retrieval.top_k",
     "knowledge.retrieval.index_rows",
     "knowledge.retrieval.allowed_types",

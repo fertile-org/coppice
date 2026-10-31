@@ -307,16 +307,6 @@ impl<'a> KnowledgeCompactionService<'a> {
         };
         let knowledge = KnowledgeService::new(self.pool, self.config);
         for candidate in review.accepted {
-            let (status, decision, reason) = policy_decision(
-                self.config,
-                PolicyInput {
-                    knowledge_type: candidate.input.knowledge_type,
-                    scope: candidate.input.scope,
-                    confidence: candidate.input.confidence,
-                    requires_human_approval: candidate.requires_human_approval,
-                    supersedes: candidate.supersedes_item_id.is_some(),
-                },
-            );
             let citations: Vec<ResolvedCitation> = match anchors.get(&candidate.index) {
                 Some((_, resolved)) => resolved
                     .iter()
@@ -325,6 +315,20 @@ impl<'a> KnowledgeCompactionService<'a> {
                     .collect(),
                 None => Vec::new(),
             };
+            let (status, decision, reason) = policy_decision(
+                self.config,
+                PolicyInput {
+                    knowledge_type: candidate.input.knowledge_type,
+                    scope: candidate.input.scope,
+                    confidence: candidate.input.confidence,
+                    requires_human_approval: candidate.requires_human_approval,
+                    supersedes: candidate.supersedes_item_id.is_some(),
+                    anchored_citations: citations
+                        .iter()
+                        .filter(|citation| citation.commit_sha.is_some())
+                        .count(),
+                },
+            );
             let citation_repo = anchors.get(&candidate.index).and_then(|(repo, _)| *repo);
             let mut savepoint = (*tx).begin().await?;
             let inserted = knowledge
@@ -632,6 +636,15 @@ impl<'a> KnowledgeCompactionService<'a> {
             blocked: row.try_get("blocked")?,
             oldest_queued_at: row.try_get("oldest_queued_at")?,
         })
+    }
+
+    /// When the oldest still-Pending knowledge item was created, if any.
+    pub async fn oldest_pending_at(&self) -> Result<Option<OffsetDateTime>, CompactionError> {
+        Ok(sqlx::query_scalar(
+            "SELECT min(created_at) FROM knowledge_items WHERE status = 'pending'",
+        )
+        .fetch_one(self.pool)
+        .await?)
     }
 
     /// When the next scheduled cycle is due, if anything is waiting.

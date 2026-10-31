@@ -177,6 +177,7 @@ export const compactionStatusSchema = z.object({
   queuedCount: z.number().int().nonnegative(),
   blockedCount: z.number().int().nonnegative(),
   oldestQueuedAt: z.string().nullable(),
+  oldestPendingAt: z.string().nullable(),
   activeBatch: compactionBatchSchema.nullable(),
   lastBatch: compactionBatchSchema.nullable(),
   nextScheduledAt: z.string().nullable(),

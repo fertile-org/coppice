@@ -99,6 +99,8 @@ max_attempts = 3
 enabled = false
 allowed_types = []
 minimum_confidence = "high"
+# true: auto-save also needs at least one citation anchored to a commit. Needs enabled = true.
+allow_verified_citations = false
 
 [knowledge.retrieval]
 top_k = 8

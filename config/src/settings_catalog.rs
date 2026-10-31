@@ -341,6 +341,12 @@ const FIXED_AFTER_CONNECTORS: &[Fixed] = &[
         },
     ),
     fixed(
+        "knowledge.auto_save.allow_verified_citations",
+        "Knowledge",
+        "Auto-save only candidates with a citation checked against a commit.",
+        SettingKind::Bool,
+    ),
+    fixed(
         "knowledge.retrieval.top_k",
         "Knowledge",
         "How many entries one lookup returns.",

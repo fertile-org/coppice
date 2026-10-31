@@ -1031,3 +1031,110 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
             .unwrap();
     assert_eq!(superseded_by, Some(merged_id));
 }
+
+#[tokio::test]
+async fn verified_auto_approval_needs_an_anchored_citation() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    fx.configure_agent().await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id = Uuid::parse_str(
+        &common::register_test_repo(
+            &fx.app,
+            &local_path.display().to_string(),
+            &fx.cookie,
+            &fx.csrf,
+        )
+        .await,
+    )
+    .unwrap();
+    let ticket_id = fx.done_ticket().await;
+    sqlx::query("UPDATE tickets SET repo_id = $2 WHERE id = $1")
+        .bind(ticket_id)
+        .bind(repo_id)
+        .execute(fx.pool())
+        .await
+        .unwrap();
+    let batch = fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    let spec = |title: &str, citations: &[&str]| coppice_server::knowledge::candidates::KnowledgeCandidateSpec {
+        knowledge_type: "test_command".into(),
+        scope: "board".into(),
+        title: title.into(),
+        confidence: Some("high".into()),
+        content: format!("{title} explains how to run the project."),
+        source_ticket_ids: vec![ticket_id.to_string()],
+        citations: citations.iter().map(|c| c.to_string()).collect(),
+        ..Default::default()
+    };
+    let config = config_with(|config| {
+        config.auto_save.enabled = true;
+        config.auto_save.allowed_types = vec!["test_command".into()];
+        config.auto_save.allow_verified_citations = true;
+    });
+    let outcome = KnowledgeCompactionService::new(fx.pool(), &config)
+        .complete_batch(
+            batch.id,
+            batch.run_id.unwrap(),
+            "done",
+            &[
+                spec("Verified README", &["README.md"]),
+                spec("Missing file", &["no/such/file.rs"]),
+                spec("No citation", &[]),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.created, 3, "{:?}", outcome.dropped);
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT r.title, i.status
+        FROM knowledge_items i
+        JOIN knowledge_revisions r ON r.id = i.current_revision_id
+        WHERE i.compaction_batch_id = $1
+        ORDER BY r.title
+        "#,
+    )
+    .bind(batch.id)
+    .fetch_all(fx.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("Missing file".to_string(), "pending".to_string()),
+            ("No citation".to_string(), "pending".to_string()),
+            ("Verified README".to_string(), "approved".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn status_api_reports_the_oldest_pending_item() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    let (_, body) = fx.api("GET", "/api/knowledge/compaction").await;
+    assert!(body["oldestPendingAt"].is_null());
+
+    for age_days in [3, 1] {
+        sqlx::query(
+            "INSERT INTO knowledge_items (id, status, version, created_at)
+             VALUES ($1, 'pending', 1, now() - make_interval(days => $2))",
+        )
+        .bind(Uuid::new_v4())
+        .bind(age_days)
+        .execute(fx.pool())
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO knowledge_items (id, status, version, created_at) VALUES ($1, 'approved', 1, now() - interval '30 days')")
+        .bind(Uuid::new_v4())
+        .execute(fx.pool())
+        .await
+        .unwrap();
+    let (_, body) = fx.api("GET", "/api/knowledge/compaction").await;
+    let oldest = body["oldestPendingAt"].as_str().expect("timestamp");
+    let parsed =
+        OffsetDateTime::parse(oldest, &time::format_description::well_known::Rfc3339).unwrap();
+    let age = OffsetDateTime::now_utc() - parsed;
+    assert!(age > Duration::days(2) && age < Duration::days(4), "{oldest}");
+}
