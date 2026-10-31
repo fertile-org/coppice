@@ -592,6 +592,10 @@ mod tests {
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].parent_ticket_id, Some(parent_id));
         assert_eq!(children[0].status, TicketStatus::Backlog);
+        assert_eq!(
+            children[0].priority,
+            Some(crate::domain::ticket::TicketPriority::Medium)
+        );
         assert_eq!(children[0].assignee_agent_id, Some(engineer_agent_id));
         assert!(children[0].description.contains("Acceptance criteria"));
         assert!(children[0].approved_plan_id.is_some());
