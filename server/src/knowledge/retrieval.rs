@@ -1,4 +1,4 @@
-use super::fts::{build_tsquery, terms};
+use super::fts::{build_tsquery, query_terms, terms};
 use crate::config::KnowledgeRetrievalConfig;
 use sqlx::{PgPool, Row};
 use std::collections::HashSet;
@@ -42,7 +42,7 @@ pub struct RetrievedKnowledge {
     pub source_type: String,
     pub source_id: Option<Uuid>,
     pub confidence: String,
-    /// Full-text rank; `0.0` when the entry did not match the query.
+    /// Summed IDF of the query terms matched; `0.0` when none matched.
     pub score: f64,
     pub revision_created_at: OffsetDateTime,
     /// Set for [`RetrievalScope::AllBoards`] only.
@@ -63,7 +63,12 @@ pub struct SimilarKnowledgeNeighbor {
 
 /// One query for every retrieval scope. `$1` is the board ids to cover (NULL
 /// means every board), `$2` the agent id, `$3` minimum confidence, `$4` the
-/// tsquery text (NULL for none), `$5` allowed types, `$6` the row limit.
+/// search terms, `$5` allowed types, `$6` the row limit.
+///
+/// `score` sums the IDF of each term a note matches, computed over the eligible
+/// set so words common across these notes count little; a title match counts
+/// double. `matches` is the one scan of notes against terms; document frequency
+/// and scores both come from it.
 pub const RETRIEVAL_QUERY_SQL: &str = r#"
 WITH eligible AS MATERIALIZED (
     SELECT
@@ -97,21 +102,36 @@ WITH eligible AS MATERIALIZED (
             OR (r.scope = 'agent' AND r.agent_id = $2
                 AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
           )
-), query AS (
-    SELECT CASE
-        WHEN $4::text IS NULL THEN NULL
-        ELSE to_tsquery('simple'::regconfig, coppice_unaccent($4::text))
-    END AS q
+), terms AS MATERIALIZED (
+    SELECT
+        t,
+        to_tsquery('simple'::regconfig, coppice_unaccent(t))
+            || to_tsquery('english'::regconfig, coppice_unaccent(t)) AS q
+    FROM unnest($4::text[]) AS t
+), matches AS MATERIALIZED (
+    SELECT e.item_id, terms.t, ts_filter(e.search_vector, '{a}') @@ terms.q AS in_title
+    FROM eligible e
+    CROSS JOIN terms
+    WHERE e.search_vector @@ terms.q
+), document_frequency AS (
+    SELECT t, count(*)::float8 AS c FROM matches GROUP BY t
+), scored AS (
+    SELECT
+        m.item_id,
+        sum(
+            ln(1 + ((SELECT count(*)::float8 FROM eligible) - df.c + 0.5) / (df.c + 0.5))
+            * CASE WHEN m.in_title THEN 2 ELSE 1 END
+        ) AS score
+    FROM matches m
+    JOIN document_frequency df ON df.t = m.t
+    GROUP BY m.item_id
 )
 SELECT
     item_id, revision_id, scope, knowledge_type, title, content,
     source_type, source_id, confidence, revision_created_at, board_name,
-    CASE
-        WHEN query.q IS NOT NULL AND eligible.search_vector @@ query.q
-            THEN ts_rank_cd(eligible.search_vector, query.q)::float8
-        ELSE 0.0::float8
-    END AS score
-FROM eligible CROSS JOIN query
+    COALESCE(scored.score, 0.0::float8) AS score
+FROM eligible
+LEFT JOIN scored USING (item_id)
 ORDER BY score DESC, revision_created_at DESC, item_id ASC
 LIMIT $6
 "#;
@@ -175,7 +195,7 @@ pub async fn retrieve(
     query_body: &str,
     config: &KnowledgeRetrievalConfig,
 ) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
-    let tsquery = build_tsquery(query_title, query_body);
+    let terms = query_terms(query_title, query_body);
     let (board_ids, with_board_name) = match scope {
         RetrievalScope::Boards(ids) => (Some(ids.clone()), false),
         RetrievalScope::AllBoards => (None, true),
@@ -184,7 +204,7 @@ pub async fn retrieve(
         .bind(board_ids)
         .bind(agent_id)
         .bind(&config.minimum_confidence)
-        .bind(tsquery)
+        .bind(terms)
         .bind(&config.allowed_types)
         .bind(MAX_ELIGIBLE_CANDIDATES)
         .fetch_all(pool)
@@ -320,7 +340,7 @@ mod tests {
         assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.id <> $1"));
         assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.status = 'approved'"));
         assert!(RETRIEVAL_QUERY_SQL.contains("i.status = 'approved'"));
-        assert!(RETRIEVAL_QUERY_SQL.contains("ts_rank_cd"));
+        assert!(INBOX_SIMILAR_QUERY_SQL.contains("ts_rank_cd"));
         assert!(!RETRIEVAL_QUERY_SQL.contains("<=>"));
         assert_eq!(ELIGIBLE_KNOWLEDGE_FROM, eligible_knowledge_from!());
         assert!(RETRIEVAL_QUERY_SQL.contains("r.scope = 'workspace'"));

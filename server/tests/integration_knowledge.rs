@@ -1,6 +1,7 @@
 mod common;
 
 use axum::{http::StatusCode, Router};
+use coppice_migrations::MIGRATOR;
 use coppice_server::domain::knowledge::{
     KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType, KnowledgeType,
 };
@@ -10,7 +11,9 @@ use coppice_server::services::knowledge_service::{
     activate_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
     KnowledgeService,
 };
+use coppice_server::AppState;
 use serde_json::Value;
+use sqlx::migrate::Migrator;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration;
 use tower::ServiceExt;
@@ -279,7 +282,7 @@ async fn explain_production_retrieval(
         .bind(vec![board_id])
         .bind(Uuid::new_v4())
         .bind("low")
-        .bind(Some("retrieval | plan"))
+        .bind(vec!["retrieval".to_string(), "plan".to_string()])
         .bind(Vec::<String>::new())
         .bind(200_i64)
         .fetch_one(&mut **tx)
@@ -1496,7 +1499,8 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
         )
     );
 
-    let group_one: Vec<(Uuid, String, i32, Option<Uuid>, Option<String>)> = sqlx::query_as(
+    type ItemRow = (Uuid, String, i32, Option<Uuid>, Option<String>);
+    let group_one: Vec<ItemRow> = sqlx::query_as(
         r#"
         SELECT id, status, version, active_revision_id, rejection_reason
         FROM knowledge_items
@@ -2142,6 +2146,7 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     let eligible_id = eligible["id"].as_str().unwrap().to_string();
     approve_item(&app, &eligible_id, 1, &cookie, &csrf).await;
 
+    #[allow(clippy::too_many_arguments)]
     async fn seed_variant(
         pool: &PgPool,
         board_id: Uuid,
@@ -2300,4 +2305,397 @@ async fn similar_rejects_non_pending_and_missing_items() {
     let missing = Uuid::new_v4();
     let (status, _) = get_similar(&app, &missing.to_string(), "", &cookie, &csrf).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// An approved, active board note with exactly this text.
+async fn seed_note(pool: &PgPool, board_id: Uuid, title: &str, content: &str) -> Uuid {
+    let item_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'approved', 1)")
+        .bind(item_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, board_id,
+            knowledge_type, title, content, source_type, confidence
+        ) VALUES ($1, $2, 1, 'board', $3, 'test_command', $4, $5, 'human_note', 'high')
+        "#,
+    )
+    .bind(revision_id)
+    .bind(item_id)
+    .bind(board_id)
+    .bind(title)
+    .bind(content)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE knowledge_items SET current_revision_id = $2, active_revision_id = $2 WHERE id = $1",
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    revision_id
+}
+
+/// Matching notes for `query`, best first, as `(title, score)`.
+async fn search(state: &AppState, board_id: Uuid, query: &str) -> Vec<(String, f64)> {
+    let mut found = retrieve(
+        state.db.as_ref().unwrap(),
+        &RetrievalScope::Boards(vec![board_id]),
+        Uuid::new_v4(),
+        query,
+        "",
+        &state.config.knowledge.retrieval,
+    )
+    .await
+    .unwrap();
+    found.retain(|k| k.score > 0.0);
+    found.into_iter().map(|k| (k.title, k.score)).collect()
+}
+
+async fn search_titles(state: &AppState, board_id: Uuid, query: &str) -> Vec<String> {
+    let found = search(state, board_id, query).await;
+    found.into_iter().map(|(title, _)| title).collect()
+}
+
+#[tokio::test]
+async fn search_matches_other_forms_of_a_word() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    seed_note(pool, board, "Run test suite", "Keep this in mind.").await;
+    seed_note(pool, board, "Merge after review", "Keep this in mind.").await;
+    seed_note(pool, board, "Paint storage", "Keep this in mind.").await;
+
+    assert_eq!(
+        search_titles(&state, board, "tests").await,
+        ["Run test suite"]
+    );
+    assert_eq!(
+        search_titles(&state, board, "merging").await,
+        ["Merge after review"]
+    );
+}
+
+#[tokio::test]
+async fn search_matches_parts_of_dotted_names_and_paths() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    seed_note(pool, board, "Edit config.toml first", "Keep this in mind.").await;
+    seed_note(
+        pool,
+        board,
+        "server/src/knowledge/fts.rs",
+        "Keep this in mind.",
+    )
+    .await;
+    seed_note(pool, board, "Paint storage", "Keep this in mind.").await;
+
+    assert_eq!(
+        search_titles(&state, board, "config toml").await,
+        ["Edit config.toml first"]
+    );
+    assert_eq!(
+        search_titles(&state, board, "fts rs").await,
+        ["server/src/knowledge/fts.rs"]
+    );
+}
+
+#[tokio::test]
+async fn search_ranks_a_rare_word_above_many_common_words() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    let csrf_title = "CSRF token must be sent on mutations";
+    seed_note(pool, board, csrf_title, "Send the header every time.").await;
+    for n in 0..5 {
+        seed_note(
+            pool,
+            board,
+            &format!("Server test run ticket {n}"),
+            "The server runs a test run for each ticket; a test run on the server closes the \
+             ticket. Run the server test before the ticket run.",
+        )
+        .await;
+    }
+
+    let titles = search_titles(&state, board, "csrf server test run ticket").await;
+    assert_eq!(titles.len(), 6);
+    assert_eq!(titles[0], csrf_title);
+}
+
+#[tokio::test]
+async fn search_counts_a_title_match_double() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    seed_note(pool, board, "Paint storage", "Keep the cans dry.").await;
+    seed_note(
+        pool,
+        board,
+        "Workshop rules",
+        "Paint goes on the top shelf.",
+    )
+    .await;
+
+    let found = search(&state, board, "paint").await;
+    assert_eq!(found[0].0, "Paint storage");
+    assert_eq!(found[1].0, "Workshop rules");
+    assert!((found[0].1 - 2.0 * found[1].1).abs() < 1e-9, "{found:?}");
+}
+
+#[tokio::test]
+async fn search_keeps_a_term_that_is_an_english_stopword() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    seed_note(pool, board, "A very careful deploy", "Keep this in mind.").await;
+    seed_note(pool, board, "Paint storage", "Keep this in mind.").await;
+
+    // Not in our stopword list, so it reaches SQL, where 'english' drops it.
+    assert_eq!(
+        search_titles(&state, board, "very").await,
+        ["A very careful deploy"]
+    );
+}
+
+#[tokio::test]
+async fn search_with_no_usable_terms_scores_every_note_zero() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    seed_note(pool, board, "Paint storage", "Keep dry.").await;
+
+    let found = retrieve(
+        pool,
+        &RetrievalScope::Boards(vec![board]),
+        Uuid::new_v4(),
+        "the and of",
+        "",
+        &state.config.knowledge.retrieval,
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].score, 0.0);
+}
+
+#[tokio::test]
+async fn existing_revisions_are_searchable_after_upgrade() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let admin = state.db.as_ref().unwrap();
+    let database = format!("coppice_upgrade_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE DATABASE {database}"))
+        .execute(admin)
+        .await
+        .unwrap();
+    let pool = PgPool::connect_with(admin.connect_options().as_ref().clone().database(&database))
+        .await
+        .unwrap();
+
+    let before_search_quality = Migrator {
+        migrations: MIGRATOR
+            .iter()
+            .filter(|m| m.version <= 60)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+    };
+    before_search_quality.run(&pool).await.unwrap();
+
+    let item_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
+    let content = "Set it in config.toml, then restart.";
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'approved', 1)")
+        .bind(item_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope,
+            knowledge_type, title, content, source_type, confidence
+        ) VALUES ($1, $2, 1, 'workspace', 'test_command', 'Connector settings', $3,
+                  'human_note', 'high')
+        "#,
+    )
+    .bind(revision_id)
+    .bind(item_id)
+    .bind(content)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE knowledge_items SET current_revision_id = $2, active_revision_id = $2 WHERE id = $1",
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let split_before: bool =
+        sqlx::query_scalar("SELECT search_vector @@ $$'toml'$$::tsquery FROM knowledge_revisions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!split_before, "the old vector has no split token");
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let (stored, whole, part): (String, bool, bool) = sqlx::query_as(
+        r#"
+        SELECT content,
+               search_vector @@ $$'config.toml'$$::tsquery,
+               search_vector @@ $$'toml'$$::tsquery
+        FROM knowledge_revisions
+        WHERE id = $1 AND search_vector IS NOT NULL
+        "#,
+    )
+    .bind(revision_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(whole, "vector keeps the whole token");
+    assert!(part, "vector has the split token");
+    assert_eq!(stored, content);
+    let found = retrieve(
+        &pool,
+        &RetrievalScope::Boards(Vec::new()),
+        Uuid::new_v4(),
+        "toml",
+        "",
+        &state.config.knowledge.retrieval,
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    assert!(found[0].score > 0.0);
+
+    pool.close().await;
+    sqlx::query(&format!("DROP DATABASE {database} WITH (FORCE)"))
+        .execute(admin)
+        .await
+        .unwrap();
+}
+
+/// Seed 1,000 notes on `board`. Each holds the term `word{n % 32}` in its title
+/// and `words` more in its content, plus `paths` file paths that match nothing.
+async fn seed_latency_notes(pool: &PgPool, board: Uuid, stride: i32, words: i32, paths: i32) {
+    sqlx::query(
+        r#"
+        WITH seed AS (
+            SELECT n,
+                   md5($1::text || 'item' || n)::uuid AS item_id,
+                   md5($1::text || 'rev' || n)::uuid AS revision_id
+            FROM generate_series(1, 1000) AS n
+        ), items AS (
+            INSERT INTO knowledge_items (id, status, version)
+            SELECT item_id, 'approved', 1 FROM seed
+        )
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, board_id,
+            knowledge_type, title, content, source_type, confidence
+        )
+        SELECT s.revision_id, s.item_id, 1, 'board', $1, 'test_command',
+               'Latency note word' || (s.n % 32),
+               (SELECT string_agg('word' || ((s.n + w * $2) % 32), ' ')
+                FROM generate_series(1, $3) AS w)
+               || ' '
+               || (SELECT string_agg('server/src/file' || w || '.rs', ' ')
+                   FROM generate_series(1, $4) AS w),
+               'human_note', 'high'
+        FROM seed s
+        "#,
+    )
+    .bind(board)
+    .bind(stride)
+    .bind(words)
+    .bind(paths)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE knowledge_items i
+        SET current_revision_id = r.id, active_revision_id = r.id
+        FROM knowledge_revisions r
+        WHERE r.item_id = i.id AND r.board_id = $1
+        "#,
+    )
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Prints sizes and sorted timings for a 32-term query; returns the slowest.
+async fn report_latency(state: &AppState, board: Uuid, label: &str) -> f64 {
+    let pool = state.db.as_ref().unwrap();
+    let (bytes, matching): (f64, f64) = sqlx::query_as(
+        r#"
+        SELECT avg(length(content))::float8,
+               (count(*) FILTER (WHERE search_vector @@ $$'word0'$$::tsquery))::float8
+                   / count(*)::float8
+        FROM knowledge_revisions
+        WHERE board_id = $1
+        "#,
+    )
+    .bind(board)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let query = (0..32)
+        .map(|n| format!("word{n}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut timings_ms = Vec::new();
+    for _ in 0..10 {
+        let started = std::time::Instant::now();
+        let found = search(state, board, &query).await;
+        timings_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+        assert!(!found.is_empty());
+    }
+    timings_ms.sort_by(f64::total_cmp);
+    eprintln!(
+        "{label}: 1,000 items, 32 terms, {bytes:.0}-byte notes, a term matches {:.0}% (ms): \
+         {timings_ms:.1?}",
+        matching * 100.0
+    );
+    timings_ms[timings_ms.len() - 1]
+}
+
+#[tokio::test]
+#[ignore = "timing check; run by hand with --ignored --nocapture"]
+async fn retrieval_latency_at_board_capacity() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let realistic = create_board_named(&app, "Latency realistic", &cookie, &csrf).await;
+    let realistic = Uuid::parse_str(&realistic).unwrap();
+    let pessimistic = create_board_named(&app, "Latency pessimistic", &cookie, &csrf).await;
+    let pessimistic = Uuid::parse_str(&pessimistic).unwrap();
+    seed_latency_notes(pool, realistic, 11, 2, 22).await;
+    seed_latency_notes(pool, pessimistic, 10, 50, 50).await;
+
+    let worst = report_latency(&state, realistic, "realistic (target 250ms)").await;
+    report_latency(&state, pessimistic, "pessimistic (informational)").await;
+    assert!(worst < 250.0, "worst {worst:.1}ms is over the 250ms target");
 }

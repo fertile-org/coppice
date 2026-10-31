@@ -2,8 +2,8 @@
 //!
 //! Ticket text is long, so terms are OR-joined: AND semantics
 //! (`plainto_tsquery` / `websearch_to_tsquery`) would almost never match.
-//! Accent folding happens in SQL via `coppice_unaccent`, matching the
-//! generated `search_vector` column.
+//! Accent folding and stemming happen in SQL, matching the generated
+//! `search_vector` column.
 //!
 //! [`terms`] is the same tokenizer as a set, for comparing two notes word by
 //! word (inbox near-duplicates).
@@ -45,9 +45,9 @@ fn words(text: &str) -> impl Iterator<Item = String> + '_ {
         })
 }
 
-/// Build an OR-joined `to_tsquery('simple', …)` expression, title terms first.
-/// Returns `None` when no usable terms remain.
-pub fn build_tsquery(title: &str, body: &str) -> Option<String> {
+/// Distinct search terms of a query, title terms first, at most
+/// [`MAX_QUERY_TERMS`].
+pub fn query_terms(title: &str, body: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut terms = Vec::new();
     for term in words(title).chain(words(body)) {
@@ -58,6 +58,13 @@ pub fn build_tsquery(title: &str, body: &str) -> Option<String> {
             terms.push(term);
         }
     }
+    terms
+}
+
+/// Build an OR-joined `to_tsquery('simple', …)` expression from
+/// [`query_terms`]. Returns `None` when no usable terms remain.
+pub fn build_tsquery(title: &str, body: &str) -> Option<String> {
+    let terms = query_terms(title, body);
     (!terms.is_empty()).then(|| terms.join(" | "))
 }
 
@@ -72,6 +79,15 @@ pub fn terms(text: &str) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_terms_are_distinct_with_title_terms_first() {
+        assert_eq!(
+            query_terms("CSRF token", "Null csrf causes 403"),
+            ["csrf", "token", "null", "causes", "403"]
+        );
+        assert!(query_terms("the and of", "a x").is_empty());
+    }
 
     #[test]
     fn joins_terms_with_or_and_dedupes() {
