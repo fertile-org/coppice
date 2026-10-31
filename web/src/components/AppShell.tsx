@@ -30,8 +30,9 @@ import { isDesktopShell } from '../lib/desktop';
 import { cn } from '../lib/utils';
 import { LOGS_COPY } from '../features/logs/copy';
 import { SYSTEM_LABEL, SYSTEM_PATHS } from '../features/system/paths';
-import { DOCS_URL } from '../features/tools/connectorCopy';
+import { SidebarSearch } from '../features/keyboard/SidebarSearch';
 import { SkipToBoard } from '../features/keyboard/SkipToBoard';
+import { DOCS_URL } from '../features/tools/connectorCopy';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
 
@@ -194,6 +195,8 @@ export function AppShell() {
             </span>
           )}
         </div>
+
+        <SidebarSearch collapsed={sidebarCollapsed} />
 
         <nav
           className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2"
