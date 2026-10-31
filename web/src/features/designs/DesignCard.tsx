@@ -1,34 +1,20 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
-import type { ChosenDesignOption, DesignSet } from '../../lib/schemas/design';
-import { DesignSidebar } from './DesignSidebar';
-import { useChooseDesign, type DesignScope } from './useDesigns';
+import type { DesignSet } from '../../lib/schemas/design';
+import { DesignDialog } from './DesignDialog';
+import { DESIGN_COPY } from './designCopy';
+import type { DesignScope } from './useDesigns';
 
 export function DesignCard({ design, scope }: { design: DesignSet; scope?: DesignScope }) {
-  const choose = useChooseDesign(scope);
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<ChosenDesignOption | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const chosen = picked ?? design.chosen;
-
-  async function pick(optionId: string) {
-    setError(null);
-    try {
-      await choose.mutateAsync({ setId: design.id, optionId });
-      const option = design.options.find((item) => item.id === optionId);
-      if (option) setPicked({ id: option.id, title: option.title });
-    } catch {
-      setError('Unable to save that choice.');
-    }
-  }
 
   return (
     <section className="rounded-md border border-border bg-surface-raised px-3 py-3">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-body text-sm font-medium text-text-primary">{design.title}</h3>
-        {chosen ? (
+        {design.chosen ? (
           <span className="inline-flex shrink-0 items-center rounded-full border border-border px-2 py-0.5 font-body text-xs text-text-secondary">
-            Chosen
+            {DESIGN_COPY.chosen}
           </span>
         ) : null}
       </div>
@@ -46,19 +32,10 @@ export function DesignCard({ design, scope }: { design: DesignSet; scope?: Desig
         className="mt-2"
         onClick={() => setOpen(true)}
       >
-        Open
+        {DESIGN_COPY.open}
       </Button>
       {open ? (
-        <DesignSidebar
-          design={design}
-          chosen={chosen}
-          pending={choose.isPending}
-          error={error}
-          onClose={() => setOpen(false)}
-          onChoose={(optionId) => {
-            void pick(optionId);
-          }}
-        />
+        <DesignDialog design={design} scope={scope} onClose={() => setOpen(false)} />
       ) : null}
     </section>
   );

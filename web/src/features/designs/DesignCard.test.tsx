@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignCard } from './DesignCard';
+import { makeDesignSet } from './designFixtures';
 import { rewriteDesignHtml } from './rewriteDesignHtml';
 
 const apiFetch = vi.hoisted(() => vi.fn());
@@ -13,16 +14,15 @@ vi.mock('../../lib/api', async (importOriginal) => ({
   apiFetch,
 }));
 
-const published = {
-  id: '11111111-1111-4111-8111-111111111111',
-  title: 'Landing page',
-  runId: '22222222-2222-4222-8222-222222222222',
+const published = makeDesignSet({
   options: [
     { id: 'a', title: 'A', entry: 'a/index.html' },
     { id: 'b', title: 'B', entry: 'b/index.html' },
   ],
-  chosen: null,
-};
+  recommended: null,
+  selected: null,
+  choice: { mode: 'save_only', planOutOfDate: false },
+});
 
 const blobs: Blob[] = [];
 
@@ -68,7 +68,7 @@ describe('DesignCard', () => {
     });
   });
 
-  it('opens the sidebar and posts Choose', async () => {
+  it('opens the popup and posts Choose', async () => {
     wrap(<DesignCard design={published} />);
 
     expect(screen.getByText('Landing page')).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe('DesignCard', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('tab', { name: 'A' })).toBeInTheDocument();
     expect(await within(dialog).findByText('This preview has no file.')).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose A' }));
 
     await waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith(
@@ -91,7 +91,11 @@ describe('DesignCard', () => {
         }),
       );
     });
-    expect(within(screen.getByRole('dialog')).getByText('Chosen')).toBeInTheDocument();
+  });
+
+  it('shows the Chosen marker once the list says so', () => {
+    wrap(<DesignCard design={{ ...published, chosen: { id: 'a', title: 'A' } }} />);
+    expect(screen.getByText('Chosen')).toBeInTheDocument();
   });
 
   it('previews the entry in a sandboxed iframe', async () => {

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import { designSetListSchema, type DesignSet } from '../../lib/schemas/design';
+import { agentRunsQueryKey } from '../tickets/useAgentRuns';
+import { ticketQueryKey } from '../tickets/useTicket';
 
 export type DesignScope = string | { chatSessionId: string };
 
@@ -50,9 +52,14 @@ export function useChooseDesign(scope?: DesignScope) {
         body: JSON.stringify({ optionId }),
       });
     },
+    // A pick can record a plan change request and start a plan run.
     onSuccess: () => {
       if (scopeEnabled(scope)) {
         void queryClient.invalidateQueries({ queryKey: designsQueryKey(scope) });
+        if (typeof scope === 'string') {
+          void queryClient.invalidateQueries({ queryKey: ticketQueryKey(scope) });
+          void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(scope) });
+        }
       }
     },
   });

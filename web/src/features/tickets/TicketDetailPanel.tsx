@@ -15,6 +15,7 @@ import {
 import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { DesignPlanCard } from '../designs/DesignPlanCard';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
@@ -252,6 +253,8 @@ export function TicketDetailPanel({
       {ticket.status === 'blocked' && !isArchived && (
         <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />
       )}
+
+      <DesignPlanCard ticketId={ticket.id} />
 
       {ticket.status === 'plan_review' && !isArchived && (
         <PlanReviewActions

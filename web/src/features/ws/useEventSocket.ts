@@ -4,6 +4,7 @@ import {
   patchAgentRunStatusInCache,
 } from '../tickets/useAgentRuns';
 import type { RunStatus } from '../../lib/schemas/agentRun';
+import { designsQueryKey } from '../designs/useDesigns';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
 import { setEventSocketOpen } from './socketState';
@@ -76,6 +77,10 @@ function dispatchMessage(raw: string) {
     // ticket.updated (worker failure), so refresh it here too.
     void queryClient.invalidateQueries({
       queryKey: ['ticket', payload.ticket_id],
+    });
+    // A run can publish design options, so the card and footer follow it.
+    void queryClient.invalidateQueries({
+      queryKey: designsQueryKey(payload.ticket_id),
     });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     for (const listener of listeners) {
