@@ -894,3 +894,140 @@ async fn compaction_anchors_citations_to_default_branch() {
         ]
     );
 }
+
+#[tokio::test]
+async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
+    use coppice_server::domain::knowledge::{
+        KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType,
+        KnowledgeType,
+    };
+    use coppice_server::knowledge::candidates::KnowledgeCandidateSpec;
+    use coppice_server::services::knowledge_service::KnowledgeService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    fx.configure_agent().await;
+    let admin = fx.admin_id().await;
+    let board_id = Uuid::parse_str(&fx.board_id).unwrap();
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id = Uuid::parse_str(
+        &common::register_test_repo(
+            &fx.app,
+            &local_path.display().to_string(),
+            &fx.cookie,
+            &fx.csrf,
+        )
+        .await,
+    )
+    .unwrap();
+
+    let knowledge = KnowledgeService::new(fx.pool(), &fx.state.config.knowledge);
+    let created = knowledge
+        .create_manual(
+            admin,
+            KnowledgeRevisionInput {
+                scope: KnowledgeScope::Board,
+                board_id: Some(board_id),
+                agent_id: None,
+                knowledge_type: KnowledgeType::TestCommand,
+                title: "Run make test-unit while iterating".into(),
+                content: "Use make test-unit; reserve make test for acceptance.".into(),
+                source_type: KnowledgeSourceType::HumanNote,
+                source_id: None,
+                source_run_id: None,
+                confidence: KnowledgeConfidence::High,
+            },
+        )
+        .await
+        .unwrap();
+    let original = knowledge.approve(created.id, created.version, admin).await.unwrap();
+    sqlx::query(
+        "INSERT INTO knowledge_citations (id, revision_id, repo_id, path) VALUES ($1, $2, $3, 'README.md')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(original.active_revision_id.unwrap())
+    .bind(repo_id)
+    .execute(fx.pool())
+    .await
+    .unwrap();
+
+    fx.done_ticket().await;
+    let batch = fx.service().start_manual(admin).await.unwrap();
+    let merge = KnowledgeCandidateSpec {
+        knowledge_type: "test_command".into(),
+        scope: "board".into(),
+        title: "Iterate with make test-unit".into(),
+        content: "Use make test-unit while iterating; make test is for final acceptance.".into(),
+        supersedes_item_id: Some(original.id.to_string()),
+        citations: vec!["README.md".into()],
+        ..Default::default()
+    };
+    let outcome = fx
+        .service()
+        .complete_batch(batch.id, batch.run_id.unwrap(), "done", &[merge])
+        .await
+        .unwrap();
+    assert_eq!(outcome.created, 1, "{:?}", outcome.dropped);
+
+    let (merged_id, status, source_type, source_id, board): (
+        Uuid,
+        String,
+        String,
+        Option<Uuid>,
+        Option<Uuid>,
+    ) = sqlx::query_as(
+        r#"
+        SELECT i.id, i.status, r.source_type, r.source_id, r.board_id
+        FROM knowledge_items i
+        JOIN knowledge_revisions r ON r.id = i.current_revision_id
+        WHERE i.compaction_batch_id = $1
+        "#,
+    )
+    .bind(batch.id)
+    .fetch_one(fx.pool())
+    .await
+    .unwrap();
+    assert_eq!(status, "pending");
+    assert_eq!(source_type, "agent_summary");
+    assert_eq!(source_id, None);
+    assert_eq!(board, Some(board_id));
+    assert_eq!(
+        fx.count(&format!(
+            "SELECT count(*) FROM knowledge_item_sources WHERE item_id = '{merged_id}'"
+        ))
+        .await,
+        0
+    );
+    let citation_repo: Option<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT c.repo_id FROM knowledge_citations c
+        JOIN knowledge_items i ON i.current_revision_id = c.revision_id
+        WHERE i.id = $1
+        "#,
+    )
+    .bind(merged_id)
+    .fetch_one(fx.pool())
+    .await
+    .unwrap();
+    assert_eq!(citation_repo, Some(repo_id));
+
+    // The original is untouched until a human approves the merge.
+    let (original_status, superseded_by): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original.id)
+            .fetch_one(fx.pool())
+            .await
+            .unwrap();
+    assert_eq!(original_status, "approved");
+    assert_eq!(superseded_by, None);
+
+    let merged = knowledge.get(merged_id).await.unwrap();
+    knowledge.approve(merged_id, merged.version, admin).await.unwrap();
+    let superseded_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original.id)
+            .fetch_one(fx.pool())
+            .await
+            .unwrap();
+    assert_eq!(superseded_by, Some(merged_id));
+}

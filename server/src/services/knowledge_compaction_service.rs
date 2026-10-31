@@ -390,7 +390,7 @@ impl<'a> KnowledgeCompactionService<'a> {
     }
 
     /// Resolve each candidate's citations against its first source ticket's
-    /// repo, keyed by candidate position. Invalid paths are skipped here and
+    /// repo (a merge uses its superseded item's repo), keyed by candidate position. Invalid paths are skipped here and
     /// reported by `review_candidates`.
     async fn anchor_citations(
         &self,
@@ -414,6 +414,37 @@ impl<'a> KnowledgeCompactionService<'a> {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        // A merge has no source ticket: it takes the repo its superseded
+        // item's active revision is already anchored to, if any.
+        let merged_ids: Vec<Uuid> = specs
+            .iter()
+            .enumerate()
+            .filter(|(position, _)| first_sources[*position].is_none())
+            .filter_map(|(_, spec)| {
+                spec.supersedes_item_id
+                    .as_deref()
+                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+            })
+            .collect();
+        let merged_repos: HashMap<Uuid, Uuid> = if merged_ids.is_empty() {
+            HashMap::new()
+        } else {
+            sqlx::query_as::<_, (Uuid, Uuid)>(
+                r#"
+                SELECT DISTINCT ON (i.id) i.id, c.repo_id
+                FROM knowledge_items i
+                JOIN knowledge_citations c ON c.revision_id = i.active_revision_id
+                WHERE i.id = ANY($1) AND c.repo_id IS NOT NULL
+                ORDER BY i.id, c.created_at, c.path
+                "#,
+            )
+            .bind(&merged_ids)
+            .fetch_all(self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+        };
         let mut anchors = HashMap::new();
         for (position, spec) in specs.iter().enumerate() {
             let mut paths: Vec<String> = Vec::new();
@@ -427,8 +458,14 @@ impl<'a> KnowledgeCompactionService<'a> {
             if paths.is_empty() {
                 continue;
             }
-            let repo_id = first_sources[position]
-                .and_then(|ticket| ticket_repos.get(&ticket).copied().flatten());
+            let repo_id = match first_sources[position] {
+                Some(ticket) => ticket_repos.get(&ticket).copied().flatten(),
+                None => spec
+                    .supersedes_item_id
+                    .as_deref()
+                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+                    .and_then(|item| merged_repos.get(&item).copied()),
+            };
             let resolved = resolve_anchors(self.pool, repo_id, &paths).await;
             anchors.insert(
                 i32::try_from(position).unwrap_or(i32::MAX),

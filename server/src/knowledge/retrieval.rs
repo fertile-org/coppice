@@ -14,6 +14,10 @@ pub const MAX_ELIGIBLE_CANDIDATES: i64 = 200;
 pub const INBOX_SIMILAR_CANDIDATES: i64 = 50;
 /// Lowest [`near_duplicate_score`] shown as a near duplicate.
 pub const NEAR_DUPLICATE_MIN_SCORE: f64 = 0.25;
+/// Lowest [`near_duplicate_score`] at which compaction is told to consider a merge.
+pub const MERGE_MIN_SCORE: f64 = 0.5;
+/// Most recently updated approved items compared pairwise per call.
+pub const MERGE_SCAN_ITEMS: i64 = 500;
 
 /// Base predicates for approved, live knowledge.
 macro_rules! live_knowledge_predicates {
@@ -376,6 +380,79 @@ pub async fn find_similar_inbox(
     Ok(neighbors)
 }
 
+/// One approved item's folded text, for pairwise comparison.
+struct FoldedItem {
+    id: Uuid,
+    board_id: Option<Uuid>,
+    title: String,
+    content: String,
+}
+
+/// Pairs of approved, live items on the same board (or both workspace-wide)
+/// that score at least [`MERGE_MIN_SCORE`], best first, at most `limit`.
+/// Looks at the [`MERGE_SCAN_ITEMS`] most recently updated items that are
+/// workspace-wide or on one of `board_ids`.
+pub async fn near_duplicate_pairs(
+    pool: &PgPool,
+    board_ids: &[Uuid],
+    limit: usize,
+) -> Result<Vec<(Uuid, Uuid, f64)>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT i.id, r.board_id,
+               coppice_unaccent(r.title) AS folded_title,
+               coppice_unaccent(r.content) AS folded_content
+        FROM knowledge_items i
+        JOIN knowledge_revisions r ON r.id = i.active_revision_id
+        WHERE i.status = 'approved'
+          AND i.superseded_by IS NULL
+          AND (i.expires_at IS NULL OR i.expires_at > now())
+          AND (r.board_id IS NULL OR r.board_id = ANY($1))
+        ORDER BY i.updated_at DESC, i.id
+        LIMIT $2
+        "#,
+    )
+    .bind(board_ids)
+    .bind(MERGE_SCAN_ITEMS)
+    .fetch_all(pool)
+    .await?;
+    let items = rows
+        .iter()
+        .map(|row| {
+            Ok(FoldedItem {
+                id: row.try_get("id")?,
+                board_id: row.try_get("board_id")?,
+                title: row.try_get("folded_title")?,
+                content: row.try_get("folded_content")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(score_pairs(&items, limit))
+}
+
+fn score_pairs(items: &[FoldedItem], limit: usize) -> Vec<(Uuid, Uuid, f64)> {
+    let mut pairs = Vec::new();
+    for (index, first) in items.iter().enumerate() {
+        for second in &items[index + 1..] {
+            if first.board_id != second.board_id {
+                continue;
+            }
+            let score =
+                near_duplicate_score(&first.title, &first.content, &second.title, &second.content);
+            if score >= MERGE_MIN_SCORE {
+                pairs.push((first.id, second.id, score));
+            }
+        }
+    }
+    pairs.sort_by(|a, b| {
+        b.2.total_cmp(&a.2)
+            .then(a.0.cmp(&b.0))
+            .then(a.1.cmp(&b.1))
+    });
+    pairs.truncate(limit);
+    pairs
+}
+
 /// How alike two notes are, from 0 (no shared words) to 1 (the same words):
 /// `0.4 × Jaccard(title words) + 0.6 × Jaccard(title and content words)`.
 /// Jaccard divides shared words by all words, so a long note that happens to
@@ -486,6 +563,28 @@ mod tests {
             DRAG_BODY,
         );
         assert!(score >= NEAR_DUPLICATE_MIN_SCORE, "{score}");
+    }
+
+    #[test]
+    fn pairs_need_the_same_board_and_a_high_score() {
+        let board = Some(Uuid::new_v4());
+        let item = |board_id, title: &str, content: &str| FoldedItem {
+            id: Uuid::new_v4(),
+            board_id,
+            title: title.into(),
+            content: content.into(),
+        };
+        let items = [
+            item(board, DRAG_TITLE, DRAG_BODY),
+            item(board, DRAG_TITLE, DRAG_BODY),
+            item(None, DRAG_TITLE, DRAG_BODY),
+            item(board, TIMEOUT_TITLE, TIMEOUT_BODY),
+        ];
+        let pairs = score_pairs(&items, 10);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!((pairs[0].0, pairs[0].1), (items[0].id, items[1].id));
+        assert_eq!(pairs[0].2, 1.0);
+        assert!(score_pairs(&items, 0).is_empty());
     }
 
     #[test]

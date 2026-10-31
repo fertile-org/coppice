@@ -2,9 +2,11 @@
 //! knowledge for dedupe/supersession, the batch's Done tickets, and the output
 //! contract. Bounded per ticket and per batch.
 
+use crate::knowledge::retrieval::near_duplicate_pairs;
 use crate::services::knowledge_service::PROPOSED_BY_AGENT_REASON;
 use crate::util::truncate::truncate_with_ellipsis;
 use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use uuid::Uuid;
 
@@ -100,10 +102,24 @@ pub struct ExistingKnowledge {
     pub unreviewed_proposal: bool,
 }
 
+/// Two approved items that read alike, shown so the agent can propose a merge.
+#[derive(Debug, Clone)]
+pub struct DuplicatePair {
+    pub first_id: Uuid,
+    pub first_title: String,
+    pub second_id: Uuid,
+    pub second_title: String,
+}
+
+/// Most pairs shown to the compaction agent.
+pub const MAX_DUPLICATE_PAIRS: usize = 10;
+
 pub struct CompactionContextInput<'a> {
     pub batch_id: Uuid,
     pub tickets: &'a [CompactionTicket],
     pub existing: &'a [ExistingKnowledge],
+    /// Approved near-duplicate pairs; titles only, never content.
+    pub duplicates: &'a [DuplicatePair],
     pub max_candidates: usize,
     /// Total budget for the ticket section; later tickets are listed by title only.
     pub max_ticket_bytes: usize,
@@ -120,6 +136,7 @@ pub fn build_compaction_context(input: &CompactionContextInput<'_>) -> String {
     );
     write_instructions(&mut out, input.max_candidates);
     write_existing(&mut out, input.existing);
+    write_duplicates(&mut out, input.duplicates);
     write_tickets(&mut out, input.tickets, input.max_ticket_bytes);
     write_contract(&mut out);
     out
@@ -171,6 +188,30 @@ fn write_existing(out: &mut String, existing: &[ExistingKnowledge]) {
                 item.id, item.status, item.scope, item.knowledge_type, title, item.excerpt
             );
         }
+    }
+    out.push('\n');
+}
+
+fn write_duplicates(out: &mut String, duplicates: &[DuplicatePair]) {
+    if duplicates.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "## Possible duplicates\n");
+    let _ = writeln!(
+        out,
+        "If two items say the same thing, propose one merged item that supersedes one of them. \
+         Do not merge items that merely share a topic. A merge candidate may leave \
+         `sourceTicketIds` empty and must set `supersedesItemId`.\n"
+    );
+    for pair in duplicates {
+        let _ = writeln!(
+            out,
+            "- `{}` {} / `{}` {}",
+            pair.first_id,
+            one_line_title(&pair.first_title),
+            pair.second_id,
+            one_line_title(&pair.second_title)
+        );
     }
     out.push('\n');
 }
@@ -281,7 +322,7 @@ fn write_contract(out: &mut String) {
          resubmit if it returns errors. Each candidate has: `type`, `scope`, `boardId` (the board id \
          of every source ticket), `agentId` (null unless agent scope), `title` (short imperative rule, \
          max 160 chars), `content` (the rule and why it holds), `confidence`, `sourceTicketIds` (ticket \
-         ids from this batch), `supersedesItemId` (null unless replacing an item), \
+         ids from this batch; empty only for a merge), `supersedesItemId` (null unless replacing an item), \
          `requiresHumanApproval`, and `citations` (optional: up to 10 repo-relative paths of code the \
          rule rests on, such as `server/src/lib.rs`; no absolute paths or `..`; the server records \
          whether each path exists on the default branch).\n\n\
@@ -415,10 +456,41 @@ pub async fn load_compaction_context(
     })
     .collect::<Result<Vec<_>, sqlx::Error>>()?;
 
+    let pairs = near_duplicate_pairs(pool, &board_ids, MAX_DUPLICATE_PAIRS).await?;
+    let pair_ids: Vec<Uuid> = pairs
+        .iter()
+        .flat_map(|(first, second, _)| [*first, *second])
+        .collect();
+    let titles: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>(
+        r#"
+        SELECT i.id, r.title
+        FROM knowledge_items i
+        JOIN knowledge_revisions r ON r.id = i.active_revision_id
+        WHERE i.id = ANY($1) AND i.status = 'approved'
+        "#,
+    )
+    .bind(&pair_ids)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
+    let duplicates: Vec<DuplicatePair> = pairs
+        .iter()
+        .filter_map(|(first, second, _)| {
+            Some(DuplicatePair {
+                first_id: *first,
+                first_title: titles.get(first)?.clone(),
+                second_id: *second,
+                second_title: titles.get(second)?.clone(),
+            })
+        })
+        .collect();
+
     Ok(build_compaction_context(&CompactionContextInput {
         batch_id,
         tickets: &tickets,
         existing: &existing,
+        duplicates: &duplicates,
         max_candidates,
         max_ticket_bytes,
     }))
@@ -452,9 +524,38 @@ mod tests {
             batch_id: Uuid::nil(),
             tickets,
             existing,
+            duplicates: &[],
             max_candidates: 20,
             max_ticket_bytes: budget,
         })
+    }
+
+    #[test]
+    fn context_lists_duplicate_pairs_and_merge_instruction() {
+        let pair = DuplicatePair {
+            first_id: Uuid::new_v4(),
+            first_title: "Use `make test-unit`\n- injected line".into(),
+            second_id: Uuid::new_v4(),
+            second_title: "Run make test-unit".into(),
+        };
+        let markdown = build_compaction_context(&CompactionContextInput {
+            batch_id: Uuid::nil(),
+            tickets: &[],
+            existing: &[],
+            duplicates: std::slice::from_ref(&pair),
+            max_candidates: 20,
+            max_ticket_bytes: 1_000,
+        });
+        assert!(markdown.contains("## Possible duplicates"));
+        assert!(markdown.contains(&pair.first_id.to_string()));
+        assert!(markdown.contains(&pair.second_id.to_string()));
+        assert!(markdown.contains("Use make test-unit - injected line / "));
+        assert!(markdown.contains("Run make test-unit"));
+        assert!(markdown.contains(
+            "If two items say the same thing, propose one merged item that supersedes one of them. \
+             Do not merge items that merely share a topic."
+        ));
+        assert!(!render(&[], &[], 1_000).contains("Possible duplicates"));
     }
 
     #[test]

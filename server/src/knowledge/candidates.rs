@@ -116,9 +116,24 @@ fn accept(
             source_ticket_ids.push(ticket_id);
         }
     }
-    let Some(&first_source) = source_ticket_ids.first() else {
-        return Err("sourceTicketIds must not be empty".into());
+    // A supersession target is looked up first: with no source tickets the
+    // candidate is a merge and takes its board from that item.
+    let supersedes = match spec.supersedes_item_id.as_deref() {
+        None => None,
+        Some(raw) if raw.trim().is_empty() => None,
+        Some(raw) => {
+            let item_id = parse_id(raw, "supersedesItemId")?;
+            let item_board = *context.supersedable.get(&item_id).ok_or_else(|| {
+                format!("supersedesItemId {item_id} is not an approved, live item")
+            })?;
+            Some((item_id, item_board))
+        }
     };
+    let first_source = source_ticket_ids.first().copied();
+    let is_merge = first_source.is_none();
+    if is_merge && supersedes.is_none() {
+        return Err("sourceTicketIds must not be empty".into());
+    }
     let source_boards: HashSet<Uuid> = context
         .tickets
         .iter()
@@ -131,6 +146,14 @@ fn accept(
         KnowledgeScope::Board | KnowledgeScope::Agent => {
             let board_id = match spec.board_id.as_deref() {
                 Some(raw) => parse_id(raw, "boardId")?,
+                None if is_merge => match supersedes.and_then(|(_, board)| board) {
+                    Some(board) => board,
+                    None => {
+                        return Err(
+                            "a merge of a workspace item must use workspace scope".into()
+                        )
+                    }
+                },
                 None if source_boards.len() == 1 => *source_boards.iter().next().unwrap(),
                 None => return Err("boardId is required when sources span boards".into()),
             };
@@ -156,18 +179,16 @@ fn accept(
         }
     };
 
-    let supersedes_item_id = match spec.supersedes_item_id.as_deref() {
+    let supersedes_item_id = match supersedes {
         None => None,
-        Some(raw) if raw.trim().is_empty() => None,
-        Some(raw) => {
-            let item_id = parse_id(raw, "supersedesItemId")?;
-            let item_board = context.supersedable.get(&item_id).ok_or_else(|| {
-                format!("supersedesItemId {item_id} is not an approved, live item")
-            })?;
-            if item_board.is_some() && *item_board != board_id {
+        Some((item_id, item_board)) => {
+            if item_board.is_some() && item_board != board_id {
                 return Err(format!(
                     "supersedesItemId {item_id} belongs to a different board"
                 ));
+            }
+            if is_merge && item_board.is_none() && scope != KnowledgeScope::Workspace {
+                return Err("a merge of a workspace item must use workspace scope".into());
             }
             Some(item_id)
         }
@@ -180,8 +201,12 @@ fn accept(
         knowledge_type,
         title: spec.title.clone(),
         content: spec.content.clone(),
-        source_type: KnowledgeSourceType::Ticket,
-        source_id: Some(first_source),
+        source_type: if is_merge {
+            KnowledgeSourceType::AgentSummary
+        } else {
+            KnowledgeSourceType::Ticket
+        },
+        source_id: first_source,
         source_run_id: Some(context.run_id),
         confidence,
     };
@@ -405,6 +430,76 @@ mod tests {
         assert_eq!(accepted.supersedes_item_id, Some(live_item));
         assert!(review.dropped[0].contains("not an approved, live item"));
         assert!(review.dropped[1].contains("different board"));
+    }
+
+    #[test]
+    fn empty_sources_allowed_only_with_supersedes() {
+        let mut world = World::new();
+        let item = Uuid::new_v4();
+        world.supersedable.insert(item, Some(world.board_a()));
+
+        // Direction 1: no sources and nothing superseded is still refused.
+        let review = world.review(&[spec(&[])], 20);
+        assert!(review.accepted.is_empty());
+        assert!(review.dropped[0].contains("must not be empty"), "{:?}", review.dropped);
+
+        // Direction 2: no sources but a superseded item is a merge.
+        let mut merge = spec(&[]);
+        merge.supersedes_item_id = Some(item.to_string());
+        let review = world.review(&[merge], 20);
+        assert!(review.dropped.is_empty(), "{:?}", review.dropped);
+        let accepted = &review.accepted[0];
+        assert!(accepted.source_ticket_ids.is_empty());
+        assert_eq!(accepted.supersedes_item_id, Some(item));
+        assert_eq!(accepted.input.board_id, Some(world.board_a()));
+        assert_eq!(accepted.input.source_type, KnowledgeSourceType::AgentSummary);
+        assert_eq!(accepted.input.source_id, None);
+
+        // Sources plus supersedes keep the ticket source.
+        let mut replace = spec(&[world.tickets[0].id]);
+        replace.supersedes_item_id = Some(item.to_string());
+        let review = world.review(&[replace], 20);
+        let accepted = &review.accepted[0];
+        assert_eq!(accepted.input.source_type, KnowledgeSourceType::Ticket);
+        assert_eq!(accepted.input.source_id, Some(world.tickets[0].id));
+    }
+
+    #[test]
+    fn merge_candidate_board_must_match_superseded_item() {
+        let mut world = World::new();
+        let board_item = Uuid::new_v4();
+        let workspace_item = Uuid::new_v4();
+        world.supersedable.insert(board_item, Some(world.board_a()));
+        world.supersedable.insert(workspace_item, None);
+
+        let mut wrong_board = spec(&[]);
+        wrong_board.supersedes_item_id = Some(board_item.to_string());
+        wrong_board.board_id = Some(world.tickets[2].board_id.to_string());
+        let mut inferred = spec(&[]);
+        inferred.supersedes_item_id = Some(board_item.to_string());
+        let mut board_scope_over_workspace_item = spec(&[]);
+        board_scope_over_workspace_item.supersedes_item_id = Some(workspace_item.to_string());
+        board_scope_over_workspace_item.board_id = Some(world.board_a().to_string());
+        let mut workspace_merge = spec(&[]);
+        workspace_merge.scope = "workspace".into();
+        workspace_merge.supersedes_item_id = Some(workspace_item.to_string());
+
+        let review = world.review(
+            &[
+                wrong_board,
+                inferred,
+                board_scope_over_workspace_item,
+                workspace_merge,
+            ],
+            20,
+        );
+        assert_eq!(review.accepted.len(), 2, "{:?}", review.dropped);
+        assert_eq!(review.dropped.len(), 2, "{:?}", review.dropped);
+        assert!(review.dropped[0].contains("different board"), "{:?}", review.dropped);
+        assert!(review.dropped[1].contains("workspace"), "{:?}", review.dropped);
+        assert_eq!(review.accepted[0].input.board_id, Some(world.board_a()));
+        assert_eq!(review.accepted[1].input.scope, KnowledgeScope::Workspace);
+        assert_eq!(review.accepted[1].input.board_id, None);
     }
 
     #[test]
