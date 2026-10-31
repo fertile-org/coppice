@@ -177,6 +177,8 @@ struct EditBody {
 struct SupersedeBody {
     expected_version: i32,
     replacement: RevisionBody,
+    /// The item whose text `replacement` copies, when not the superseded one.
+    citations_from_item_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -607,6 +609,7 @@ async fn supersede_knowledge(
             body.expected_version,
             auth.user.id,
             revision_input(body.replacement)?,
+            body.citations_from_item_id,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(item_response(item))))

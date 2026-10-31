@@ -5,7 +5,7 @@ use crate::domain::knowledge::{
     validate_revision, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeSourceType, KnowledgeStatus, KnowledgeType,
 };
-use crate::knowledge::citations::{insert_citations, ResolvedCitation};
+use crate::knowledge::citations::{copy_citations, insert_citations, ResolvedCitation};
 use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::fts::build_tsquery;
 use crate::knowledge::retrieval::{
@@ -488,6 +488,7 @@ LIMIT $6"#
             &input,
         )
         .await?;
+        copy_citations(&mut tx, item.current_revision_id, revision_id).await?;
         sqlx::query(
             "UPDATE knowledge_items SET current_revision_id = $2, version = version + 1, updated_at = now() WHERE id = $1",
         )
@@ -541,12 +542,16 @@ LIMIT $6"#
         self.get(item_id).await
     }
 
+    /// Create the Pending replacement for `item_id`. Its citations come from
+    /// the item whose text it copies: `citations_from` when given, otherwise
+    /// the superseded item.
     pub async fn supersede(
         &self,
         item_id: Uuid,
         expected_version: i32,
         user_id: Uuid,
         mut replacement: KnowledgeRevisionInput,
+        citations_from: Option<Uuid>,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         validate_revision(&mut replacement).map_err(KnowledgeError::Validation)?;
         let mut tx = self.pool.begin().await?;
@@ -570,6 +575,16 @@ LIMIT $6"#
         if has_live_replacement {
             return Err(KnowledgeError::LiveReplacementConflict);
         }
+        let source_revision_id = match citations_from {
+            None => item.current_revision_id,
+            Some(source_id) => sqlx::query_scalar(
+                "SELECT current_revision_id FROM knowledge_items WHERE id = $1",
+            )
+            .bind(source_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(KnowledgeError::NotFound)?,
+        };
         self.enforce_capacity(&mut tx, &replacement, None).await?;
         let replacement_id = self
             .insert_item_revision(
@@ -583,6 +598,12 @@ LIMIT $6"#
                 None,
             )
             .await?;
+        let replacement_revision_id: Uuid =
+            sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
+                .bind(replacement_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        copy_citations(&mut tx, source_revision_id, replacement_revision_id).await?;
         sqlx::query(
             "UPDATE knowledge_items SET version = version + 1, updated_at = now() WHERE id = $1",
         )

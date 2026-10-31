@@ -136,6 +136,28 @@ pub async fn insert_citations(
     Ok(())
 }
 
+/// Give a new revision the same citations, anchors included, as an earlier one.
+pub async fn copy_citations(
+    tx: &mut Transaction<'_, Postgres>,
+    from_revision_id: Uuid,
+    to_revision_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha)
+        SELECT gen_random_uuid(), $2, repo_id, path, commit_sha
+        FROM knowledge_citations
+        WHERE revision_id = $1
+        ON CONFLICT DO NOTHING
+        "#,
+    )
+    .bind(from_revision_id)
+    .bind(to_revision_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

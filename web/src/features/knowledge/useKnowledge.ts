@@ -216,11 +216,18 @@ export function useSupersedeKnowledge() {
       id,
       expectedVersion,
       replacement,
+      citationsFromItemId,
     }: {
       id: string;
       expectedVersion: number;
       replacement: KnowledgeRevisionInput;
-    }) => mutateKnowledge(id, '/supersede', { expectedVersion, replacement }),
+      citationsFromItemId?: string;
+    }) =>
+      mutateKnowledge(id, '/supersede', {
+        expectedVersion,
+        replacement,
+        citationsFromItemId,
+      }),
   );
 }
 

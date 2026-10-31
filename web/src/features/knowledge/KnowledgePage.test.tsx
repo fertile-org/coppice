@@ -372,6 +372,7 @@ describe('KnowledgePage', () => {
       expect(mocks.supersede).toHaveBeenCalledWith({
         id: neighbor.itemId,
         expectedVersion: 7,
+        citationsFromItemId: item.id,
         replacement: {
           scope: item.scope,
           boardId: item.boardId,

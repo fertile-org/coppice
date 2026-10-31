@@ -220,6 +220,7 @@ export function KnowledgeCard({
       await supersede.mutateAsync({
         id: neighbor.itemId,
         expectedVersion: neighborItem.version,
+        citationsFromItemId: item.id,
         replacement: {
           scope: item.scope,
           boardId: item.boardId,

@@ -2834,3 +2834,154 @@ async fn editing_an_item_resets_its_open_flag_count() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(edited["openFlagCount"], 0);
 }
+
+async fn add_citation(pool: &PgPool, revision_id: &str, repo_id: Uuid, path: &str, sha: &str) {
+    sqlx::query(
+        "INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(revision_id.parse::<Uuid>().unwrap())
+    .bind(repo_id)
+    .bind(path)
+    .bind(sha)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn citations_of(pool: &PgPool, revision_id: &str) -> Vec<(Uuid, String, String)> {
+    sqlx::query_as(
+        "SELECT repo_id, path, commit_sha FROM knowledge_citations \
+         WHERE revision_id = $1 ORDER BY path",
+    )
+    .bind(revision_id.parse::<Uuid>().unwrap())
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn editing_an_item_keeps_its_citations() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id: Uuid =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf)
+            .await
+            .parse()
+            .unwrap();
+    let created = create_candidate(&app, &board_id, &cookie, &csrf, "Cited item").await;
+    let revision = created["revisionId"].as_str().unwrap();
+    let sha = "a".repeat(40);
+    add_citation(&pool, revision, repo_id, "src/a.rs", &sha).await;
+    add_citation(&pool, revision, repo_id, "src/b.rs", &sha).await;
+
+    let (status, edited) = mutate(
+        &app,
+        "PATCH",
+        &format!("/api/knowledge/{}", created["id"].as_str().unwrap()),
+        serde_json::json!({"expectedVersion": created["version"], "title": "Cited item, reworded"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(edited["revisionId"], created["revisionId"]);
+    assert_eq!(
+        citations_of(&pool, edited["revisionId"].as_str().unwrap()).await,
+        vec![
+            (repo_id, "src/a.rs".to_string(), sha.clone()),
+            (repo_id, "src/b.rs".to_string(), sha.clone()),
+        ]
+    );
+    assert_eq!(citations_of(&pool, revision).await.len(), 2, "old revision is untouched");
+}
+
+#[tokio::test]
+async fn supersede_carries_citations_from_the_item_it_copies() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id: Uuid =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf)
+            .await
+            .parse()
+            .unwrap();
+    let sha = "b".repeat(40);
+
+    // The near-duplicate assist copies a pending item onto an approved neighbor.
+    let neighbor = create_candidate(&app, &board_id, &cookie, &csrf, "Neighbor").await;
+    let neighbor_id = neighbor["id"].as_str().unwrap();
+    add_citation(&pool, neighbor["revisionId"].as_str().unwrap(), repo_id, "neighbor.rs", &sha)
+        .await;
+    let approved = approve_item(&app, neighbor_id, 1, &cookie, &csrf).await;
+    let pending = create_candidate(&app, &board_id, &cookie, &csrf, "Pending copy").await;
+    let pending_id = pending["id"].as_str().unwrap();
+    add_citation(&pool, pending["revisionId"].as_str().unwrap(), repo_id, "pending.rs", &sha)
+        .await;
+
+    let mut body = supersede_body(
+        &board_id,
+        approved["version"].as_i64().unwrap(),
+        "Pending copy",
+        "Run make test-unit before review.",
+    );
+    body["citationsFromItemId"] = serde_json::json!(Uuid::new_v4());
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{neighbor_id}/supersede"),
+        body.clone(),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown source item");
+
+    body["citationsFromItemId"] = serde_json::json!(pending_id);
+    let (status, replacement) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{neighbor_id}/supersede"),
+        body,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{replacement}");
+    assert_eq!(
+        citations_of(&pool, replacement["revisionId"].as_str().unwrap()).await,
+        vec![(repo_id, "pending.rs".to_string(), sha.clone())]
+    );
+
+    // The Supersede dialog rewrites the superseded item itself.
+    let original = create_candidate(&app, &board_id, &cookie, &csrf, "Original").await;
+    let original_id = original["id"].as_str().unwrap();
+    add_citation(&pool, original["revisionId"].as_str().unwrap(), repo_id, "original.rs", &sha)
+        .await;
+    let approved = approve_item(&app, original_id, 1, &cookie, &csrf).await;
+    let (status, rewritten) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        supersede_body(
+            &board_id,
+            approved["version"].as_i64().unwrap(),
+            "Original, rewritten",
+            "Run make test-smoke before review.",
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{rewritten}");
+    assert_eq!(
+        citations_of(&pool, rewritten["revisionId"].as_str().unwrap()).await,
+        vec![(repo_id, "original.rs".to_string(), sha)]
+    );
+}
