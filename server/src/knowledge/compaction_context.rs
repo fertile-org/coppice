@@ -260,8 +260,10 @@ fn write_contract(out: &mut String) {
          resubmit if it returns errors. Each candidate has: `type`, `scope`, `boardId` (the board id \
          of every source ticket), `agentId` (null unless agent scope), `title` (short imperative rule, \
          max 160 chars), `content` (the rule and why it holds), `confidence`, `sourceTicketIds` (ticket \
-         ids from this batch), `supersedesItemId` (null unless replacing an item), and \
-         `requiresHumanApproval`.\n\n\
+         ids from this batch), `supersedesItemId` (null unless replacing an item), \
+         `requiresHumanApproval`, and `citations` (optional: up to 10 repo-relative paths of code the \
+         rule rests on, such as `server/src/lib.rs`; no absolute paths or `..`; the server records \
+         whether each path exists on the default branch).\n\n\
          `scope` is `board`, `workspace`, or `agent` (agent scope also needs `agentId`). \
          `confidence` is `low`, `medium`, or `high`. Every `sourceTicketIds` entry must be a ticket id listed above. \
          Use `ticket_get` / `ticket_comments` for more detail on a listed ticket and `knowledge_search` \

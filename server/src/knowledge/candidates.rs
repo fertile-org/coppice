@@ -1,6 +1,7 @@
 //! `knowledgeCandidates` from a compaction run: lenient parsing, strict validation.
 //! Invalid candidates are dropped with a reason; they never fail the batch.
 
+use crate::knowledge::citations::{validate_citation_path, MAX_CITATIONS_PER_CANDIDATE};
 use crate::domain::knowledge::{
     confidence_from_str, scope_from_str, type_from_str, validate_revision, KnowledgeConfidence,
     KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType,
@@ -24,6 +25,8 @@ pub struct KnowledgeCandidateSpec {
     pub source_ticket_ids: Vec<String>,
     pub supersedes_item_id: Option<String>,
     pub requires_human_approval: bool,
+    /// Repo-relative paths the candidate rests on.
+    pub citations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,6 +53,8 @@ pub struct AcceptedCandidate {
     pub source_ticket_ids: Vec<Uuid>,
     pub supersedes_item_id: Option<Uuid>,
     pub requires_human_approval: bool,
+    /// Validated, de-duplicated, capped.
+    pub citations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -73,7 +78,10 @@ pub fn review_candidates(
             continue;
         }
         match accept(position, spec, context) {
-            Ok(candidate) => review.accepted.push(candidate),
+            Ok((candidate, citation_notes)) => {
+                review.dropped.extend(citation_notes);
+                review.accepted.push(candidate);
+            }
             Err(reason) => review
                 .dropped
                 .push(format!("candidate {}: {reason}", position + 1)),
@@ -86,7 +94,7 @@ fn accept(
     position: usize,
     spec: &KnowledgeCandidateSpec,
     context: &CandidateContext<'_>,
-) -> Result<AcceptedCandidate, String> {
+) -> Result<(AcceptedCandidate, Vec<String>), String> {
     let knowledge_type = type_from_str(spec.knowledge_type.trim())
         .ok_or_else(|| format!("unknown type `{}`", spec.knowledge_type))?;
     let scope = scope_from_str(spec.scope.trim())
@@ -179,13 +187,42 @@ fn accept(
     };
     validate_revision(&mut input)?;
 
-    Ok(AcceptedCandidate {
+    let (citations, citation_notes) = review_citations(position, &spec.citations);
+    let accepted = AcceptedCandidate {
         index: i32::try_from(position).unwrap_or(i32::MAX),
         input,
         source_ticket_ids,
         supersedes_item_id,
         requires_human_approval: spec.requires_human_approval,
-    })
+        citations,
+    };
+    Ok((accepted, citation_notes))
+}
+
+/// Keep valid, distinct paths up to the cap. A bad citation never drops its
+/// candidate; the reason goes back to the agent through the batch summary.
+fn review_citations(position: usize, raw: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut kept: Vec<String> = Vec::new();
+    let mut notes = Vec::new();
+    let mut over_cap = 0usize;
+    for item in raw {
+        match validate_citation_path(item) {
+            Ok(path) if kept.contains(&path) => {}
+            Ok(_) if kept.len() >= MAX_CITATIONS_PER_CANDIDATE => over_cap += 1,
+            Ok(path) => kept.push(path),
+            Err(reason) => notes.push(format!(
+                "candidate {}: citation `{item}` dropped: {reason}",
+                position + 1
+            )),
+        }
+    }
+    if over_cap > 0 {
+        notes.push(format!(
+            "candidate {}: kept at most {MAX_CITATIONS_PER_CANDIDATE} citations; {over_cap} dropped",
+            position + 1
+        ));
+    }
+    (kept, notes)
 }
 
 fn parse_id(raw: &str, field: &str) -> Result<Uuid, String> {
@@ -269,6 +306,35 @@ mod tests {
         assert_eq!(accepted.input.source_type, KnowledgeSourceType::Ticket);
         assert_eq!(accepted.input.source_id, Some(world.tickets[0].id));
         assert_eq!(accepted.source_ticket_ids.len(), 2);
+    }
+
+    #[test]
+    fn bad_citation_is_dropped_but_candidate_kept() {
+        let world = World::new();
+        let mut with_citations = spec(&[world.tickets[0].id]);
+        with_citations.citations = vec![
+            "server/src/lib.rs".into(),
+            "../../etc/passwd".into(),
+            "server/src/lib.rs".into(),
+        ];
+        let review = world.review(&[with_citations], 20);
+        assert_eq!(review.accepted.len(), 1);
+        assert_eq!(review.accepted[0].citations, vec!["server/src/lib.rs"]);
+        assert_eq!(review.dropped.len(), 1, "{:?}", review.dropped);
+        assert!(review.dropped[0].contains("candidate 1"), "{:?}", review.dropped);
+        assert!(review.dropped[0].contains("../../etc/passwd"), "{:?}", review.dropped);
+    }
+
+    #[test]
+    fn citations_are_capped_at_ten_with_a_reason() {
+        let world = World::new();
+        let mut many = spec(&[world.tickets[0].id]);
+        many.citations = (0..12).map(|n| format!("src/file{n}.rs")).collect();
+        let review = world.review(&[many], 20);
+        assert_eq!(review.accepted[0].citations.len(), 10);
+        assert_eq!(review.accepted[0].citations[9], "src/file9.rs");
+        assert_eq!(review.dropped.len(), 1, "{:?}", review.dropped);
+        assert!(review.dropped[0].contains("at most 10"), "{:?}", review.dropped);
     }
 
     #[test]

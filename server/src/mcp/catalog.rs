@@ -232,7 +232,7 @@ fn result_submit_properties() -> Value {
         },
         "knowledgeCandidates": {
             "type": "array",
-            "description": "Proposed knowledge items (knowledge compaction, done).",
+            "description": "Proposed knowledge items (knowledge compaction, done). Each may include `citations`: up to 10 repo-relative code paths the item rests on.",
             "items": { "type": "object", "additionalProperties": true },
         },
         "blockerType": {

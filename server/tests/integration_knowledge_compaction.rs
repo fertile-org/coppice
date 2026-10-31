@@ -820,3 +820,77 @@ async fn control_api_conflicts_and_cancel() {
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path} requires CSRF");
     }
 }
+
+#[tokio::test]
+async fn compaction_anchors_citations_to_default_branch() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    fx.configure_agent().await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id = Uuid::parse_str(
+        &common::register_test_repo(
+            &fx.app,
+            &local_path.display().to_string(),
+            &fx.cookie,
+            &fx.csrf,
+        )
+        .await,
+    )
+    .unwrap();
+    let head = String::from_utf8(
+        std::process::Command::new("git")
+            .args(["rev-parse", "main"])
+            .current_dir(&local_path)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let ticket_id = fx.done_ticket().await;
+    sqlx::query("UPDATE tickets SET repo_id = $2 WHERE id = $1")
+        .bind(ticket_id)
+        .bind(repo_id)
+        .execute(fx.pool())
+        .await
+        .unwrap();
+
+    let batch = fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    let spec = coppice_server::knowledge::candidates::KnowledgeCandidateSpec {
+        knowledge_type: "test_command".into(),
+        scope: "board".into(),
+        title: "Read the README first".into(),
+        content: "The README explains how to run the project.".into(),
+        source_ticket_ids: vec![ticket_id.to_string()],
+        citations: vec!["README.md".into(), "no/such/file.rs".into()],
+        ..Default::default()
+    };
+    let outcome = fx
+        .service()
+        .complete_batch(batch.id, batch.run_id.unwrap(), "done", &[spec])
+        .await
+        .unwrap();
+    assert_eq!(outcome.created, 1, "{:?}", outcome.dropped);
+
+    let rows: Vec<(String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT c.path, c.repo_id, c.commit_sha
+        FROM knowledge_citations c
+        JOIN knowledge_items i ON i.current_revision_id = c.revision_id
+        WHERE i.compaction_batch_id = $1
+        ORDER BY c.path COLLATE "C"
+        "#,
+    )
+    .bind(batch.id)
+    .fetch_all(fx.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("README.md".to_string(), Some(repo_id), Some(head)),
+            ("no/such/file.rs".to_string(), Some(repo_id), None),
+        ]
+    );
+}

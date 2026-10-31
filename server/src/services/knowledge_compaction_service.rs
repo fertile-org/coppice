@@ -6,6 +6,10 @@ use crate::domain::knowledge_compaction::{
 use crate::knowledge::candidates::{
     review_candidates, BatchTicket, CandidateContext, KnowledgeCandidateSpec,
 };
+use crate::knowledge::citations::{
+    insert_citations, resolve_anchors, validate_citation_path, ResolvedCitation,
+    MAX_CITATIONS_PER_CANDIDATE,
+};
 use crate::knowledge::policy::{policy_decision, PolicyInput};
 use crate::services::knowledge_service::{CompactionProvenance, KnowledgeError, KnowledgeService};
 use crate::services::notification_service::NotificationService;
@@ -218,6 +222,8 @@ impl<'a> KnowledgeCompactionService<'a> {
         agent_summary: &str,
         specs: &[KnowledgeCandidateSpec],
     ) -> Result<BatchOutcome, CompactionError> {
+        // Git runs before the transaction so a slow checkout never holds row locks.
+        let anchors = self.anchor_citations(specs).await;
         let mut tx = self.pool.begin().await?;
         let status: Option<String> = sqlx::query_scalar(
             "SELECT status FROM knowledge_compaction_batches WHERE id = $1 FOR UPDATE",
@@ -311,6 +317,15 @@ impl<'a> KnowledgeCompactionService<'a> {
                     supersedes: candidate.supersedes_item_id.is_some(),
                 },
             );
+            let citations: Vec<ResolvedCitation> = match anchors.get(&candidate.index) {
+                Some((_, resolved)) => resolved
+                    .iter()
+                    .filter(|citation| candidate.citations.contains(&citation.path))
+                    .cloned()
+                    .collect(),
+                None => Vec::new(),
+            };
+            let citation_repo = anchors.get(&candidate.index).and_then(|(repo, _)| *repo);
             let mut savepoint = (*tx).begin().await?;
             let inserted = knowledge
                 .create_from_compaction_in_tx(
@@ -328,7 +343,17 @@ impl<'a> KnowledgeCompactionService<'a> {
                 )
                 .await;
             match inserted {
-                Ok(_) => {
+                Ok(item_id) => {
+                    if !citations.is_empty() {
+                        let revision_id: Uuid = sqlx::query_scalar(
+                            "SELECT current_revision_id FROM knowledge_items WHERE id = $1",
+                        )
+                        .bind(item_id)
+                        .fetch_one(&mut *savepoint)
+                        .await?;
+                        insert_citations(&mut savepoint, revision_id, citation_repo, &citations)
+                            .await?;
+                    }
                     savepoint.commit().await?;
                     outcome.created += 1;
                 }
@@ -362,6 +387,55 @@ impl<'a> KnowledgeCompactionService<'a> {
             .await?;
         tx.commit().await?;
         Ok(outcome)
+    }
+
+    /// Resolve each candidate's citations against its first source ticket's
+    /// repo, keyed by candidate position. Invalid paths are skipped here and
+    /// reported by `review_candidates`.
+    async fn anchor_citations(
+        &self,
+        specs: &[KnowledgeCandidateSpec],
+    ) -> HashMap<i32, (Option<Uuid>, Vec<ResolvedCitation>)> {
+        let first_sources: Vec<Option<Uuid>> = specs
+            .iter()
+            .map(|spec| {
+                spec.source_ticket_ids
+                    .first()
+                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+            })
+            .collect();
+        let ticket_repos: HashMap<Uuid, Option<Uuid>> =
+            sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+                "SELECT id, repo_id FROM tickets WHERE id = ANY($1)",
+            )
+            .bind(first_sources.iter().flatten().copied().collect::<Vec<_>>())
+            .fetch_all(self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let mut anchors = HashMap::new();
+        for (position, spec) in specs.iter().enumerate() {
+            let mut paths: Vec<String> = Vec::new();
+            for raw in &spec.citations {
+                if let Ok(path) = validate_citation_path(raw) {
+                    if !paths.contains(&path) && paths.len() < MAX_CITATIONS_PER_CANDIDATE {
+                        paths.push(path);
+                    }
+                }
+            }
+            if paths.is_empty() {
+                continue;
+            }
+            let repo_id = first_sources[position]
+                .and_then(|ticket| ticket_repos.get(&ticket).copied().flatten());
+            let resolved = resolve_anchors(self.pool, repo_id, &paths).await;
+            anchors.insert(
+                i32::try_from(position).unwrap_or(i32::MAX),
+                (repo_id, resolved),
+            );
+        }
+        anchors
     }
 
     /// Fail an active batch and release its tickets back to the queue. Returns
