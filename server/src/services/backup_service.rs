@@ -211,6 +211,7 @@ const IMPORTABLE_SETTINGS: &[&str] = &[
     "knowledge.auto_save.allowed_types",
     "knowledge.auto_save.minimum_confidence",
     "knowledge.retrieval.top_k",
+    "knowledge.retrieval.index_rows",
     "knowledge.retrieval.allowed_types",
     "knowledge.retrieval.minimum_confidence",
     "knowledge.retrieval.default_page_size",

@@ -2699,3 +2699,85 @@ async fn retrieval_latency_at_board_capacity() {
     report_latency(&state, pessimistic, "pessimistic (informational)").await;
     assert!(worst < 250.0, "worst {worst:.1}ms is over the 250ms target");
 }
+
+#[tokio::test]
+async fn full_run_context_lists_matching_titles_only() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Index Worker",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let mut ids = Vec::new();
+    for title in ["Use smoke checks", "Rotate credentials"] {
+        let item = create_candidate(&app, &board_id, &cookie, &csrf, title).await;
+        let item_id = item["id"].as_str().unwrap().to_string();
+        let (status, _) = mutate(
+            &app,
+            "POST",
+            &format!("/api/knowledge/{item_id}/approve"),
+            serde_json::json!({"expectedVersion": 1}),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        ids.push(item_id);
+    }
+    let board_uuid = Uuid::parse_str(&board_id).unwrap();
+    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+
+    let index = coppice_server::knowledge::index::build_run_index(
+        pool,
+        board_uuid,
+        agent_uuid,
+        "Add smoke coverage",
+        "",
+        &state.config.knowledge,
+    )
+    .await
+    .unwrap()
+    .expect("a matching entry is listed");
+    assert!(index.contains("Use smoke checks"), "{index}");
+    assert!(index.contains(&ids[0]), "{index}");
+    assert!(!index.contains("Rotate credentials"), "{index}");
+    assert!(!index.contains("make test-unit"), "content stays out: {index}");
+
+    let nothing = coppice_server::knowledge::index::build_run_index(
+        pool,
+        board_uuid,
+        agent_uuid,
+        "Unrelated zebra work",
+        "",
+        &state.config.knowledge,
+    )
+    .await
+    .unwrap();
+    assert!(nothing.is_none());
+
+    let mut off = state.config.knowledge.clone();
+    off.enabled = false;
+    let disabled = coppice_server::knowledge::index::build_run_index(
+        pool,
+        board_uuid,
+        agent_uuid,
+        "Add smoke coverage",
+        "",
+        &off,
+    )
+    .await
+    .unwrap();
+    assert!(disabled.is_none());
+
+    let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_usage_logs")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(logged, 0);
+}

@@ -313,6 +313,9 @@ pub struct KnowledgeAutoSaveConfig {
 pub struct KnowledgeRetrievalConfig {
     #[serde(default = "default_retrieval_top_k")]
     pub top_k: usize,
+    /// The most titles listed in the start-of-run index in `.agent/context.md`. `0` turns the index off.
+    #[serde(default = "default_retrieval_index_rows")]
+    pub index_rows: usize,
     #[serde(default)]
     pub allowed_types: Vec<String>,
     #[serde(default = "default_retrieval_min_confidence")]
@@ -485,6 +488,7 @@ impl Default for KnowledgeRetrievalConfig {
     fn default() -> Self {
         Self {
             top_k: default_retrieval_top_k(),
+            index_rows: default_retrieval_index_rows(),
             allowed_types: Vec::new(),
             minimum_confidence: default_retrieval_min_confidence(),
             default_page_size: default_knowledge_list_limit(),
@@ -528,6 +532,9 @@ fn default_auto_save_confidence() -> String {
 }
 fn default_retrieval_top_k() -> usize {
     8
+}
+fn default_retrieval_index_rows() -> usize {
+    10
 }
 fn default_retrieval_min_confidence() -> String {
     "medium".into()
@@ -2235,6 +2242,7 @@ mod tests {
         assert!(!cfg.auto_save.enabled);
         assert!(cfg.auto_save.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.top_k, 8);
+        assert_eq!(cfg.retrieval.index_rows, 10);
         assert!(cfg.retrieval.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.max_page_size, 100);
         assert_eq!(cfg.retrieval.max_active_per_board, 1_000);

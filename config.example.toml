@@ -107,6 +107,8 @@ minimum_confidence = "high"
 
 [knowledge.retrieval]
 top_k = 8
+# The most titles listed in the start-of-run index in .agent/context.md. 0 turns the index off.
+index_rows = 10
 allowed_types = []
 minimum_confidence = "medium"
 default_page_size = 25

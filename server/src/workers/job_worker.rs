@@ -598,6 +598,23 @@ async fn execute_job(
         &agent.role,
     );
     let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    if matches!(
+        run.context_profile,
+        ContextProfile::Full | ContextProfile::HumanAgent
+    ) {
+        append_index(
+            &mut markdown,
+            crate::knowledge::index::build_run_index(
+                pool,
+                ticket.ticket.board_id,
+                run.agent_id,
+                &ticket.ticket.title,
+                &ticket.ticket.description,
+                &state.config.knowledge,
+            )
+            .await,
+        );
+    }
     plan::append_work_design_instruction(&mut markdown, &run.job_type, &skills);
     if let Some(section) = crate::services::review_rounds::ReviewRoundService::new(pool)
         .context_section(
@@ -1699,10 +1716,37 @@ fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
     }
 }
 
+/// Adds the knowledge index to the context. A failed lookup only costs the
+/// index, never the run.
+fn append_index(markdown: &mut String, index: Result<Option<String>, sqlx::Error>) {
+    match index {
+        Ok(Some(section)) => {
+            markdown.push('\n');
+            markdown.push_str(&section);
+        }
+        Ok(None) => {}
+        Err(err) => tracing::warn!(error = %err, "knowledge index skipped"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::agent::Agent;
+    #[test]
+    fn index_query_failure_does_not_fail_the_run() {
+        let mut markdown = "# Agent\n".to_string();
+        append_index(&mut markdown, Err(sqlx::Error::PoolTimedOut));
+        assert_eq!(markdown, "# Agent\n");
+        append_index(&mut markdown, Ok(None));
+        assert_eq!(markdown, "# Agent\n");
+        append_index(
+            &mut markdown,
+            Ok(Some("# Possibly relevant knowledge\n".into())),
+        );
+        assert_eq!(markdown, "# Agent\n\n# Possibly relevant knowledge\n");
+    }
+
     use crate::domain::mention::{MentionStatus, TicketMention};
     use crate::providers::codex_console::CodexConsolePublisher;
     use crate::providers::cursor_console::CursorConsolePublisher;
