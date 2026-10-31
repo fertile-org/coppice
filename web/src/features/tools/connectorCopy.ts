@@ -1,6 +1,7 @@
 /** Verbatim product copy for connector status, hints, and the turn-off confirm. */
 
-export const INSTALL_GUIDE_URL = 'https://getcoppice.app/docs/providers';
+export const DOCS_URL = 'https://getcoppice.app/docs';
+export const INSTALL_GUIDE_URL = `${DOCS_URL}/providers`;
 
 export const NO_READY_CONNECTOR_HINT =
   "No agent CLI is ready yet. Pick the one you plan to use, and save now. It will work once it's installed and signed in.";

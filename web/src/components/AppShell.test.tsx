@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '../features/theme/ThemeProvider';
@@ -290,5 +290,62 @@ describe('AppShell', () => {
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Logs' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
+  });
+
+  it('places Help directly below Settings for an admin', () => {
+    renderShell(['/boards']);
+
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const links = within(nav).getAllByRole('link');
+    const settingsIndex = links.findIndex((link) => link.getAttribute('href') === '/settings');
+    const helpIndex = links.findIndex(
+      (link) => link.getAttribute('href') === 'https://getcoppice.app/docs',
+    );
+
+    expect(settingsIndex).toBeGreaterThanOrEqual(0);
+    expect(helpIndex).toBe(settingsIndex + 1);
+  });
+
+  it('shows Help as the last nav item for a member', () => {
+    sessionState.user = { ...sessionState.user, role: 'member' };
+
+    renderShell(['/boards']);
+
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
+
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const links = within(nav).getAllByRole('link');
+    const last = links[links.length - 1];
+    expect(last).toHaveAccessibleName('Help');
+    expect(last).toHaveAttribute('href', 'https://getcoppice.app/docs');
+  });
+
+  it('opens Help in a new tab to the public docs', () => {
+    renderShell(['/boards']);
+
+    const help = screen.getByRole('link', { name: 'Help' });
+    expect(help).toHaveAttribute('href', 'https://getcoppice.app/docs');
+    expect(help).toHaveAttribute('target', '_blank');
+    expect(help).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('shows only the Help icon when the sidebar is collapsed', () => {
+    renderShell();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+
+    const help = screen.getByRole('link', { name: 'Help' });
+    expect(help).toHaveAttribute('title', 'Help');
+    expect(help).toHaveAttribute('aria-label', 'Help');
+    expect(help).not.toHaveTextContent('Help');
+  });
+
+  it('never marks Help as the active nav item', () => {
+    renderShell(['/settings']);
+
+    const help = screen.getByRole('link', { name: 'Help' });
+    expect(help).not.toHaveAttribute('aria-current');
+    expect(help).not.toHaveClass('bg-accent-muted');
+    expect(help).toHaveClass('text-text-secondary');
   });
 });
