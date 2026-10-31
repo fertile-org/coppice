@@ -3,7 +3,9 @@ use crate::domain::agent::Agent;
 use crate::domain::knowledge_compaction::{
     next_scheduled_at, select_within_bytes, BatchStatus, BatchTrigger, CompactionBatch,
 };
+use crate::domain::knowledge::scope_from_str;
 use crate::knowledge::candidates::{
+    SupersedableItem,
     review_candidates, BatchTicket, CandidateContext, KnowledgeCandidateSpec,
 };
 use crate::knowledge::citations::{
@@ -273,9 +275,9 @@ impl<'a> KnowledgeCompactionService<'a> {
                 .await?
                 .into_iter()
                 .collect();
-        let supersedable: HashMap<Uuid, Option<Uuid>> = sqlx::query(
+        let supersedable: HashMap<Uuid, SupersedableItem> = sqlx::query(
             r#"
-            SELECT i.id, r.board_id
+            SELECT i.id, r.scope, r.board_id, r.agent_id
             FROM knowledge_items i
             JOIN knowledge_revisions r ON r.id = i.active_revision_id
             WHERE i.id = ANY($1)
@@ -288,7 +290,18 @@ impl<'a> KnowledgeCompactionService<'a> {
         .fetch_all(&mut *tx)
         .await?
         .iter()
-        .map(|row| Ok((row.try_get("id")?, row.try_get("board_id")?)))
+        .map(|row| {
+            let scope: &str = row.try_get("scope")?;
+            Ok((
+                row.try_get("id")?,
+                SupersedableItem {
+                    scope: scope_from_str(scope)
+                        .ok_or_else(|| sqlx::Error::Decode("invalid knowledge scope".into()))?,
+                    board_id: row.try_get("board_id")?,
+                    agent_id: row.try_get("agent_id")?,
+                },
+            ))
+        })
         .collect::<Result<_, sqlx::Error>>()?;
 
         let review = review_candidates(

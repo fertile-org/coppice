@@ -1138,3 +1138,57 @@ async fn status_api_reports_the_oldest_pending_item() {
     let age = OffsetDateTime::now_utc() - parsed;
     assert!(age > Duration::days(2) && age < Duration::days(4), "{oldest}");
 }
+
+#[tokio::test]
+async fn near_identical_approved_items_show_as_possible_duplicates_in_the_loaded_context() {
+    use coppice_server::domain::knowledge::{
+        KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType,
+        KnowledgeType,
+    };
+    use coppice_server::knowledge::compaction_context::load_compaction_context;
+    use coppice_server::services::knowledge_service::KnowledgeService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = Fixture::new().await;
+    fx.configure_agent().await;
+    let admin = fx.admin_id().await;
+    let board_id = Uuid::parse_str(&fx.board_id).unwrap();
+    let knowledge = KnowledgeService::new(fx.pool(), &fx.state.config.knowledge);
+    let mut ids = Vec::new();
+    for title in [
+        "Run make test-unit while iterating",
+        "Run make test-unit while iterating!",
+    ] {
+        let created = knowledge
+            .create_manual(
+                admin,
+                KnowledgeRevisionInput {
+                    scope: KnowledgeScope::Board,
+                    board_id: Some(board_id),
+                    agent_id: None,
+                    knowledge_type: KnowledgeType::TestCommand,
+                    title: title.into(),
+                    content: "Use make test-unit; reserve make test for acceptance.".into(),
+                    source_type: KnowledgeSourceType::HumanNote,
+                    source_id: None,
+                    source_run_id: None,
+                    confidence: KnowledgeConfidence::High,
+                },
+            )
+            .await
+            .unwrap();
+        ids.push(knowledge.approve(created.id, created.version, admin).await.unwrap().id);
+    }
+
+    fx.done_ticket().await;
+    let batch = fx.service().start_manual(admin).await.unwrap();
+    let markdown = load_compaction_context(fx.pool(), batch.id, 20, 100_000)
+        .await
+        .unwrap();
+    let section = &markdown[markdown
+        .find("## Possible duplicates")
+        .unwrap_or_else(|| panic!("no duplicates section in:\n{markdown}"))..];
+    for id in ids {
+        assert!(section.contains(&id.to_string()), "{id} missing from:\n{section}");
+    }
+}

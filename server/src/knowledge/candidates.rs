@@ -35,12 +35,20 @@ pub struct BatchTicket {
     pub board_id: Uuid,
 }
 
+/// Where an item that may be superseded applies.
+#[derive(Debug, Clone, Copy)]
+pub struct SupersedableItem {
+    pub scope: KnowledgeScope,
+    /// `None` for workspace scope.
+    pub board_id: Option<Uuid>,
+    pub agent_id: Option<Uuid>,
+}
+
 pub struct CandidateContext<'a> {
     pub tickets: &'a [BatchTicket],
     pub agent_ids: &'a HashSet<Uuid>,
-    /// Approved, live items that may be superseded, keyed by id; value is the
-    /// item's board (`None` for workspace scope).
-    pub supersedable: &'a HashMap<Uuid, Option<Uuid>>,
+    /// Approved, live items that may be superseded, keyed by id.
+    pub supersedable: &'a HashMap<Uuid, SupersedableItem>,
     pub run_id: Uuid,
     pub max_candidates: usize,
 }
@@ -123,10 +131,10 @@ fn accept(
         Some(raw) if raw.trim().is_empty() => None,
         Some(raw) => {
             let item_id = parse_id(raw, "supersedesItemId")?;
-            let item_board = *context.supersedable.get(&item_id).ok_or_else(|| {
+            let item = *context.supersedable.get(&item_id).ok_or_else(|| {
                 format!("supersedesItemId {item_id} is not an approved, live item")
             })?;
-            Some((item_id, item_board))
+            Some((item_id, item))
         }
     };
     let first_source = source_ticket_ids.first().copied();
@@ -146,7 +154,7 @@ fn accept(
         KnowledgeScope::Board | KnowledgeScope::Agent => {
             let board_id = match spec.board_id.as_deref() {
                 Some(raw) => parse_id(raw, "boardId")?,
-                None if is_merge => match supersedes.and_then(|(_, board)| board) {
+                None if is_merge => match supersedes.and_then(|(_, item)| item.board_id) {
                     Some(board) => board,
                     None => {
                         return Err(
@@ -181,7 +189,8 @@ fn accept(
 
     let supersedes_item_id = match supersedes {
         None => None,
-        Some((item_id, item_board)) => {
+        Some((item_id, item)) => {
+            let item_board = item.board_id;
             if item_board.is_some() && item_board != board_id {
                 return Err(format!(
                     "supersedesItemId {item_id} belongs to a different board"
@@ -189,6 +198,11 @@ fn accept(
             }
             if is_merge && item_board.is_none() && scope != KnowledgeScope::Workspace {
                 return Err("a merge of a workspace item must use workspace scope".into());
+            }
+            if is_merge && (scope != item.scope || agent_id != item.agent_id) {
+                return Err(format!(
+                    "a merge must keep the scope and agent of supersedesItemId {item_id}"
+                ));
             }
             Some(item_id)
         }
@@ -262,7 +276,7 @@ mod tests {
     struct World {
         tickets: Vec<BatchTicket>,
         agents: HashSet<Uuid>,
-        supersedable: HashMap<Uuid, Option<Uuid>>,
+        supersedable: HashMap<Uuid, SupersedableItem>,
     }
 
     impl World {
@@ -304,6 +318,18 @@ mod tests {
 
         fn board_a(&self) -> Uuid {
             self.tickets[0].board_id
+        }
+    }
+
+    fn supersedable(board_id: Option<Uuid>) -> SupersedableItem {
+        SupersedableItem {
+            scope: if board_id.is_some() {
+                KnowledgeScope::Board
+            } else {
+                KnowledgeScope::Workspace
+            },
+            board_id,
+            agent_id: None,
         }
     }
 
@@ -408,10 +434,10 @@ mod tests {
         let mut world = World::new();
         let live_item = Uuid::new_v4();
         let other_board_item = Uuid::new_v4();
-        world.supersedable.insert(live_item, None);
+        world.supersedable.insert(live_item, supersedable(None));
         world
             .supersedable
-            .insert(other_board_item, Some(world.tickets[2].board_id));
+            .insert(other_board_item, supersedable(Some(world.tickets[2].board_id)));
 
         let mut workspace = spec(&[world.tickets[0].id]);
         workspace.scope = "workspace".into();
@@ -436,7 +462,7 @@ mod tests {
     fn empty_sources_allowed_only_with_supersedes() {
         let mut world = World::new();
         let item = Uuid::new_v4();
-        world.supersedable.insert(item, Some(world.board_a()));
+        world.supersedable.insert(item, supersedable(Some(world.board_a())));
 
         // Direction 1: no sources and nothing superseded is still refused.
         let review = world.review(&[spec(&[])], 20);
@@ -469,8 +495,8 @@ mod tests {
         let mut world = World::new();
         let board_item = Uuid::new_v4();
         let workspace_item = Uuid::new_v4();
-        world.supersedable.insert(board_item, Some(world.board_a()));
-        world.supersedable.insert(workspace_item, None);
+        world.supersedable.insert(board_item, supersedable(Some(world.board_a())));
+        world.supersedable.insert(workspace_item, supersedable(None));
 
         let mut wrong_board = spec(&[]);
         wrong_board.supersedes_item_id = Some(board_item.to_string());
@@ -500,6 +526,49 @@ mod tests {
         assert_eq!(review.accepted[0].input.board_id, Some(world.board_a()));
         assert_eq!(review.accepted[1].input.scope, KnowledgeScope::Workspace);
         assert_eq!(review.accepted[1].input.board_id, None);
+    }
+
+    #[test]
+    fn merge_must_keep_the_scope_and_agent_of_the_superseded_item() {
+        let mut world = World::new();
+        let agent = *world.agents.iter().next().unwrap();
+        let other_agent = Uuid::new_v4();
+        world.agents.insert(other_agent);
+        let agent_item = Uuid::new_v4();
+        let board_item = Uuid::new_v4();
+        world.supersedable.insert(
+            agent_item,
+            SupersedableItem {
+                scope: KnowledgeScope::Agent,
+                board_id: Some(world.board_a()),
+                agent_id: Some(agent),
+            },
+        );
+        world.supersedable.insert(board_item, supersedable(Some(world.board_a())));
+
+        let merge = |item: Uuid, scope: &str, agent_id: Option<Uuid>| {
+            let mut candidate = spec(&[]);
+            candidate.supersedes_item_id = Some(item.to_string());
+            candidate.scope = scope.into();
+            candidate.agent_id = agent_id.map(|id| id.to_string());
+            candidate
+        };
+        let review = world.review(
+            &[
+                merge(agent_item, "agent", Some(other_agent)),
+                merge(agent_item, "board", None),
+                merge(board_item, "agent", Some(agent)),
+                merge(agent_item, "agent", Some(agent)),
+            ],
+            20,
+        );
+        assert_eq!(review.dropped.len(), 3, "{:?}", review.dropped);
+        for reason in &review.dropped {
+            assert!(reason.contains("scope and agent"), "{reason}");
+        }
+        assert_eq!(review.accepted.len(), 1);
+        assert_eq!(review.accepted[0].index, 3);
+        assert_eq!(review.accepted[0].input.agent_id, Some(agent));
     }
 
     #[test]

@@ -383,13 +383,15 @@ pub async fn find_similar_inbox(
 /// One approved item's folded text, for pairwise comparison.
 struct FoldedItem {
     id: Uuid,
+    scope: String,
     board_id: Option<Uuid>,
+    agent_id: Option<Uuid>,
     title: String,
     content: String,
 }
 
-/// Pairs of approved, live items on the same board (or both workspace-wide)
-/// that score at least [`MERGE_MIN_SCORE`], best first, at most `limit`.
+/// Pairs of approved, live items with the same scope, board and agent that
+/// score at least [`MERGE_MIN_SCORE`], best first, at most `limit`.
 /// Looks at the [`MERGE_SCAN_ITEMS`] most recently updated items that are
 /// workspace-wide or on one of `board_ids`.
 pub async fn near_duplicate_pairs(
@@ -399,7 +401,7 @@ pub async fn near_duplicate_pairs(
 ) -> Result<Vec<(Uuid, Uuid, f64)>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
-        SELECT i.id, r.board_id,
+        SELECT i.id, r.scope, r.board_id, r.agent_id,
                coppice_unaccent(r.title) AS folded_title,
                coppice_unaccent(r.content) AS folded_content
         FROM knowledge_items i
@@ -421,24 +423,35 @@ pub async fn near_duplicate_pairs(
         .map(|row| {
             Ok(FoldedItem {
                 id: row.try_get("id")?,
+                scope: row.try_get("scope")?,
                 board_id: row.try_get("board_id")?,
+                agent_id: row.try_get("agent_id")?,
                 title: row.try_get("folded_title")?,
                 content: row.try_get("folded_content")?,
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    Ok(score_pairs(&items, limit))
+    // Worst case is about 150 ms in a release build, too long for a tokio worker.
+    tokio::task::spawn_blocking(move || score_pairs(&items, limit))
+        .await
+        .map_err(|error| sqlx::Error::Io(std::io::Error::other(error)))
 }
 
 fn score_pairs(items: &[FoldedItem], limit: usize) -> Vec<(Uuid, Uuid, f64)> {
+    let notes: Vec<(&FoldedItem, NoteTerms)> = items
+        .iter()
+        .map(|item| (item, NoteTerms::new(&item.title, &item.content)))
+        .collect();
     let mut pairs = Vec::new();
-    for (index, first) in items.iter().enumerate() {
-        for second in &items[index + 1..] {
-            if first.board_id != second.board_id {
+    for (index, (first, first_terms)) in notes.iter().enumerate() {
+        for (second, second_terms) in &notes[index + 1..] {
+            if first.scope != second.scope
+                || first.board_id != second.board_id
+                || first.agent_id != second.agent_id
+            {
                 continue;
             }
-            let score =
-                near_duplicate_score(&first.title, &first.content, &second.title, &second.content);
+            let score = first_terms.score(second_terms);
             if score >= MERGE_MIN_SCORE {
                 pairs.push((first.id, second.id, score));
             }
@@ -464,28 +477,36 @@ pub fn near_duplicate_score(
     other_title: &str,
     other_body: &str,
 ) -> f64 {
-    let pending_title = terms(pending_title);
-    let other_title = terms(other_title);
-    let pending_all: HashSet<String> = pending_title
-        .iter()
-        .cloned()
-        .chain(terms(pending_body))
-        .collect();
-    let other_all: HashSet<String> = other_title
-        .iter()
-        .cloned()
-        .chain(terms(other_body))
-        .collect();
-    (0.4 * jaccard(&pending_title, &other_title) + 0.6 * jaccard(&pending_all, &other_all))
-        .clamp(0.0, 1.0)
+    NoteTerms::new(pending_title, pending_body).score(&NoteTerms::new(other_title, other_body))
+}
+
+/// A note's words, so comparing it many times tokenizes it once.
+struct NoteTerms {
+    title: HashSet<String>,
+    all: HashSet<String>,
+}
+
+impl NoteTerms {
+    fn new(title: &str, body: &str) -> Self {
+        let title = terms(title);
+        let all = title.iter().cloned().chain(terms(body)).collect();
+        Self { title, all }
+    }
+
+    fn score(&self, other: &Self) -> f64 {
+        (0.4 * jaccard(&self.title, &other.title) + 0.6 * jaccard(&self.all, &other.all))
+            .clamp(0.0, 1.0)
+    }
 }
 
 fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    let union = a.union(b).count();
+    let (small, large) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    let shared = small.iter().filter(|term| large.contains(*term)).count();
+    let union = a.len() + b.len() - shared;
     if union == 0 {
         return 0.0;
     }
-    a.intersection(b).count() as f64 / union as f64
+    shared as f64 / union as f64
 }
 
 #[cfg(test)]
@@ -570,7 +591,9 @@ mod tests {
         let board = Some(Uuid::new_v4());
         let item = |board_id, title: &str, content: &str| FoldedItem {
             id: Uuid::new_v4(),
+            scope: "board".into(),
             board_id,
+            agent_id: None,
             title: title.into(),
             content: content.into(),
         };
@@ -585,6 +608,57 @@ mod tests {
         assert_eq!((pairs[0].0, pairs[0].1), (items[0].id, items[1].id));
         assert_eq!(pairs[0].2, 1.0);
         assert!(score_pairs(&items, 0).is_empty());
+    }
+
+    #[test]
+    fn pairs_need_the_same_scope_and_agent() {
+        let board = Some(Uuid::new_v4());
+        let item = |scope: &str, agent_id| FoldedItem {
+            id: Uuid::new_v4(),
+            scope: scope.into(),
+            board_id: board,
+            agent_id,
+            title: DRAG_TITLE.into(),
+            content: DRAG_BODY.into(),
+        };
+        let agent_a = Some(Uuid::new_v4());
+        let agent_b = Some(Uuid::new_v4());
+        let items = [
+            item("agent", agent_a),
+            item("agent", agent_b),
+            item("board", None),
+            item("agent", agent_a),
+        ];
+        let pairs = score_pairs(&items, 10);
+        assert_eq!(pairs.len(), 1, "{pairs:?}");
+        assert_eq!((pairs[0].0, pairs[0].1), (items[0].id, items[3].id));
+    }
+
+    #[test]
+    fn pair_scores_equal_near_duplicate_score() {
+        let board = Some(Uuid::new_v4());
+        let paraphrase_title = "Refuse drag into review during an active run";
+        let paraphrase_body = "Dragging a ticket into In Review is refused while it has an \
+            active run. The server checks hasActiveRun and answers 409; cancel the run or wait \
+            for it to finish, then make the move again.";
+        let item = |title: &str, content: &str| FoldedItem {
+            id: Uuid::new_v4(),
+            scope: "board".into(),
+            board_id: board,
+            agent_id: None,
+            title: title.into(),
+            content: content.into(),
+        };
+        let pairs = score_pairs(
+            &[item(DRAG_TITLE, DRAG_BODY), item(paraphrase_title, paraphrase_body)],
+            10,
+        );
+        assert_eq!(pairs.len(), 1, "{pairs:?}");
+        assert!(pairs[0].2 < 1.0, "{pairs:?}");
+        assert_eq!(
+            pairs[0].2,
+            near_duplicate_score(DRAG_TITLE, DRAG_BODY, paraphrase_title, paraphrase_body)
+        );
     }
 
     #[test]
