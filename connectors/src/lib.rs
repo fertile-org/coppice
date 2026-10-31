@@ -40,8 +40,12 @@ pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
         // against a scripted model; enforcement is the CLI's, not the model's.
         // Grok: its read-only sandbox plus commands refused by Coppice (real
         // model). Codex: OS `--sandbox read-only` (real model, 0.163.0).
-        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX => ChatReadOnlyStatus::Passed,
-        CLAUDE_CODE | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
+        // Cursor: per-run cli-config deny plus project `.cursor/cli.json`
+        // overlay (real model, cursor-agent 2026.10.22-27dcf5f).
+        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX | CURSOR => {
+            ChatReadOnlyStatus::Passed
+        }
+        CLAUDE_CODE | KILO_CODE => ChatReadOnlyStatus::Untested,
         _ => ChatReadOnlyStatus::Unavailable,
     }
 }
@@ -268,10 +272,11 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         console: ConsoleKind::Structured,
         caps: Capabilities {
             // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
-            // also write a per-run deny for Shell(*) and Write(**), but the live
-            // probe (server/tests/real_cursor.rs) has not passed yet (cursor-agent
-            // 2026.10.01 hit the account usage limit), so compaction stays refused.
-            read_only_tools: false,
+            // write a per-run deny for Shell(*) and Write(**) and overlay
+            // project `.cursor/cli.json` so a repo allow cannot replace it.
+            // Live probe passed on cursor-agent 2026.10.22-27dcf5f
+            // (`server/tests/real_cursor.rs`).
+            read_only_tools: true,
             chat_resume: true,
             session_events: true,
             run_resume: true,
@@ -624,7 +629,7 @@ mod tests {
             false,
         );
         assert_row(
-            CURSOR, CursorHome, Dash, Structured, false, true, true, true, false,
+            CURSOR, CursorHome, Dash, Structured, true, true, true, true, false,
         );
         assert_row(
             CODEX,

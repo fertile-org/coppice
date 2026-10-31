@@ -42,9 +42,6 @@ describe('chatIsolationBanner', () => {
     expect(chatIsolationBanner('claude-code')).toBe(
       "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     );
-    expect(chatIsolationBanner('cursor')).toBe(
-      "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer.",
-    );
     expect(chatIsolationBanner('kilo-code')).toBe(
       "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer.",
     );
@@ -53,6 +50,7 @@ describe('chatIsolationBanner', () => {
   it('is absent when the write test passed', () => {
     expect(chatIsolationBanner('opencode')).toBeNull();
     expect(chatIsolationBanner('codex')).toBeNull();
+    expect(chatIsolationBanner('cursor')).toBeNull();
     expect(chatIsolationBanner('mock')).toBeNull();
     expect(chatIsolationBanner(null)).toBeNull();
   });

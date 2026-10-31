@@ -115,6 +115,23 @@ impl McpServerSpec {
         serde_json::to_string(&file).expect("cursor cli-config.json serializes")
     }
 
+    /// `<worktree>/.cursor/cli.json`. Same allow/deny as `cursor_cli_config`,
+    /// without `version` — the project schema rejects that key.
+    pub fn cursor_project_cli_json(&self, read_only: bool) -> String {
+        let deny = if read_only {
+            vec!["Shell(*)".to_string(), "Write(**)".to_string()]
+        } else {
+            Vec::new()
+        };
+        serde_json::to_string(&json!({
+            "permissions": {
+                "allow": [format!("Mcp({}:*)", self.name)],
+                "deny": deny,
+            }
+        }))
+        .expect("cursor project cli.json serializes")
+    }
+
     /// The per-run `OPENCODE_CONFIG`.
     pub fn opencode_json(&self) -> String {
         json!({
@@ -194,6 +211,10 @@ mod tests {
             spec().cursor_cli_config(true),
             r#"{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":["Shell(*)","Write(**)"]}}"#
         );
+        assert_eq!(
+            spec().cursor_project_cli_json(true),
+            r#"{"permissions":{"allow":["Mcp(coppice:*)"],"deny":["Shell(*)","Write(**)"]}}"#
+        );
     }
 
     #[test]
@@ -246,6 +267,7 @@ mod tests {
             spec.cursor_mcp_json(),
             spec.cursor_cli_config(false),
             spec.cursor_cli_config(true),
+            spec.cursor_project_cli_json(true),
             spec.opencode_json(),
             spec.kilo_json(),
             spec.codex_args().join(" "),
