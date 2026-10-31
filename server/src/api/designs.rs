@@ -38,6 +38,10 @@ struct DesignSetResponse {
     run_id: Uuid,
     options: Vec<DesignOption>,
     chosen: Option<ChosenOption>,
+    recommended: Option<ChosenOption>,
+    selected: Option<ChosenOption>,
+    superseded: bool,
+    from_plan_run: bool,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +61,10 @@ fn to_response(set: DesignSetSummary) -> DesignSetResponse {
         run_id: set.run_id,
         options: set.options,
         chosen: set.chosen,
+        recommended: set.recommended,
+        selected: set.selected,
+        superseded: set.superseded,
+        from_plan_run: set.from_plan_run,
     }
 }
 

@@ -232,6 +232,14 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
                         "id": chosen.id,
                         "title": chosen.title,
                     })),
+                    "recommended": set.recommended.as_ref().map(|option| json!({
+                        "id": option.id,
+                        "title": option.title,
+                    })),
+                    "selected": set.selected.as_ref().map(|option| json!({
+                        "id": option.id,
+                        "title": option.title,
+                    })),
                 })
             })
             .collect::<Vec<_>>()

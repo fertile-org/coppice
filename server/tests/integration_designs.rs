@@ -140,6 +140,7 @@ async fn create_write_publish_choose_roundtrip() {
                     entry: "b/index.html".into(),
                 },
             ],
+            "a",
         )
         .await
         .expect("publish");
@@ -432,6 +433,7 @@ async fn mcp_design_create_write_publish_list() {
                 "name": "design__publish",
                 "arguments": {
                     "setId": set_id,
+                    "recommendedOptionId": "b",
                     "options": [
                         {"id":"a","title":"A","entry":"a/index.html"},
                         {"id":"b","title":"B","entry":"b/index.html"}
@@ -456,6 +458,8 @@ async fn mcp_design_create_write_publish_list() {
     assert_eq!(sets[0]["id"], set_id);
     assert_eq!(sets[0]["title"], "Home");
     assert!(sets[0]["chosen"].is_null());
+    assert_eq!(sets[0]["recommended"]["id"], "b");
+    assert_eq!(sets[0]["selected"]["id"], "b");
     assert_eq!(sets[0]["options"][0]["id"], "a");
     assert_eq!(sets[0]["options"][1]["id"], "b");
 }
@@ -625,7 +629,7 @@ async fn publish_html(
     svc.write(created.id, run_id, "b/index.html", html_b.as_bytes())
         .await
         .expect("write b");
-    svc.publish(created.id, run_id, two_options())
+    svc.publish(created.id, run_id, two_options(), "b")
         .await
         .expect("publish");
     created.id
@@ -1195,4 +1199,166 @@ async fn login_as(app: &Router, email: &str, password: &str) -> (String, String)
         .expect("csrf token")
         .to_string();
     (cookie, csrf)
+}
+
+#[tokio::test]
+async fn publish_rejects_unknown_recommendation() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let svc = DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    );
+    let created = svc
+        .create(
+            "Home",
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id: fx.agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    for path in ["a/index.html", "b/index.html"] {
+        svc.write(created.id, run_id, path, b"<!doctype html>")
+            .await
+            .expect("write");
+    }
+    let err = svc
+        .publish(created.id, run_id, two_options(), "z")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DesignError::Invalid(ref msg)
+            if msg == "recommendedOptionId must be one of the options"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn selected_follows_choice_then_falls_back_to_recommendation() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    let svc = DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    );
+    let summary = svc.get(set_id).await.expect("get").summary;
+    assert_eq!(summary.recommended.as_ref().expect("rec").id, "b");
+    assert_eq!(summary.selected.as_ref().expect("sel").id, "b");
+    assert!(summary.chosen.is_none());
+    assert!(!summary.superseded);
+    assert!(!summary.from_plan_run);
+
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&fx.pool)
+        .await
+        .expect("user");
+    svc.choose(set_id, "a", user_id).await.expect("choose");
+    let summary = svc.get(set_id).await.expect("get").summary;
+    assert_eq!(summary.selected.as_ref().expect("sel").id, "a");
+    assert_eq!(summary.recommended.as_ref().expect("rec").id, "b");
+
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![fx.design_id],
+    )
+    .await;
+    let url = mcp_url(fx.app.clone()).await;
+    let listed = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"design__list","arguments":{}}),
+        )
+        .await,
+    );
+    assert_eq!(listed["sets"][0]["recommended"]["id"], "b");
+    assert_eq!(listed["sets"][0]["selected"]["id"], "a");
+    let body = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"ticket_get","arguments":{}}),
+        )
+        .await,
+    );
+    assert_eq!(body["designs"][0]["recommended"]["id"], "b");
+    assert_eq!(body["designs"][0]["selected"]["id"], "a");
+
+    let got = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/designs/{set_id}"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("get");
+    let got = common::json_body(got).await;
+    assert_eq!(got["recommended"]["id"], "b");
+    assert_eq!(got["selected"]["id"], "a");
+    assert_eq!(got["superseded"], false);
+    assert_eq!(got["fromPlanRun"], false);
+}
+
+#[tokio::test]
+async fn set_from_before_recommendations_has_no_selection() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    sqlx::query("UPDATE design_sets SET recommended_option_id = NULL WHERE id = $1")
+        .bind(set_id)
+        .execute(&fx.pool)
+        .await
+        .expect("clear");
+    let summary = DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    )
+    .get(set_id)
+    .await
+    .expect("get")
+    .summary;
+    assert!(summary.recommended.is_none());
+    assert!(summary.selected.is_none());
 }

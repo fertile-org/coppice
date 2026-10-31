@@ -80,7 +80,7 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 
 /// Added when the agent has the design skill. Guidance only: Plan Review does
 /// not wait for a choice, and a person can ask for plan changes after picking.
-pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, then write the plan around the option you recommend and say which one it is. If you already published options, honor the one the human chose. Skip this when the ticket has no visible change.";
+pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. Skip this when the ticket has no visible change.";
 
 /// A person reviews the plan at Plan Review, so it has to fit on one screen.
 /// Detail belongs to the Tech Lead and the implementer, not the plan.

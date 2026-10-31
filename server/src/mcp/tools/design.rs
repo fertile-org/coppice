@@ -1,5 +1,5 @@
 use crate::mcp::tools::{ToolCtx, ToolError};
-use crate::services::design_service::{CreateScope, DesignError, DesignOption, DesignService};
+use crate::services::design_service::{ChosenOption, CreateScope, DesignError, DesignOption, DesignService};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -31,8 +31,9 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
                 .ok_or_else(|| ToolError::InvalidArgs("options is required".into()))?;
             let options: Vec<DesignOption> = serde_json::from_value(options)
                 .map_err(|err| ToolError::InvalidArgs(err.to_string()))?;
+            let recommended = required_str(&args, "recommendedOptionId")?;
             let id = svc
-                .publish(set_id, ctx.scope.run_id, options)
+                .publish(set_id, ctx.scope.run_id, options, recommended)
                 .await
                 .map_err(map_err)?;
             Ok(json!({ "setId": id }))
@@ -51,15 +52,17 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
             let sets: Vec<Value> = sets
                 .into_iter()
                 .map(|set| {
-                    let chosen = set
-                        .chosen
-                        .as_ref()
-                        .map(|chosen| json!({ "id": chosen.id, "title": chosen.title }));
+                    let pick = |opt: &Option<ChosenOption>| {
+                        opt.as_ref()
+                            .map(|o| json!({ "id": o.id, "title": o.title }))
+                    };
                     json!({
                         "id": set.id,
                         "title": set.title,
                         "options": set.options,
-                        "chosen": chosen,
+                        "chosen": pick(&set.chosen),
+                        "recommended": pick(&set.recommended),
+                        "selected": pick(&set.selected),
                     })
                 })
                 .collect();

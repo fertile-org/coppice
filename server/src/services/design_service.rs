@@ -58,6 +58,11 @@ pub struct DesignSetSummary {
     pub run_id: Uuid,
     pub options: Vec<DesignOption>,
     pub chosen: Option<ChosenOption>,
+    pub recommended: Option<ChosenOption>,
+    /// The human's choice, else the agent's recommendation.
+    pub selected: Option<ChosenOption>,
+    pub superseded: bool,
+    pub from_plan_run: bool,
 }
 
 pub struct DesignSetRecord {
@@ -169,9 +174,18 @@ impl<'a> DesignService<'a> {
         set_id: Uuid,
         run_id: Uuid,
         options: Vec<DesignOption>,
+        recommended_option_id: &str,
     ) -> Result<Uuid, DesignError> {
         if !(2..=4).contains(&options.len()) {
             return Err(DesignError::Invalid("publish 2 to 4 options".into()));
+        }
+        if !options
+            .iter()
+            .any(|option| option.id == recommended_option_id)
+        {
+            return Err(DesignError::Invalid(
+                "recommendedOptionId must be one of the options".into(),
+            ));
         }
         let row = self.load(set_id).await?;
         let row_run: Uuid = row.get("run_id");
@@ -217,12 +231,14 @@ impl<'a> DesignService<'a> {
         let updated = sqlx::query(
             r#"
             UPDATE design_sets
-            SET options = $1, published_at = COALESCE(published_at, now())
+            SET options = $1, recommended_option_id = $3,
+                published_at = COALESCE(published_at, now())
             WHERE id = $2
             "#,
         )
         .bind(&options_json)
         .bind(set_id)
+        .bind(recommended_option_id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -333,7 +349,12 @@ impl<'a> DesignService<'a> {
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, title, run_id, options, chosen_option_id
+            SELECT id, title, run_id, options, chosen_option_id, recommended_option_id,
+                   superseded_by IS NOT NULL AS superseded,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                   ) AS from_plan_run
             FROM design_sets
             WHERE published_at IS NOT NULL
               AND (
@@ -354,6 +375,12 @@ impl<'a> DesignService<'a> {
         sqlx::query(
             r#"
             SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
+                   recommended_option_id,
+                   superseded_by IS NOT NULL AS superseded,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                   ) AS from_plan_run,
                    published_at IS NOT NULL AS published
             FROM design_sets
             WHERE id = $1
@@ -379,22 +406,30 @@ fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf)
 
 fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, DesignError> {
     let options = options_from_row(row)?;
-    let chosen_id: Option<String> = row.get("chosen_option_id");
-    let chosen = chosen_id.and_then(|id| {
-        options
-            .iter()
-            .find(|option| option.id == id)
-            .map(|option| ChosenOption {
-                id: option.id.clone(),
-                title: option.title.clone(),
-            })
-    });
+    let find = |id: Option<String>| {
+        id.and_then(|id| {
+            options
+                .iter()
+                .find(|option| option.id == id)
+                .map(|option| ChosenOption {
+                    id: option.id.clone(),
+                    title: option.title.clone(),
+                })
+        })
+    };
+    let chosen = find(row.get("chosen_option_id"));
+    let recommended = find(row.get("recommended_option_id"));
+    let selected = chosen.clone().or_else(|| recommended.clone());
     Ok(DesignSetSummary {
         id: row.get("id"),
         title: row.get("title"),
         run_id: row.get("run_id"),
         options,
         chosen,
+        recommended,
+        selected,
+        superseded: row.get("superseded"),
+        from_plan_run: row.get("from_plan_run"),
     })
 }
 
