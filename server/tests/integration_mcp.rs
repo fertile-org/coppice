@@ -4257,3 +4257,70 @@ async fn proposed_item_is_not_searchable_until_approved() {
         call_tool_json(&url, &token, "knowledge_search", json!({"query": "persimmon"})).await;
     assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
 }
+
+async fn run_proposal_count(pool: &PgPool, run_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_revisions r JOIN knowledge_provenance p ON p.id = r.provenance_id \
+         WHERE p.run_id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn parallel_proposals_respect_the_run_limit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let topics = [
+        ("Alpha cache layout", "Alpha entries expire nightly."),
+        ("Bravo retry budget", "Bravo requests retry twice."),
+        ("Charlie deploy order", "Charlie services deploy last."),
+        ("Delta log format", "Delta lines are JSON."),
+        ("Echo queue depth", "Echo queues hold ten jobs."),
+    ];
+    let results = futures_util::future::join_all(topics.iter().map(|(title, content)| {
+        call_tool(&url, &token, "knowledge_propose", proposal(title, content))
+    }))
+    .await;
+    let created = results.iter().filter(|(is_error, _)| !is_error).count();
+    assert_eq!(created, 3, "{results:?}");
+    for (is_error, text) in &results {
+        if *is_error {
+            assert!(text.contains("limit"), "{text}");
+        }
+    }
+    assert_eq!(run_proposal_count(&fx.pool, fx.scope.run_id).await, 3);
+}
+
+#[tokio::test]
+async fn parallel_identical_proposals_make_one_item() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let args = proposal(
+        "Walnut index rebuild",
+        "Rebuild the walnut index after every schema change.",
+    );
+    let (a, b) = tokio::join!(
+        call_tool_json(&url, &token, "knowledge_propose", args.clone()),
+        call_tool_json(&url, &token, "knowledge_propose", args.clone()),
+    );
+    let mut statuses = vec![a["status"].as_str().unwrap(), b["status"].as_str().unwrap()];
+    statuses.sort();
+    assert_eq!(statuses, ["existing", "pending"], "{a} {b}");
+    assert_eq!(a["itemId"], b["itemId"]);
+    assert_eq!(run_proposal_count(&fx.pool, fx.scope.run_id).await, 1);
+}

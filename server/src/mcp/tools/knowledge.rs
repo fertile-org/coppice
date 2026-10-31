@@ -285,22 +285,6 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
     if !ctx.state.config.knowledge.enabled {
         return Err(ToolError::Denied("knowledge is turned off".into()));
     }
-    let proposed: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM knowledge_revisions r \
-         JOIN knowledge_provenance p ON p.id = r.provenance_id WHERE p.run_id = $1",
-    )
-    .bind(ctx.scope.run_id)
-    .fetch_one(ctx.pool)
-    .await?;
-    if proposed >= MAX_PROPOSALS_PER_RUN {
-        return Err(ToolError::Limit(format!(
-            "knowledge_propose limit reached for this run ({MAX_PROPOSALS_PER_RUN})"
-        )));
-    }
-    if let Some(item_id) = find_close_item(ctx.pool, board_id, &title, &content).await? {
-        return Ok(json!({ "itemId": item_id, "status": "existing" }));
-    }
-
     let mut paths: Vec<String> = Vec::new();
     let mut dropped: Vec<Value> = Vec::new();
     for raw in requested {
@@ -339,14 +323,37 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
         board_id,
         repo_id,
     };
+    // One run's proposals are serialized, so parallel calls cannot slip past
+    // the limit or both insert the same note.
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(ctx.scope.run_id)
+        .execute(&mut *tx)
+        .await?;
+    let proposed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_revisions r \
+         JOIN knowledge_provenance p ON p.id = r.provenance_id WHERE p.run_id = $1",
+    )
+    .bind(ctx.scope.run_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if proposed >= MAX_PROPOSALS_PER_RUN {
+        return Err(ToolError::Limit(format!(
+            "knowledge_propose limit reached for this run ({MAX_PROPOSALS_PER_RUN})"
+        )));
+    }
+    if let Some(item_id) = find_close_item(&mut tx, board_id, &input.title, &input.content).await? {
+        return Ok(json!({ "itemId": item_id, "status": "existing" }));
+    }
     let item_id = KnowledgeService::new(ctx.pool, &ctx.state.config.knowledge)
-        .create_from_run(run, input, &citations)
+        .create_from_run_in_tx(&mut tx, run, input, &citations)
         .await
         .map_err(|e| match e {
             KnowledgeError::Validation(m) => ToolError::InvalidArgs(m),
             KnowledgeError::Capacity(m) => ToolError::Limit(m),
             other => ToolError::Internal(other.into()),
         })?;
+    tx.commit().await?;
     let mut out = json!({ "itemId": item_id, "status": "pending" });
     if !dropped.is_empty() {
         out["droppedCitations"] = Value::Array(dropped);

@@ -18,6 +18,10 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Lowest [`near_duplicate_score`] at which a proposal counts as already known.
+/// `policy_reason` of every item a working agent proposes. Compaction uses it
+/// to tell unreviewed agent text from its own candidates.
+pub const PROPOSED_BY_AGENT_REASON: &str = "proposed by a working agent";
+
 pub const PROPOSE_DUPLICATE_SCORE: f64 = 0.6;
 
 const ONE_LIVE_REPLACEMENT_INDEX: &str = "knowledge_items_one_live_replacement_idx";
@@ -229,8 +233,9 @@ impl<'a> KnowledgeService<'a> {
     /// Insert an item proposed by a working agent. It is always Pending, scoped
     /// to the run's board and sourced from the run's ticket; the auto-save
     /// policy never applies. The run is recorded as its provenance.
-    pub async fn create_from_run(
+    pub async fn create_from_run_in_tx(
         &self,
+        tx: &mut Transaction<'_, Postgres>,
         run: RunProposal,
         mut input: KnowledgeRevisionInput,
         citations: &[ResolvedCitation],
@@ -242,27 +247,25 @@ impl<'a> KnowledgeService<'a> {
         input.source_id = Some(run.ticket_id);
         input.source_run_id = Some(run.run_id);
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
-        let mut tx = self.pool.begin().await?;
-        self.enforce_capacity(&mut tx, &input, None).await?;
+        self.enforce_capacity(tx, &input, None).await?;
         let item_id = self
             .insert_item_revision(
-                &mut tx,
+                tx,
                 Uuid::nil(),
                 &input,
                 None,
                 None,
                 KnowledgeStatus::Pending,
                 None,
-                Some(("human_review", "proposed by a working agent")),
+                Some(("human_review", PROPOSED_BY_AGENT_REASON)),
             )
             .await?;
         let revision_id: Uuid =
             sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
                 .bind(item_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await?;
-        insert_citations(&mut tx, revision_id, run.repo_id, citations).await?;
-        tx.commit().await?;
+        insert_citations(tx, revision_id, run.repo_id, citations).await?;
         Ok(item_id)
     }
 
@@ -860,7 +863,7 @@ async fn enforce_capacity_for_scope(
 /// nearly the same thing, best match first. `None` when nothing scores at
 /// least [`PROPOSE_DUPLICATE_SCORE`].
 pub async fn find_close_item(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     board_id: Uuid,
     title: &str,
     content: &str,
@@ -895,7 +898,7 @@ pub async fn find_close_item(
     .bind(tsquery)
     .bind(title)
     .bind(content)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?;
     let mut best: Option<(f64, Uuid)> = None;
     for row in rows {
