@@ -153,7 +153,7 @@ let postRefreshEntryDelay: Promise<void> | null;
 const refreshedIds = new Set<string>();
 
 function deferred() {
-  let resolve = () => undefined;
+  let resolve: () => void = () => undefined;
   const promise = new Promise<void>((res) => {
     resolve = res;
   });

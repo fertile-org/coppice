@@ -209,19 +209,6 @@ export function useRemoveMarketplaceSource() {
   });
 }
 
-export function useRefreshMarketplaceSource() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: refreshSource,
-    onSuccess: (source) => {
-      void queryClient.invalidateQueries({
-        queryKey: [...MARKETPLACE_ENTRIES_QUERY_KEY, source.id],
-      });
-      void queryClient.invalidateQueries({ queryKey: MARKETPLACE_SOURCES_QUERY_KEY });
-    },
-  });
-}
-
 export function useInstallMarketplaceEntry() {
   return useMutation({ mutationFn: installEntry });
 }
