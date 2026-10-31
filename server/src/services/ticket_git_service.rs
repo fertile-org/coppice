@@ -14,7 +14,7 @@ use crate::services::human_review_service::{
     normalize_sha, reviewed_sha_matches, HumanReviewError, HumanReviewService,
 };
 use crate::services::pr_create_url::{
-    build_pr_create_url, github_owner_repo, https_remote_url,
+    build_pr_create_url, github_com_owner_repo, https_remote_url,
 };
 use crate::services::secret_service::SecretService;
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -208,7 +208,10 @@ impl<'a> TicketGitService<'a> {
         }
     }
 
-    pub async fn resolve_context(&self, ticket_id: Uuid) -> Result<TicketGitContext, TicketGitError> {
+    pub async fn resolve_context(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<TicketGitContext, TicketGitError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         let repo_id = ticket.ticket.repo_id.ok_or(TicketGitError::NoRepo)?;
 
@@ -236,11 +239,10 @@ impl<'a> TicketGitService<'a> {
         let remote_url: Option<String> = row.get("remote_url");
         let forge_token_secret_id: Option<Uuid> = row.get("forge_token_secret_id");
 
-        let pr_url: Option<String> =
-            sqlx::query_scalar("SELECT pr_url FROM tickets WHERE id = $1")
-                .bind(ticket_id)
-                .fetch_one(self.pool)
-                .await?;
+        let pr_url: Option<String> = sqlx::query_scalar("SELECT pr_url FROM tickets WHERE id = $1")
+            .bind(ticket_id)
+            .fetch_one(self.pool)
+            .await?;
 
         let paths = compute_paths(&self.worktrees_root, &repo_name, ticket_id);
 
@@ -302,7 +304,10 @@ impl<'a> TicketGitService<'a> {
             return Err(TicketGitError::PushDisabled);
         }
         let ctx = self.resolve_context(ticket_id).await?;
-        let remote_url = ctx.remote_url.as_deref().ok_or(TicketGitError::NoRemoteUrl)?;
+        let remote_url = ctx
+            .remote_url
+            .as_deref()
+            .ok_or(TicketGitError::NoRemoteUrl)?;
         let https = https_remote_url(remote_url).ok_or(TicketGitError::NoRemoteUrl)?;
         let (token, _secret_mask) = self.decrypt_forge_token(&ctx).await;
 
@@ -311,12 +316,8 @@ impl<'a> TicketGitService<'a> {
         }
 
         if worktree_exists(&ctx.worktree_dir) {
-            sync_worktree_to_branch_tip(
-                &ctx.git_dir,
-                &ctx.worktree_dir,
-                &ctx.ticket_branch,
-            )
-            .await?;
+            sync_worktree_to_branch_tip(&ctx.git_dir, &ctx.worktree_dir, &ctx.ticket_branch)
+                .await?;
             let _ = finalize_worktree_git(
                 &ctx.worktree_dir,
                 &ctx.ticket_branch,
@@ -365,17 +366,23 @@ impl<'a> TicketGitService<'a> {
         title: Option<&str>,
         body: Option<&str>,
     ) -> Result<CreatePrResult, TicketGitError> {
+        let ctx = self.resolve_context(ticket_id).await?;
+        let remote_url = ctx
+            .remote_url
+            .as_deref()
+            .ok_or(TicketGitError::NoRemoteUrl)?;
+        // Same host gate as the merge sweep: only github.com talks to api.github.com.
+        // is_github_host also matches github.example.com — do not send those tokens.
+        let (owner, repo) = github_com_owner_repo(remote_url).ok_or(TicketGitError::NotGitHub)?;
+
         // GitHub rejects create-PR with field=head code=invalid when the branch
         // only exists locally. Push first so Create PR is self-contained.
         let pushed = self.push_branch(ticket_id).await?;
 
         let store = self.secret_store.ok_or(TicketGitError::NoForgeToken)?;
-        let ctx = self.resolve_context(ticket_id).await?;
-        let remote_url = ctx.remote_url.as_deref().ok_or(TicketGitError::NoRemoteUrl)?;
         let secret_id = ctx
             .forge_token_secret_id
             .ok_or(TicketGitError::NoForgeToken)?;
-        let (owner, repo) = github_owner_repo(remote_url).ok_or(TicketGitError::NotGitHub)?;
         let token = SecretService::new(self.pool, store)
             .decrypt_by_id(secret_id)
             .await?;
@@ -418,8 +425,8 @@ impl<'a> TicketGitService<'a> {
             )));
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| TicketGitError::GitHubApi(e.to_string()))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| TicketGitError::GitHubApi(e.to_string()))?;
         let pr_url = parsed["html_url"]
             .as_str()
             .ok_or_else(|| TicketGitError::GitHubApi("missing html_url".into()))?
@@ -523,12 +530,8 @@ impl<'a> TicketGitService<'a> {
         let ctx = self.resolve_context(ticket_id).await?;
 
         if worktree_exists(&ctx.worktree_dir) {
-            sync_worktree_to_branch_tip(
-                &ctx.git_dir,
-                &ctx.worktree_dir,
-                &ctx.ticket_branch,
-            )
-            .await?;
+            sync_worktree_to_branch_tip(&ctx.git_dir, &ctx.worktree_dir, &ctx.ticket_branch)
+                .await?;
             let _ = finalize_worktree_git(
                 &ctx.worktree_dir,
                 &ctx.ticket_branch,
@@ -549,8 +552,7 @@ impl<'a> TicketGitService<'a> {
 
         if !git_status_clean(&ctx.git_dir).await? {
             return Err(TicketGitError::Git(
-                "main repository has uncommitted changes — commit or stash before merging"
-                    .into(),
+                "main repository has uncommitted changes — commit or stash before merging".into(),
             ));
         }
 
@@ -636,8 +638,7 @@ impl<'a> TicketGitService<'a> {
         let fetch_succeeded = self.soft_fetch_for_rebase(&ctx, base).await;
         let onto_ref = resolve_rebase_onto(&ctx.worktree_dir, base, fetch_succeeded).await?;
 
-        let rebase_output =
-            run_git_capture(&ctx.worktree_dir, &["rebase", &onto_ref]).await;
+        let rebase_output = run_git_capture(&ctx.worktree_dir, &["rebase", &onto_ref]).await;
 
         match rebase_output {
             Ok(_) => {
@@ -645,10 +646,7 @@ impl<'a> TicketGitService<'a> {
                 if let Err(err) = self.note_branch_head(ticket_id).await {
                     tracing::warn!(error = %err, "human review check after rebase failed");
                 }
-                let message = format!(
-                    "Rebased `{}` onto `{}`",
-                    ctx.ticket_branch, onto_ref
-                );
+                let message = format!("Rebased `{}` onto `{}`", ctx.ticket_branch, onto_ref);
                 Ok(RebaseBranchResult {
                     base_branch: base.to_string(),
                     onto_ref,
@@ -767,7 +765,9 @@ impl TicketGitService<'_> {
         let ctx = match self.resolve_context(ticket_id).await {
             Ok(ctx) => ctx,
             Err(
-                TicketGitError::NoRepo | TicketGitError::RepoNotFound | TicketGitError::RepoNotReady,
+                TicketGitError::NoRepo
+                | TicketGitError::RepoNotFound
+                | TicketGitError::RepoNotReady,
             ) => return Ok(WorktreeCleanup::NothingToDo),
             Err(err) => return Err(err),
         };
@@ -825,7 +825,7 @@ fn create_pr_gate(
             Some("API create PR needs a forge token — use Open compare URL instead".into()),
         );
     }
-    if remote_url.and_then(github_owner_repo).is_none() {
+    if remote_url.and_then(github_com_owner_repo).is_none() {
         return (
             false,
             Some("Create PR via API requires a GitHub remote_url".into()),
@@ -894,12 +894,12 @@ pub(crate) fn validate_branch_name(branch: &str) -> Result<(), TicketGitError> {
 }
 
 fn path_to_string(path: &Path) -> Result<String, TicketGitError> {
-    path.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| TicketGitError::Io(std::io::Error::new(
+    path.to_str().map(str::to_string).ok_or_else(|| {
+        TicketGitError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("path is not valid UTF-8: {}", path.display()),
-        )))
+        ))
+    })
 }
 
 async fn resolve_rebase_onto(
@@ -997,7 +997,11 @@ async fn abort_merge_conflict(
     TicketGitError::Git(detail)
 }
 
-async fn abort_rebase_conflict(worktree: &Path, base_branch: &str, detail: String) -> TicketGitError {
+async fn abort_rebase_conflict(
+    worktree: &Path,
+    base_branch: &str,
+    detail: String,
+) -> TicketGitError {
     let mut paths = unmerged_paths(worktree).await;
     if paths.is_empty() {
         paths = parse_conflict_paths_from_output(&detail);
@@ -1022,7 +1026,9 @@ async fn abort_rebase_conflict(worktree: &Path, base_branch: &str, detail: Strin
 }
 
 async fn checked_out_branch(dir: &Path) -> Option<String> {
-    let output = run_git_capture(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).await.ok()?;
+    let output = run_git_capture(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .await
+        .ok()?;
     let name = output.lines().next()?.trim();
     if name.is_empty() || name == "HEAD" {
         None
@@ -1163,6 +1169,29 @@ mod tests {
         );
         assert!(msg.starts_with("422"), "expected status prefix: {msg}");
         assert!(msg.contains("base"), "expected raw body retained: {msg}");
+    }
+
+    #[test]
+    fn create_pr_gate_allows_github_com_https_and_ssh() {
+        assert!(create_pr_gate(true, Some("https://github.com/acme/coppice.git"), true).0);
+        assert!(create_pr_gate(true, Some("git@github.com:acme/coppice.git"), true).0);
+    }
+
+    #[test]
+    fn create_pr_gate_refuses_non_github_com_hosts() {
+        let (ok, reason) = create_pr_gate(
+            true,
+            Some("https://github.example.com/acme/coppice.git"),
+            true,
+        );
+        assert!(!ok);
+        assert!(
+            reason
+                .as_deref()
+                .is_some_and(|r| r.contains("GitHub remote_url")),
+            "expected GitHub remote reason, got {reason:?}"
+        );
+        assert!(!create_pr_gate(true, Some("https://gitlab.com/acme/coppice.git"), true).0);
     }
 
     #[test]
