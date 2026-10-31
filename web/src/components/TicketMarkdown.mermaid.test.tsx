@@ -49,6 +49,18 @@ describe('TicketMarkdown mermaid', () => {
     expect(document.querySelector('svg')).toBeNull();
   });
 
+  it('can render mermaid fences as plain code', () => {
+    render(
+      <TicketMarkdown mermaidAsCode>
+        {`The plan.\n\n\`\`\`mermaid\n${DRAWN_DIAGRAM}\n\`\`\`\n`}
+      </TicketMarkdown>,
+    );
+
+    expect(screen.getByText(/flowchart LR/)).toBeInTheDocument();
+    expect(screen.getByText(/Plan --> Review/).closest('pre')).not.toBeNull();
+    expect(document.querySelector('svg')).toBeNull();
+  });
+
   it('draws a mermaid block as a diagram', async () => {
     render(
       <TicketMarkdown>

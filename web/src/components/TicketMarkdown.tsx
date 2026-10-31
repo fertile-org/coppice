@@ -51,93 +51,103 @@ function urlTransform(url: string): string {
   return url.startsWith(FILE_REFERENCE_URL_PREFIX) ? url : defaultUrlTransform(url);
 }
 
-const components: Components = {
-  h1: ({ children }) => (
-    <h1 className="mb-3 mt-5 font-display text-lg font-semibold text-text-primary first:mt-0">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2 className="mb-2 mt-5 font-display text-base font-semibold text-text-primary first:mt-0">
-      {children}
-    </h2>
-  ),
-  h3: ({ children }) => (
-    <h3 className="mb-2 mt-4 font-body text-sm font-semibold text-text-primary first:mt-0">
-      {children}
-    </h3>
-  ),
-  p: ({ children }) => (
-    <p className="mb-3 font-body text-sm leading-relaxed text-text-primary last:mb-0">
-      {children}
-    </p>
-  ),
-  ul: ({ children }) => (
-    <ul className="mb-3 list-disc space-y-1.5 pl-5 font-body text-sm leading-relaxed text-text-primary">
-      {children}
-    </ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="mb-3 list-decimal space-y-1.5 pl-5 font-body text-sm leading-relaxed text-text-primary">
-      {children}
-    </ol>
-  ),
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  strong: ({ children }) => (
-    <strong className="font-semibold text-text-primary">{children}</strong>
-  ),
-  a: ({ href, children }) => {
-    const file = linkedFile(href);
-    if (file) return <FileReferenceLink file={file}>{children}</FileReferenceLink>;
-    if (href?.startsWith(FILE_REFERENCE_URL_PREFIX)) return <>{children}</>;
-    return (
-      <a href={href} className="text-accent underline-offset-2 hover:underline">
+function markdownComponents(options?: { mermaidAsCode?: boolean }): Components {
+  return {
+    h1: ({ children }) => (
+      <h1 className="mb-3 mt-5 font-display text-lg font-semibold text-text-primary first:mt-0">
         {children}
-      </a>
-    );
-  },
-  code: ({ className, children }) => {
-    const inline = (
-      <code className="rounded bg-paper-200 px-1 font-mono text-[0.9em]">
+      </h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className="mb-2 mt-5 font-display text-base font-semibold text-text-primary first:mt-0">
         {children}
-      </code>
-    );
-    // Only inline spans: fenced blocks carry a language class or a trailing newline.
-    if (className || typeof children !== 'string' || children.includes('\n')) return inline;
-    const file = parseFileReference(children);
-    return file ? <FileReferenceLink file={file}>{inline}</FileReferenceLink> : inline;
-  },
-  pre: ({ children }) => {
-    const diagram = mermaidFenceSource(children);
-    if (diagram !== null) return <MermaidDiagram source={diagram} />;
-    return (
-      <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-paper-200 p-3 font-mono text-xs leading-relaxed">
+      </h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className="mb-2 mt-4 font-body text-sm font-semibold text-text-primary first:mt-0">
         {children}
-      </pre>
-    );
-  },
-  blockquote: ({ children }) => (
-    <blockquote className="mb-3 border-l-2 border-border pl-3 text-text-secondary">
-      {children}
-    </blockquote>
-  ),
-  table: ({ children }) => (
-    <div className="mb-4 overflow-x-auto">
-      <table className="min-w-full border-collapse font-body text-sm">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className="bg-paper-200">{children}</thead>,
-  th: ({ children }) => (
-    <th className="border border-border px-3 py-2 text-left font-semibold text-text-primary">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => (
-    <td className="border border-border px-3 py-2 align-top text-text-primary">
-      {children}
-    </td>
-  ),
-};
+      </h3>
+    ),
+    p: ({ children }) => (
+      <p className="mb-3 font-body text-sm leading-relaxed text-text-primary last:mb-0">
+        {children}
+      </p>
+    ),
+    ul: ({ children }) => (
+      <ul className="mb-3 list-disc space-y-1.5 pl-5 font-body text-sm leading-relaxed text-text-primary">
+        {children}
+      </ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="mb-3 list-decimal space-y-1.5 pl-5 font-body text-sm leading-relaxed text-text-primary">
+        {children}
+      </ol>
+    ),
+    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+    strong: ({ children }) => (
+      <strong className="font-semibold text-text-primary">{children}</strong>
+    ),
+    a: ({ href, children }) => {
+      const file = linkedFile(href);
+      if (file) return <FileReferenceLink file={file}>{children}</FileReferenceLink>;
+      if (href?.startsWith(FILE_REFERENCE_URL_PREFIX)) return <>{children}</>;
+      const external = href != null && /^https?:\/\//i.test(href);
+      return (
+        <a
+          href={href}
+          className="text-accent underline-offset-2 hover:underline"
+          {...(external ? { target: '_blank', rel: 'noreferrer' } : {})}
+        >
+          {children}
+        </a>
+      );
+    },
+    code: ({ className, children }) => {
+      const inline = (
+        <code className="rounded bg-paper-200 px-1 font-mono text-[0.9em]">
+          {children}
+        </code>
+      );
+      // Only inline spans: fenced blocks carry a language class or a trailing newline.
+      if (className || typeof children !== 'string' || children.includes('\n')) return inline;
+      const file = parseFileReference(children);
+      return file ? <FileReferenceLink file={file}>{inline}</FileReferenceLink> : inline;
+    },
+    pre: ({ children }) => {
+      const diagram = options?.mermaidAsCode ? null : mermaidFenceSource(children);
+      if (diagram !== null) return <MermaidDiagram source={diagram} />;
+      return (
+        <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-paper-200 p-3 font-mono text-xs leading-relaxed">
+          {children}
+        </pre>
+      );
+    },
+    blockquote: ({ children }) => (
+      <blockquote className="mb-3 border-l-2 border-border pl-3 text-text-secondary">
+        {children}
+      </blockquote>
+    ),
+    table: ({ children }) => (
+      <div className="mb-4 overflow-x-auto">
+        <table className="min-w-full border-collapse font-body text-sm">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className="bg-paper-200">{children}</thead>,
+    th: ({ children }) => (
+      <th className="border border-border px-3 py-2 text-left font-semibold text-text-primary">
+        {children}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="border border-border px-3 py-2 align-top text-text-primary">
+        {children}
+      </td>
+    ),
+  };
+}
+
+const components = markdownComponents();
+const mermaidAsCodeComponents = markdownComponents({ mermaidAsCode: true });
 
 const AGENT_REQUESTS_MARKER_PREFIX = '<!-- coppice-agent-requests: ';
 
@@ -161,14 +171,21 @@ export function normalizeCommentMarkdown(text: string): string {
   return withoutMarkers.replace(/([^\n])\n(\*\*[^*]+:\*\*)/g, '$1\n\n$2');
 }
 
-export function TicketMarkdown({ children }: { children: string }) {
+export function TicketMarkdown({
+  children,
+  mermaidAsCode = false,
+}: {
+  children: string;
+  /** Keep mermaid fences as code so a streaming source does not remount a diagram. */
+  mermaidAsCode?: boolean;
+}) {
   const text = normalizeCommentMarkdown(children.trim());
   if (!text) return null;
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkFileReferences]}
-      components={components}
+      components={mermaidAsCode ? mermaidAsCodeComponents : components}
       urlTransform={urlTransform}
     >
       {text}
