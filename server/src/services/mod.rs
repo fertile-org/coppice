@@ -34,6 +34,7 @@ pub mod init_wizard;
 pub mod plugin_service;
 pub mod plugin_settings_service;
 pub mod pr_create_url;
+pub mod pr_merge_sync;
 pub mod board_service;
 pub mod repo_git_service;
 pub mod repo_service;

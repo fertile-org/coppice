@@ -45,6 +45,22 @@ pub fn github_owner_repo(remote_url: &str) -> Option<(String, String)> {
     if !is_github_host(&host) {
         return None;
     }
+    owner_repo_from_path(&repo_path)
+}
+
+/// `owner` / `repo` only when the remote host is exactly `github.com`.
+///
+/// `github_owner_repo` also accepts hosts `is_github_host` allows, such as
+/// `github.example.com`. Do not send those tokens to api.github.com.
+pub fn github_com_owner_repo(remote_url: &str) -> Option<(String, String)> {
+    let (host, repo_path) = parse_git_remote(remote_url.trim())?;
+    if host != "github.com" {
+        return None;
+    }
+    owner_repo_from_path(&repo_path)
+}
+
+fn owner_repo_from_path(repo_path: &str) -> Option<(String, String)> {
     let (owner, repo) = repo_path.split_once('/')?;
     if owner.is_empty() || repo.is_empty() || repo.contains('/') {
         return None;
@@ -173,5 +189,19 @@ mod tests {
             github_owner_repo("git@github.com:acme/coppice.git"),
             Some(("acme".into(), "coppice".into()))
         );
+    }
+
+    #[test]
+    fn github_com_owner_repo_rejects_enterprise_lookalikes() {
+        assert_eq!(
+            github_com_owner_repo("https://github.com/acme/coppice.git"),
+            Some(("acme".into(), "coppice".into()))
+        );
+        assert_eq!(
+            github_com_owner_repo("git@github.com:acme/coppice.git"),
+            Some(("acme".into(), "coppice".into()))
+        );
+        assert!(github_com_owner_repo("https://github.example.com/acme/coppice.git").is_none());
+        assert!(github_owner_repo("https://github.example.com/acme/coppice.git").is_some());
     }
 }

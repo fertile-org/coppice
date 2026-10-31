@@ -429,6 +429,7 @@ pub async fn serve(
     crate::logs::retain::spawn_sweep(state.clone());
     crate::services::artifact_retention::spawn_sweep(state.clone());
     crate::services::worktree_cleanup::spawn_sweep(state.clone());
+    crate::services::pr_merge_sync::spawn_sweep(state.clone());
     crate::services::attachment_cleanup::spawn_sweep(state.clone());
     crate::workers::job_worker::spawn_workers(state.clone());
     crate::workers::health_worker::spawn_health_worker(state.clone());

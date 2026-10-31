@@ -83,6 +83,7 @@ services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim_next / claim_next_excluding (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)
 services/worktree_service.rs   worktree per (ticket, agent) from registered local_path
+services/pr_merge_sync.rs      records GitHub.com PR merges on accepted Done tickets
 services/context_builder.rs    write the slim tool-first .agent/context.md (agent, task, repo, skills, tool pointers)
 services/result_contract.rs    apply nextStatus, comments, blocker metadata
 workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
