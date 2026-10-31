@@ -213,22 +213,65 @@ fn tool_title(tool_key: &str, payload: &Value) -> (&'static str, String) {
     ("action", tool_key.to_string())
 }
 
+fn shell_body_candidate(value: Option<&Value>) -> Option<&Value> {
+    value.filter(|v| v.is_object())
+}
+
+fn has_exit_code(value: &Value) -> bool {
+    value.get("exitCode").is_some()
+}
+
+/// Cursor `ShellResult` is a oneof. The live CLI puts `exitCode`/`stdout`/`stderr`
+/// on `success` *or* `failure`. When both keys exist (legacy dual-key payloads),
+/// prefer the object that actually has `exitCode`.
+fn shell_result_body(result: &Value) -> Option<&Value> {
+    let success = shell_body_candidate(result.get("success"));
+    let failure = shell_body_candidate(result.get("failure"));
+    match (success, failure) {
+        (Some(success), Some(failure)) => match (has_exit_code(success), has_exit_code(failure)) {
+            (true, false) => Some(success),
+            (false, true) => Some(failure),
+            (true, true) | (false, false) => Some(success),
+        },
+        (Some(success), None) => Some(success),
+        (None, Some(failure)) => Some(failure),
+        (None, None) => None,
+    }
+}
+
 fn completed_tool_status(payload: &Value) -> &'static str {
     let Some(result) = payload.get("result") else {
         return "completed";
     };
-    if result.get("error").is_some() || result.get("failure").is_some() {
+    if result.get("error").is_some()
+        || result.get("timeout").is_some()
+        || result.get("rejected").is_some()
+        || result.get("spawnError").is_some()
+        || result.get("permissionDenied").is_some()
+    {
         return "error";
     }
-    if let Some(success) = result.get("success") {
-        if let Some(code) = success.get("exitCode").and_then(|v| v.as_i64()) {
-            if code != 0 {
-                return "error";
-            }
-        }
+    if result
+        .get("failure")
+        .and_then(|failure| failure.get("aborted"))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return "error";
+    }
+    if let Some(code) = shell_result_body(result)
+        .and_then(|body| body.get("exitCode"))
+        .and_then(Value::as_i64)
+    {
+        return if code != 0 { "error" } else { "completed" };
+    }
+    if result.get("failure").is_some() {
+        return "error";
+    }
+    if result.get("success").is_some() {
         return "completed";
     }
-    if result.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+    if result.get("is_error").and_then(Value::as_bool) == Some(true) {
         return "error";
     }
     "completed"
@@ -266,15 +309,28 @@ fn value_text(value: &Value) -> Option<String> {
 }
 
 fn extract_error_output(result: &Value) -> Option<String> {
-    value_text(result.get("error")?)
+    for key in ["error", "rejected", "spawnError", "permissionDenied"] {
+        if let Some(text) = result.get(key).and_then(value_text) {
+            return Some(text);
+        }
+    }
+    None
 }
 
 fn extract_failure_output(result: &Value) -> Option<String> {
     value_text(result.get("failure")?)
 }
 
-fn stream_text(success: &Value, key: &str) -> Option<String> {
-    let value = success.get(key)?;
+fn extract_timeout_output(result: &Value) -> Option<String> {
+    result
+        .get("timeout")?
+        .get("timeoutMs")
+        .and_then(Value::as_i64)
+        .map(|ms| format!("timed out after {ms} ms"))
+}
+
+fn stream_text(body: &Value, key: &str) -> Option<String> {
+    let value = body.get(key)?;
     if let Some(text) = non_empty_str(value.as_str()) {
         return Some(text);
     }
@@ -311,10 +367,9 @@ fn is_generic_failure_phrase(text: &str) -> bool {
     )
 }
 
-fn exit_code_line(success: &Value) -> Option<String> {
-    success
-        .get("exitCode")
-        .and_then(|v| v.as_i64())
+fn exit_code_line(body: &Value) -> Option<String> {
+    body.get("exitCode")
+        .and_then(Value::as_i64)
         .map(|code| format!("exit code {code}"))
 }
 
@@ -375,9 +430,9 @@ fn compose_error_output(primary: Option<String>, secondary: Option<String>) -> O
 }
 
 fn stream_and_exit_secondary(result: &Value) -> Option<String> {
-    let success = result.get("success")?;
-    let stdout = stream_text(success, "stdout");
-    let stderr = stream_text(success, "stderr");
+    let body = shell_result_body(result)?;
+    let stdout = stream_text(body, "stdout");
+    let stderr = stream_text(body, "stderr");
     let mut parts: Vec<String> = Vec::new();
     match (stderr, stdout) {
         (Some(err), Some(out)) => {
@@ -390,7 +445,7 @@ fn stream_and_exit_secondary(result: &Value) -> Option<String> {
     }
     // Exit code only when streams are absent (keeps PR #2 stream-only output).
     if parts.is_empty() {
-        if let Some(code) = exit_code_line(success) {
+        if let Some(code) = exit_code_line(body) {
             parts.push(code);
         }
     }
@@ -398,18 +453,18 @@ fn stream_and_exit_secondary(result: &Value) -> Option<String> {
 }
 
 /// Extraction for completed tools:
-/// - Success: stdout-first, then stderr.
-/// - Error: compose primary (`result.error` / `result.failure`) with secondary
-///   (stderr → stdout, exit code, short args summary). Generic primary phrases
-///   like `tool call failed` never suppress secondary context.
+/// - Success: stdout-first, then stderr, from `success` or `failure`.
+/// - Error: compose primary (`result.error` / variant / `result.failure`) with
+///   secondary (stderr → stdout, exit code, short args summary). Generic
+///   primary phrases like `tool call failed` never suppress secondary context.
 fn tool_output(payload: &Value) -> Option<String> {
     let status = completed_tool_status(payload);
     let result = payload.get("result")?;
 
     if status != "error" {
-        if let Some(success) = result.get("success") {
-            let stdout = stream_text(success, "stdout");
-            let stderr = stream_text(success, "stderr");
+        if let Some(body) = shell_result_body(result) {
+            let stdout = stream_text(body, "stdout");
+            let stderr = stream_text(body, "stderr");
             if let Some(out) = stdout {
                 return Some(out);
             }
@@ -420,7 +475,9 @@ fn tool_output(payload: &Value) -> Option<String> {
         return None;
     }
 
-    let primary = extract_error_output(result).or_else(|| extract_failure_output(result));
+    let primary = extract_error_output(result)
+        .or_else(|| extract_timeout_output(result))
+        .or_else(|| extract_failure_output(result));
     let primary_was_generic = primary
         .as_ref()
         .is_some_and(|p| is_generic_failure_phrase(p));
@@ -920,5 +977,204 @@ mod tests {
         let tool = last_tool(&handle);
         assert_eq!(tool["status"], "error");
         assert_eq!(tool["output"], "not found");
+    }
+
+    #[test]
+    fn failure_nonzero_exit_publishes_stderr() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail_body",
+            json!({
+                "failure": {
+                    "exitCode": 3,
+                    "stdout": "out",
+                    "stderr": "err",
+                    "aborted": false
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "err\n\nout");
+    }
+
+    #[test]
+    fn failure_exit_zero_is_completed_and_shows_stdout() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail_ok",
+            json!({
+                "failure": {
+                    "exitCode": 0,
+                    "stdout": "still printed\n",
+                    "stderr": "",
+                    "aborted": false
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "completed");
+        assert_eq!(tool["output"], "still printed");
+    }
+
+    #[test]
+    fn failure_aborted_is_error_even_with_exit_zero() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_aborted",
+            json!({
+                "failure": {
+                    "exitCode": 0,
+                    "stdout": "",
+                    "stderr": "interrupted",
+                    "aborted": true
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "interrupted");
+    }
+
+    #[test]
+    fn failure_without_exit_code_is_error_and_shows_streams() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail_no_exit",
+            json!({
+                "failure": {
+                    "stdout": "partial out",
+                    "stderr": "partial err"
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "partial err\n\npartial out");
+    }
+
+    #[test]
+    fn timeout_rejected_spawn_and_permission_denied_are_error_with_reason() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_timeout",
+            json!({"timeout": {"command": "sleep 99", "workingDirectory": "", "timeoutMs": 30000}}),
+        );
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_rejected",
+            json!({
+                "rejected": {
+                    "command": "rm -rf /",
+                    "workingDirectory": "",
+                    "reason": "Command aborted",
+                    "isReadonly": false
+                }
+            }),
+        );
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_spawn",
+            json!({
+                "spawnError": {
+                    "command": "nope",
+                    "workingDirectory": "",
+                    "error": "ENOENT: nope"
+                }
+            }),
+        );
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_perm",
+            json!({
+                "permissionDenied": {
+                    "command": "cat /etc/shadow",
+                    "workingDirectory": "",
+                    "error": "not permitted",
+                    "isReadonly": true
+                }
+            }),
+        );
+
+        let tools: Vec<_> = collect_events(&handle)
+            .into_iter()
+            .filter(|e| e["type"] == "cursor.console.tool")
+            .collect();
+        assert_eq!(tools.len(), 4);
+        assert_eq!(tools[0]["status"], "error");
+        assert_eq!(tools[0]["output"], "timed out after 30000 ms");
+        assert_eq!(tools[1]["status"], "error");
+        assert_eq!(tools[1]["output"], "Command aborted");
+        assert_eq!(tools[2]["status"], "error");
+        assert_eq!(tools[2]["output"], "ENOENT: nope");
+        assert_eq!(tools[3]["status"], "error");
+        assert_eq!(tools[3]["output"], "not permitted");
+        for tool in &tools {
+            let output = tool["output"].as_str().unwrap();
+            assert!(
+                !output.starts_with("command:"),
+                "variant must not fall back to args summary, got {output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn replays_captured_cursor_shell_failure_fixture() {
+        let raw = std::fs::read_to_string(fixtures_root().join("shell_failure.jsonl")).unwrap();
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(line).unwrap();
+            console.handle_stream_json(&handle, &value);
+        }
+        let tools: Vec<_> = collect_events(&handle)
+            .into_iter()
+            .filter(|e| e["type"] == "cursor.console.tool")
+            .collect();
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0]["title"], "false");
+        assert_eq!(tools[0]["status"], "error");
+        assert_eq!(tools[0]["output"], "exit code 1");
+        assert_eq!(tools[1]["status"], "error");
+        assert_eq!(tools[1]["output"], "err\n\nout");
+        assert_eq!(tools[2]["title"], "true");
+        assert_eq!(tools[2]["status"], "completed");
+        assert!(tools[2].get("output").is_none());
     }
 }
