@@ -6,12 +6,14 @@ import {
 } from '@tanstack/react-query';
 import { ApiError, apiFetch } from '../../lib/api';
 import {
+  knowledgeFlagListSchema,
   knowledgeFreshnessSchema,
   knowledgeItemSchema,
   knowledgePageSchema,
   knowledgeUsageListSchema,
   similarListSchema,
   type KnowledgeConfidence,
+  type KnowledgeFlagList,
   type KnowledgeFreshness,
   type KnowledgeItem,
   type KnowledgePage,
@@ -42,6 +44,7 @@ export interface KnowledgeListFilter {
   status: KnowledgeStatus;
   boardId?: string;
   knowledgeType?: KnowledgeType;
+  flagged?: boolean;
 }
 
 async function fetchKnowledgePage(
@@ -51,6 +54,7 @@ async function fetchKnowledgePage(
   const params = new URLSearchParams({ status: filter.status, limit: '24' });
   if (filter.boardId) params.set('boardId', filter.boardId);
   if (filter.knowledgeType) params.set('knowledgeType', filter.knowledgeType);
+  if (filter.flagged) params.set('flagged', 'true');
   if (cursor) params.set('cursor', cursor);
   const response = await apiFetch(`/api/knowledge?${params.toString()}`);
   return knowledgePageSchema.parse(await response.json());
@@ -126,6 +130,18 @@ export function useKnowledgeFreshness(itemId: string) {
   });
 }
 
+async function fetchKnowledgeFlags(itemId: string): Promise<KnowledgeFlagList> {
+  const response = await apiFetch(`/api/knowledge/${itemId}/feedback`);
+  return knowledgeFlagListSchema.parse(await response.json());
+}
+
+export function useKnowledgeFlags(itemId: string) {
+  return useQuery({
+    queryKey: [...KNOWLEDGE_QUERY_KEY, 'flags', itemId],
+    queryFn: () => fetchKnowledgeFlags(itemId),
+  });
+}
+
 function useKnowledgeMutation<TVariables>(
   mutationFn: (variables: TVariables) => Promise<KnowledgeItem>,
 ) {
@@ -165,6 +181,12 @@ export function useRejectKnowledge() {
       expectedVersion: number;
       reason: string | null;
     }) => mutateKnowledge(id, '/reject', { expectedVersion, reason }),
+  );
+}
+
+export function useDismissKnowledgeFlags() {
+  return useKnowledgeMutation((id: string) =>
+    mutateKnowledge(id, '/flags/dismiss', {}),
   );
 }
 

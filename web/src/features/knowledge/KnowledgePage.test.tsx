@@ -147,6 +147,21 @@ vi.mock('./useKnowledge', () => ({
     };
   },
   fetchKnowledgeItem: (id: string) => mocks.fetchKnowledgeItem(id),
+  useKnowledgeFlags: () => ({
+    data: {
+      items: [
+        {
+          verdict: 'wrong',
+          reason: 'The command moved.',
+          agentName: 'Backend',
+          createdAt: '2026-10-30T12:00:00Z',
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+  }),
+  useDismissKnowledgeFlags: () => mutation(vi.fn()),
   useCreateKnowledge: () => mutation(mocks.create),
   useApproveKnowledge: () => mutation(mocks.approve),
   useRejectKnowledge: () => mutation(mocks.reject),
@@ -192,6 +207,28 @@ describe('KnowledgePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(mocks.openTicket).toHaveBeenCalledWith(item.sourceId);
+  });
+
+  it('lists approved items with open flags on the Flagged tab', () => {
+    mocks.items = [{ ...item, status: 'approved', openFlagCount: 1 }];
+    render(<KnowledgePage />);
+    expect(mocks.filter).toEqual({ status: 'pending' });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Flagged' }));
+
+    expect(screen.getByRole('tab', { name: 'Flagged' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(mocks.filter).toEqual({ status: 'approved', flagged: true });
+    expect(screen.getByText('Flagged by agents (1)')).toBeVisible();
+    expect(screen.getByText('The command moved.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss flags' })).toBeVisible();
+
+    mocks.items = [];
+    fireEvent.click(screen.getByRole('tab', { name: 'Pending' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Flagged' }));
+    expect(screen.getByRole('heading', { name: 'No flagged knowledge' })).toBeVisible();
   });
 
   it('shows compaction provenance with openable source tickets', () => {

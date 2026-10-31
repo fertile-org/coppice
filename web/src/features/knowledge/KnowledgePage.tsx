@@ -21,14 +21,18 @@ import {
 import { TYPE_LABELS, TYPE_OPTIONS, scopeLabel } from './knowledgeFormat';
 import { useKnowledge } from './useKnowledge';
 
-const STATUS_TABS: Array<{ value: KnowledgeStatus; label: string }> = [
+type KnowledgeTab = KnowledgeStatus | 'flagged';
+
+const STATUS_TABS: Array<{ value: KnowledgeTab; label: string }> = [
   { value: 'pending', label: 'Pending' },
   { value: 'approved', label: 'Approved' },
+  { value: 'flagged', label: 'Flagged' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'stale', label: 'Stale' },
 ];
 
-const EMPTY_COPY: Record<KnowledgeStatus, string> = {
+const EMPTY_COPY: Record<KnowledgeTab, string> = {
+  flagged: 'Approved knowledge that agents marked outdated or wrong will wait here for review.',
   pending: 'New manual and extracted candidates will wait here for review.',
   approved: 'Approved knowledge is what agents can retrieve during runs.',
   rejected: 'Rejected candidates stay here with their reason for the audit trail.',
@@ -81,7 +85,7 @@ export function KnowledgePage() {
   const { data: boards } = useBoards();
   const openTicket = useOpenTicket();
   const idPrefix = useId();
-  const [status, setStatus] = useState<KnowledgeStatus>('pending');
+  const [status, setStatus] = useState<KnowledgeTab>('pending');
   const [boardId, setBoardId] = useState('');
   const [knowledgeType, setKnowledgeType] = useState('');
   const [search, setSearch] = useState('');
@@ -93,7 +97,7 @@ export function KnowledgePage() {
   const [rejectItem, setRejectItem] = useState<KnowledgeItem | null>(null);
 
   const query = useKnowledge({
-    status,
+    ...(status === 'flagged' ? { status: 'approved', flagged: true } : { status }),
     boardId: boardId || undefined,
     knowledgeType: (knowledgeType || undefined) as KnowledgeType | undefined,
   });
@@ -115,7 +119,7 @@ export function KnowledgePage() {
   );
 
   const hasFilters = searchTerms.length > 0 || boardId !== '' || knowledgeType !== '';
-  const tabId = (value: KnowledgeStatus) => `${idPrefix}-tab-${value}`;
+  const tabId = (value: KnowledgeTab) => `${idPrefix}-tab-${value}`;
   const panelId = `${idPrefix}-panel`;
 
   function clearFilters() {
@@ -124,7 +128,7 @@ export function KnowledgePage() {
     setKnowledgeType('');
   }
 
-  function selectStatus(next: KnowledgeStatus) {
+  function selectStatus(next: KnowledgeTab) {
     setFocusItemId(null);
     setStatus(next);
   }

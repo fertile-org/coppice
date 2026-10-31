@@ -11,7 +11,7 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { KnowledgeItem, SimilarNeighbor } from '../../lib/schemas/knowledge';
-import { FlaggedByAgents, KnowledgeFreshness } from './KnowledgeFreshness';
+import { AgentFlags, FlaggedByAgents, KnowledgeFreshness } from './KnowledgeFreshness';
 import {
   TYPE_LABELS,
   duplicateRejectReason,
@@ -270,6 +270,8 @@ export function KnowledgeCard({
           <p className="mt-1.5 whitespace-pre-wrap font-body text-sm leading-relaxed text-text-secondary">
             {item.content}
           </p>
+
+          <AgentFlags itemId={item.id} count={item.openFlagCount} canGovern={canGovern} />
 
           <KnowledgeFreshness itemId={item.id} />
 

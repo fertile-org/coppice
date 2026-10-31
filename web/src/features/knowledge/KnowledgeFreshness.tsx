@@ -1,8 +1,13 @@
 import { ChevronDown, ChevronRight, Flag } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '../../components/ui/button';
 import type { KnowledgeFreshness as Freshness } from '../../lib/schemas/knowledge';
-import { shortId } from './knowledgeFormat';
-import { useKnowledgeFreshness } from './useKnowledge';
+import { formatDate, humanize, shortId } from './knowledgeFormat';
+import {
+  useDismissKnowledgeFlags,
+  useKnowledgeFlags,
+  useKnowledgeFreshness,
+} from './useKnowledge';
 
 const STATE_LABELS: Record<Freshness['state'], string> = {
   current: 'Current',
@@ -29,6 +34,85 @@ export function FlaggedByAgents({ count }: { count: number }) {
       Flagged by agents ({count})
     </span>
   );
+}
+
+function AgentFlagList({ itemId, canGovern }: { itemId: string; canGovern: boolean }) {
+  const flags = useKnowledgeFlags(itemId);
+  const dismiss = useDismissKnowledgeFlags();
+  const [error, setError] = useState(false);
+
+  async function dismissFlags() {
+    setError(false);
+    try {
+      await dismiss.mutateAsync(itemId);
+    } catch {
+      setError(true);
+    }
+  }
+
+  return (
+    <section
+      aria-label="Agent flags"
+      className="mt-3 rounded-md border border-border bg-paper-50 px-3 py-2"
+    >
+      <p className="font-body text-xs text-text-muted">
+        Written by agents. Check each claim before you act on it.
+      </p>
+      {flags.isLoading && (
+        <p className="mt-2 font-body text-xs text-text-muted">Loading flags…</p>
+      )}
+      {flags.isError && (
+        <p className="mt-2 font-body text-xs text-danger">Unable to load these flags.</p>
+      )}
+      {flags.data && (
+        <ul className="mt-2 space-y-2">
+          {flags.data.items.map((flag, index) => (
+            <li key={`${flag.createdAt}-${index}`} className="font-body text-xs">
+              <p className="text-text-muted">
+                <span className="font-medium text-warning">{humanize(flag.verdict)}</span>
+                {' · '}
+                {flag.agentName ?? 'Unknown agent'} · {formatDate(flag.createdAt)}
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-text-secondary">
+                {flag.reason}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canGovern && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+          loading={dismiss.isPending}
+          onClick={() => void dismissFlags()}
+        >
+          Dismiss flags
+        </Button>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 font-body text-xs text-danger">
+          Unable to dismiss these flags. Refresh and try again.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Open flags with their reasons. Loads only for an item that has some. */
+export function AgentFlags({
+  itemId,
+  count,
+  canGovern,
+}: {
+  itemId: string;
+  count: number;
+  canGovern: boolean;
+}) {
+  if (count <= 0) return null;
+  return <AgentFlagList itemId={itemId} canGovern={canGovern} />;
 }
 
 function FreshnessDetails({ itemId }: { itemId: string }) {

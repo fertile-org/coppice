@@ -139,6 +139,17 @@ export const knowledgeFreshnessSchema = z.object({
   ),
 });
 
+export const knowledgeFlagListSchema = z.object({
+  items: z.array(
+    z.object({
+      verdict: z.enum(['outdated', 'wrong']),
+      reason: z.string(),
+      agentName: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+
 export const compactionBatchSchema = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
@@ -195,6 +206,7 @@ export type KnowledgePage = z.infer<typeof knowledgePageSchema>;
 export type KnowledgeUsage = z.infer<typeof knowledgeUsageSchema>;
 export type SimilarNeighbor = z.infer<typeof similarNeighborSchema>;
 export type KnowledgeFreshness = z.infer<typeof knowledgeFreshnessSchema>;
+export type KnowledgeFlagList = z.infer<typeof knowledgeFlagListSchema>;
 export type SimilarList = z.infer<typeof similarListSchema>;
 export type CompactionBatch = z.infer<typeof compactionBatchSchema>;
 export type CompactionState = z.infer<typeof compactionStateSchema>;
