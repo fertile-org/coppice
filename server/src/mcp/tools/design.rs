@@ -63,6 +63,8 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
                         "chosen": pick(&set.chosen),
                         "recommended": pick(&set.recommended),
                         "selected": pick(&set.selected),
+                        "superseded": set.superseded,
+                        "inherited": set.inherited,
                     })
                 })
                 .collect();
@@ -90,7 +92,7 @@ pub(crate) async fn selected_design_json(
             "title": design.title,
             "id": design.selected.id,
             "optionTitle": design.selected.title,
-            "path": design.entry_path.display().to_string(),
+            "path": design.entry_path.map(|path| path.display().to_string()),
         }),
         None => Value::Null,
     })

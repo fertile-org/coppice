@@ -108,7 +108,7 @@ When a ticket has a selected design, the work run is given the absolute path of 
 | `claude-code` | Yes (marker printed) | installed CLI |
 | `codex` | Yes (marker printed) | installed CLI |
 | `cursor` | Yes (marker printed) | installed CLI |
-| `opencode` | Not yet | `opencode run` stopped with a model-access error before reading anything |
+| `opencode` | Not yet | `opencode run` stopped with a model-access error before reading anything. Tried with `opencode run` only, not the `opencode serve` path Coppice runs use on OpenCode 1.x (2 and later use ACP) |
 | `kilo-code` | Not yet | `kilo run` stopped with `PAID_MODEL_AUTH_REQUIRED` (not signed in) |
 
 A connector that cannot read the file still gets the option's title and the plan text.

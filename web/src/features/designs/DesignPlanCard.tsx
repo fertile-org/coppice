@@ -2,18 +2,18 @@ import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { DesignDialog } from './DesignDialog';
 import { DESIGN_COPY } from './designCopy';
-import { useDesigns } from './useDesigns';
+import { designDrivesWork, planCardDesign, useDesigns } from './useDesigns';
 
 /** Opens the design options the plan was written around, above the plan. */
 export function DesignPlanCard({ ticketId }: { ticketId: string }) {
   const { data } = useDesigns(ticketId);
   const [open, setOpen] = useState(false);
-  const live = (data ?? []).filter((set) => !set.superseded);
-  const design = live.find((set) => set.fromPlanRun) ?? live[0];
+  const sets = data ?? [];
+  const design = planCardDesign(sets);
   if (!design) return null;
 
   const { selected } = design;
-  const detail = selected
+  const detail = selected && designDrivesWork(design, sets)
     ? `${DESIGN_COPY.options(design.options.length)} · ${DESIGN_COPY.using(
         selected.id,
         selected.title,
@@ -26,6 +26,9 @@ export function DesignPlanCard({ ticketId }: { ticketId: string }) {
       <div>
         <h3 className="font-body text-sm font-medium text-text-primary">{DESIGN_COPY.cardTitle}</h3>
         <p className="font-body text-xs text-text-secondary">{detail}</p>
+        {design.choice.planOutOfDate ? (
+          <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
+        ) : null}
       </div>
       <Button type="button" size="sm" onClick={() => setOpen(true)}>
         {DESIGN_COPY.open}

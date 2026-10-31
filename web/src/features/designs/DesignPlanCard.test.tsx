@@ -61,6 +61,37 @@ describe('DesignPlanCard', () => {
     expect(await screen.findByText('3 options')).toBeInTheDocument();
   });
 
+  it('shows only the option count for a work-run set nobody picked', async () => {
+    serve([makeDesignSet({ fromPlanRun: false, choice: { mode: 'save_only', planOutOfDate: false } })]);
+    renderCard();
+    expect(await screen.findByText('3 options')).toBeInTheDocument();
+  });
+
+  it('names a picked work-run set', async () => {
+    const full = { id: 'b', title: 'Full-width button with Show all' };
+    serve([makeDesignSet({ fromPlanRun: false, chosen: full, selected: full })]);
+    renderCard();
+    expect(
+      await screen.findByText('3 options · Using B: Full-width button with Show all (your choice)'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the option count on the plan set once a work-run set was picked', async () => {
+    const full = { id: 'b', title: 'Full-width button with Show all' };
+    serve([
+      makeDesignSet({ id: '44444444-4444-4444-8444-444444444444', fromPlanRun: false, chosen: full, selected: full }),
+      makeDesignSet(),
+    ]);
+    renderCard();
+    expect(await screen.findByText('3 options')).toBeInTheDocument();
+  });
+
+  it('says when the plan was not updated to the chosen option', async () => {
+    serve([makeDesignSet({ choice: { mode: 'update_plan', planOutOfDate: true } })]);
+    renderCard();
+    expect(await screen.findByText("The plan wasn't updated to this option.")).toBeInTheDocument();
+  });
+
   it('prefers the plan-run set and ignores superseded sets', async () => {
     serve([
       makeDesignSet({ id: '33333333-3333-4333-8333-333333333333', title: 'Old', superseded: true }),

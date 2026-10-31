@@ -95,10 +95,15 @@ pub async fn choice_state(
         return Ok(mode_only(ChoiceMode::SaveOnly));
     };
 
-    // A plan with no recorded design counts as up to date.
-    let plan_out_of_date = match (&set.selected, plan.design_set_id) {
-        (Some(selected), Some(plan_set_id)) => {
-            plan_set_id != set.id || plan.design_option_id.as_deref() != Some(selected.id.as_str())
+    // A plan with no recorded design or option counts as up to date. Plans
+    // written around a set with no recommendation and no choice record no option.
+    let plan_out_of_date = match (
+        &set.selected,
+        plan.design_set_id,
+        plan.design_option_id.as_deref(),
+    ) {
+        (Some(selected), Some(plan_set_id), Some(plan_option_id)) => {
+            plan_set_id != set.id || plan_option_id != selected.id
         }
         _ => false,
     };
@@ -152,7 +157,7 @@ pub async fn choose_design(
     save_choice(&mut *tx, set_id, option_id, user_id)
         .await
         .map_err(PlanError::from)?;
-    let note = plan_design_change_note(&option.title);
+    let note = plan_design_change_note(&option.id, &option.title);
     let outcome = PlanningService::new(pool)
         .ask_for_changes_in(&mut tx, ticket_id, &note)
         .await?;

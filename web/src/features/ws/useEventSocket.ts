@@ -56,6 +56,10 @@ function dispatchMessage(raw: string) {
     void queryClient.invalidateQueries({
       queryKey: ['ticket', payload.ticket_id],
     });
+    // The popup's footer depends on whether a plan run is active.
+    void queryClient.invalidateQueries({
+      queryKey: designsQueryKey(payload.ticket_id),
+    });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     for (const listener of listeners) {
       listener.onRunStarted?.(payload);
@@ -98,6 +102,10 @@ function dispatchMessage(raw: string) {
       void queryClient.invalidateQueries({
         queryKey: ['agent-runs', msg.ticket_id],
       });
+      // Approve, Ask for changes and a pick all change what the popup offers.
+      void queryClient.invalidateQueries({
+        queryKey: designsQueryKey(msg.ticket_id),
+      });
     }
   }
 
@@ -124,12 +132,13 @@ function dispatchMessage(raw: string) {
   }
 }
 
-/** Every query an app event can change: tickets, runs, comments, notifications. */
+/** Every query an app event can change: tickets, runs, comments, designs, notifications. */
 export const EVENT_QUERY_FAMILIES = [
   ['tickets'],
   ['ticket'],
   ['agent-runs'],
   ['comments'],
+  ['designs'],
   NOTIFICATIONS_QUERY_KEY,
   COMPACTION_STATUS_QUERY_KEY,
 ] as const;

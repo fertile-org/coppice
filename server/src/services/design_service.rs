@@ -56,6 +56,8 @@ pub struct DesignSetSummary {
     pub id: Uuid,
     pub title: String,
     pub run_id: Uuid,
+    /// Relative to the artifacts dir, as stored.
+    pub dir: String,
     pub options: Vec<DesignOption>,
     pub chosen: Option<ChosenOption>,
     pub recommended: Option<ChosenOption>,
@@ -73,8 +75,9 @@ pub struct EffectiveDesign {
     pub set_id: Uuid,
     pub title: String,
     pub selected: ChosenOption,
-    /// Absolute path of the selected option's entry file.
-    pub entry_path: PathBuf,
+    /// Absolute path of the selected option's entry file. None when the set's
+    /// folder can't be resolved: the title still tells the agent what to build.
+    pub entry_path: Option<PathBuf>,
 }
 
 pub struct DesignSetRecord {
@@ -356,12 +359,23 @@ impl<'a> DesignService<'a> {
         let Some(option) = set.options.iter().find(|option| option.id == selected.id) else {
             return Ok(None);
         };
-        let (_, root) = resolve_set_dir(&self.artifacts_dir, &format!("designs/{}", set.id))?;
+        let entry_path = match resolve_set_dir(&self.artifacts_dir, &set.dir) {
+            Ok((_, root)) => Some(root.join(&option.entry)),
+            Err(err) => {
+                tracing::warn!(
+                    set_id = %set.id,
+                    dir = %set.dir,
+                    error = %err,
+                    "design set folder unavailable"
+                );
+                None
+            }
+        };
         Ok(Some(EffectiveDesign {
             set_id: set.id,
             title: set.title,
             selected,
-            entry_path: root.join(&option.entry),
+            entry_path,
         }))
     }
 
@@ -423,7 +437,7 @@ impl<'a> DesignService<'a> {
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, title, run_id, options, chosen_option_id, recommended_option_id,
+            SELECT id, title, run_id, dir, options, chosen_option_id, recommended_option_id,
                    superseded_by IS NOT NULL AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
@@ -520,6 +534,7 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
         id: row.get("id"),
         title: row.get("title"),
         run_id: row.get("run_id"),
+        dir: row.get("dir"),
         options,
         chosen,
         recommended,

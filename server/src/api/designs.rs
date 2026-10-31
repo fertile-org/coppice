@@ -1,7 +1,5 @@
 use crate::api::auth::{pool_from_state, AuthUser};
-use crate::api::tickets::{
-    map_plan_error, map_update_status_error, publish_ticket_and_runs, UpdateStatusError,
-};
+use crate::api::tickets::{map_plan_error, publish_ticket_state, UpdateStatusError};
 use crate::services::chat_service::{ChatError, ChatService};
 use crate::services::design_choice::{
     choice_state, choose_design, ChoiceState, DesignChoiceError,
@@ -217,13 +215,10 @@ async fn choose(
             DesignChoiceError::Design(err) => UpdateStatusError::Status(map_design(err)),
             DesignChoiceError::Plan(err) => map_plan_error(err),
         })?;
-    // A pick may have queued a plan run. Tell open boards either way.
+    // The pick is committed, so publishing can no longer fail the request. Save-only
+    // picks publish too: `ticket.updated` is what refreshes other open popups.
     if let Some(ticket_id) = record.ticket_id {
-        let ticket = TicketService::new(pool)
-            .get(ticket_id)
-            .await
-            .map_err(map_update_status_error)?;
-        publish_ticket_and_runs(&state, pool, &ticket).await;
+        publish_ticket_state(&state, pool, ticket_id).await;
     }
     Ok(StatusCode::NO_CONTENT)
 }

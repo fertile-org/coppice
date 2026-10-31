@@ -101,11 +101,41 @@ describe('DesignDialog footer', () => {
     expect(dialog.getByRole('button', { name: 'Choose B' })).toBeInTheDocument();
   });
 
-  it('save_only with a selection: the selected option has no action', () => {
+  it('save_only plan-run set: the selected option has no action', () => {
     const dialog = open(makeDesignSet({ choice: { mode: 'save_only', planOutOfDate: false } }));
     expect(dialog.getByText('Work follows this option.')).toBeInTheDocument();
     viewOption(dialog, 'Footer');
     expect(dialog.getByRole('button', { name: 'Choose C' })).toBeInTheDocument();
+  });
+
+  it('save_only work-run or chat set: the recommended option can be chosen, and saves', async () => {
+    const dialog = open(
+      makeDesignSet({ fromPlanRun: false, choice: { mode: 'save_only', planOutOfDate: false } }),
+    );
+    expect(dialog.queryByText('Work follows this option.')).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: 'Choose A' }));
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/choose$/),
+        expect.objectContaining({ body: JSON.stringify({ optionId: 'a' }) }),
+      ),
+    );
+  });
+
+  it("save_only work-run or chat set: work follows only the human's choice", () => {
+    const full = { id: 'b', title: 'Full-width button with Show all' };
+    const dialog = open(
+      makeDesignSet({
+        fromPlanRun: false,
+        chosen: full,
+        selected: full,
+        choice: { mode: 'save_only', planOutOfDate: false },
+      }),
+    );
+    expect(dialog.getByText('Work follows this option.')).toBeInTheDocument();
+    viewOption(dialog, 'Quiet button');
+    expect(dialog.queryByText('Work follows this option.')).toBeNull();
+    expect(dialog.getByRole('button', { name: 'Choose A' })).toBeInTheDocument();
   });
 
   it('read_only: no action', () => {

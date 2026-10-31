@@ -56,7 +56,7 @@ The set the approved plan was written around stays on the Detail card and stays 
 When a ticket has a published set that is not superseded, the Detail tab shows one card directly above the plan, in any ticket status that shows a plan, and in the same position when none is shown:
 
 - Title: "Click to open design options"
-- Detail: "3 options · Using A: Quiet button after the last card (recommended)". The wording says "(your choice)" when a human chose. Sets from before this change with no choice say "3 options".
+- Detail: "3 options · Using A: Quiet button after the last card (recommended)". The wording says "(your choice)" when a human chose. Sets from before this change with no choice say "3 options", and so does a set whose option doesn't drive work: a work-run set nobody picked, or a plan-run set once someone picked on a work-run set. When `planOutOfDate` is true the card adds "The plan wasn't updated to this option."
 - Button: Open
 
 The card on the Agent Runs tab stays, and opens the same popup. Superseded sets stay reachable only from there.
@@ -69,13 +69,16 @@ The footer shows what happens next:
 
 | State | Footer |
 | --- | --- |
-| Viewing the selected option, plan reflects it | "Work follows this option." with no action |
+| Viewing the selected option, plan reflects it, in Plan Review | "Work follows this option." with no action |
 | Viewing the selected option, plan does not reflect it | "The plan wasn't updated to this option." with a "Try again" button |
 | Viewing another option, plan run not active, Plan Review | Button "Choose B and update plan" |
 | Plan run active | Text "The plan is being updated." with choosing disabled |
 | Plan approved | "The plan is approved, so this design is final. To change it, add a comment on the ticket." with no action |
 | No plan yet, plan run not active | Button "Choose B" |
-| Set from a work run, in chat, or from before this change with nothing selected | Button "Choose B" |
+| Plan-run set with no plan yet, viewing the selected option | "Work follows this option." with no action |
+| Work-run or chat set, viewing the human's choice | "Work follows this option." with no action |
+| Work-run or chat set, any other option, including the recommended one | Button "Choose B" |
+| Set from before this change with nothing selected | Button "Choose B" |
 | Sub-ticket | No action |
 
 ### Approving during a rewrite
@@ -132,6 +135,9 @@ These were decided without asking, and can be overruled:
 - With no plan yet, a pick saves without starting a run, and the next plan is written around it.
 - The plan's design is recorded when the plan is inserted, because picks are refused while a plan run is active. A pick and its plan rewrite request share one transaction, which commits only when the run starts.
 - Plain "Choose B" wording for work-run, chat and older sets, where nothing else happens.
+- A failed rewrite does not block Approve. The card and a line beside Approve say "The plan wasn't updated to this option." If someone approves anyway, work follows the chosen option, through `selectedDesign`, while the approved plan text still describes the earlier one.
+- A work-run or chat set's recommendation drives nothing until someone confirms it, so those sets offer "Choose" on the recommended option too.
+- When change requests conflict, as they do after picking back, the later one wins and the design to use is `selectedDesign` in `ticket_get`. A note identical to the last one is not appended again.
 
 ## Left to the builder
 

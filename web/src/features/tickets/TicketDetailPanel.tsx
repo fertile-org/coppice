@@ -16,6 +16,7 @@ import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { DesignPlanCard } from '../designs/DesignPlanCard';
+import { planCardDesign, useDesigns } from '../designs/useDesigns';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
@@ -80,6 +81,8 @@ export function TicketDetailPanel({
   const planRunActive = (runs.data ?? []).some(
     (run) => run.jobType === 'plan_ticket' && isActiveRunStatus(run.status),
   );
+  const designs = useDesigns(ticket.status === 'plan_review' ? ticket.id : undefined);
+  const designOutOfDate = planCardDesign(designs.data ?? [])?.choice.planOutOfDate ?? false;
   const descriptionFiles = descriptionAttachments(ticket);
 
   async function attachToTicket(incoming: File[]) {
@@ -266,6 +269,7 @@ export function TicketDetailPanel({
           changeRequests={ticket.pendingPlan?.changeRequests}
           planQuestions={ticket.planQuestions}
           planRunActive={planRunActive}
+          designOutOfDate={designOutOfDate}
         />
       )}
 

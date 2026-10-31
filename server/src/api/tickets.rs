@@ -938,7 +938,7 @@ impl IntoResponse for UpdateStatusError {
     }
 }
 
-pub(super) fn map_update_status_error(err: TicketError) -> UpdateStatusError {
+fn map_update_status_error(err: TicketError) -> UpdateStatusError {
     match err {
         TicketError::Validation(message)
             if message == DONE_REQUIRES_ACCEPT
@@ -1636,7 +1636,7 @@ async fn final_approve(
     Ok(Json(ticket_to_response(updated)))
 }
 
-async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
+pub(super) async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
     if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
         publish_ticket_and_runs(state, pool, &ticket).await;
     }
@@ -1644,7 +1644,7 @@ async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: 
 
 /// `ticket.updated` plus `agent_run.started` for each active run, so a run
 /// queued by the service call shows up before a worker picks it up.
-pub(super) async fn publish_ticket_and_runs(
+async fn publish_ticket_and_runs(
     state: &AppState,
     pool: &sqlx::PgPool,
     ticket: &crate::services::ticket_service::TicketWithDisplay,

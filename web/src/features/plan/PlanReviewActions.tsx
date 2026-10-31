@@ -5,6 +5,7 @@ import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey, type PlanQuestions } from '../board/useTickets';
 import { agentRunsQueryKey } from '../tickets/useAgentRuns';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
+import { DESIGN_COPY } from '../designs/designCopy';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { approveTicketPlan } from './approvePlan';
 import { PLAN_COPY } from './copy';
@@ -121,6 +122,7 @@ export function PlanReviewActions({
   changeRequests = [],
   planQuestions,
   planRunActive = false,
+  designOutOfDate = false,
 }: {
   ticketId: string;
   boardId: string;
@@ -133,6 +135,8 @@ export function PlanReviewActions({
   planQuestions?: PlanQuestions | null;
   /** A plan run is queued or running: the plan on screen is about to change. */
   planRunActive?: boolean;
+  /** The chosen design isn't the one the plan reflects. Approve stays available. */
+  designOutOfDate?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
@@ -219,7 +223,7 @@ export function PlanReviewActions({
           </p>
         </>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => approve.mutate()}
@@ -229,6 +233,9 @@ export function PlanReviewActions({
         >
           {approve.isPending ? PLAN_COPY.approving : PLAN_COPY.approvePlan}
         </button>
+        {designOutOfDate && (
+          <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
+        )}
       </div>
       <form
         className="flex flex-col gap-2"

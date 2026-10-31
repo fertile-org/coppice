@@ -66,8 +66,11 @@ pub const DESIGN_SUPERSEDED: &str =
     "Newer design options replaced these. Open the latest ones to choose.";
 
 /// Change request recorded when a different design is chosen in Plan Review.
-pub fn plan_design_change_note(title: &str) -> String {
-    format!("Update the plan to use design option {title}.")
+pub fn plan_design_change_note(option_id: &str, title: &str) -> String {
+    format!(
+        "Update the plan to use design option {}: {title}.",
+        option_id.to_uppercase()
+    )
 }
 
 pub const PLAN_HEADING: &str = "## Plan";
@@ -417,7 +420,7 @@ pub fn approved_plan_section_body(plan_comment: &str) -> String {
 /// Heading a revised plan opens with, one line per change request.
 pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
 
-pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. Then write the full plan in the format above.";
+pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. If requests conflict, the later one wins; say so on the earlier one's line. The design to use is `selectedDesign` in `ticket_get`, whichever option the requests name. Then write the full plan in the format above.";
 
 /// A revision run: the plan it replaces and every change request on this
 /// ticket's plans, oldest first. The last one is the newest.
@@ -651,6 +654,28 @@ mod tests {
         assert!(previous < first && first < second, "{text}");
         assert!(text.contains("- [ ] Second version"));
         assert!(text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_revision_says_the_later_request_wins_and_where_the_design_is() {
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n",
+            requests: vec![
+                "Update the plan to use design option B: Wide.",
+                "Update the plan to use design option A: Quiet.",
+            ],
+        };
+        let text = plan_instructions(Some(&revision));
+        assert!(text.contains("If requests conflict, the later one wins"), "{text}");
+        assert!(text.contains("`selectedDesign` in `ticket_get`"), "{text}");
+    }
+
+    #[test]
+    fn design_change_note_names_the_option_in_capitals() {
+        assert_eq!(
+            plan_design_change_note("b", "Full-width button with Show all"),
+            "Update the plan to use design option B: Full-width button with Show all."
+        );
     }
 
     #[test]

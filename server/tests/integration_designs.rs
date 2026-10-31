@@ -1405,12 +1405,12 @@ async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> 
     let options = vec![
         DesignOption {
             id: "a".into(),
-            title: "A: Quiet button after the last card".into(),
+            title: "Quiet button after the last card".into(),
             entry: "a/index.html".into(),
         },
         DesignOption {
             id: "b".into(),
-            title: "B: Full-width button with Show all".into(),
+            title: "Full-width button with Show all".into(),
             entry: "b/index.html".into(),
         },
     ];
@@ -1808,6 +1808,8 @@ async fn failed_rewrite_keeps_choice_and_try_again_starts_a_run() {
     assert_eq!(plan_runs(&fx).await, runs + 1);
     active_plan_run(&fx).await;
     assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
+    // Try again requests the same change, and doesn't list it twice.
+    assert_eq!(change_request(&fx).await.as_deref(), Some(B_NOTE));
 }
 
 #[tokio::test]
@@ -1848,6 +1850,12 @@ async fn pick_on_a_set_from_before_recommendations_saves_and_starts_no_run() {
         .execute(&fx.pool)
         .await
         .expect("clear recommendation");
+    // A plan written around such a set records the set and no option.
+    sqlx::query("UPDATE ticket_plans SET design_option_id = NULL WHERE ticket_id = $1")
+        .bind(fx.ticket_id)
+        .execute(&fx.pool)
+        .await
+        .expect("clear recorded option");
     let before = set_json(&fx, set_id).await;
     assert_eq!(before["choice"]["mode"], "update_plan");
     assert_eq!(before["choice"]["planOutOfDate"], false);
@@ -1855,9 +1863,30 @@ async fn pick_on_a_set_from_before_recommendations_saves_and_starts_no_run() {
 
     assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
 
-    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
+    let after = set_json(&fx, set_id).await;
+    assert_eq!(after["chosen"]["id"], "b");
     assert_eq!(plan_runs(&fx).await, runs);
     assert_eq!(change_request(&fx).await, None);
+    // The plan recorded no option, so nothing says it wasn't updated.
+    assert_eq!(after["choice"]["planOutOfDate"], false);
+}
+
+#[tokio::test]
+async fn plan_with_no_recorded_option_counts_as_up_to_date() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    sqlx::query("UPDATE ticket_plans SET design_option_id = NULL WHERE ticket_id = $1")
+        .bind(fx.ticket_id)
+        .execute(&fx.pool)
+        .await
+        .expect("clear recorded option");
+
+    let set = set_json(&fx, set_id).await;
+    assert_eq!(set["selected"]["id"], "a");
+    assert_eq!(set["choice"]["mode"], "update_plan");
+    assert_eq!(set["choice"]["planOutOfDate"], false);
 }
 
 #[tokio::test]
@@ -1878,9 +1907,17 @@ async fn work_run_and_chat_sets_save_and_start_no_run() {
         "<!doctype html><title>B</title>",
     )
     .await;
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "save_only");
-    assert_eq!(pick(&fx, set_id, "a").await.status(), StatusCode::NO_CONTENT);
-    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "a");
+    let before = set_json(&fx, set_id).await;
+    assert_eq!(before["choice"]["mode"], "save_only");
+    // Confirming the recommendation is a pick like any other: it has to save.
+    assert_eq!(before["selected"]["id"], before["recommended"]["id"]);
+    assert_eq!(before["chosen"], Value::Null);
+    let recommended = before["recommended"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        pick(&fx, set_id, &recommended).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], recommended);
     assert_eq!(plan_runs(&fx).await, 0);
 
     let created = fx
@@ -2229,9 +2266,90 @@ async fn effective_design_path_is_the_absolute_entry_file() {
         .await
         .expect("effective")
         .expect("some design");
-    assert!(effective.entry_path.is_absolute());
-    assert!(effective.entry_path.ends_with("a/index.html"));
-    assert!(effective.entry_path.is_file());
+    let path = effective.entry_path.expect("path");
+    assert!(path.is_absolute());
+    assert!(path.ends_with("a/index.html"));
+    assert!(path.is_file());
+}
+
+#[tokio::test]
+async fn effective_design_path_uses_the_stored_dir() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let moved = format!("designs/moved-{set_id}");
+    std::fs::rename(
+        artifacts.join(format!("designs/{set_id}")),
+        artifacts.join(&moved),
+    )
+    .expect("move folder");
+    sqlx::query("UPDATE design_sets SET dir = $2 WHERE id = $1")
+        .bind(set_id)
+        .bind(&moved)
+        .execute(&fx.pool)
+        .await
+        .expect("store dir");
+
+    let path = design_svc(&fx)
+        .effective_for_ticket(fx.ticket_id)
+        .await
+        .expect("effective")
+        .expect("some design")
+        .entry_path
+        .expect("path");
+    assert!(path.is_file(), "{path:?}");
+    assert!(path.to_string_lossy().contains("moved-"), "{path:?}");
+}
+
+#[tokio::test]
+async fn a_missing_design_folder_keeps_the_title_with_a_null_path() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let child = child_ticket(&fx).await;
+    ensure_repo(&fx, child).await;
+    let run_id = RunService::new(&fx.pool)
+        .start_run_for_agent(child, fx.agent_id, "work_on_ticket", Default::default())
+        .await
+        .expect("child run")
+        .id;
+    let design_plugin: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("design plugin");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![design_plugin],
+    )
+    .await;
+    std::fs::remove_dir_all(
+        PathBuf::from(&fx.state.config.storage.artifacts_dir).join(format!("designs/{set_id}")),
+    )
+    .expect("remove folder");
+
+    let url = mcp_url(fx.app.clone()).await;
+    for tool in ["ticket_get", "design__list"] {
+        let body = tool_json(
+            &rpc(
+                &url,
+                &token,
+                "tools/call",
+                json!({"name": tool, "arguments": {}}),
+            )
+            .await,
+        );
+        let design = &body["selectedDesign"];
+        assert_eq!(design["setId"], set_id.to_string(), "{tool}: {body}");
+        assert_eq!(design["id"], "a", "{tool}");
+        assert_eq!(design["path"], Value::Null, "{tool}");
+        assert!(design["optionTitle"].as_str().is_some(), "{tool}");
+    }
 }
 
 #[tokio::test]
@@ -2297,7 +2415,7 @@ async fn sub_ticket_inherits_the_parent_selected_design() {
     let design = &body["selectedDesign"];
     assert_eq!(design["setId"], plan_set.to_string());
     assert_eq!(design["id"], "a");
-    assert_eq!(design["optionTitle"], "A: Quiet button after the last card");
+    assert_eq!(design["optionTitle"], "Quiet button after the last card");
     assert!(design["path"].as_str().unwrap().ends_with("a/index.html"));
 
     let listed = tool_json(
@@ -2310,6 +2428,8 @@ async fn sub_ticket_inherits_the_parent_selected_design() {
         .await,
     );
     assert_eq!(listed["selectedDesign"]["setId"], plan_set.to_string());
+    assert_eq!(listed["sets"][0]["inherited"], true);
+    assert_eq!(listed["sets"][0]["superseded"], false);
 }
 
 #[tokio::test]

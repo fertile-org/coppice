@@ -1114,8 +1114,13 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
     }
 }
 
+/// Notes are joined by a blank line. A note identical to the last one is not
+/// repeated, so Try again after a failed rewrite doesn't list it twice.
 fn append_change_request(existing: Option<&str>, added: &str) -> String {
     match existing.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(prev) if prev == added || prev.ends_with(&format!("\n\n{added}")) => {
+            prev.to_string()
+        }
         Some(prev) => format!("{prev}\n\n{added}"),
         None => added.to_string(),
     }
@@ -1166,6 +1171,26 @@ fn is_tech_lead_agent(agent: &Agent) -> bool {
 mod tests {
     use super::*;
     use time::OffsetDateTime;
+
+    #[test]
+    fn append_change_request_skips_a_note_identical_to_the_last() {
+        assert_eq!(append_change_request(None, "Use B."), "Use B.");
+        assert_eq!(append_change_request(Some("Use B."), "Use B."), "Use B.");
+        assert_eq!(
+            append_change_request(Some("Use A.\n\nUse B."), "Use B."),
+            "Use A.\n\nUse B."
+        );
+        // Only the last note counts: going back to an earlier one is a new request.
+        assert_eq!(
+            append_change_request(Some("Use A.\n\nUse B."), "Use A."),
+            "Use A.\n\nUse B.\n\nUse A."
+        );
+        // A note that merely ends the same way is a different note.
+        assert_eq!(
+            append_change_request(Some("Do not Use B."), "Use B."),
+            "Do not Use B.\n\nUse B."
+        );
+    }
 
     fn agent(id: u128, role: &str, key: &str, enabled: bool, created_secs: i64) -> Agent {
         Agent {

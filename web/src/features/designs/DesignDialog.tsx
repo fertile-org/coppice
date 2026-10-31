@@ -67,10 +67,12 @@ function footerFor(design: DesignSet, viewed: DesignOption): Footer {
   if (mode === 'read_only') return { kind: 'none' };
   if (mode === 'plan_final') return { kind: 'text', text: DESIGN_COPY.planFinal };
   if (mode === 'plan_running') return { kind: 'text', text: DESIGN_COPY.planRunning };
-  if (isSelected) {
-    return planOutOfDate
-      ? { kind: 'action', text: DESIGN_COPY.planNotUpdated, label: DESIGN_COPY.tryAgain }
-      : { kind: 'text', text: DESIGN_COPY.workFollows };
+  if (isSelected && planOutOfDate) {
+    return { kind: 'action', text: DESIGN_COPY.planNotUpdated, label: DESIGN_COPY.tryAgain };
+  }
+  // A work-run or chat set's recommendation drives nothing until someone confirms it.
+  if (isSelected && (design.fromPlanRun || design.chosen?.id === id)) {
+    return { kind: 'text', text: DESIGN_COPY.workFollows };
   }
   return {
     kind: 'action',

@@ -129,8 +129,19 @@ async fn snapshot_plan_refs(
 }
 
 /// The plugin can be off for this agent, and then its skill is not listed.
-pub(crate) fn has_design_skill(skills: &[SkillInfo]) -> bool {
+fn has_design_skill(skills: &[SkillInfo]) -> bool {
     skills.iter().any(|skill| skill.id == DESIGN_SKILL_ID)
+}
+
+/// Work runs follow the selected design, when the agent has the design skill.
+pub(crate) fn append_work_design_instruction(
+    markdown: &mut String,
+    job_type: &str,
+    skills: &[SkillInfo],
+) {
+    if job_type == "work_on_ticket" && has_design_skill(skills) {
+        markdown.push_str(&format!("\n{}\n", plan::WORK_DESIGN_INSTRUCTION));
+    }
 }
 
 /// The plan task: template, revision context, split option, and the
@@ -604,8 +615,8 @@ async fn drive_plan_run(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_plan_ref_diff, has_design_skill};
-    use crate::copy::plan::PLAN_DESIGN_INSTRUCTION;
+    use super::{append_plan_ref_diff, append_work_design_instruction, has_design_skill};
+    use crate::copy::plan::{PLAN_DESIGN_INSTRUCTION, WORK_DESIGN_INSTRUCTION};
     use crate::plugins::builtin::DESIGN_SKILL_ID;
     use crate::plugins::skills::SkillInfo;
     use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
@@ -621,6 +632,24 @@ mod tests {
         assert!(has_design_skill(&[skill("coppice-git"), skill(DESIGN_SKILL_ID)]));
         assert!(!has_design_skill(&[skill("coppice-git")]));
         assert!(PLAN_DESIGN_INSTRUCTION.contains(DESIGN_SKILL_ID));
+    }
+
+    #[test]
+    fn work_design_guidance_reaches_work_runs_with_the_design_skill() {
+        let design = SkillInfo {
+            id: DESIGN_SKILL_ID.into(),
+            description: String::new(),
+            path: Default::default(),
+        };
+        let context = |job_type: &str, skills: &[SkillInfo]| {
+            let mut markdown = String::new();
+            append_work_design_instruction(&mut markdown, job_type, skills);
+            markdown
+        };
+        assert!(context("work_on_ticket", std::slice::from_ref(&design))
+            .contains(WORK_DESIGN_INSTRUCTION));
+        assert_eq!(context("work_on_ticket", &[]), "");
+        assert_eq!(context("plan_ticket", &[design]), "");
     }
 
     #[test]
