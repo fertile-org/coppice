@@ -1840,7 +1840,7 @@ async fn pick_with_no_plan_saves_and_starts_no_run() {
 }
 
 #[tokio::test]
-async fn pick_on_a_set_from_before_recommendations_saves_and_starts_no_run() {
+async fn pick_on_a_set_from_before_recommendations_rewrites_the_plan() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
 
@@ -1865,10 +1865,9 @@ async fn pick_on_a_set_from_before_recommendations_saves_and_starts_no_run() {
 
     let after = set_json(&fx, set_id).await;
     assert_eq!(after["chosen"]["id"], "b");
-    assert_eq!(plan_runs(&fx).await, runs);
-    assert_eq!(change_request(&fx).await, None);
-    // The plan recorded no option, so nothing says it wasn't updated.
-    assert_eq!(after["choice"]["planOutOfDate"], false);
+    assert_eq!(plan_runs(&fx).await, runs + 1);
+    assert!(change_request(&fx).await.is_some());
+    assert_eq!(after["choice"]["mode"], "plan_running");
 }
 
 #[tokio::test]

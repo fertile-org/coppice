@@ -21,20 +21,25 @@ export function DesignPlanCard({ ticketId }: { ticketId: string }) {
     : DESIGN_COPY.options(design.options.length);
 
   return (
-    <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent bg-surface-raised px-4 py-3">
-      <div>
-        <h3 className="font-body text-sm font-medium text-text-primary">{DESIGN_COPY.cardTitle}</h3>
-        <p className="font-body text-xs text-text-secondary">{detail}</p>
-        {design.choice.planOutOfDate ? (
-          <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
-        ) : null}
-      </div>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}>
-        {DESIGN_COPY.open}
-      </Button>
+    <>
+      <section
+        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent bg-surface-raised px-4 py-3 cursor-pointer transition-colors hover:bg-surface-raised"
+        onClick={() => setOpen(true)}
+      >
+        <div>
+          <h3 className="font-body text-sm font-medium text-text-primary">{DESIGN_COPY.cardTitle}</h3>
+          <p className="font-body text-xs text-text-secondary">{detail}</p>
+          {design.choice.planOutOfDate ? (
+            <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
+          ) : null}
+        </div>
+        <Button type="button" size="sm">
+          {DESIGN_COPY.open}
+        </Button>
+      </section>
       {open ? (
         <DesignDialog design={design} scope={ticketId} onClose={() => setOpen(false)} />
       ) : null}
-    </section>
+    </>
   );
 }

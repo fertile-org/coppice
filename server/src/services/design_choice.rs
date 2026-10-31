@@ -140,9 +140,14 @@ pub async fn choose_design(
         ChoiceMode::SaveOnly | ChoiceMode::UpdatePlan => {}
     }
 
-    let rewrite_for = match (state.mode, record.ticket_id, &set.selected) {
-        (ChoiceMode::UpdatePlan, Some(ticket_id), Some(selected))
-            if selected.id != option_id || state.plan_out_of_date =>
+    // A set with nothing selected has no option the plan is known to follow.
+    let plan_follows_pick = set
+        .selected
+        .as_ref()
+        .is_some_and(|selected| selected.id == option_id);
+    let rewrite_for = match (state.mode, record.ticket_id) {
+        (ChoiceMode::UpdatePlan, Some(ticket_id))
+            if !plan_follows_pick || state.plan_out_of_date =>
         {
             Some(ticket_id)
         }

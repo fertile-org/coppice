@@ -78,7 +78,6 @@ The footer shows what happens next:
 | Plan-run set with no plan yet, viewing the selected option | "Work follows this option." with no action |
 | Work-run or chat set, viewing the human's choice | "Work follows this option." with no action |
 | Work-run or chat set, any other option, including the recommended one | Button "Choose B" |
-| Set from before this change with nothing selected | Button "Choose B" |
 | Sub-ticket | No action |
 
 ### Approving during a rewrite
@@ -92,7 +91,7 @@ The server decides all of this in one operation behind `POST /api/designs/{setId
 For a set published by a `plan_ticket` run:
 
 1. Picking the option that is already selected saves the choice if none was stored, and starts nothing.
-2. Picking a different option in Plan Review saves the choice and records a change request through the existing `PlanningService::ask_for_changes` flow, in the same transaction, with the note "Update the plan to use design option B: Full-width button with Show all." If the set has no recommendation and no earlier choice, the pick saves and starts nothing.
+2. Picking a different option in Plan Review saves the choice and records a change request through the existing `PlanningService::ask_for_changes` flow, in the same transaction, with the note "Update the plan to use design option B: Full-width button with Show all."
 3. While a plan run is active, the choice is refused and nothing is saved, using the existing `PLAN_ALREADY_RUNNING` message.
 4. With no planner available, the choice is refused and nothing is saved, using the existing `NO_PM` or `NO_PLANNER` message.
 5. With no plan yet, because the run asked questions or failed, the choice is saved and starts nothing. The next plan is written around it.
@@ -130,7 +129,7 @@ These were decided without asking, and can be overruled:
 
 - The popup replaces the existing sidebar everywhere, including chat, so there is one preview UI.
 - "Different" is compared with the currently selected option, not the original recommendation, so going from B back to A also updates the plan.
-- Sets from before this change have no recommendation, and a first pick on one saves without changing the plan.
+- Sets from before this change have no recommendation, so a pick on one during Plan Review also rewrites the plan: nothing says which option that plan follows.
 - `recommendedOptionId` is required in chat too, for one rule across tools.
 - With no plan yet, a pick saves without starting a run, and the next plan is written around it.
 - The plan's design is recorded when the plan is inserted, because picks are refused while a plan run is active. A pick and its plan rewrite request share one transaction, which commits only when the run starts.

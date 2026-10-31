@@ -50,7 +50,7 @@ function DesignPreview({ setId, option }: { setId: string; option: DesignOption 
       title={DESIGN_COPY.optionName(option)}
       sandbox="allow-scripts"
       src={url}
-      className="h-[min(50vh,28rem)] min-h-56 w-full rounded-md border border-border bg-surface"
+      className="h-full min-h-56 w-full rounded-md border border-border bg-surface"
     />
   );
 }
@@ -112,7 +112,7 @@ export function DesignDialog({
       <DialogContent
         showCloseButton
         aria-describedby={undefined}
-        className="flex max-h-[90vh] max-w-4xl flex-col gap-3 overflow-y-auto p-0"
+        className="flex h-[92vh] w-[calc(100%-2rem)] max-w-[1600px] flex-col gap-3 overflow-hidden p-0"
       >
         <DialogHeader className="border-b border-border px-5 py-4">
           <DialogTitle className="text-base">{DESIGN_COPY.dialogTitle}</DialogTitle>
@@ -159,7 +159,7 @@ export function DesignDialog({
                 );
               })}
             </div>
-            <div role="tabpanel" aria-label={DESIGN_COPY.optionName(active)} className="px-5">
+            <div role="tabpanel" aria-label={DESIGN_COPY.optionName(active)} className="min-h-0 flex-1 px-5">
               <DesignPreview key={active.id} setId={design.id} option={active} />
             </div>
           </>
