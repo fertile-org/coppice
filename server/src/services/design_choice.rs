@@ -5,7 +5,7 @@ use crate::copy::plan::{
 };
 use crate::domain::substatus::TicketStatus;
 use crate::services::design_service::{
-    save_choice, DesignError, DesignService, DesignSetSummary,
+    chosen_option, save_choice, DesignError, DesignService, DesignSetSummary,
 };
 use crate::services::planning_service::{PlanError, PlanningService, StartOutcome};
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -127,7 +127,7 @@ pub async fn choose_design(
     let svc = DesignService::new(pool, artifacts);
     let record = svc.get(set_id).await?;
     let set = &record.summary;
-    let Some(option) = set.options.iter().find(|option| option.id == option_id) else {
+    let Some(picked_index) = set.options.iter().position(|option| option.id == option_id) else {
         return Err(DesignError::Invalid("unknown option".into()).into());
     };
 
@@ -157,7 +157,8 @@ pub async fn choose_design(
     save_choice(&mut *tx, set_id, option_id, user_id)
         .await
         .map_err(PlanError::from)?;
-    let note = plan_design_change_note(&option.id, &option.title);
+    let picked = chosen_option(&set.options, picked_index);
+    let note = plan_design_change_note(&picked.label, &picked.display_title);
     let outcome = PlanningService::new(pool)
         .ask_for_changes_in(&mut tx, ticket_id, &note)
         .await?;

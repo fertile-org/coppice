@@ -5,7 +5,8 @@ use crate::services::design_choice::{
     choice_state, choose_design, ChoiceState, DesignChoiceError,
 };
 use crate::services::design_service::{
-    ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord, DesignSetSummary,
+    chosen_option, ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord,
+    DesignSetSummary,
 };
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
@@ -34,13 +35,39 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/designs/{set_id}/files/{*path}", get(get_file))
 }
 
+/// A stored option plus the label and title people see.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesignOptionResponse {
+    id: String,
+    title: String,
+    entry: String,
+    label: String,
+    display_title: String,
+}
+
+fn option_responses(options: Vec<DesignOption>) -> Vec<DesignOptionResponse> {
+    (0..options.len())
+        .map(|index| {
+            let shown = chosen_option(&options, index);
+            DesignOptionResponse {
+                id: shown.id,
+                title: shown.title,
+                entry: options[index].entry.clone(),
+                label: shown.label,
+                display_title: shown.display_title,
+            }
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesignSetResponse {
     id: Uuid,
     title: String,
     run_id: Uuid,
-    options: Vec<DesignOption>,
+    options: Vec<DesignOptionResponse>,
     chosen: Option<ChosenOption>,
     recommended: Option<ChosenOption>,
     selected: Option<ChosenOption>,
@@ -75,7 +102,7 @@ async fn to_response(
         id: set.id,
         title: set.title,
         run_id: set.run_id,
-        options: set.options,
+        options: option_responses(set.options),
         chosen: set.chosen,
         recommended: set.recommended,
         selected: set.selected,

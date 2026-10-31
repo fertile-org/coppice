@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ChatMessage } from '../../lib/schemas/chat';
-import { makeDesignSet } from '../designs/designFixtures';
+import { makeDesignSet, makeOption } from '../designs/designFixtures';
 import { ChatMessageBubble, ChatMessageList, ThinkingIndicator } from './ChatMessageList';
 
 vi.mock('../tickets/useOpenTicket', () => ({
@@ -67,7 +67,7 @@ describe('ChatMessageList', () => {
     const runId = '22222222-2222-4222-8222-222222222222';
     const design = makeDesignSet({
       runId,
-      options: [{ id: 'a', title: 'A', entry: 'a/index.html' }],
+      options: [makeOption('a', 'Quiet', 'A')],
     });
     const shared = {
       sessionId: '00000000-0000-4000-8000-000000000099',

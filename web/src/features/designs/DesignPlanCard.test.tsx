@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesignSet } from '../../lib/schemas/design';
 import { DesignPlanCard } from './DesignPlanCard';
-import { makeDesignSet } from './designFixtures';
+import { makeDesignSet, makeOption, makePick } from './designFixtures';
 
 const apiFetch = vi.hoisted(() => vi.fn());
 
@@ -47,7 +47,7 @@ describe('DesignPlanCard', () => {
   });
 
   it('says your choice when a human chose', async () => {
-    const full = { id: 'b', title: 'Full-width button with Show all' };
+    const full = makePick(makeOption('b', 'Full-width button with Show all', 'B'));
     serve([makeDesignSet({ chosen: full, selected: full })]);
     renderCard();
     expect(
@@ -68,7 +68,7 @@ describe('DesignPlanCard', () => {
   });
 
   it('names a picked work-run set', async () => {
-    const full = { id: 'b', title: 'Full-width button with Show all' };
+    const full = makePick(makeOption('b', 'Full-width button with Show all', 'B'));
     serve([makeDesignSet({ fromPlanRun: false, chosen: full, selected: full })]);
     renderCard();
     expect(
@@ -77,7 +77,7 @@ describe('DesignPlanCard', () => {
   });
 
   it('shows only the option count on the plan set once a work-run set was picked', async () => {
-    const full = { id: 'b', title: 'Full-width button with Show all' };
+    const full = makePick(makeOption('b', 'Full-width button with Show all', 'B'));
     serve([
       makeDesignSet({ id: '44444444-4444-4444-8444-444444444444', fromPlanRun: false, chosen: full, selected: full }),
       makeDesignSet(),
@@ -95,7 +95,7 @@ describe('DesignPlanCard', () => {
   it('prefers the plan-run set and ignores superseded sets', async () => {
     serve([
       makeDesignSet({ id: '33333333-3333-4333-8333-333333333333', title: 'Old', superseded: true }),
-      makeDesignSet({ id: '44444444-4444-4444-8444-444444444444', title: 'Work run', fromPlanRun: false, options: [{ id: 'a', title: 'X', entry: 'a/index.html' }], selected: null }),
+      makeDesignSet({ id: '44444444-4444-4444-8444-444444444444', title: 'Work run', fromPlanRun: false, options: [makeOption('a', 'X', 'A')], selected: null }),
       makeDesignSet({ id: '55555555-5555-4555-8555-555555555555', title: 'Plan run' }),
     ]);
     renderCard();
@@ -115,5 +115,21 @@ describe('DesignPlanCard', () => {
     renderCard();
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows each label and clean title once, for slug ids and prefixed titles', async () => {
+    const quiet = makeOption('option-a', 'A: Quiet button after the last card', 'A', 'Quiet button after the last card');
+    const full = makeOption('option-b', 'B: Full-width', 'B', 'Full-width');
+    serve([
+      makeDesignSet({
+        options: [quiet, full],
+        recommended: makePick(quiet),
+        selected: makePick(quiet),
+      }),
+    ]);
+    renderCard();
+    expect(
+      await screen.findByText('2 options · Using A: Quiet button after the last card (recommended)'),
+    ).toBeInTheDocument();
   });
 });

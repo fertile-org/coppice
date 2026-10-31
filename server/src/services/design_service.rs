@@ -39,9 +39,67 @@ pub struct DesignOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChosenOption {
     pub id: String,
     pub title: String,
+    /// Position in the set: A, B, C.
+    pub label: String,
+    /// The title without a leading label or id the agent wrote into it.
+    pub display_title: String,
+}
+
+/// An option's label is its position in the set, never derived from its id.
+pub fn option_label(index: usize) -> String {
+    match u8::try_from(index) {
+        Ok(i) if i < 26 => char::from(b'A' + i).to_string(),
+        _ => (index + 1).to_string(),
+    }
+}
+
+/// The title with a leading `label` or `id` prefix removed, when that prefix
+/// is followed by a separator and whitespace. Unchanged if nothing is left.
+pub fn option_display_title(title: &str, label: &str, id: &str) -> String {
+    [label, id]
+        .into_iter()
+        .find_map(|prefix| strip_option_prefix(title, prefix))
+        .unwrap_or(title)
+        .to_string()
+}
+
+fn strip_option_prefix<'a>(title: &'a str, prefix: &str) -> Option<&'a str> {
+    let prefix = prefix.trim();
+    if prefix.is_empty() {
+        return None;
+    }
+    let mut chars = title.char_indices();
+    for expected in prefix.chars() {
+        let (_, actual) = chars.next()?;
+        if !actual.to_lowercase().eq(expected.to_lowercase()) {
+            return None;
+        }
+    }
+    let after = chars.next().map_or(title.len(), |(i, _)| i);
+    let rest = title[after..]
+        .trim_start()
+        .strip_prefix([':', '.', '-', '\u{2013}', '\u{2014}', ')'])?;
+    if !rest.chars().next()?.is_whitespace() {
+        return None;
+    }
+    let rest = rest.trim();
+    (!rest.is_empty()).then_some(rest)
+}
+
+pub fn chosen_option(options: &[DesignOption], index: usize) -> ChosenOption {
+    let option = &options[index];
+    let label = option_label(index);
+    let display_title = option_display_title(&option.title, &label, &option.id);
+    ChosenOption {
+        id: option.id.clone(),
+        title: option.title.clone(),
+        label,
+        display_title,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -520,11 +578,8 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
         id.and_then(|id| {
             options
                 .iter()
-                .find(|option| option.id == id)
-                .map(|option| ChosenOption {
-                    id: option.id.clone(),
-                    title: option.title.clone(),
-                })
+                .position(|option| option.id == id)
+                .map(|index| chosen_option(&options, index))
         })
     };
     let chosen = find(row.get("chosen_option_id"));
@@ -628,7 +683,10 @@ fn invalid_io(err: std::io::Error) -> DesignError {
 
 #[cfg(test)]
 mod tests {
-    use super::{reject_rel_path, resolve_set_dir, DesignError};
+    use super::{
+        chosen_option, option_display_title, option_label, reject_rel_path, resolve_set_dir,
+        DesignError, DesignOption,
+    };
 
     #[test]
     fn reject_rel_path_blocks_escape_and_bad_types() {
@@ -660,5 +718,51 @@ mod tests {
             matches!(err, DesignError::Invalid(ref msg) if msg.contains("escapes")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn labels_follow_position_not_id() {
+        assert_eq!(option_label(0), "A");
+        assert_eq!(option_label(1), "B");
+        assert_eq!(option_label(3), "D");
+    }
+
+    #[test]
+    fn display_title_strips_its_own_label_or_id() {
+        let t = option_display_title;
+        assert_eq!(t("A: Quiet button", "A", "option-a"), "Quiet button");
+        assert_eq!(t("a. Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A) Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A - Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A \u{2013} Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A \u{2014} Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("option-a - Quiet", "A", "option-a"), "Quiet");
+        assert_eq!(t("Option-A: Quiet", "B", "option-a"), "Quiet");
+        assert_eq!(t("A/B testing panel", "A", "option-a"), "A/B testing panel");
+        assert_eq!(t("Apple: red", "A", "option-a"), "Apple: red");
+        assert_eq!(t("A:Quiet", "A", "x"), "A:Quiet");
+        assert_eq!(t("A: ", "A", "x"), "A: ");
+        assert_eq!(t("A:", "A", "x"), "A:");
+        assert_eq!(t("Quiet button", "A", "a"), "Quiet button");
+        assert_eq!(t("B: Quiet", "A", "a"), "B: Quiet");
+    }
+
+    #[test]
+    fn chosen_option_carries_label_and_display_title() {
+        let options = vec![
+            DesignOption {
+                id: "option-a".into(),
+                title: "A: Quiet".into(),
+                entry: "a/index.html".into(),
+            },
+            DesignOption {
+                id: "option-b".into(),
+                title: "B: Full".into(),
+                entry: "b/index.html".into(),
+            },
+        ];
+        let b = chosen_option(&options, 1);
+        assert_eq!((b.label.as_str(), b.display_title.as_str()), ("B", "Full"));
+        assert_eq!(b.title, "B: Full");
     }
 }

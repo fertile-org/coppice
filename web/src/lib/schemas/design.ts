@@ -4,11 +4,15 @@ export const designOptionSchema = z.object({
   id: z.string(),
   title: z.string(),
   entry: z.string(),
+  label: z.string(),
+  displayTitle: z.string(),
 });
 
 export const chosenDesignOptionSchema = z.object({
   id: z.string(),
   title: z.string(),
+  label: z.string(),
+  displayTitle: z.string(),
 });
 
 export const designChoiceSchema = z.object({

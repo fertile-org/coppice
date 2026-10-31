@@ -66,11 +66,8 @@ pub const DESIGN_SUPERSEDED: &str =
     "Newer design options replaced these. Open the latest ones to choose.";
 
 /// Change request recorded when a different design is chosen in Plan Review.
-pub fn plan_design_change_note(option_id: &str, title: &str) -> String {
-    format!(
-        "Update the plan to use design option {}: {title}.",
-        option_id.to_uppercase()
-    )
+pub fn plan_design_change_note(label: &str, display_title: &str) -> String {
+    format!("Update the plan to use design option {label}: {display_title}.")
 }
 
 pub const PLAN_HEADING: &str = "## Plan";
@@ -671,9 +668,9 @@ mod tests {
     }
 
     #[test]
-    fn design_change_note_names_the_option_in_capitals() {
+    fn design_change_note_names_the_option_by_label() {
         assert_eq!(
-            plan_design_change_note("b", "Full-width button with Show all"),
+            plan_design_change_note("B", "Full-width button with Show all"),
             "Update the plan to use design option B: Full-width button with Show all."
         );
     }

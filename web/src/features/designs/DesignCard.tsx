@@ -21,7 +21,7 @@ export function DesignCard({ design, scope }: { design: DesignSet; scope?: Desig
       <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
         {design.options.map((option) => (
           <li key={option.id} className="font-body text-xs text-text-secondary">
-            {option.title}
+            {DESIGN_COPY.optionName(option)}
           </li>
         ))}
       </ul>

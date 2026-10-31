@@ -2443,3 +2443,79 @@ async fn sub_ticket_of_a_parent_without_designs_has_none() {
     assert!(svc.effective_for_ticket(child).await.unwrap().is_none());
     assert!(svc.list_for_ticket(child).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show me options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let svc = design_svc(&fx);
+    let created = svc
+        .create(
+            "Home",
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id: fx.agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    for entry in ["option-a/index.html", "option-b/index.html"] {
+        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
+            .await
+            .expect("write");
+    }
+    let options = vec![
+        DesignOption {
+            id: "option-a".into(),
+            title: "A: Quiet button after the last card".into(),
+            entry: "option-a/index.html".into(),
+        },
+        DesignOption {
+            id: "option-b".into(),
+            title: "B: Full-width button with Show all".into(),
+            entry: "option-b/index.html".into(),
+        },
+    ];
+    svc.publish(created.id, run_id, options, "option-a")
+        .await
+        .expect("publish");
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .await
+        .expect("plan with design");
+    set_run_status(&fx, run_id, "succeeded").await;
+
+    let set = set_json(&fx, created.id).await;
+    assert_eq!(set["options"][0]["id"], "option-a");
+    assert_eq!(set["options"][0]["title"], "A: Quiet button after the last card");
+    assert_eq!(set["options"][0]["label"], "A");
+    assert_eq!(set["options"][0]["displayTitle"], "Quiet button after the last card");
+    assert_eq!(set["options"][1]["label"], "B");
+    assert_eq!(set["options"][1]["displayTitle"], "Full-width button with Show all");
+    assert_eq!(set["recommended"]["label"], "A");
+    assert_eq!(set["recommended"]["displayTitle"], "Quiet button after the last card");
+
+    let res = pick(&fx, created.id, "option-b").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(change_request(&fx).await.as_deref(), Some(B_NOTE));
+    let set = set_json(&fx, created.id).await;
+    assert_eq!(set["chosen"]["id"], "option-b");
+    assert_eq!(set["chosen"]["label"], "B");
+    assert_eq!(set["chosen"]["displayTitle"], "Full-width button with Show all");
+    assert_eq!(set["selected"]["label"], "B");
+}

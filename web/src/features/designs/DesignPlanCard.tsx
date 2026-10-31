@@ -15,8 +15,7 @@ export function DesignPlanCard({ ticketId }: { ticketId: string }) {
   const { selected } = design;
   const detail = selected && designDrivesWork(design, sets)
     ? `${DESIGN_COPY.options(design.options.length)} · ${DESIGN_COPY.using(
-        selected.id,
-        selected.title,
+        selected,
         design.chosen !== null,
       )}`
     : DESIGN_COPY.options(design.options.length);

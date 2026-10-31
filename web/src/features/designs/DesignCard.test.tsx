@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignCard } from './DesignCard';
-import { makeDesignSet } from './designFixtures';
+import { makeDesignSet, makeOption, makePick } from './designFixtures';
 import { rewriteDesignHtml } from './rewriteDesignHtml';
 
 const apiFetch = vi.hoisted(() => vi.fn());
@@ -16,8 +16,8 @@ vi.mock('../../lib/api', async (importOriginal) => ({
 
 const published = makeDesignSet({
   options: [
-    { id: 'a', title: 'A', entry: 'a/index.html' },
-    { id: 'b', title: 'B', entry: 'b/index.html' },
+    makeOption('a', 'Quiet', 'A'),
+    makeOption('b', 'Loud', 'B'),
   ],
   recommended: null,
   selected: null,
@@ -72,13 +72,13 @@ describe('DesignCard', () => {
     wrap(<DesignCard design={published} />);
 
     expect(screen.getByText('Landing page')).toBeInTheDocument();
-    expect(screen.getByText('A')).toBeInTheDocument();
-    expect(screen.getByText('B')).toBeInTheDocument();
+    expect(screen.getByText('A: Quiet')).toBeInTheDocument();
+    expect(screen.getByText('B: Loud')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('tab', { name: 'A' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('tab', { name: 'A: Quiet' })).toBeInTheDocument();
     expect(await within(dialog).findByText('This preview has no file.')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Choose A' }));
 
@@ -94,7 +94,7 @@ describe('DesignCard', () => {
   });
 
   it('shows the Chosen marker once the list says so', () => {
-    wrap(<DesignCard design={{ ...published, chosen: { id: 'a', title: 'A' } }} />);
+    wrap(<DesignCard design={{ ...published, chosen: makePick(makeOption('a', 'Quiet', 'A')) }} />);
     expect(screen.getByText('Chosen')).toBeInTheDocument();
   });
 
@@ -107,7 +107,7 @@ describe('DesignCard', () => {
     });
     wrap(<DesignCard design={published} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    const frame = await screen.findByTitle('A');
+    const frame = await screen.findByTitle('A: Quiet');
     expect(frame.tagName).toBe('IFRAME');
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     expect(frame.getAttribute('src')).toMatch(/^blob:/);

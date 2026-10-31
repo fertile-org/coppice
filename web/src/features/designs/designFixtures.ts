@@ -1,4 +1,22 @@
-import type { DesignSet } from '../../lib/schemas/design';
+import type { ChosenDesignOption, DesignOption, DesignSet } from '../../lib/schemas/design';
+
+/** An option as the server returns it; the display title defaults to the title. */
+export function makeOption(
+  id: string,
+  title: string,
+  label: string,
+  displayTitle: string = title,
+): DesignOption {
+  return { id, title, entry: `${id}/index.html`, label, displayTitle };
+}
+
+/** The `chosen`, `recommended` and `selected` shape. */
+export function makePick(option: DesignOption): ChosenDesignOption {
+  const { id, title, label, displayTitle } = option;
+  return { id, title, label, displayTitle };
+}
+
+const quiet = makeOption('a', 'Quiet button after the last card', 'A');
 
 /** A published set with three options; override fields per test. */
 export function makeDesignSet(overrides: Partial<DesignSet> = {}): DesignSet {
@@ -7,13 +25,13 @@ export function makeDesignSet(overrides: Partial<DesignSet> = {}): DesignSet {
     title: 'Landing page',
     runId: '22222222-2222-4222-8222-222222222222',
     options: [
-      { id: 'a', title: 'Quiet button after the last card', entry: 'a/index.html' },
-      { id: 'b', title: 'Full-width button with Show all', entry: 'b/index.html' },
-      { id: 'c', title: 'Footer pinned to the viewport', entry: 'c/index.html' },
+      quiet,
+      makeOption('b', 'Full-width button with Show all', 'B'),
+      makeOption('c', 'Footer pinned to the viewport', 'C'),
     ],
     chosen: null,
-    recommended: { id: 'a', title: 'Quiet button after the last card' },
-    selected: { id: 'a', title: 'Quiet button after the last card' },
+    recommended: makePick(quiet),
+    selected: makePick(quiet),
     superseded: false,
     fromPlanRun: true,
     inherited: false,

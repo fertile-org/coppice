@@ -47,7 +47,7 @@ function DesignPreview({ setId, option }: { setId: string; option: DesignOption 
   }
   return (
     <iframe
-      title={option.title}
+      title={DESIGN_COPY.optionName(option)}
       sandbox="allow-scripts"
       src={url}
       className="h-[min(50vh,28rem)] min-h-56 w-full rounded-md border border-border bg-surface"
@@ -77,7 +77,7 @@ function footerFor(design: DesignSet, viewed: DesignOption): Footer {
   return {
     kind: 'action',
     text: null,
-    label: mode === 'update_plan' ? DESIGN_COPY.chooseAndUpdate(id) : DESIGN_COPY.choose(id),
+    label: mode === 'update_plan' ? DESIGN_COPY.chooseAndUpdate(viewed.label) : DESIGN_COPY.choose(viewed.label),
   };
 }
 
@@ -144,7 +144,7 @@ export function DesignDialog({
                         : 'border-border text-text-secondary hover:text-text-primary',
                     ].join(' ')}
                   >
-                    {option.title}
+                    {DESIGN_COPY.optionName(option)}
                     {design.recommended?.id === option.id ? (
                       <span className="rounded-full bg-accent px-1.5 text-xs font-medium text-white">
                         {DESIGN_COPY.recommended}
@@ -159,7 +159,7 @@ export function DesignDialog({
                 );
               })}
             </div>
-            <div role="tabpanel" aria-label={active.title} className="px-5">
+            <div role="tabpanel" aria-label={DESIGN_COPY.optionName(active)} className="px-5">
               <DesignPreview key={active.id} setId={design.id} option={active} />
             </div>
           </>

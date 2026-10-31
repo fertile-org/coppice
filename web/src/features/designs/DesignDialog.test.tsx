@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
 import type { DesignSet } from '../../lib/schemas/design';
 import { DesignDialog } from './DesignDialog';
-import { makeDesignSet } from './designFixtures';
+import { makeDesignSet, makeOption, makePick } from './designFixtures';
 
 const apiFetch = vi.hoisted(() => vi.fn());
 
@@ -123,7 +123,7 @@ describe('DesignDialog footer', () => {
   });
 
   it("save_only work-run or chat set: work follows only the human's choice", () => {
-    const full = { id: 'b', title: 'Full-width button with Show all' };
+    const full = makePick(makeOption('b', 'Full-width button with Show all', 'B'));
     const dialog = open(
       makeDesignSet({
         fromPlanRun: false,
@@ -146,7 +146,7 @@ describe('DesignDialog footer', () => {
   });
 
   it('shows the Recommended badge and the chosen marker', () => {
-    const dialog = open(makeDesignSet({ chosen: { id: 'b', title: 'Full-width button with Show all' } }));
+    const dialog = open(makeDesignSet({ chosen: makePick(makeOption('b', 'Full-width button with Show all', 'B')) }));
     const tabA = dialog.getByRole('tab', { name: /Quiet button/ });
     const tabB = dialog.getByRole('tab', { name: /Full-width/ });
     expect(within(tabA).getByText('Recommended')).toBeInTheDocument();
@@ -162,5 +162,38 @@ describe('DesignDialog footer', () => {
     viewOption(dialog, 'Full-width');
     fireEvent.click(dialog.getByRole('button', { name: 'Choose B and update plan' }));
     expect(await dialog.findByText('The plan is already being updated.')).toBeInTheDocument();
+  });
+
+  describe('slug ids and prefixed titles', () => {
+    const quiet = makeOption('option-a', 'A: Quiet', 'A', 'Quiet');
+    const full = makeOption('option-b', 'B: Full-width', 'B', 'Full-width');
+    const slugSet = (overrides: Partial<DesignSet> = {}) =>
+      makeDesignSet({
+        options: [quiet, full],
+        recommended: makePick(quiet),
+        selected: makePick(quiet),
+        ...overrides,
+      });
+
+    it('labels tabs "B: Full-width" and the buttons "Choose B"', async () => {
+      const dialog = open(slugSet());
+      expect(dialog.getByRole('tab', { name: /^A: Quiet/ })).toBeInTheDocument();
+      expect(dialog.getByRole('tab', { name: /^B: Full-width/ })).toBeInTheDocument();
+      expect(dialog.queryByText(/OPTION-/i)).toBeNull();
+      fireEvent.click(dialog.getByRole('tab', { name: /^B: Full-width/ }));
+      fireEvent.click(dialog.getByRole('button', { name: 'Choose B and update plan' }));
+      await waitFor(() =>
+        expect(apiFetch).toHaveBeenCalledWith(
+          expect.stringMatching(/\/choose$/),
+          expect.objectContaining({ body: JSON.stringify({ optionId: 'option-b' }) }),
+        ),
+      );
+    });
+
+    it('says "Choose B" when the plan is not touched', () => {
+      const dialog = open(slugSet({ choice: { mode: 'save_only', planOutOfDate: false } }));
+      fireEvent.click(dialog.getByRole('tab', { name: /^B: Full-width/ }));
+      expect(dialog.getByRole('button', { name: 'Choose B' })).toBeInTheDocument();
+    });
   });
 });
