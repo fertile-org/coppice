@@ -42,7 +42,7 @@ This is not the public-beta hero. [M12 — Beta Release](./M12-beta-release.md) 
 
 ## Dependencies
 
-- M06: knowledge available to observations via `knowledge_search`
+- M06: knowledge available to observations via `knowledge_search` and `knowledge_get`
 - M10: `signal_create` tool, domain plugins
 - M13: capabilities/secrets gate what observations can touch; Grant Capability / Add Secret actions
 

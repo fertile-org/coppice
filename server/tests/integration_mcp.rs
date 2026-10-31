@@ -2044,8 +2044,16 @@ async fn m06_smoke_fixture_logs_each_approved_revision_once() {
         vec![
             ("knowledge_search".into(), "core".into(), "ok".into()),
             ("knowledge_get".into(), "core".into(), "ok".into()),
+            ("knowledge_flag".into(), "core".into(), "ok".into()),
         ]
     );
+    let verdicts: Vec<String> =
+        sqlx::query_scalar("SELECT verdict FROM knowledge_feedback WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(verdicts, vec!["outdated".to_string()]);
 }
 
 #[tokio::test]

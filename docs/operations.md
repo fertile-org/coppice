@@ -81,6 +81,7 @@ Settings live under `[knowledge]` and `[knowledge.compaction]` in TOML. There is
 |-----|---------|---------|
 | `knowledge.enabled` | `true` | Master switch for retrieval and the compaction scheduler |
 | `knowledge.poll_interval_ms` | `500` | Scheduler tick (reconcile finished runs, continue drain cycles) |
+| `knowledge.retrieval.index_rows` | `10` | Titles listed in a Full run's start-of-run index (3,200 bytes at most); `0` turns the index off |
 | `knowledge.compaction.interval_secs` | `1800` | Time between scheduled compaction cycles |
 | `knowledge.compaction.batch_max_tickets` | `10` | Done tickets per batch (one agent run) |
 | `knowledge.compaction.batch_max_source_bytes` | `200000` | Byte budget for a batch's ticket snapshots |
@@ -91,7 +92,7 @@ Settings live under `[knowledge]` and `[knowledge.compaction]` in TOML. There is
 
 **Lifecycle.** Moving a ticket to Done queues it. Every `interval_secs`, or on **Compact now** from the Knowledge page, a drain cycle runs batches until the queue is empty or a batch fails. Candidates land in the Pending inbox under the fail-closed approval policy. Success sends no notification. A failure fans out a `knowledge_compaction_failed` notification to every user, returns the tickets to the queue with one more attempt, and shows a Retry banner. Cancel releases the tickets without counting an attempt.
 
-**Optional lighter review.** `knowledge.auto_save.allow_verified_citations` (default `false`) narrows auto-save; it never widens it. Auto-save stays off unless `knowledge.auto_save.enabled = true` and the type is in `allowed_types`. With the option on, a candidate is also saved without review only when at least one of its citations is anchored to a commit, meaning the cited path exists on the default branch of the repo when compaction finishes. Confidence must still be `high`. High-impact types, workspace scope, supersessions and merges, and candidates the agent flagged for review still wait in the Inbox, and `knowledge_propose` items always land Pending. The status strip on the Knowledge page shows `Oldest in Inbox: N days` for the oldest Pending item.
+**Optional lighter review.** `knowledge.auto_save.allow_verified_citations` (default `false`) narrows auto-save; it never widens it. Auto-save stays off unless `knowledge.auto_save.enabled = true` and the type is in `allowed_types`. With the option on, a candidate is also saved without review only when at least one of its citations is anchored to a commit, meaning the cited path exists on the default branch of the repo when compaction finishes. This does not check that the content is correct. Confidence must still be `high`. High-impact types, workspace scope, supersessions and merges, and candidates the agent flagged for review still wait in the Inbox, and `knowledge_propose` items always land Pending. The status strip on the Knowledge page shows `Oldest in Inbox: N days` for the oldest Pending item.
 
 ### Measuring serving and freshness
 
@@ -117,7 +118,7 @@ SELECT now() - min(created_at) AS oldest_pending
 FROM knowledge_items WHERE status = 'pending';
 ```
 
-The zero-result search rate is not logged today: `run_tool_calls` keeps only a short argument summary, not the result count, so there is no query for it. Add logging before relying on it, for example before deciding whether embeddings are worth adding.
+The zero-result search rate comes from the server log. Each `knowledge_search` call with a real query that matches nothing writes one INFO line with the message `knowledge search returned no matches`, plus `run_id` and the query (cut at 200 characters). Count those lines per period in `coppice.*.jsonl` (for example `grep -h 'knowledge search returned no matches' coppice.*.jsonl | wc -l`) and divide by the number of `knowledge_search` rows in `run_tool_calls` for the same period. Consider embeddings only if these queries show paraphrase misses.
 
 ## Plugins
 

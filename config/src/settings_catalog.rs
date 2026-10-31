@@ -343,7 +343,7 @@ const FIXED_AFTER_CONNECTORS: &[Fixed] = &[
     fixed(
         "knowledge.auto_save.allow_verified_citations",
         "Knowledge",
-        "Auto-save only candidates with a citation checked against a commit.",
+        "Auto-save only candidates that cite a path existing on the default branch. It does not check the content is correct.",
         SettingKind::Bool,
     ),
     fixed(

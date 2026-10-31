@@ -13,6 +13,14 @@
         "limit": 20
       }
     },
-    { "tool": "knowledge_get", "args": { "ids": "$previousIds" } }
+    { "tool": "knowledge_get", "args": { "ids": "$previousIds" } },
+    {
+      "tool": "knowledge_flag",
+      "args": {
+        "itemId": "$previousFirstId",
+        "verdict": "outdated",
+        "reason": "Smoke: the cited command no longer matches the repository."
+      }
+    }
   ]
 }

@@ -2,6 +2,7 @@
 
 **Status:** Accepted (implemented)  
 **Date:** 2026-09-28  
+**Amended by:** [Serving, search quality, and freshness](2026-10-31-knowledge-serving-and-freshness-design.md) (two-step reads, stemmed ranking, start-of-run index, citations, agent feedback and proposals).  
 **Milestone context:** Amends [M06 — Knowledge & learning](../../milestones/M06-knowledge-and-learning.md) (shipped) and supersedes the extraction/embedding sections of the [M06 knowledge design](2026-08-03-m06-knowledge-and-learning-design.md). Governance (Inbox, revisions, approval policy, supersession, usage audit) is unchanged.
 
 ## Decision summary

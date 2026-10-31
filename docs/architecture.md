@@ -23,7 +23,7 @@ server/src/
   services/     Business logic, DB queries, validation orchestration
   domain/       Entity types, enums, pure validation helpers
   db/           Pool setup, migration runner
-  knowledge/    Full-text retrieval, compaction context and candidate contract (M06)
+  knowledge/    Full-text retrieval, start-of-run index, citations and freshness, compaction context and candidate contract (M06)
   mcp/          MCP gateway at /mcp: per-run tokens, tool catalog, tool handlers (M10)
   middleware/   Session auth, CSRF, admin checks
   providers/    AgentProvider trait, connector factories, CLI runner, mock / opencode / claude-code / codex / cursor / kilo-code adapters
@@ -54,7 +54,7 @@ server/src/
 - Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`). Migrations 001 and 013 were rewritten in place to drop pgvector; `coppice_migrations::run_migrations` (crate `db-migrations/`, shared by server and CLI) updates their recorded checksums on older databases before sqlx runs.
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
-- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions` (generated `search_vector` + GIN index), `knowledge_item_sources` (source tickets), `knowledge_usage_logs` (unique run/revision audit snapshot with full-text `score`), `workspace_settings` (compaction agent), and the compaction tables `knowledge_compaction_queue`, `knowledge_compaction_batches` (at most one queued/running), `knowledge_compaction_batch_tickets`. Compaction runs are ordinary `agent_runs` rows with `compaction_batch_id` set.
+- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions` (generated `search_vector` + GIN index), `knowledge_item_sources` (source tickets), `knowledge_usage_logs` (unique run/revision audit snapshot with full-text `score`), `knowledge_citations` (repo-relative paths a revision cites, anchored to a default-branch commit when the file exists there), `knowledge_feedback` (agent verdicts `outdated` / `wrong` / `confirmed`, one per run and revision), `workspace_settings` (compaction agent), and the compaction tables `knowledge_compaction_queue`, `knowledge_compaction_batches` (at most one queued/running), `knowledge_compaction_batch_tickets`. Compaction runs are ordinary `agent_runs` rows with `compaction_batch_id` set.
 - **Connector checks:** `connector_checks` (Test connection; at most one `queued`/`running` per connector). A check's run is an `agent_runs` row with `connector_check_id` set; every run has exactly one owner (`ticket_id`, `chat_session_id`, `compaction_batch_id`, or `connector_check_id`).
 
 ## Auth
@@ -142,7 +142,7 @@ mcp/host.rs        RunToolHost: one token's view of the registry (ToolHost impl)
 mcp/wiring.rs      McpServerSpec rendered per connector wiring style
 mcp/proxy/         plugin MCP servers: McpTransport seam, stdio + HTTP, shared pool, PluginMcpSource
 mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowledge_search,
-                   comment_post, skill_list, skill_load, result_submit
+                   knowledge_get, knowledge_flag, knowledge_propose, comment_post, skill_list, skill_load, result_submit
 ```
 
 **Profile → tool matrix** (`mcp/catalog.rs` `core_tools_for`; skills come from `SkillToolSource`, plugin tools from `PluginMcpSource`):
@@ -152,13 +152,14 @@ mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowl
 | `ticket_get` | ✓ | ✓ | ✓ (batch tickets) | ✓ (fixed synthetic ticket, no DB read) |
 | `ticket_comments`, `ticket_runs` | ✓ | ✓ | ✓ (batch tickets) | — |
 | `ticket_search`, `board_agents` | ✓ | ✓ | — | — |
-| `knowledge_search` | ✓ | ✓ | ✓ | — |
+| `knowledge_search`, `knowledge_get` | ✓ | ✓ | ✓ | — |
+| `knowledge_flag`, `knowledge_propose` | ✓ | — | — | — |
 | `comment_post` | ✓ | — | — | — |
 | `result_submit` | ✓ | ✓ (reply) | ✓ (`done` + candidates) | ✓ (any outcome; first valid wins) |
 | `skill_list`, `skill_load` | ✓ | ✓ | ✓ | — |
 | Plugin tools | assigned | assigned, `readOnlyHint` only | — | — |
 
-A `conversation` run searches tickets and approved knowledge on every board, whether or not the session has a board. The session board only chooses the focus repository (`REPOS.md` / `open_repo`). Those results include `boardName` (null for workspace-scoped knowledge). The same run lists `board_list` and may open any ticket with `ticket_get`, `ticket_comments`, and `ticket_runs`. Agent-scoped knowledge stays visible only to that agent, and pending knowledge stays hidden. Chat stays read-only apart from `result_submit`. `human_chat` stays on its board, and `knowledge_compaction` with no board still does not search.
+A `conversation` run searches tickets and approved knowledge on every board, whether or not the session has a board. The session board only chooses the focus repository (`REPOS.md` / `open_repo`). Those results include `boardName` (null for workspace-scoped knowledge). The same run lists `board_list` and may open any ticket with `ticket_get`, `ticket_comments`, and `ticket_runs`. Agent-scoped knowledge stays visible only to that agent, and pending knowledge stays hidden. Chat stays read-only apart from `result_submit`. `human_chat` stays on its board, and `knowledge_compaction` searches the boards of its batch tickets (plus workspace and agent-scoped items it may see), or returns nothing when the batch has no board.
 
 **Chat proposals.** A `conversation` turn may return `actions` (`create_ticket` / `create_knowledge`) in its `done` result. `job_worker` re-validates them with `parse_chat_actions` and stores them as `proposals` (`status: pending`) in the agent message's `action_metadata`; invalid actions are logged and dropped, and the message is kept. Nothing reaches the board until the human accepts via `POST /api/chat/sessions/{sid}/messages/{mid}/proposals/{pid}/accept` (`ChatService::accept_proposal`, which row-locks the agent message with `FOR UPDATE`) or rejects it. `human_chat` and other profiles reject `actions`.
 
@@ -265,8 +266,11 @@ domain/knowledge_compaction.rs            batch status/trigger, scheduling and b
 services/knowledge_service.rs             revision/lifecycle invariants, compaction inserts, similar items
 services/knowledge_compaction_service.rs  queue, batches, drain cycles, completion, failure reconcile
 services/workspace_settings_service.rs    compaction agent setting (read-only connectors only)
-knowledge/fts.rs                          OR-joined tsquery builder (unaccent, simple config)
-knowledge/retrieval.rs                    eligibility CTE, include-all when it fits, else ts_rank_cd top-k
+knowledge/fts.rs                          OR-joined tsquery builder (unaccent, `simple` + `english` stem layers)
+knowledge/retrieval.rs                    eligibility CTE, summed inverse-document-frequency ranking with a title boost
+knowledge/index.rs                        start-of-run index of matching titles for `.agent/context.md`
+knowledge/citations.rs                    citation path validation, anchoring to the default-branch head, storage
+knowledge/freshness.rs                    read-time freshness from citations (`current`/`changed`/`missing`/`unknown`/`uncited`)
 knowledge/compaction_context.rs           bounded `.agent/context.md` for a compaction run
 knowledge/candidates.rs                   lenient parse + strict validation of `knowledgeCandidates`
 knowledge/policy.rs                       fail-closed approval policy
@@ -275,9 +279,17 @@ workers/knowledge_compaction_scheduler.rs reconcile finished runs, scheduled and
 workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 ```
 
-**Retrieval.** Agents pull Knowledge on demand with the `knowledge_search` MCP tool (approved items only). The query is the agent's search text, normalized and OR-joined into a `to_tsquery('simple', …)`. Relational eligibility (approved, active, unexpired, unsuperseded, confidence, board/agent scope) is materialized first. Items are ranked by `ts_rank_cd`. Zero matches is not an error. The result is rendered as untrusted data, and every returned exact revision is logged once per run in `knowledge_usage_logs`.
+**Retrieval.** Agents pull Knowledge on demand in two steps. `knowledge_search` (approved items only) returns short rows: `id`, `title`, `type`, a snippet, a token estimate and `freshness`. `knowledge_get` returns up to 5 whole entries by id, rendered as untrusted data, and is the only place usage is logged: every returned exact revision is logged once per run in `knowledge_usage_logs`, so `usage_count` means "opened". An id the run cannot see fails like an unknown id. Relational eligibility (approved, active, unexpired, unsuperseded, confidence, board/agent scope) is materialized first. The query is normalized and OR-joined into a tsquery over two layers of the revision's `search_vector`: `simple` (with dotted names and paths also split, so `config.toml` matches `config`) and `english` stems (so `tests` matches `test`). Ranking sums the inverse document frequency of each matching word over the eligible set, so rare words outweigh filler, with a boost for title matches. Zero matches is not an error; a search with a real query that matches nothing writes an INFO log line `knowledge search returned no matches` ([measuring](operations.md#measuring-serving-and-freshness)).
 
-**Compaction.** A trigger queues a ticket when it enters Done and removes its unbatched row when it leaves Done. The scheduler starts a drain cycle every `knowledge.compaction.interval_secs` (or on Compact now) when an enabled compaction agent is configured. Each batch is one `compact_knowledge` run of that agent: read-only tools, a scratch directory, no repository, no knowledge retrieval, no ticket side effects. The agent returns `knowledgeCandidates`; invalid candidates (sources outside the batch, board mismatch, unknown types, limits) are dropped with reasons in the batch summary. Valid ones go through the fail-closed policy: workspace scope, supersessions, and high-impact types always need human approval. Success deletes the batch's queue rows and sends no notification. The scheduler's reconcile step fails batches whose run ended without applying a result: tickets return to the queue with `attempts + 1`, and a `knowledge_compaction_failed` notification goes to every user. Cancelled runs release tickets without an attempt or notification. Tickets at `max_attempts` wait for a manual Retry. Operator settings: [Knowledge configuration](operations.md#knowledge-configuration).
+**Start-of-run index.** Full and Human Agent ticket runs get a section in `.agent/context.md` listing up to `knowledge.retrieval.index_rows` (default 10; 0 disables) approved titles ranked against the ticket, with id, type and the token cost of reading each, capped at 3,200 bytes. It lists titles only, is labelled as data, and tells the agent to open items with `knowledge_get`. A failure while building it is logged and never fails the run. The index does not read the repository, so it carries no freshness.
+
+**Citations and freshness.** A candidate or edited revision may cite up to 10 repo-relative paths (`knowledge/citations.rs`). Paths are validated, and the server anchors each to the default-branch commit when the file exists there; a path that does not resolve is stored unanchored. On read, search and get report one `freshness` per item: `current` (cited files unchanged since the anchor), `changed`, `missing` (file gone), `unknown` (repository trouble, no repository, or too many citations to check), or `uncited`. Repository problems yield `unknown`, never an error. `GET /api/knowledge/{id}/freshness` backs the Cited code detail on Inbox and Approved cards.
+
+**Agent feedback.** `knowledge_flag` records `outdated`, `wrong` or `confirmed` for an item the run can see, with a reason required for the first two (`knowledge_feedback`, one row per run and revision). `outdated` and `wrong` show on Inbox cards and never retire an item by themselves; a human decides. `confirmed` re-anchors the item's citations to the current default branch. Chat and compaction runs do not get the tool.
+
+**Working agents propose.** `knowledge_propose` (Full and Human Agent ticket runs only) creates **Pending** items on the run's board with the run's ticket as source, at most 3 per run. The policy never auto-approves them. A close match to an existing item returns that item instead of creating a new one. Pending agent proposals show only their title (marked unreviewed) in compaction context, so unreviewed agent text does not reach another agent.
+
+**Compaction.** A trigger queues a ticket when it enters Done and removes its unbatched row when it leaves Done. The scheduler starts a drain cycle every `knowledge.compaction.interval_secs` (or on Compact now) when an enabled compaction agent is configured. Each batch is one `compact_knowledge` run of that agent: read-only tools, a scratch directory, no repository, no ticket side effects. It can use `knowledge_search` and `knowledge_get` on its batch tickets' boards. The agent returns `knowledgeCandidates`; invalid candidates (sources outside the batch, board mismatch, unknown types, limits) are dropped with reasons in the batch summary. Valid ones go through the fail-closed policy: workspace scope, supersessions, and high-impact types always need human approval. Success deletes the batch's queue rows and sends no notification. The scheduler's reconcile step fails batches whose run ended without applying a result: tickets return to the queue with `attempts + 1`, and a `knowledge_compaction_failed` notification goes to every user. Cancelled runs release tickets without an attempt or notification. Tickets at `max_attempts` wait for a manual Retry. Operator settings: [Knowledge configuration](operations.md#knowledge-configuration). The context gives each ticket the latest successful run's summary and `changedFiles`, up to 4 `review_feedback` comments first (then the latest others, 8 in all), and near-duplicate pairs among approved items on the same board (or both workspace-scoped). A candidate may cite paths it sees in this input (the server validates them), and may supersede one of those items without a source ticket, which merges duplicates; supersessions stay human-reviewed. With `knowledge.auto_save.allow_verified_citations` on, the allowlist also needs one citation anchored to a commit (the path exists on the default branch; content is not checked).
 
 **Config env:** `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories. `AGENT_DEFAULT_PROVIDER` / `agent.default_connector` are obsolete and ignored.
 

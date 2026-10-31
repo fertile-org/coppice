@@ -360,7 +360,8 @@ async fn run_tool_calls(
 
 /// A mock call can read what the previous call found: an `ids` argument of
 /// `"$previousIds"` becomes the `id` of every item in the previous result
-/// (`knowledge_search` then `knowledge_get`).
+/// (`knowledge_search` then `knowledge_get`). An `itemId` of `"$previousFirstId"`
+/// becomes the id of the first item (`knowledge_get` then `knowledge_flag`).
 fn resolve_previous_ids(args: &serde_json::Value, previous: Option<&String>) -> serde_json::Value {
     let mut args = args.clone();
     if args.get("ids").and_then(serde_json::Value::as_str) == Some("$previousIds") {
@@ -372,6 +373,14 @@ fn resolve_previous_ids(args: &serde_json::Value, previous: Option<&String>) -> 
             .map(|item| item["id"].clone())
             .collect();
         args["ids"] = serde_json::Value::Array(ids);
+    }
+    if args.get("itemId").and_then(serde_json::Value::as_str) == Some("$previousFirstId") {
+        if let Some(id) = previous
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|value| value["items"].get(0).map(|item| item["id"].clone()))
+        {
+            args["itemId"] = id;
+        }
     }
     args
 }
@@ -778,6 +787,11 @@ mod tests {
         );
         let plain = serde_json::json!({ "query": "x" });
         assert_eq!(resolve_previous_ids(&plain, Some(&previous)), plain);
+        let flag = serde_json::json!({ "itemId": "$previousFirstId", "verdict": "wrong" });
+        assert_eq!(
+            resolve_previous_ids(&flag, Some(&previous)),
+            serde_json::json!({ "itemId": "a", "verdict": "wrong" })
+        );
     }
 
     #[tokio::test]

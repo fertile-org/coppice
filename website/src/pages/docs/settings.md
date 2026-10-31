@@ -141,7 +141,7 @@ When auto-split is on for that status, Coppice creates the child tickets the run
 | `auto_save.enabled` | bool | `false` | Saves low-risk candidates without asking you. |
 | `auto_save.allowed_types` | list of strings | `[]` | Types auto-save may save: `bug_pattern`, `coding_convention`, `dependency_note`, `performance_note`, `review_feedback`, `test_command`. |
 | `auto_save.minimum_confidence` | string | `high` | Must stay `high`. |
-| `auto_save.allow_verified_citations` | bool | `false` | With `auto_save.enabled`, auto-save only candidates that have a citation checked against a commit. |
+| `auto_save.allow_verified_citations` | bool | `false` | With `auto_save.enabled`, auto-save only candidates that cite a path existing on the default branch. It does not check that the content is correct. |
 | `retrieval.top_k` | integer | `8` | How many entries one lookup returns. 1 to 20. |
 | `retrieval.allowed_types` | list of strings | `[]` (all types) | Only return these types: `coding_convention`, `architecture_rule`, `bug_pattern`, `test_command`, `review_feedback`, `dependency_note`, `api_contract`, `workflow_rule`, `human_preference`, `operational_runbook`, `security_rule`, `performance_note`. |
 | `retrieval.minimum_confidence` | string | `medium` | `low`, `medium` or `high`. |

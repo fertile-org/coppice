@@ -74,6 +74,14 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
     .await?;
     // Retrieval returns the whole eligible set; non-matches carry score 0.
     found.retain(|k| k.score > 0.0);
+    if found.is_empty() {
+        // Counted by operators as the zero-result search rate (docs/operations.md).
+        tracing::info!(
+            run_id = %ctx.scope.run_id,
+            query = %query.chars().take(200).collect::<String>(),
+            "knowledge search returned no matches"
+        );
+    }
     found.truncate(limit);
 
     // Rows carry a snippet and the token cost of reading the whole entry with

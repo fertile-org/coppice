@@ -8,7 +8,10 @@
  * approved revisions through the `knowledge_search` and `knowledge_get` MCP tools in a Full run with
  * an exact audit. Knowledge is no longer injected into the run context: the
  * worker agent's mock fixture (`m06-knowledge-search-worker/work_on_ticket.json`)
- * calls `knowledge_search` then `knowledge_get` through the gateway; `knowledge_get` logs usage. Restores the
+ * calls `knowledge_search`, `knowledge_get` then `knowledge_flag` through the
+ * gateway; `knowledge_get` logs usage. The Full run's `.agent/context.md` (read
+ * from the server container) must list both approved titles in its
+ * start-of-run index, and the flag must show on the item. Restores the
  * previous compaction agent setting when done.
  *
  * Env:
@@ -19,6 +22,8 @@
  *   COPPICE_SMOKE_PASSWORD     default changeme
  *   COPPICE_SMOKE_REPO_PATH    default /tmp/smoke-repo
  */
+
+import { execFileSync } from 'node:child_process';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
 const WEB = process.env.COPPICE_WEB_URL ?? 'http://localhost:5001';
@@ -322,6 +327,7 @@ async function compactDoneTicket(board, compactor, suffix, auth) {
     200,
     'move compaction ticket to Human Review',
   );
+  ensureTicketBranch(ticket);
   await expectJson(
     await api('POST', `/api/tickets/${ticket.id}/final-approve`, {
       ...auth,
@@ -418,6 +424,8 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     return current?.status === 'succeeded' ? current : null;
   });
 
+  assertIndexInContext(ticket.id, items);
+
   const usage = await expectJson(
     await api('GET', `/api/agent-runs/${run.id}/knowledge-used`, auth),
     200,
@@ -446,6 +454,76 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     }
   }
   console.log(`smoke: audited ${items.length} knowledge revisions on run ${run.id}`);
+
+  // knowledge_flag (outdated) from the fixture shows on exactly one item.
+  const approvedPage = await expectJson(
+    await api(
+      'GET',
+      `/api/knowledge?boardId=${encodeURIComponent(board.id)}&status=approved&limit=100`,
+      auth,
+    ),
+    200,
+    'list approved knowledge',
+  );
+  const flagged = approvedPage.items.filter((entry) => entry.openFlagCount > 0);
+  if (
+    flagged.length !== 1 ||
+    flagged[0].openFlagCount !== 1 ||
+    !items.some((item) => item.id === flagged[0].id)
+  ) {
+    fail(`expected one flagged item with one flag; got ${JSON.stringify(flagged)}`);
+  }
+  console.log(`smoke: knowledge_flag shows on item ${flagged[0].id}`);
+}
+
+// A new ticket gets the only registered repo, and Accept needs its branch. No
+// agent works on the compaction ticket, so create the (empty) branch by hand.
+function ensureTicketBranch(ticket) {
+  if (!ticket.repoId) return;
+  const branch = `agent/TICKET-${ticket.id.slice(0, 8)}`;
+  try {
+    execFileSync(
+      'docker',
+      [
+        'compose', '-f', 'deploy/docker-compose.yml', 'exec', '-T', '-u', '1000:1000',
+        'server', 'git', '-C', SMOKE_REPO_PATH, 'branch', branch, 'main',
+      ],
+      { encoding: 'utf8', stdio: 'pipe' },
+    );
+  } catch (error) {
+    fail(`could not create branch ${branch}: ${error.message}`);
+  }
+}
+
+// The Full run's context.md is written inside the server container, so read it
+// from there (default Compose stack). It must carry the start-of-run index with
+// every approved title, which proves the worker wires the index into the run.
+function assertIndexInContext(ticketId, items) {
+  const compose = ['compose', '-f', 'deploy/docker-compose.yml'];
+  let context;
+  try {
+    context = execFileSync(
+      'docker',
+      [
+        ...compose,
+        'exec',
+        '-T',
+        'server',
+        'sh',
+        '-c',
+        `f=$(grep -rl --include=context.md -F "${ticketId}" /data/worktrees 2>/dev/null | head -n 1); test -n "$f" && cat "$f"`,
+      ],
+      { encoding: 'utf8' },
+    );
+  } catch (error) {
+    fail(`could not read the run's .agent/context.md: ${error.message}`);
+  }
+  for (const item of items) {
+    if (!context.includes(item.title)) {
+      fail(`context.md index is missing title "${item.title}"`);
+    }
+  }
+  console.log('smoke: Full run context.md lists the approved titles');
 }
 
 async function main() {
