@@ -598,6 +598,7 @@ async fn execute_job(
         &agent.role,
     );
     let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    plan::append_work_design_instruction(&mut markdown, &run.job_type, &skills);
     if let Some(section) = crate::services::review_rounds::ReviewRoundService::new(pool)
         .context_section(
             ticket_id,

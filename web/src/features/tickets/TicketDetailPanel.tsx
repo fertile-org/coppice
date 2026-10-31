@@ -15,6 +15,8 @@ import {
 import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { DesignPlanCard } from '../designs/DesignPlanCard';
+import { planCardDesign, useDesigns } from '../designs/useDesigns';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
@@ -23,6 +25,7 @@ import { CommentAttachments } from './CommentAttachments';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { RestartChoice } from './RestartChoice';
 import { TicketCommentsTab } from './TicketCommentsTab';
+import { isActiveRunStatus, useAgentRuns } from './useAgentRuns';
 import { useTicketChildren, useUpdateTicket, useUploadAttachment } from './useTicket';
 
 interface TicketDetailPanelProps {
@@ -74,6 +77,12 @@ export function TicketDetailPanel({
 
   const saving = isSaving || updateTicket.isPending;
   const isArchived = Boolean(ticket.archivedAt);
+  const runs = useAgentRuns(ticket.status === 'plan_review' ? ticket.id : undefined);
+  const planRunActive = (runs.data ?? []).some(
+    (run) => run.jobType === 'plan_ticket' && isActiveRunStatus(run.status),
+  );
+  const designs = useDesigns(ticket.status === 'plan_review' ? ticket.id : undefined);
+  const designOutOfDate = planCardDesign(designs.data ?? [])?.choice.planOutOfDate ?? false;
   const descriptionFiles = descriptionAttachments(ticket);
 
   async function attachToTicket(incoming: File[]) {
@@ -248,6 +257,8 @@ export function TicketDetailPanel({
         <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />
       )}
 
+      <DesignPlanCard ticketId={ticket.id} />
+
       {ticket.status === 'plan_review' && !isArchived && (
         <PlanReviewActions
           ticketId={ticket.id}
@@ -257,6 +268,8 @@ export function TicketDetailPanel({
           revision={ticket.pendingPlan?.revision}
           changeRequests={ticket.pendingPlan?.changeRequests}
           planQuestions={ticket.planQuestions}
+          planRunActive={planRunActive}
+          designOutOfDate={designOutOfDate}
         />
       )}
 

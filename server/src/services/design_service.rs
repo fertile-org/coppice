@@ -39,9 +39,67 @@ pub struct DesignOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChosenOption {
     pub id: String,
     pub title: String,
+    /// Position in the set: A, B, C.
+    pub label: String,
+    /// The title without a leading label or id the agent wrote into it.
+    pub display_title: String,
+}
+
+/// An option's label is its position in the set, never derived from its id.
+pub fn option_label(index: usize) -> String {
+    match u8::try_from(index) {
+        Ok(i) if i < 26 => char::from(b'A' + i).to_string(),
+        _ => (index + 1).to_string(),
+    }
+}
+
+/// The title with a leading `label` or `id` prefix removed, when that prefix
+/// is followed by a separator and whitespace. Unchanged if nothing is left.
+pub fn option_display_title(title: &str, label: &str, id: &str) -> String {
+    [label, id]
+        .into_iter()
+        .find_map(|prefix| strip_option_prefix(title, prefix))
+        .unwrap_or(title)
+        .to_string()
+}
+
+fn strip_option_prefix<'a>(title: &'a str, prefix: &str) -> Option<&'a str> {
+    let prefix = prefix.trim();
+    if prefix.is_empty() {
+        return None;
+    }
+    let mut chars = title.char_indices();
+    for expected in prefix.chars() {
+        let (_, actual) = chars.next()?;
+        if !actual.to_lowercase().eq(expected.to_lowercase()) {
+            return None;
+        }
+    }
+    let after = chars.next().map_or(title.len(), |(i, _)| i);
+    let rest = title[after..]
+        .trim_start()
+        .strip_prefix([':', '.', '-', '\u{2013}', '\u{2014}', ')'])?;
+    if !rest.chars().next()?.is_whitespace() {
+        return None;
+    }
+    let rest = rest.trim();
+    (!rest.is_empty()).then_some(rest)
+}
+
+pub fn chosen_option(options: &[DesignOption], index: usize) -> ChosenOption {
+    let option = &options[index];
+    let label = option_label(index);
+    let display_title = option_display_title(&option.title, &label, &option.id);
+    ChosenOption {
+        id: option.id.clone(),
+        title: option.title.clone(),
+        label,
+        display_title,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,8 +114,28 @@ pub struct DesignSetSummary {
     pub id: Uuid,
     pub title: String,
     pub run_id: Uuid,
+    /// Relative to the artifacts dir, as stored.
+    pub dir: String,
     pub options: Vec<DesignOption>,
     pub chosen: Option<ChosenOption>,
+    pub recommended: Option<ChosenOption>,
+    /// The human's choice, else the agent's recommendation.
+    pub selected: Option<ChosenOption>,
+    pub superseded: bool,
+    pub from_plan_run: bool,
+    /// The set belongs to the parent ticket, not this one.
+    pub inherited: bool,
+}
+
+/// The design a ticket's work should follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveDesign {
+    pub set_id: Uuid,
+    pub title: String,
+    pub selected: ChosenOption,
+    /// Absolute path of the selected option's entry file. None when the set's
+    /// folder can't be resolved: the title still tells the agent what to build.
+    pub entry_path: Option<PathBuf>,
 }
 
 pub struct DesignSetRecord {
@@ -169,9 +247,18 @@ impl<'a> DesignService<'a> {
         set_id: Uuid,
         run_id: Uuid,
         options: Vec<DesignOption>,
+        recommended_option_id: &str,
     ) -> Result<Uuid, DesignError> {
         if !(2..=4).contains(&options.len()) {
             return Err(DesignError::Invalid("publish 2 to 4 options".into()));
+        }
+        if !options
+            .iter()
+            .any(|option| option.id == recommended_option_id)
+        {
+            return Err(DesignError::Invalid(
+                "recommendedOptionId must be one of the options".into(),
+            ));
         }
         let row = self.load(set_id).await?;
         let row_run: Uuid = row.get("run_id");
@@ -217,12 +304,14 @@ impl<'a> DesignService<'a> {
         let updated = sqlx::query(
             r#"
             UPDATE design_sets
-            SET options = $1, published_at = COALESCE(published_at, now())
+            SET options = $1, recommended_option_id = $3,
+                published_at = COALESCE(published_at, now())
             WHERE id = $2
             "#,
         )
         .bind(&options_json)
         .bind(set_id)
+        .bind(recommended_option_id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -237,6 +326,13 @@ impl<'a> DesignService<'a> {
             WHERE id <> $1
               AND published_at IS NOT NULL
               AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
+              AND (EXISTS (
+                      SELECT 1 FROM agent_runs r
+                      WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                  )) = (EXISTS (
+                      SELECT 1 FROM agent_runs r
+                      WHERE r.id = $4 AND r.job_type = 'plan_ticket'
+                  ))
               AND (
                   ($2::uuid IS NOT NULL AND ticket_id = $2)
                   OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
@@ -246,6 +342,7 @@ impl<'a> DesignService<'a> {
         .bind(set_id)
         .bind(ticket_id)
         .bind(chat_session_id)
+        .bind(run_id)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -290,7 +387,83 @@ impl<'a> DesignService<'a> {
         &self,
         ticket_id: Uuid,
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
-        self.list_scoped(Some(ticket_id), None).await
+        let mut sets = self.list_scoped(Some(ticket_id), None).await?;
+        if let Some(parent_id) = self.parent_of(ticket_id).await? {
+            if let Some(mut parent_set) = self.own_effective(parent_id).await? {
+                parent_set.inherited = true;
+                sets.push(parent_set);
+            }
+        }
+        Ok(sets)
+    }
+
+    /// The design a ticket's work follows: its own, else its parent's.
+    pub async fn effective_for_ticket(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<EffectiveDesign>, DesignError> {
+        let mut set = self.own_effective(ticket_id).await?;
+        if set.is_none() {
+            if let Some(parent_id) = self.parent_of(ticket_id).await? {
+                set = self.own_effective(parent_id).await?;
+            }
+        }
+        let Some(set) = set else {
+            return Ok(None);
+        };
+        let Some(selected) = set.selected.clone() else {
+            return Ok(None);
+        };
+        let Some(option) = set.options.iter().find(|option| option.id == selected.id) else {
+            return Ok(None);
+        };
+        let entry_path = match resolve_set_dir(&self.artifacts_dir, &set.dir) {
+            Ok((_, root)) => Some(root.join(&option.entry)),
+            Err(err) => {
+                tracing::warn!(
+                    set_id = %set.id,
+                    dir = %set.dir,
+                    error = %err,
+                    "design set folder unavailable"
+                );
+                None
+            }
+        };
+        Ok(Some(EffectiveDesign {
+            set_id: set.id,
+            title: set.title,
+            selected,
+            entry_path,
+        }))
+    }
+
+    async fn parent_of(&self, ticket_id: Uuid) -> Result<Option<Uuid>, DesignError> {
+        let parent: Option<Option<Uuid>> =
+            sqlx::query_scalar("SELECT parent_ticket_id FROM tickets WHERE id = $1")
+                .bind(ticket_id)
+                .fetch_optional(self.pool)
+                .await?;
+        Ok(parent.flatten())
+    }
+
+    /// Newest live set a person picked from outside a plan run, else the newest
+    /// live plan-run set with a selection. Sets are newest first.
+    async fn own_effective(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<DesignSetSummary>, DesignError> {
+        let sets = self.list_scoped(Some(ticket_id), None).await?;
+        let live = |set: &&DesignSetSummary| !set.superseded;
+        let picked_in_work = sets
+            .iter()
+            .filter(live)
+            .find(|set| !set.from_plan_run && set.chosen.is_some());
+        let found = picked_in_work.or_else(|| {
+            sets.iter()
+                .filter(live)
+                .find(|set| set.from_plan_run && set.selected.is_some())
+        });
+        Ok(found.cloned())
     }
 
     pub async fn list_for_chat(
@@ -311,18 +484,7 @@ impl<'a> DesignService<'a> {
         if !options.iter().any(|option| option.id == option_id) {
             return Err(DesignError::Invalid("unknown option".into()));
         }
-        sqlx::query(
-            r#"
-            UPDATE design_sets
-            SET chosen_option_id = $1, chosen_by_user_id = $2, chosen_at = now()
-            WHERE id = $3
-            "#,
-        )
-        .bind(option_id)
-        .bind(user_id)
-        .bind(set_id)
-        .execute(self.pool)
-        .await?;
+        save_choice(self.pool, set_id, option_id, user_id).await?;
         Ok(())
     }
 
@@ -333,7 +495,12 @@ impl<'a> DesignService<'a> {
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, title, run_id, options, chosen_option_id
+            SELECT id, title, run_id, dir, options, chosen_option_id, recommended_option_id,
+                   superseded_by IS NOT NULL AS superseded,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                   ) AS from_plan_run
             FROM design_sets
             WHERE published_at IS NOT NULL
               AND (
@@ -354,6 +521,12 @@ impl<'a> DesignService<'a> {
         sqlx::query(
             r#"
             SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
+                   recommended_option_id,
+                   superseded_by IS NOT NULL AS superseded,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                   ) AS from_plan_run,
                    published_at IS NOT NULL AS published
             FROM design_sets
             WHERE id = $1
@@ -364,6 +537,28 @@ impl<'a> DesignService<'a> {
         .await?
         .ok_or(DesignError::NotFound)
     }
+}
+
+/// Store a pick without checking it. Callers validate the option first.
+pub(crate) async fn save_choice<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    set_id: Uuid,
+    option_id: &str,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE design_sets
+        SET chosen_option_id = $1, chosen_by_user_id = $2, chosen_at = now()
+        WHERE id = $3
+        "#,
+    )
+    .bind(option_id)
+    .bind(user_id)
+    .bind(set_id)
+    .execute(executor)
+    .await?;
+    Ok(())
 }
 
 fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf), DesignError> {
@@ -379,22 +574,29 @@ fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf)
 
 fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, DesignError> {
     let options = options_from_row(row)?;
-    let chosen_id: Option<String> = row.get("chosen_option_id");
-    let chosen = chosen_id.and_then(|id| {
-        options
-            .iter()
-            .find(|option| option.id == id)
-            .map(|option| ChosenOption {
-                id: option.id.clone(),
-                title: option.title.clone(),
-            })
-    });
+    let find = |id: Option<String>| {
+        id.and_then(|id| {
+            options
+                .iter()
+                .position(|option| option.id == id)
+                .map(|index| chosen_option(&options, index))
+        })
+    };
+    let chosen = find(row.get("chosen_option_id"));
+    let recommended = find(row.get("recommended_option_id"));
+    let selected = chosen.clone().or_else(|| recommended.clone());
     Ok(DesignSetSummary {
         id: row.get("id"),
         title: row.get("title"),
         run_id: row.get("run_id"),
+        dir: row.get("dir"),
         options,
         chosen,
+        recommended,
+        selected,
+        superseded: row.get("superseded"),
+        from_plan_run: row.get("from_plan_run"),
+        inherited: false,
     })
 }
 
@@ -481,7 +683,10 @@ fn invalid_io(err: std::io::Error) -> DesignError {
 
 #[cfg(test)]
 mod tests {
-    use super::{reject_rel_path, resolve_set_dir, DesignError};
+    use super::{
+        chosen_option, option_display_title, option_label, reject_rel_path, resolve_set_dir,
+        DesignError, DesignOption,
+    };
 
     #[test]
     fn reject_rel_path_blocks_escape_and_bad_types() {
@@ -513,5 +718,51 @@ mod tests {
             matches!(err, DesignError::Invalid(ref msg) if msg.contains("escapes")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn labels_follow_position_not_id() {
+        assert_eq!(option_label(0), "A");
+        assert_eq!(option_label(1), "B");
+        assert_eq!(option_label(3), "D");
+    }
+
+    #[test]
+    fn display_title_strips_its_own_label_or_id() {
+        let t = option_display_title;
+        assert_eq!(t("A: Quiet button", "A", "option-a"), "Quiet button");
+        assert_eq!(t("a. Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A) Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A - Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A \u{2013} Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("A \u{2014} Quiet", "A", "x"), "Quiet");
+        assert_eq!(t("option-a - Quiet", "A", "option-a"), "Quiet");
+        assert_eq!(t("Option-A: Quiet", "B", "option-a"), "Quiet");
+        assert_eq!(t("A/B testing panel", "A", "option-a"), "A/B testing panel");
+        assert_eq!(t("Apple: red", "A", "option-a"), "Apple: red");
+        assert_eq!(t("A:Quiet", "A", "x"), "A:Quiet");
+        assert_eq!(t("A: ", "A", "x"), "A: ");
+        assert_eq!(t("A:", "A", "x"), "A:");
+        assert_eq!(t("Quiet button", "A", "a"), "Quiet button");
+        assert_eq!(t("B: Quiet", "A", "a"), "B: Quiet");
+    }
+
+    #[test]
+    fn chosen_option_carries_label_and_display_title() {
+        let options = vec![
+            DesignOption {
+                id: "option-a".into(),
+                title: "A: Quiet".into(),
+                entry: "a/index.html".into(),
+            },
+            DesignOption {
+                id: "option-b".into(),
+                title: "B: Full".into(),
+                entry: "b/index.html".into(),
+            },
+        ];
+        let b = chosen_option(&options, 1);
+        assert_eq!((b.label.as_str(), b.display_title.as_str()), ("B", "Full"));
+        assert_eq!(b.title, "B: Full");
     }
 }

@@ -46,6 +46,22 @@ describe('PlanReviewActions', () => {
     expect(screen.getByRole('button', { name: 'Send answers' })).toBeDisabled();
   });
 
+  it('disables Approve while a plan run is active', () => {
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" planRunActive />);
+    expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeDisabled();
+  });
+
+  it('warns beside Approve when the plan missed the chosen design, without blocking', () => {
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" designOutOfDate />);
+    expect(screen.getByText("The plan wasn't updated to this option.")).toBeVisible();
+    expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeEnabled();
+  });
+
+  it('has no design warning when the plan is up to date', () => {
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
+    expect(screen.queryByText("The plan wasn't updated to this option.")).toBeNull();
+  });
+
   it('sends the answers once at least one is given', async () => {
     wrap(<PlanReviewActions ticketId="t1" boardId="b1" hasPlan={false} planQuestions={questions} />);
     fireEvent.click(screen.getByRole('button', { name: 'Postgres' }));

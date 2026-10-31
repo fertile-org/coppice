@@ -1,8 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import { designSetListSchema, type DesignSet } from '../../lib/schemas/design';
+import { agentRunsQueryKey } from '../tickets/useAgentRuns';
+import { ticketQueryKey } from '../tickets/useTicket';
 
 export type DesignScope = string | { chatSessionId: string };
+
+/** The set the Detail card opens: the plan's, else the newest live one. */
+export function planCardDesign(sets: DesignSet[]): DesignSet | undefined {
+  const live = sets.filter((set) => !set.superseded);
+  return live.find((set) => set.fromPlanRun) ?? live[0];
+}
+
+/**
+ * Whether work follows this set: a plan-run set until someone picks on a work-run
+ * set, and any other set only once picked. Mirrors the server's effective design.
+ */
+export function designDrivesWork(design: DesignSet, sets: DesignSet[]): boolean {
+  if (!design.fromPlanRun) return design.chosen !== null;
+  return !sets.some((set) => !set.superseded && !set.fromPlanRun && set.chosen !== null);
+}
 
 export function designsQueryKey(scope: DesignScope) {
   return typeof scope === 'string'
@@ -50,9 +67,15 @@ export function useChooseDesign(scope?: DesignScope) {
         body: JSON.stringify({ optionId }),
       });
     },
-    onSuccess: () => {
+    // A pick can record a plan change request and start a plan run. A refused pick
+    // means the cached footer was out of date, so it refreshes too.
+    onSettled: () => {
       if (scopeEnabled(scope)) {
         void queryClient.invalidateQueries({ queryKey: designsQueryKey(scope) });
+        if (typeof scope === 'string') {
+          void queryClient.invalidateQueries({ queryKey: ticketQueryKey(scope) });
+          void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(scope) });
+        }
       }
     },
   });

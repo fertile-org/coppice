@@ -99,6 +99,20 @@ Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, hande
 
 Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so connectors need no per-plugin wiring. More in [architecture.md](../architecture.md#plugin-mcp-proxy).
 
+## Reading design mockups on a work run
+
+When a ticket has a selected design, the work run is given the absolute path of the option's HTML. Checked 2026-10-31 by running each connector's work-mode flags on a one-line prompt asking it to read a marker file outside the git repo it ran in, with no Coppice gateway:
+
+| Connector | Can read a file outside the worktree | Checked against |
+| --- | --- | --- |
+| `claude-code` | Yes (marker printed) | installed CLI |
+| `codex` | Yes (marker printed) | installed CLI |
+| `cursor` | Yes (marker printed) | installed CLI |
+| `opencode` | Not yet | `opencode run` stopped with a model-access error before reading anything. Tried with `opencode run` only, not the `opencode serve` path Coppice runs use on OpenCode 1.x (2 and later use ACP) |
+| `kilo-code` | Not yet | `kilo run` stopped with `PAID_MODEL_AUTH_REQUIRED` (not signed in) |
+
+A connector that cannot read the file still gets the option's title and the plan text.
+
 ## Diagnostics (System → Connectors)
 
 System → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.

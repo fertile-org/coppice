@@ -29,6 +29,7 @@ use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use sqlx::Row;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 pub use crate::domain::workflow::JOB_TYPE_PLAN_TICKET as PLAN_JOB;
@@ -90,6 +91,9 @@ pub struct TicketPlan {
     pub body: String,
     pub content_version: i32,
     pub change_request: Option<String>,
+    /// The design set the plan reflects, and the option it was written against.
+    pub design_set_id: Option<Uuid>,
+    pub design_option_id: Option<String>,
     pub created_at: time::OffsetDateTime,
 }
 
@@ -222,8 +226,23 @@ impl<'a> PlanningService<'a> {
             return Ok(StartOutcome::NoPlanner);
         };
 
-        let run_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
+        let outcome = self
+            .queue_plan_run(&mut tx, ticket_id, planner.id, trigger_comment_id)
+            .await?;
+        tx.commit().await?;
+        Ok(outcome)
+    }
+
+    /// Insert the plan run and its job on the caller's transaction.
+    async fn queue_plan_run(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Uuid,
+        planner_id: Uuid,
+        trigger_comment_id: Option<Uuid>,
+    ) -> Result<StartOutcome, PlanError> {
+        let run_id = Uuid::new_v4();
         let inserted = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -237,21 +256,18 @@ impl<'a> PlanningService<'a> {
         )
         .bind(run_id)
         .bind(ticket_id)
-        .bind(planner.id)
+        .bind(planner_id)
         .bind(JOB_TYPE_PLAN_TICKET)
         .bind(run_status_to_str(RunStatus::Queued))
         .bind(PROFILE_ID)
         .bind(ContextProfile::Full.as_str())
         .bind(trigger_comment_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
 
         let Some(row) = inserted else {
-            tx.rollback().await?;
-            if let Some(existing) = self.active_plan_run(ticket_id).await? {
-                return Ok(StartOutcome::AlreadyRunning(existing));
-            }
-            return Ok(StartOutcome::AlreadyRunning(run_id));
+            let existing = self.active_plan_run(ticket_id).await?;
+            return Ok(StartOutcome::AlreadyRunning(existing.unwrap_or(run_id)));
         };
         let inserted_id: Uuid = row.get("id");
 
@@ -265,9 +281,8 @@ impl<'a> PlanningService<'a> {
         .bind(inserted_id)
         .bind(JOB_TYPE_PLAN_TICKET)
         .bind(job_status_to_str(JobStatus::Pending))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(StartOutcome::Started(inserted_id))
     }
 
@@ -315,15 +330,41 @@ impl<'a> PlanningService<'a> {
                 next
             }
         };
+        // The newest live plan-run design set and the option picked (or
+        // recommended) in it. Picks are refused during a plan run, so reading
+        // here also covers options the run itself published.
+        let design: Option<(Uuid, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
+            FROM design_sets d
+            WHERE d.ticket_id = $1
+              AND d.published_at IS NOT NULL
+              AND d.superseded_by IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM agent_runs r
+                  WHERE r.id = d.run_id AND r.job_type = 'plan_ticket'
+              )
+            ORDER BY d.created_at DESC, d.id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let (design_set_id, design_option_id) = match design {
+            Some((set, option)) => (Some(set), option),
+            None => (None, None),
+        };
         let id = Uuid::new_v4();
         let row = sqlx::query(
             r#"
             INSERT INTO ticket_plans (
-                id, ticket_id, run_id, agent_id, revision, body, content_version
+                id, ticket_id, run_id, agent_id, revision, body, content_version,
+                design_set_id, design_option_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, ticket_id, run_id, agent_id, revision, body, content_version,
-                      change_request, created_at
+                      change_request, design_set_id, design_option_id, created_at
             "#,
         )
         .bind(id)
@@ -333,6 +374,8 @@ impl<'a> PlanningService<'a> {
         .bind(next)
         .bind(body)
         .bind(ticket.ticket.content_version)
+        .bind(design_set_id)
+        .bind(design_option_id)
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -378,6 +421,9 @@ impl<'a> PlanningService<'a> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+        if self.active_plan_run(ticket_id).await?.is_some() {
+            return Err(PlanError::Validation(PLAN_ALREADY_RUNNING.into()));
         }
         if self
             .questions(ticket_id)
@@ -826,7 +872,35 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
-    pub async fn ask_for_changes(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
+    pub async fn ask_for_changes(
+        &self,
+        ticket_id: Uuid,
+        body: &str,
+    ) -> Result<StartOutcome, PlanError> {
+        let mut tx = self.pool.begin().await?;
+        let outcome = self.ask_for_changes_in(&mut tx, ticket_id, body).await?;
+        tx.commit().await?;
+        if matches!(outcome, StartOutcome::NoPlanner) {
+            self.note(ticket_id, NO_PM).await?;
+        }
+        Ok(outcome)
+    }
+
+    /// Record the change request, drop the approval and any split proposed with
+    /// the plan, and queue the rewrite, all on the caller's transaction. The
+    /// caller reads the outcome and decides whether to commit. A missing planner
+    /// posts no note here.
+    pub async fn ask_for_changes_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Uuid,
+        body: &str,
+    ) -> Result<StartOutcome, PlanError> {
+        // Two requests take turns, so the second sees the first one's run.
+        sqlx::query("SELECT id FROM tickets WHERE id = $1 FOR UPDATE")
+            .bind(ticket_id)
+            .execute(&mut **tx)
+            .await?;
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(ASK_ONLY_FROM_PLAN_REVIEW.into()));
@@ -845,37 +919,43 @@ impl<'a> PlanningService<'a> {
         sqlx::query("UPDATE ticket_plans SET change_request = $2 WHERE id = $1")
             .bind(plan.id)
             .bind(&appended)
-            .execute(self.pool)
+            .execute(&mut **tx)
             .await?;
         // A split proposed with the plan goes with it; the revision may propose another.
-        if ticket
+        let split_from_plan = ticket
             .ticket
             .pending_split_recommendation
             .as_ref()
             .and_then(|pending| pending.get("fromPlan"))
             .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            TicketService::new(self.pool)
-                .clear_pending_split_recommendation(ticket_id)
-                .await?;
-        }
-
+            .unwrap_or(false);
         sqlx::query(
             r#"
             UPDATE tickets
             SET approved_plan_id = NULL,
                 approved_plan_content_version = NULL,
+                pending_split_recommendation =
+                    CASE WHEN $2 THEN NULL ELSE pending_split_recommendation END,
                 updated_at = now()
             WHERE id = $1
             "#,
         )
         .bind(ticket_id)
-        .execute(self.pool)
+        .bind(split_from_plan)
+        .execute(&mut **tx)
         .await?;
 
-        self.start(ticket_id, None).await?;
-        Ok(())
+        if ticket.ticket.skip_planning {
+            return Ok(StartOutcome::Skipped);
+        }
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let Some(planner) = planner_for_ticket(&agents) else {
+            return Ok(StartOutcome::NoPlanner);
+        };
+        self.queue_plan_run(tx, ticket_id, planner.id, None).await
     }
 
     pub async fn approved_plan(&self, ticket_id: Uuid) -> Result<Option<ApprovedPlan>, PlanError> {
@@ -899,7 +979,7 @@ impl<'a> PlanningService<'a> {
         }))
     }
 
-    async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
+    pub async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
         let id = sqlx::query_scalar(
             r#"
             SELECT id FROM agent_runs
@@ -963,7 +1043,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, created_at
+                   change_request, design_set_id, design_option_id, created_at
             FROM ticket_plans
             WHERE ticket_id = $1
             ORDER BY revision DESC
@@ -980,7 +1060,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, created_at
+                   change_request, design_set_id, design_option_id, created_at
             FROM ticket_plans
             WHERE id = $1
             "#,
@@ -1028,12 +1108,19 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
         body: row.get("body"),
         content_version: row.get("content_version"),
         change_request: row.get("change_request"),
+        design_set_id: row.get("design_set_id"),
+        design_option_id: row.get("design_option_id"),
         created_at: row.get("created_at"),
     }
 }
 
+/// Notes are joined by a blank line. A note identical to the last one is not
+/// repeated, so Try again after a failed rewrite doesn't list it twice.
 fn append_change_request(existing: Option<&str>, added: &str) -> String {
     match existing.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(prev) if prev == added || prev.ends_with(&format!("\n\n{added}")) => {
+            prev.to_string()
+        }
         Some(prev) => format!("{prev}\n\n{added}"),
         None => added.to_string(),
     }
@@ -1084,6 +1171,26 @@ fn is_tech_lead_agent(agent: &Agent) -> bool {
 mod tests {
     use super::*;
     use time::OffsetDateTime;
+
+    #[test]
+    fn append_change_request_skips_a_note_identical_to_the_last() {
+        assert_eq!(append_change_request(None, "Use B."), "Use B.");
+        assert_eq!(append_change_request(Some("Use B."), "Use B."), "Use B.");
+        assert_eq!(
+            append_change_request(Some("Use A.\n\nUse B."), "Use B."),
+            "Use A.\n\nUse B."
+        );
+        // Only the last note counts: going back to an earlier one is a new request.
+        assert_eq!(
+            append_change_request(Some("Use A.\n\nUse B."), "Use A."),
+            "Use A.\n\nUse B.\n\nUse A."
+        );
+        // A note that merely ends the same way is a different note.
+        assert_eq!(
+            append_change_request(Some("Do not Use B."), "Use B."),
+            "Do not Use B.\n\nUse B."
+        );
+    }
 
     fn agent(id: u128, role: &str, key: &str, enabled: bool, created_secs: i64) -> Agent {
         Agent {

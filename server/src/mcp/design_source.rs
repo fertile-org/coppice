@@ -90,9 +90,11 @@ fn description(name: &str) -> &'static str {
             "Create a design set and return its id and absolute folder under artifacts."
         }
         "design__write" => "Write a utf-8 file under that design set's folder.",
-        "design__publish" => "Publish 2 to 4 HTML options for a design set on this run.",
+        "design__publish" => {
+            "Publish 2 to 4 HTML options for a design set on this run, marking the one you recommend."
+        }
         "design__list" => {
-            "List published design sets for this ticket or chat, newest first, with the chosen option."
+            "List published design sets for this ticket or chat, newest first, with the chosen, recommended and selected option."
         }
         _ => "",
     }
@@ -112,6 +114,7 @@ fn input_schema(name: &str) -> Value {
         "design__publish" => object(
             json!({
                 "setId": { "type": "string" },
+                "recommendedOptionId": { "type": "string" },
                 "options": {
                     "type": "array",
                     "items": {
@@ -125,7 +128,7 @@ fn input_schema(name: &str) -> Value {
                     },
                 },
             }),
-            &["setId", "options"],
+            &["setId", "options", "recommendedOptionId"],
         ),
         _ => object(json!({}), &[]),
     }

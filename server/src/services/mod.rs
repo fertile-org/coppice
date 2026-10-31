@@ -19,6 +19,7 @@ pub mod connector_probe_service;
 pub mod context_builder;
 pub mod criteria_results;
 pub mod context_budget;
+pub mod design_choice;
 pub mod design_service;
 pub mod job_service;
 pub mod knowledge_compaction_service;

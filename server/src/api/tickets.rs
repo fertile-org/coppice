@@ -922,7 +922,7 @@ async fn update_ticket(
     Ok(Json(response))
 }
 
-enum UpdateStatusError {
+pub(super) enum UpdateStatusError {
     Status(StatusCode),
     Message(StatusCode, String),
 }
@@ -1132,7 +1132,9 @@ async fn verify_parent(
     Ok(Json(ticket_to_response(ticket)))
 }
 
-fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateStatusError {
+pub(super) fn map_plan_error(
+    err: crate::services::planning_service::PlanError,
+) -> UpdateStatusError {
     match err {
         crate::services::planning_service::PlanError::Validation(message) => {
             UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
@@ -1634,7 +1636,7 @@ async fn final_approve(
     Ok(Json(ticket_to_response(updated)))
 }
 
-async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
+pub(super) async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
     if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
         publish_ticket_and_runs(state, pool, &ticket).await;
     }

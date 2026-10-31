@@ -57,6 +57,19 @@ pub const WORK_NOT_STARTED: &str =
 pub const PLAN_CHANGES_DISCARDED: &str =
     "The plan run changed some files. Coppice discarded them, and your ticket's code is unchanged.";
 
+/// Choosing a design after the plan was approved.
+pub const PLAN_DESIGN_FINAL: &str =
+    "The plan is approved, so this design is final. To change it, add a comment on the ticket.";
+
+/// Choosing from a set that newer options replaced.
+pub const DESIGN_SUPERSEDED: &str =
+    "Newer design options replaced these. Open the latest ones to choose.";
+
+/// Change request recorded when a different design is chosen in Plan Review.
+pub fn plan_design_change_note(label: &str, display_title: &str) -> String {
+    format!("Update the plan to use design option {label}: {display_title}.")
+}
+
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
 pub const STEPS_HEADING: &str = "### Steps";
@@ -80,7 +93,10 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 
 /// Added when the agent has the design skill. Guidance only: Plan Review does
 /// not wait for a choice, and a person can ask for plan changes after picking.
-pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, then write the plan around the option you recommend and say which one it is. If you already published options, honor the one the human chose. Skip this when the ticket has no visible change.";
+pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. Skip this when the ticket has no visible change.";
+
+/// Added to work runs when the agent has the design skill.
+pub const WORK_DESIGN_INSTRUCTION: &str = "If `ticket_get` returns `selectedDesign`, build that option. Read the HTML at its `path` for the layout when you can; otherwise follow its title and the plan.";
 
 /// A person reviews the plan at Plan Review, so it has to fit on one screen.
 /// Detail belongs to the Tech Lead and the implementer, not the plan.
@@ -401,7 +417,7 @@ pub fn approved_plan_section_body(plan_comment: &str) -> String {
 /// Heading a revised plan opens with, one line per change request.
 pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
 
-pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. Then write the full plan in the format above.";
+pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. If requests conflict, the later one wins; say so on the earlier one's line. The design to use is `selectedDesign` in `ticket_get`, whichever option the requests name. Then write the full plan in the format above.";
 
 /// A revision run: the plan it replaces and every change request on this
 /// ticket's plans, oldest first. The last one is the newest.
@@ -635,6 +651,28 @@ mod tests {
         assert!(previous < first && first < second, "{text}");
         assert!(text.contains("- [ ] Second version"));
         assert!(text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_revision_says_the_later_request_wins_and_where_the_design_is() {
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n",
+            requests: vec![
+                "Update the plan to use design option B: Wide.",
+                "Update the plan to use design option A: Quiet.",
+            ],
+        };
+        let text = plan_instructions(Some(&revision));
+        assert!(text.contains("If requests conflict, the later one wins"), "{text}");
+        assert!(text.contains("`selectedDesign` in `ticket_get`"), "{text}");
+    }
+
+    #[test]
+    fn design_change_note_names_the_option_by_label() {
+        assert_eq!(
+            plan_design_change_note("B", "Full-width button with Show all"),
+            "Update the plan to use design option B: Full-width button with Show all."
+        );
     }
 
     #[test]

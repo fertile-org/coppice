@@ -5,6 +5,7 @@ use coppice_server::copy::plan::{
     NO_PM, NO_TECH_LEAD, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_CHANGES_DISCARDED,
     PLAN_REQUIRED, PLAN_STALE, READY_REQUIRES_PLAN,
 };
+use coppice_server::services::design_service::{CreateScope, DesignOption, DesignService};
 use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::worktree_service::compute_paths;
 use std::path::{Path, PathBuf};
@@ -1577,4 +1578,109 @@ async fn a_second_ask_after_a_failed_revision_appends_on_that_revision() {
         shown["pendingPlan"]["changeRequests"],
         serde_json::json!(["Use Postgres.\n\nAnd keep the public API."])
     );
+}
+
+async fn queued_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> (Uuid, Uuid) {
+    sqlx::query_as(
+        r#"
+        SELECT id, agent_id FROM agent_runs
+        WHERE ticket_id = $1 AND job_type = 'plan_ticket' AND status IN ('queued', 'running')
+        ORDER BY created_at DESC LIMIT 1
+        "#,
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .expect("plan run")
+}
+
+#[tokio::test]
+async fn approve_is_refused_while_a_plan_run_is_active() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
+
+    let approve = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/approve-plan"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(approve.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(approve).await, PLAN_ALREADY_RUNNING);
+    let approved: Option<Uuid> =
+        sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
+            .bind(ticket)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(approved, None);
+}
+
+#[tokio::test]
+async fn inserted_plan_records_the_selected_design() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    ask_for_changes(&app, &ticket_id, "Show me options.", &cookie, &csrf).await;
+    let (run_id, agent_id) = queued_plan_run(pool, ticket).await;
+
+    let svc = DesignService::new(pool, PathBuf::from(&state.config.storage.artifacts_dir));
+    let created = svc
+        .create(
+            "Home",
+            CreateScope {
+                ticket_id: Some(ticket),
+                chat_session_id: None,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    for entry in ["a/index.html", "b/index.html"] {
+        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
+            .await
+            .expect("write");
+    }
+    let options = ["a", "b"]
+        .map(|id| DesignOption {
+            id: id.into(),
+            title: id.to_uppercase(),
+            entry: format!("{id}/index.html"),
+        })
+        .to_vec();
+    svc.publish(created.id, run_id, options, "b")
+        .await
+        .expect("publish");
+
+    planning
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id))
+        .await
+        .expect("insert plan");
+    let plan = planning.latest_plan(ticket).await.unwrap().expect("plan");
+    assert_eq!(plan.design_set_id, Some(created.id));
+    assert_eq!(plan.design_option_id.as_deref(), Some("b"));
 }

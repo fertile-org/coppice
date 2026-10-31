@@ -33,6 +33,9 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-runs', 'ticket-123'],
     });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['designs', 'ticket', 'ticket-123'],
+    });
   });
 
   it('invalidates agent runs on agent_run.started', async () => {
@@ -54,6 +57,9 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-runs', 'ticket-456'],
     });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['designs', 'ticket', 'ticket-456'],
+    });
   });
 
   it('refreshes the ticket when a run finishes so hasActiveRun clears', async () => {
@@ -73,6 +79,9 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['agent-runs', 'ticket-789'],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-789'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['designs', 'ticket', 'ticket-789'],
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
   });
 
@@ -83,7 +92,14 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).not.toHaveBeenCalledWith();
     const keys = invalidateSpy.mock.calls.map(([arg]) => (arg as { queryKey: unknown[] }).queryKey);
     expect(keys).toEqual(
-      expect.arrayContaining([['tickets'], ['ticket'], ['agent-runs'], ['comments'], ['notifications']]),
+      expect.arrayContaining([
+        ['tickets'],
+        ['ticket'],
+        ['agent-runs'],
+        ['comments'],
+        ['designs'],
+        ['notifications'],
+      ]),
     );
     for (const unrelated of [['agents'], ['knowledge'], ['plugins'], ['logs'], ['chat-messages']]) {
       expect(keys).not.toContainEqual(unrelated);

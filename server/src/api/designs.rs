@@ -1,7 +1,12 @@
 use crate::api::auth::{pool_from_state, AuthUser};
+use crate::api::tickets::{map_plan_error, publish_ticket_state, UpdateStatusError};
 use crate::services::chat_service::{ChatError, ChatService};
+use crate::services::design_choice::{
+    choice_state, choose_design, ChoiceState, DesignChoiceError,
+};
 use crate::services::design_service::{
-    ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord, DesignSetSummary,
+    chosen_option, ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord,
+    DesignSetSummary,
 };
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
@@ -30,14 +35,46 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/designs/{set_id}/files/{*path}", get(get_file))
 }
 
+/// A stored option plus the label and title people see.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesignOptionResponse {
+    id: String,
+    title: String,
+    entry: String,
+    label: String,
+    display_title: String,
+}
+
+fn option_responses(options: Vec<DesignOption>) -> Vec<DesignOptionResponse> {
+    (0..options.len())
+        .map(|index| {
+            let shown = chosen_option(&options, index);
+            DesignOptionResponse {
+                id: shown.id,
+                title: shown.title,
+                entry: options[index].entry.clone(),
+                label: shown.label,
+                display_title: shown.display_title,
+            }
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesignSetResponse {
     id: Uuid,
     title: String,
     run_id: Uuid,
-    options: Vec<DesignOption>,
+    options: Vec<DesignOptionResponse>,
     chosen: Option<ChosenOption>,
+    recommended: Option<ChosenOption>,
+    selected: Option<ChosenOption>,
+    superseded: bool,
+    from_plan_run: bool,
+    inherited: bool,
+    choice: ChoiceState,
 }
 
 #[derive(Deserialize)]
@@ -50,14 +87,42 @@ fn artifacts(state: &AppState) -> PathBuf {
     PathBuf::from(&state.config.storage.artifacts_dir)
 }
 
-fn to_response(set: DesignSetSummary) -> DesignSetResponse {
-    DesignSetResponse {
+async fn to_response(
+    pool: &sqlx::PgPool,
+    set: DesignSetSummary,
+    ticket_id: Option<Uuid>,
+) -> Result<DesignSetResponse, StatusCode> {
+    let choice = choice_state(pool, &set, ticket_id, set.inherited)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "design choice state failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(DesignSetResponse {
         id: set.id,
         title: set.title,
         run_id: set.run_id,
-        options: set.options,
+        options: option_responses(set.options),
         chosen: set.chosen,
+        recommended: set.recommended,
+        selected: set.selected,
+        superseded: set.superseded,
+        from_plan_run: set.from_plan_run,
+        inherited: set.inherited,
+        choice,
+    })
+}
+
+async fn to_responses(
+    pool: &sqlx::PgPool,
+    sets: Vec<DesignSetSummary>,
+    ticket_id: Option<Uuid>,
+) -> Result<Vec<DesignSetResponse>, StatusCode> {
+    let mut responses = Vec::with_capacity(sets.len());
+    for set in sets {
+        responses.push(to_response(pool, set, ticket_id).await?);
     }
+    Ok(responses)
 }
 
 fn map_design(err: DesignError) -> StatusCode {
@@ -109,7 +174,7 @@ async fn list_for_ticket(
         .list_for_ticket(ticket_id)
         .await
         .map_err(map_design)?;
-    Ok(Json(sets.into_iter().map(to_response).collect()))
+    Ok(Json(to_responses(pool, sets, Some(ticket_id)).await?))
 }
 
 async fn list_for_chat(
@@ -123,7 +188,7 @@ async fn list_for_chat(
         .list_for_chat(session_id)
         .await
         .map_err(map_design)?;
-    Ok(Json(sets.into_iter().map(to_response).collect()))
+    Ok(Json(to_responses(pool, sets, None).await?))
 }
 
 async fn open_published(
@@ -154,7 +219,9 @@ async fn get_set(
     let pool = pool_from_state(&state)?;
     let svc = DesignService::new(pool, artifacts(&state));
     let record = open_published(&svc, pool, user.id, set_id).await?;
-    Ok(Json(to_response(record.summary)))
+    Ok(Json(
+        to_response(pool, record.summary, record.ticket_id).await?,
+    ))
 }
 
 async fn choose(
@@ -162,13 +229,24 @@ async fn choose(
     AuthUser { user, .. }: AuthUser,
     Path(set_id): Path<Uuid>,
     Json(body): Json<ChooseBody>,
-) -> Result<StatusCode, StatusCode> {
-    let pool = pool_from_state(&state)?;
-    let svc = DesignService::new(pool, artifacts(&state));
-    open_published(&svc, pool, user.id, set_id).await?;
-    svc.choose(set_id, &body.option_id, user.id)
+) -> Result<StatusCode, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    let artifacts = artifacts(&state);
+    let svc = DesignService::new(pool, &artifacts);
+    let record = open_published(&svc, pool, user.id, set_id)
         .await
-        .map_err(map_design)?;
+        .map_err(UpdateStatusError::Status)?;
+    choose_design(pool, &artifacts, set_id, &body.option_id, user.id)
+        .await
+        .map_err(|err| match err {
+            DesignChoiceError::Design(err) => UpdateStatusError::Status(map_design(err)),
+            DesignChoiceError::Plan(err) => map_plan_error(err),
+        })?;
+    // The pick is committed, so publishing can no longer fail the request. Save-only
+    // picks publish too: `ticket.updated` is what refreshes other open popups.
+    if let Some(ticket_id) = record.ticket_id {
+        publish_ticket_state(&state, pool, ticket_id).await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
