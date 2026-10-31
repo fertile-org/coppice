@@ -77,11 +77,14 @@ export function useBoardRename(
       setErrorState(null);
       return;
     }
-    const pending = rename.mutateAsync(trimmed).finally(() => {
-      if (inFlight.current?.boardId === boardId) {
-        inFlight.current = null;
-      }
-    });
+    const pending = rename
+      .mutateAsync(trimmed)
+      .then(() => undefined)
+      .finally(() => {
+        if (inFlight.current?.boardId === boardId) {
+          inFlight.current = null;
+        }
+      });
     inFlight.current = { boardId, promise: pending };
     return pending;
   }
