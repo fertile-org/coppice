@@ -3721,3 +3721,241 @@ async fn knowledge_freshness_reads_unknown_beyond_the_citation_cap() {
     let (state, _) = freshness_of(&fx, rev).await;
     assert_eq!(state, "unknown");
 }
+
+// ---- Task 8: knowledge_flag ----
+
+async fn flag_rows(pool: &PgPool, item: Uuid) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT verdict, reason FROM knowledge_feedback WHERE item_id = $1 ORDER BY created_at",
+    )
+    .bind(item)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn knowledge_flag_outdated_shows_on_item_and_does_not_retire_it() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let rev = seed_mulberry(&fx).await;
+    let item = item_of(&fx.pool, rev).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "outdated"}),
+    )
+    .await;
+    assert!(is_error, "reason is required: {text}");
+    let (is_error, _) = call_tool(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "wrong", "reason": "x".repeat(1001)}),
+    )
+    .await;
+    assert!(is_error);
+    let (is_error, _) = call_tool(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "bogus", "reason": "x"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(flag_rows(&fx.pool, item).await.is_empty());
+
+    let out = call_tool_json(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "outdated", "reason": "The command moved to make test-unit."}),
+    )
+    .await;
+    assert_eq!(out["recorded"], true, "{out}");
+
+    let search =
+        call_tool_json(&url, &token, "knowledge_search", json!({"query": "mulberry"})).await;
+    assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
+    let status: String = sqlx::query_scalar("SELECT status FROM knowledge_items WHERE id = $1")
+        .bind(item)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "approved");
+    let view = api(
+        &fx.app,
+        "GET",
+        &format!("/api/knowledge/{item}"),
+        Value::Null,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    assert_eq!(view["openFlagCount"], 1, "{view}");
+}
+
+#[tokio::test]
+async fn knowledge_flag_repeated_in_a_run_updates_one_row() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let rev = seed_mulberry(&fx).await;
+    let item = item_of(&fx.pool, rev).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    call_tool_json(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "wrong", "reason": "first"}),
+    )
+    .await;
+    call_tool_json(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "outdated", "reason": "second"}),
+    )
+    .await;
+    assert_eq!(
+        flag_rows(&fx.pool, item).await,
+        vec![("outdated".to_string(), "second".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn knowledge_flag_out_of_scope_is_same_as_unknown() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let other_board = Uuid::parse_str(&create_other_board(&fx).await).unwrap();
+    let hidden = seed_knowledge(&fx.pool, other_board, "Elsewhere", "approved").await;
+    let hidden = item_of(&fx.pool, hidden).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let (_, unknown) = call_tool(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": Uuid::new_v4(), "verdict": "confirmed"}),
+    )
+    .await;
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": hidden, "verdict": "confirmed"}),
+    )
+    .await;
+    assert!(is_error);
+    assert_eq!(text, unknown);
+    assert!(flag_rows(&fx.pool, hidden).await.is_empty());
+}
+
+#[tokio::test]
+async fn knowledge_flag_confirmed_reanchors_citations_to_head() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let dir = fx._git_dir.path().to_path_buf();
+    let repo_id = fixture_repo_id(&fx).await;
+    let rev = seed_mulberry(&fx).await;
+    let item = item_of(&fx.pool, rev).await;
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    git_in(&dir, &["add", "a.txt"]);
+    git_in(&dir, &["commit", "-m", "add a"]);
+    let old = git_in(&dir, &["rev-parse", "HEAD"]);
+    cite(&fx.pool, rev, repo_id, "a.txt", Some(&old)).await;
+    std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+    git_in(&dir, &["commit", "-am", "change a"]);
+    let head = git_in(&dir, &["rev-parse", "HEAD"]);
+    let (state, _) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "changed");
+
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    call_tool_json(
+        &url,
+        &token,
+        "knowledge_flag",
+        json!({"itemId": item, "verdict": "confirmed"}),
+    )
+    .await;
+    let (state, _) = freshness_of(&fx, rev).await;
+    assert_eq!(state, "current");
+    let sha: String =
+        sqlx::query_scalar("SELECT commit_sha FROM knowledge_citations WHERE revision_id = $1")
+            .bind(rev)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(sha, head);
+
+    let fresh = api(
+        &fx.app,
+        "GET",
+        &format!("/api/knowledge/{item}/freshness"),
+        Value::Null,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    assert_eq!(fresh["state"], "current", "{fresh}");
+    assert_eq!(fresh["citations"][0]["path"], "a.txt");
+    assert_eq!(fresh["citations"][0]["commitSha"], head.as_str());
+    assert!(fresh["citations"][0]["repoName"].is_string(), "{fresh}");
+}
+
+#[tokio::test]
+async fn knowledge_flag_not_listed_in_chat_profiles() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    for profile in [
+        ContextProfile::HumanChat,
+        ContextProfile::Conversation,
+        ContextProfile::KnowledgeCompaction,
+    ] {
+        let token = common::mint_test_token(&fx.state, fx.scope.run_id, profile).await;
+        let res = rpc(&url, &token, "tools/list", json!({})).await;
+        let names: Vec<&str> = res["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(!names.contains(&"knowledge_flag"), "{profile:?} {names:?}");
+    }
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let res = rpc(&url, &token, "tools/list", json!({})).await;
+    let flag = res["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "knowledge_flag")
+        .cloned()
+        .expect("listed for agent runs");
+    assert_eq!(flag["annotations"]["readOnlyHint"], false);
+}

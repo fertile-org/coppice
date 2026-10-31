@@ -75,6 +75,7 @@ export const knowledgeItemSchema = z.object({
   compactionAgentName: z.string().nullable(),
   sourceTicketIds: z.array(z.string().uuid()),
   usageCount: z.number().int().nonnegative(),
+  openFlagCount: z.number().int().nonnegative(),
   lastUsedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -117,6 +118,25 @@ export const similarNeighborSchema = z.object({
 
 export const similarListSchema = z.object({
   items: z.array(similarNeighborSchema),
+});
+
+export const knowledgeFreshnessStateSchema = z.enum([
+  'current',
+  'changed',
+  'missing',
+  'unknown',
+  'uncited',
+]);
+
+export const knowledgeFreshnessSchema = z.object({
+  state: knowledgeFreshnessStateSchema,
+  citations: z.array(
+    z.object({
+      path: z.string(),
+      repoName: z.string().nullable(),
+      commitSha: z.string().nullable(),
+    }),
+  ),
 });
 
 export const compactionBatchSchema = z.object({
@@ -173,6 +193,7 @@ export type KnowledgeItem = z.infer<typeof knowledgeItemSchema>;
 export type KnowledgePage = z.infer<typeof knowledgePageSchema>;
 export type KnowledgeUsage = z.infer<typeof knowledgeUsageSchema>;
 export type SimilarNeighbor = z.infer<typeof similarNeighborSchema>;
+export type KnowledgeFreshness = z.infer<typeof knowledgeFreshnessSchema>;
 export type SimilarList = z.infer<typeof similarListSchema>;
 export type CompactionBatch = z.infer<typeof compactionBatchSchema>;
 export type CompactionState = z.infer<typeof compactionStateSchema>;

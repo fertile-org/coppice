@@ -501,6 +501,7 @@ mod tests {
             "ticket_search",
             "knowledge_search",
             "knowledge_get",
+            "knowledge_flag",
             "comment_post",
             "result_submit",
             "skill_list",
@@ -509,7 +510,7 @@ mod tests {
         let chat: Vec<&str> = full
             .iter()
             .copied()
-            .filter(|n| *n != "comment_post")
+            .filter(|n| *n != "comment_post" && *n != "knowledge_flag")
             .collect();
         let mut conversation = chat.clone();
         conversation.insert(conversation.len() - 1, "open_repo");

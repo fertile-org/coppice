@@ -1,4 +1,5 @@
 use crate::domain::context_profile::ContextProfile;
+use crate::knowledge::citations::resolve_anchors;
 use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::retrieval::{fetch_visible, retrieve, RetrievalScope};
 use crate::mcp::tools::{ToolCtx, ToolError};
@@ -13,6 +14,7 @@ const MAX_LIMIT: usize = 20;
 const MAX_QUERY_CHARS: usize = 2_000;
 const SNIPPET_CHARS: usize = 200;
 const MAX_GET_IDS: usize = 5;
+const MAX_FLAG_REASON_CHARS: usize = 1_000;
 const VERIFY_NOTE: &str = "Cited code changed since this was written. Check it before relying on it, then call knowledge_flag.";
 
 fn parse_limit(args: &Value) -> Result<usize, ToolError> {
@@ -142,6 +144,121 @@ pub async fn call_knowledge_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         })
         .collect();
     Ok(response(items))
+}
+
+/// Records an agent's verdict on one visible knowledge entry. A flag never
+/// retires the entry: reviewers see it in the Inbox. One row per run and
+/// revision; a repeat call replaces the earlier verdict. `confirmed` moves the
+/// revision's citations to the current head of each repo, for paths that
+/// still exist there.
+pub async fn call_knowledge_flag(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
+    let item_id = args
+        .get("itemId")
+        .and_then(Value::as_str)
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or_else(|| ToolError::InvalidArgs("itemId must be a knowledge item id".into()))?;
+    let verdict = args
+        .get("verdict")
+        .and_then(Value::as_str)
+        .filter(|v| matches!(*v, "outdated" | "wrong" | "confirmed"))
+        .ok_or_else(|| {
+            ToolError::InvalidArgs("verdict must be outdated, wrong or confirmed".into())
+        })?;
+    let reason = args
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if reason.chars().count() > MAX_FLAG_REASON_CHARS {
+        return Err(ToolError::InvalidArgs(format!(
+            "reason must be at most {MAX_FLAG_REASON_CHARS} characters"
+        )));
+    }
+    if verdict != "confirmed" && reason.is_empty() {
+        return Err(ToolError::InvalidArgs(format!(
+            "reason is required when the verdict is {verdict}"
+        )));
+    }
+
+    let not_found = || ToolError::NotFound("knowledge item not found".into());
+    if !ctx.state.config.knowledge.enabled {
+        return Err(not_found());
+    }
+    let Some(scope) = tool_scope(ctx).await? else {
+        return Err(not_found());
+    };
+    let found = fetch_visible(
+        ctx.pool,
+        &scope,
+        ctx.scope.agent_id,
+        &[item_id],
+        &ctx.state.config.knowledge.retrieval,
+    )
+    .await?;
+    let Some(entry) = found.first() else {
+        return Err(not_found());
+    };
+    let revision_id = entry.revision_id;
+
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, agent_id, verdict, reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (run_id, revision_id)
+        DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason, created_at = now()
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(item_id)
+    .bind(revision_id)
+    .bind(ctx.scope.run_id)
+    .bind(ctx.scope.agent_id)
+    .bind(verdict)
+    .bind(reason)
+    .execute(ctx.pool)
+    .await?;
+
+    if verdict == "confirmed" {
+        reanchor_citations(ctx.pool, revision_id).await?;
+    }
+    Ok(json!({ "recorded": true, "itemId": item_id, "verdict": verdict }))
+}
+
+/// Moves each citation of the revision to its repo's current head. A path that
+/// no longer exists there keeps its old anchor and so keeps reading as missing.
+async fn reanchor_citations(pool: &sqlx::PgPool, revision_id: Uuid) -> Result<(), ToolError> {
+    let rows: Vec<(Option<Uuid>, String)> = sqlx::query_as(
+        "SELECT repo_id, path FROM knowledge_citations WHERE revision_id = $1 ORDER BY path",
+    )
+    .bind(revision_id)
+    .fetch_all(pool)
+    .await?;
+    let mut by_repo: Vec<(Uuid, Vec<String>)> = Vec::new();
+    for (repo_id, path) in rows {
+        let Some(repo_id) = repo_id else { continue };
+        match by_repo.iter_mut().find(|(id, _)| *id == repo_id) {
+            Some((_, paths)) => paths.push(path),
+            None => by_repo.push((repo_id, vec![path])),
+        }
+    }
+    for (repo_id, paths) in by_repo {
+        for anchor in resolve_anchors(pool, Some(repo_id), &paths).await {
+            let Some(sha) = anchor.commit_sha else {
+                continue;
+            };
+            sqlx::query(
+                "UPDATE knowledge_citations SET commit_sha = $4 \
+                 WHERE revision_id = $1 AND repo_id = $2 AND path = $3",
+            )
+            .bind(revision_id)
+            .bind(repo_id)
+            .bind(&anchor.path)
+            .bind(sha)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 fn parse_ids(args: &Value) -> Result<Vec<Uuid>, ToolError> {

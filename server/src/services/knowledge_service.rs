@@ -5,6 +5,7 @@ use crate::domain::knowledge::{
     validate_revision, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeStatus, KnowledgeType,
 };
+use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::retrieval::{
     find_similar_inbox, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
     INBOX_SIMILAR_MAX_LIMIT,
@@ -32,7 +33,9 @@ SELECT
         WHERE s.item_id = i.id ORDER BY s.ticket_id
     ) AS source_ticket_ids,
     (SELECT count(*) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS usage_count,
-    (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at
+    (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at,
+    (SELECT count(*) FROM knowledge_feedback f
+     WHERE f.revision_id = i.active_revision_id AND f.verdict IN ('outdated', 'wrong')) AS open_flag_count
 FROM knowledge_items i
 JOIN knowledge_revisions r ON r.id = i.current_revision_id
 LEFT JOIN knowledge_provenance provenance ON provenance.id = r.provenance_id
@@ -41,6 +44,19 @@ LEFT JOIN agents a ON a.id = r.agent_id
 LEFT JOIN knowledge_compaction_batches cb ON cb.id = i.compaction_batch_id
 LEFT JOIN agents ca ON ca.id = cb.agent_id
 "#;
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeCitationView {
+    pub path: String,
+    pub repo_name: Option<String>,
+    pub commit_sha: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeFreshness {
+    pub state: Freshness,
+    pub citations: Vec<KnowledgeCitationView>,
+}
 
 #[derive(Debug, Error)]
 pub enum KnowledgeError {
@@ -204,6 +220,43 @@ impl<'a> KnowledgeService<'a> {
             .await?
             .ok_or(KnowledgeError::NotFound)?;
         row_to_view(&row)
+    }
+
+    /// Freshness of the item's active revision (the current one when it has
+    /// none), with the citations behind it.
+    pub async fn freshness(&self, item_id: Uuid) -> Result<KnowledgeFreshness, KnowledgeError> {
+        let revision_id: Uuid = sqlx::query_scalar(
+            "SELECT COALESCE(active_revision_id, current_revision_id) FROM knowledge_items WHERE id = $1",
+        )
+        .bind(item_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(KnowledgeError::NotFound)?;
+        let state = freshness_for(self.pool, &[revision_id])
+            .await
+            .get(&revision_id)
+            .map_or(Freshness::Unknown, |report| report.state);
+        let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT c.path, repo.name, c.commit_sha
+            FROM knowledge_citations c
+            LEFT JOIN repos repo ON repo.id = c.repo_id
+            WHERE c.revision_id = $1
+            ORDER BY c.created_at, c.path
+            "#,
+        )
+        .bind(revision_id)
+        .fetch_all(self.pool)
+        .await?;
+        let citations = rows
+            .into_iter()
+            .map(|(path, repo_name, commit_sha)| KnowledgeCitationView {
+                path,
+                repo_name,
+                commit_sha,
+            })
+            .collect();
+        Ok(KnowledgeFreshness { state, citations })
     }
 
     /// Near-duplicate assist for pending inbox review via full-text match
@@ -925,6 +978,7 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, Knowled
         compaction_agent_name: row.try_get("compaction_agent_name")?,
         source_ticket_ids: row.try_get("source_ticket_ids")?,
         usage_count: row.try_get("usage_count")?,
+        open_flag_count: row.try_get("open_flag_count")?,
         last_used_at: row.try_get("last_used_at")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,

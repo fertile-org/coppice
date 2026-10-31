@@ -2781,3 +2781,56 @@ async fn full_run_context_lists_matching_titles_only() {
         .unwrap();
     assert_eq!(logged, 0);
 }
+
+#[tokio::test]
+async fn editing_an_item_resets_its_open_flag_count() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let created = create_candidate(&app, &board_id, &cookie, &csrf, "Flag me").await;
+    let item_id = created["id"].as_str().unwrap();
+    let approved = approve_item(&app, item_id, 1, &cookie, &csrf).await;
+    let revision_id: Uuid = approved["activeRevisionId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    for (verdict, run) in [("outdated", Uuid::new_v4()), ("confirmed", Uuid::new_v4())] {
+        sqlx::query(
+            "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, verdict) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(item_id.parse::<Uuid>().unwrap())
+        .bind(revision_id)
+        .bind(run)
+        .bind(verdict)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let (status, view) = mutate(
+        &app,
+        "GET",
+        &format!("/api/knowledge/{item_id}"),
+        serde_json::Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["openFlagCount"], 1, "confirmed does not count");
+
+    let (status, edited) = mutate(
+        &app,
+        "PATCH",
+        &format!("/api/knowledge/{item_id}"),
+        serde_json::json!({"expectedVersion": approved["version"], "title": "Flag me, fixed"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edited["openFlagCount"], 0);
+}

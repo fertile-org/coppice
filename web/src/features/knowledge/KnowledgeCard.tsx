@@ -11,6 +11,7 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { KnowledgeItem, SimilarNeighbor } from '../../lib/schemas/knowledge';
+import { FlaggedByAgents, KnowledgeFreshness } from './KnowledgeFreshness';
 import {
   TYPE_LABELS,
   duplicateRejectReason,
@@ -260,6 +261,7 @@ export function KnowledgeCard({
             <span className="font-body text-xs text-text-muted">
               {humanize(item.confidence)} confidence
             </span>
+            <FlaggedByAgents count={item.openFlagCount} />
           </div>
           <h2 className="mt-2 font-display text-lg font-semibold text-bark-900">
             {item.title}
@@ -267,6 +269,8 @@ export function KnowledgeCard({
           <p className="mt-1.5 whitespace-pre-wrap font-body text-sm leading-relaxed text-text-secondary">
             {item.content}
           </p>
+
+          <KnowledgeFreshness itemId={item.id} />
 
           {item.sourceTicketIds.length > 0 && (
             <div

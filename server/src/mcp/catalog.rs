@@ -13,13 +13,14 @@ pub enum CoreTool {
     TicketSearch,
     KnowledgeSearch,
     KnowledgeGet,
+    KnowledgeFlag,
     CommentPost,
     ResultSubmit,
     OpenRepo,
 }
 
 impl CoreTool {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::BoardList,
         Self::BoardAgents,
         Self::TicketGet,
@@ -28,6 +29,7 @@ impl CoreTool {
         Self::TicketSearch,
         Self::KnowledgeSearch,
         Self::KnowledgeGet,
+        Self::KnowledgeFlag,
         Self::CommentPost,
         Self::ResultSubmit,
         Self::OpenRepo,
@@ -43,6 +45,7 @@ impl CoreTool {
             Self::TicketSearch => "ticket_search",
             Self::KnowledgeSearch => "knowledge_search",
             Self::KnowledgeGet => "knowledge_get",
+            Self::KnowledgeFlag => "knowledge_flag",
             Self::CommentPost => "comment_post",
             Self::ResultSubmit => "result_submit",
             Self::OpenRepo => "open_repo",
@@ -134,6 +137,18 @@ impl CoreTool {
                     &["ids"],
                 ),
                 true,
+            ),
+            Self::KnowledgeFlag => (
+                "Report what you found when you checked a knowledge entry against the code. Use outdated or wrong (with a reason) when it no longer matches; confirmed when it still holds. Flags are shown to reviewers. They do not remove the entry.",
+                object(
+                    json!({
+                        "itemId": { "type": "string", "description": "Knowledge item id from knowledge_search." },
+                        "verdict": { "type": "string", "enum": ["outdated", "wrong", "confirmed"] },
+                        "reason": { "type": "string", "maxLength": 1000, "description": "Required for outdated and wrong: what differs and where." },
+                    }),
+                    &["itemId", "verdict"],
+                ),
+                false,
             ),
             Self::CommentPost => (
                 "Post a markdown note on the current ticket as this agent. Limited per run.",
@@ -324,6 +339,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketSearch,
             KnowledgeSearch,
             KnowledgeGet,
+            KnowledgeFlag,
             CommentPost,
             ResultSubmit,
         ],
@@ -381,6 +397,7 @@ mod tests {
             "ticket_search",
             "knowledge_search",
             "knowledge_get",
+            "knowledge_flag",
             "comment_post",
             "result_submit",
         ];
@@ -390,7 +407,7 @@ mod tests {
         let no_comment: Vec<&str> = all
             .iter()
             .copied()
-            .filter(|n| *n != "comment_post")
+            .filter(|n| *n != "comment_post" && *n != "knowledge_flag")
             .collect();
         assert_eq!(names(ContextProfile::HumanChat), no_comment);
         let mut conversation = no_comment.clone();

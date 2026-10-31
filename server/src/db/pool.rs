@@ -86,6 +86,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             chat_messages,
             chat_sessions,
             knowledge_usage_logs,
+            knowledge_feedback,
             knowledge_item_sources,
             knowledge_compaction_batch_tickets,
             knowledge_compaction_queue,

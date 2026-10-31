@@ -6,11 +6,13 @@ import {
 } from '@tanstack/react-query';
 import { ApiError, apiFetch } from '../../lib/api';
 import {
+  knowledgeFreshnessSchema,
   knowledgeItemSchema,
   knowledgePageSchema,
   knowledgeUsageListSchema,
   similarListSchema,
   type KnowledgeConfidence,
+  type KnowledgeFreshness,
   type KnowledgeItem,
   type KnowledgePage,
   type KnowledgeScope,
@@ -106,6 +108,21 @@ export function useSimilarKnowledge(itemId: string, enabled: boolean) {
     queryKey: similarKnowledgeQueryKey(itemId),
     queryFn: () => fetchSimilarKnowledge(itemId),
     enabled,
+  });
+}
+
+async function fetchKnowledgeFreshness(
+  itemId: string,
+): Promise<KnowledgeFreshness> {
+  const response = await apiFetch(`/api/knowledge/${itemId}/freshness`);
+  return knowledgeFreshnessSchema.parse(await response.json());
+}
+
+/** Runs git on the server, so call it only once the reviewer asks to see it. */
+export function useKnowledgeFreshness(itemId: string) {
+  return useQuery({
+    queryKey: [...KNOWLEDGE_QUERY_KEY, 'freshness', itemId],
+    queryFn: () => fetchKnowledgeFreshness(itemId),
   });
 }
 

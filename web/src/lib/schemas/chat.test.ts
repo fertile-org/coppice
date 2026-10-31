@@ -67,6 +67,7 @@ const knowledgeItem = {
   compactionAgentName: null,
   sourceTicketIds: [],
   usageCount: 0,
+  openFlagCount: 0,
   lastUsedAt: null,
   createdAt: '2026-09-08T00:00:00Z',
   updatedAt: '2026-09-08T00:00:00Z',

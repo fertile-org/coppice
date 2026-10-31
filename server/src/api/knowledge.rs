@@ -18,6 +18,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use crate::knowledge::freshness::Freshness;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_knowledge).patch(edit_knowledge),
         )
         .route("/api/knowledge/{item_id}/similar", get(similar_knowledge))
+        .route("/api/knowledge/{item_id}/freshness", get(knowledge_freshness))
         .route("/api/knowledge/{item_id}/approve", post(approve_knowledge))
         .route("/api/knowledge/{item_id}/reject", post(reject_knowledge))
         .route(
@@ -220,6 +222,7 @@ pub(crate) struct KnowledgeResponse {
     compaction_agent_name: Option<String>,
     source_ticket_ids: Vec<Uuid>,
     usage_count: i64,
+    open_flag_count: i64,
     last_used_at: Option<String>,
     created_at: String,
     updated_at: String,
@@ -350,6 +353,7 @@ pub(crate) fn item_response(item: KnowledgeItemView) -> KnowledgeResponse {
         compaction_agent_name: item.compaction_agent_name,
         source_ticket_ids: item.source_ticket_ids,
         usage_count: item.usage_count,
+        open_flag_count: item.open_flag_count,
         last_used_at: format(item.last_used_at),
         created_at: item.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: item.updated_at.format(&Rfc3339).unwrap_or_default(),
@@ -392,6 +396,43 @@ async fn get_knowledge(
         .get(item_id)
         .await?;
     Ok(Json(item_response(item)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CitationResponse {
+    path: String,
+    repo_name: Option<String>,
+    commit_sha: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FreshnessResponse {
+    state: Freshness,
+    citations: Vec<CitationResponse>,
+}
+
+async fn knowledge_freshness(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<FreshnessResponse>, KnowledgeApiError> {
+    let report = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
+        .freshness(item_id)
+        .await?;
+    Ok(Json(FreshnessResponse {
+        state: report.state,
+        citations: report
+            .citations
+            .into_iter()
+            .map(|c| CitationResponse {
+                path: c.path,
+                repo_name: c.repo_name,
+                commit_sha: c.commit_sha,
+            })
+            .collect(),
+    }))
 }
 
 #[derive(Deserialize, Default)]

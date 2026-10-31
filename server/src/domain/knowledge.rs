@@ -109,6 +109,8 @@ pub struct KnowledgeItemView {
     pub compaction_agent_name: Option<String>,
     pub source_ticket_ids: Vec<Uuid>,
     pub usage_count: i64,
+    /// Outdated or wrong flags from agents on the active revision.
+    pub open_flag_count: i64,
     pub last_used_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
