@@ -263,6 +263,7 @@ describe('Done card accepted branch', () => {
               baseBranch: 'main',
               files: ['README.md', 'src/app.ts'],
               canAskAssignee: false,
+              agents: [],
               rereviewNote:
                 "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.",
             },
@@ -319,6 +320,14 @@ describe('Done card accepted branch', () => {
               files: ['README.md'],
               canAskAssignee: true,
               askLabel: 'Ask Ada to resolve',
+              defaultAgentId: '00000000-0000-0000-0000-0000000000aa',
+              agents: [
+                {
+                  id: '00000000-0000-0000-0000-0000000000aa',
+                  name: 'Ada',
+                  askLabel: 'Ask Ada to resolve',
+                },
+              ],
               rereviewNote:
                 "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.",
             },
@@ -357,12 +366,20 @@ describe('Done card accepted branch', () => {
             baseBranch: 'main',
             files: ['README.md'],
             operation: 'merge',
+            agentId: '00000000-0000-0000-0000-0000000000aa',
           }),
         }),
       );
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
-    expect(await screen.findByRole('button', { name: 'Merge…' })).toBeVisible();
+    expect(
+      await within(dialog).findByRole('heading', {
+        name: 'Ada is resolving the conflict',
+      }),
+    ).toBeVisible();
+    expect(dialog).toHaveTextContent(
+      'The ticket moved to In Progress and the run has started.',
+    );
     invalidateSpy.mockRestore();
   });
 

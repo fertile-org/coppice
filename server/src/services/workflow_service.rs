@@ -530,6 +530,7 @@ fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketSta
         (Backlog, role) if is_implementer(role) => Some(InReview),
         (Ready, role) if is_implementer(role) => Some(InReview),
         (InProgress, role) if is_implementer(role) => Some(InReview),
+        (InProgress, role) if is_tech_lead(role) => Some(InReview),
         (InReview, role) if is_implementer(role) => Some(WaitForFinalReview),
         (InReview, role) if is_reviewer(role) || is_tech_lead(role) => Some(InQa),
         (InQa, role) if is_qc(role) => Some(WaitForFinalReview),
@@ -1842,5 +1843,21 @@ mod tests {
         assert!(is_implementer("Researcher"));
         assert!(!is_implementer("PM"));
         assert!(!is_implementer("Reviewer"));
+    }
+
+    #[test]
+    fn tech_lead_resolve_from_in_progress_reaches_in_review() {
+        assert_eq!(
+            resolve_succeeded_gate(TicketStatus::InProgress, "Technical Lead"),
+            Some(TicketStatus::InReview)
+        );
+        assert_eq!(
+            resolve_succeeded_gate(TicketStatus::InProgress, "Backend Engineer"),
+            Some(TicketStatus::InReview)
+        );
+        assert_eq!(
+            resolve_succeeded_gate(TicketStatus::Ready, "Technical Lead"),
+            None
+        );
     }
 }

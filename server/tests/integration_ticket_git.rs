@@ -286,7 +286,7 @@ async fn rebase_branch_conflict_aborts_and_leaves_clean_worktree() {
     assert_eq!(body["conflict"]["canAskAssignee"], false);
     assert_eq!(
         body["conflict"]["unavailableReason"],
-        coppice_server::copy::conflict::NO_ASSIGNEE
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
     );
     assert!(body["conflict"]["askLabel"].is_null());
     assert_eq!(
@@ -425,14 +425,17 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
         .await
         .unwrap();
     let ticket: serde_json::Value = common::json_body(ticket).await;
-    assert_eq!(ticket["status"], "done", "a conflict leaves the ticket in Done");
+    assert_eq!(
+        ticket["status"], "done",
+        "a conflict leaves the ticket in Done"
+    );
     assert!(ticket["assigneeAgentId"].is_null());
     assert_eq!(ticket["humanReview"]["stale"], false);
     assert_eq!(ticket["humanReview"]["merged"], false);
     assert_eq!(body["conflict"]["canAskAssignee"], false);
     assert_eq!(
         body["conflict"]["unavailableReason"],
-        coppice_server::copy::conflict::NO_ASSIGNEE
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
     );
 
     let comments = app
@@ -450,6 +453,7 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
     let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
         "main",
         &["README.md".into()],
+        "Ada",
     );
     assert!(!comments
         .as_array()
@@ -600,8 +604,14 @@ async fn archiving_removes_the_worktree_and_the_ticket_branch() {
 
     archive(&app, ticket_id, &cookie, &csrf).await;
 
-    assert!(wait_until(|| !worktree.exists()).await, "worktree left behind");
-    assert!(wait_until(|| !branch_exists(&repo, ticket_id)).await, "branch left behind");
+    assert!(
+        wait_until(|| !worktree.exists()).await,
+        "worktree left behind"
+    );
+    assert!(
+        wait_until(|| !branch_exists(&repo, ticket_id)).await,
+        "branch left behind"
+    );
 }
 
 #[tokio::test]

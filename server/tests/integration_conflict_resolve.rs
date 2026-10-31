@@ -165,17 +165,75 @@ async fn list_runs(fx: &TicketGit) -> Vec<serde_json::Value> {
 }
 
 async fn post_resolve(fx: &TicketGit) -> axum::response::Response {
+    post_resolve_with(fx, None, None).await
+}
+
+async fn post_resolve_with(
+    fx: &TicketGit,
+    operation: Option<&str>,
+    agent_id: Option<&str>,
+) -> axum::response::Response {
+    let mut body = serde_json::json!({
+        "baseBranch": "main",
+        "files": ["README.md"],
+    });
+    if let Some(operation) = operation {
+        body["operation"] = serde_json::json!(operation);
+    }
+    if let Some(agent_id) = agent_id {
+        body["agentId"] = serde_json::json!(agent_id);
+    }
     fx.app
         .clone()
         .oneshot(common::json_request(
             "POST",
             &format!("/api/tickets/{}/resolve-conflict", fx.ticket_id),
-            r#"{"baseBranch":"main","files":["README.md"]}"#,
+            &body.to_string(),
             &fx.cookie,
             &fx.csrf,
         ))
         .await
         .unwrap()
+}
+
+async fn insert_run(
+    fx: &TicketGit,
+    agent_id: &str,
+    job_type: &str,
+    context_profile: &str,
+    created_offset_secs: i64,
+) {
+    let pool = fx.state.db.clone().expect("pool");
+    let created = time::OffsetDateTime::now_utc() + time::Duration::seconds(created_offset_secs);
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+            context_profile, created_at, started_at, ended_at
+        )
+        VALUES (
+            $1, $2, $3, $4, 'succeeded', 'permissive-default', $5, $6, $6, $6
+        )
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(uuid::Uuid::parse_str(&fx.ticket_id).unwrap())
+    .bind(uuid::Uuid::parse_str(agent_id).unwrap())
+    .bind(job_type)
+    .bind(context_profile)
+    .bind(created)
+    .execute(&pool)
+    .await
+    .expect("insert run");
+}
+
+fn offer_agent_ids(conflict: &serde_json::Value) -> Vec<String> {
+    conflict["conflict"]["agents"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|agent| agent["id"].as_str().map(str::to_string))
+        .collect()
 }
 
 async fn ticket_json(fx: &TicketGit) -> serde_json::Value {
@@ -229,6 +287,11 @@ async fn resolve_conflict_starts_one_run_and_ignores_a_second_request() {
         coppice_server::copy::conflict::REREVIEW_NOTE
     );
     assert!(conflict["conflict"]["unavailableReason"].is_null());
+    assert_eq!(conflict["conflict"]["defaultAgentId"], agent_id);
+    assert_eq!(
+        conflict["conflict"]["agents"][0]["askLabel"],
+        coppice_server::copy::conflict::ask_to_resolve_label("Ada")
+    );
     assert!(
         list_runs(&fx).await.is_empty(),
         "a conflict does not start a run"
@@ -306,15 +369,20 @@ async fn resolve_conflict_is_refused_without_an_assignee() {
     assert_eq!(conflict["conflict"]["canAskAssignee"], false);
     assert_eq!(
         conflict["conflict"]["unavailableReason"],
-        coppice_server::copy::conflict::NO_ASSIGNEE
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
     );
     assert!(conflict["conflict"]["askLabel"].is_null());
+    assert!(conflict["conflict"]["defaultAgentId"].is_null());
+    assert_eq!(conflict["conflict"]["agents"], serde_json::json!([]));
     assert!(list_runs(&fx).await.is_empty());
 
     let res = post_resolve(&fx).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = common::json_body(res).await;
-    assert_eq!(body["message"], coppice_server::copy::conflict::NO_ASSIGNEE);
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
+    );
     assert!(list_runs(&fx).await.is_empty());
 }
 
@@ -341,7 +409,14 @@ async fn resolve_conflict_is_refused_when_connector_is_not_ready() {
         conflict["conflict"]["unavailableReason"],
         coppice_server::copy::conflict::connector_not_ready_reason("Ada")
     );
-    assert!(conflict["conflict"]["askLabel"].is_null());
+    assert_eq!(
+        conflict["conflict"]["askLabel"],
+        coppice_server::copy::conflict::ask_to_resolve_label("Ada")
+    );
+    assert_eq!(
+        conflict["conflict"]["agents"][0]["unavailableReason"],
+        coppice_server::copy::conflict::connector_not_ready_reason("Ada")
+    );
 
     let res = post_resolve(&fx).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
@@ -491,21 +566,15 @@ async fn merge_main(fx: &TicketGit) -> axum::response::Response {
 }
 
 async fn post_resolve_merge(fx: &TicketGit) -> axum::response::Response {
-    fx.app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/tickets/{}/resolve-conflict", fx.ticket_id),
-            r#"{"baseBranch":"main","files":["README.md"],"operation":"merge"}"#,
-            &fx.cookie,
-            &fx.csrf,
-        ))
-        .await
-        .unwrap()
+    post_resolve_with(fx, Some("merge"), None).await
 }
 
 fn reopen_comment_for_readme() -> String {
-    coppice_server::copy::conflict::merge_conflict_reopen_comment("main", &["README.md".into()])
+    coppice_server::copy::conflict::merge_conflict_reopen_comment(
+        "main",
+        &["README.md".into()],
+        "Ada",
+    )
 }
 
 /// Done, accepted, and the merge into main conflicts on README.md.
@@ -825,4 +894,387 @@ async fn wait_until_back_in_review(fx: &TicketGit) -> (serde_json::Value, serde_
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+#[tokio::test]
+async fn unassigned_done_ticket_preselects_last_implementer() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "tech_lead",
+        "Technical Lead",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let qc_id =
+        common::create_agent_with_preset_key(&fx.app, "qc", "QC Engineer", &fx.cookie, &fx.csrf)
+            .await;
+    insert_run(&fx, &frontend_id, "work_on_ticket", "full", -30).await;
+    insert_run(&fx, &qc_id, "work_on_ticket", "full", -5).await;
+    insert_run(&fx, &frontend_id, "respond_to_mention", "full", -1).await;
+    insert_run(&fx, &tech_lead_id, "respond_to_mention", "human_agent", 0).await;
+
+    let conflict = done_with_merge_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], frontend_id);
+    assert_eq!(
+        conflict["conflict"]["askLabel"],
+        coppice_server::copy::conflict::ask_to_resolve_label("Frontend Engineer")
+    );
+    assert_eq!(conflict["conflict"]["canAskAssignee"], true);
+    let ids = offer_agent_ids(&conflict);
+    assert!(ids.contains(&frontend_id));
+    assert!(ids.contains(&tech_lead_id));
+    assert!(!ids.contains(&qc_id));
+
+    let asked = post_resolve_merge(&fx).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let asked: serde_json::Value = common::json_body(asked).await;
+    assert_eq!(asked["run"]["agentId"], frontend_id);
+    let ticket = ticket_json(&fx).await;
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["assigneeAgentId"], frontend_id);
+    let pool = fx.state.db.clone().expect("pool");
+    let row: (String, Option<uuid::Uuid>) =
+        sqlx::query_as("SELECT context_profile, trigger_comment_id FROM agent_runs WHERE id = $1")
+            .bind(uuid::Uuid::parse_str(asked["run"]["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .expect("run row");
+    assert_eq!(row.0, "full");
+    let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
+        "main",
+        &["README.md".into()],
+        "Frontend Engineer",
+    );
+    let thread = comments(&fx).await;
+    assert!(thread.iter().any(|comment| comment["body"] == expected));
+}
+
+#[tokio::test]
+async fn picking_another_agent_assigns_and_runs_that_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let backend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Backend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    insert_run(&fx, &frontend_id, "work_on_ticket", "full", -10).await;
+    let conflict = done_with_merge_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], frontend_id);
+
+    let asked = post_resolve_with(&fx, Some("merge"), Some(&backend_id)).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let asked: serde_json::Value = common::json_body(asked).await;
+    assert_eq!(asked["run"]["agentId"], backend_id);
+    let ticket = ticket_json(&fx).await;
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["assigneeAgentId"], backend_id);
+}
+
+#[tokio::test]
+async fn no_implementer_run_preselects_tech_lead_and_success_reaches_in_review() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_with_workers().await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "tech_lead",
+        "Technical Lead",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let _frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let conflict = done_with_merge_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], tech_lead_id);
+    assert_eq!(
+        conflict["conflict"]["askLabel"],
+        coppice_server::copy::conflict::ask_to_resolve_label("Technical Lead")
+    );
+
+    let asked = post_resolve_merge(&fx).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let (run, ticket) = wait_until_back_in_review(&fx).await;
+    assert_eq!(run["status"], "succeeded", "error: {}", run["errorMessage"]);
+    assert_eq!(run["agentId"], tech_lead_id);
+    assert_eq!(ticket["status"], "in_review");
+}
+
+#[tokio::test]
+async fn asking_a_not_ready_agent_leaves_the_ticket_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let backend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Backend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    insert_run(&fx, &frontend_id, "work_on_ticket", "full", -10).await;
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
+        .bind(uuid::Uuid::parse_str(&frontend_id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("switch connector");
+
+    let conflict = done_with_merge_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], frontend_id);
+    assert_eq!(conflict["conflict"]["canAskAssignee"], true);
+    assert_eq!(
+        conflict["conflict"]["unavailableReason"],
+        coppice_server::copy::conflict::connector_not_ready_reason("Frontend Engineer")
+    );
+    let backend = conflict["conflict"]["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["id"] == backend_id)
+        .expect("backend in picker");
+    assert!(backend["unavailableReason"].is_null());
+
+    let res = post_resolve_with(&fx, Some("merge"), Some(&frontend_id)).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::connector_not_ready_reason("Frontend Engineer")
+    );
+    let ticket = ticket_json(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert!(ticket["assigneeAgentId"].is_null());
+    assert!(
+        list_runs(&fx)
+            .await
+            .iter()
+            .all(|run| run["status"] == "succeeded"),
+        "no resolve run was started"
+    );
+}
+
+#[tokio::test]
+async fn asking_while_another_agent_is_active_returns_conflict() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let backend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Backend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    done_with_merge_conflict(&fx).await;
+    let first = post_resolve_with(&fx, Some("merge"), Some(&frontend_id)).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: serde_json::Value = common::json_body(first).await;
+    let run_id = first["run"]["id"].as_str().unwrap().to_string();
+
+    let second = post_resolve_with(&fx, Some("merge"), Some(&backend_id)).await;
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    let body: serde_json::Value = common::json_body(second).await;
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::other_agent_active_reason("Frontend Engineer")
+    );
+    let runs = list_runs(&fx).await;
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["id"], run_id);
+}
+
+#[tokio::test]
+async fn failed_reopen_start_leaves_unassigned_done_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    insert_run(&fx, &frontend_id, "work_on_ticket", "full", -10).await;
+    done_with_merge_conflict(&fx).await;
+
+    let moved = fx.local_path.with_extension("moved");
+    std::fs::rename(&fx.local_path, &moved).expect("hide the checkout");
+    let res = post_resolve_merge(&fx).await;
+    std::fs::rename(&moved, &fx.local_path).expect("restore the checkout");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let ticket = ticket_json(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert!(ticket["assigneeAgentId"].is_null());
+    assert!(
+        list_runs(&fx)
+            .await
+            .iter()
+            .all(|run| run["status"] == "succeeded"),
+        "no resolve run was started"
+    );
+}
+
+#[tokio::test]
+async fn assigning_an_agent_to_a_done_ticket_starts_no_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = path;
+        config.workflow.auto_start_runs = true;
+    })
+    .await;
+    let fx = finish_ticket(git_dir, local_path, worktrees, state, app, cookie, csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    accept_to_done(&fx).await;
+    assert_eq!(ticket_json(&fx).await["status"], "done");
+    assert!(list_runs(&fx).await.is_empty());
+
+    common::assign_agent_to_ticket(&fx.app, &fx.ticket_id, &agent_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(ticket_json(&fx).await["status"], "done");
+    assert_eq!(ticket_json(&fx).await["assigneeAgentId"], agent_id);
+    assert!(
+        list_runs(&fx).await.is_empty(),
+        "assigning on Done must not start a run"
+    );
+}
+
+#[tokio::test]
+async fn rebase_resolve_does_not_assign_the_picked_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    diverge_readme(&fx.local_path, &fx.worktree_path);
+    let conflict = rebase_conflict(&fx).await;
+    assert_eq!(conflict["conflict"]["defaultAgentId"], frontend_id);
+
+    let asked = post_resolve_with(&fx, None, Some(&frontend_id)).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let asked: serde_json::Value = common::json_body(asked).await;
+    assert_eq!(asked["run"]["agentId"], frontend_id);
+    let ticket = ticket_json(&fx).await;
+    assert!(ticket["assigneeAgentId"].is_null());
+    assert_ne!(ticket["status"], "done");
+}
+
+#[tokio::test]
+async fn refusing_an_ineligible_agent_starts_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let pm_id =
+        common::create_agent_with_preset_key(&fx.app, "pm", "PM", &fx.cookie, &fx.csrf).await;
+    let _frontend_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    done_with_merge_conflict(&fx).await;
+    let res = post_resolve_with(&fx, Some("merge"), Some(&pm_id)).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::AGENT_NOT_ELIGIBLE
+    );
+    assert_still_done(&fx).await;
 }

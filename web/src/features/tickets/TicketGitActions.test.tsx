@@ -217,6 +217,18 @@ describe('TicketGitActions', () => {
     "Couldn't rebase onto main because these files conflict: README.md. Nothing was changed.";
   const rereviewNote =
     "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.";
+  const adaId = '00000000-0000-0000-0000-0000000000aa';
+  const beaId = '00000000-0000-0000-0000-0000000000bb';
+  const adaAgent = {
+    id: adaId,
+    name: 'Ada',
+    askLabel: 'Ask Ada to resolve',
+  };
+  const beaAgent = {
+    id: beaId,
+    name: 'Bea',
+    askLabel: 'Ask Bea to resolve',
+  };
 
   function conflictBody(
     overrides: Record<string, unknown> = {},
@@ -230,6 +242,8 @@ describe('TicketGitActions', () => {
         files: ['README.md'],
         canAskAssignee: true,
         askLabel: 'Ask Ada to resolve',
+        defaultAgentId: adaId,
+        agents: [adaAgent],
         rereviewNote,
         ...overrides,
       },
@@ -254,6 +268,8 @@ describe('TicketGitActions', () => {
     const ask = within(dialog).getByRole('button', { name: 'Ask Ada to resolve' });
     const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
     expect(ask.parentElement).toBe(cancel.parentElement);
+    expect(within(dialog).getByRole('button', { name: 'Rebase again' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Who should resolve it?')).toHaveValue(adaId);
     // The dialog hides the drawer from assistive tech, so include that button.
     expect(screen.getAllByTestId('git-conflict')).toHaveLength(2);
     expect(
@@ -269,6 +285,42 @@ describe('TicketGitActions', () => {
       baseBranch: 'main',
       files: ['README.md'],
       operation: 'rebase',
+      agentId: adaId,
+    });
+    expect(
+      await within(dialog).findByRole('heading', {
+        name: 'Ada is resolving the conflict',
+      }),
+    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('The run has started.');
+  });
+
+  it('sends the selected agent and updates the ask label', async () => {
+    rebaseMutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        conflictBody({
+          agents: [adaAgent, beaAgent],
+        }),
+      ),
+    );
+
+    renderActions(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const dialog = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rebase' }));
+
+    const picker = await within(dialog).findByLabelText('Who should resolve it?');
+    fireEvent.change(picker, { target: { value: beaId } });
+    const ask = within(dialog).getByRole('button', { name: 'Ask Bea to resolve' });
+    fireEvent.click(ask);
+    await waitFor(() => {
+      expect(resolveMutateAsync).toHaveBeenCalledWith({
+        baseBranch: 'main',
+        files: ['README.md'],
+        operation: 'rebase',
+        agentId: beaId,
+      });
     });
   });
 
@@ -299,24 +351,36 @@ describe('TicketGitActions', () => {
     expect(ask.parentElement).toBe(
       within(dialog).getByRole('button', { name: 'Cancel' }).parentElement,
     );
+    expect(within(dialog).getByRole('button', { name: 'Merge again' })).toBeInTheDocument();
     fireEvent.click(ask);
     await waitFor(() => {
       expect(resolveMutateAsync).toHaveBeenCalledWith({
         baseBranch: 'main',
         files: ['README.md'],
         operation: 'merge',
+        agentId: adaId,
       });
     });
+    expect(
+      await within(dialog).findByRole('heading', {
+        name: 'Ada is resolving the conflict',
+      }),
+    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(
+      'The ticket moved to In Progress and the run has started.',
+    );
   });
 
-  it('hides the ask button when there is no assignee', async () => {
-    const reason = 'Assign an agent to this ticket to resolve the conflicts.';
+  it('hides the ask button when no agent can resolve', async () => {
+    const reason = 'No agent on this board can resolve the conflicts.';
     rebaseMutateAsync.mockRejectedValue(
       new ApiError(
         400,
         conflictBody({
           canAskAssignee: false,
           askLabel: undefined,
+          defaultAgentId: undefined,
+          agents: [],
           unavailableReason: reason,
         }),
       ),
@@ -331,17 +395,21 @@ describe('TicketGitActions', () => {
       expect(dialog).toHaveTextContent(reason);
     });
     expect(screen.queryByRole('button', { name: /Ask .+ to resolve/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Who should resolve it?')).not.toBeInTheDocument();
     expect(resolveMutateAsync).not.toHaveBeenCalled();
   });
 
-  it("hides the ask button when the assignee's connector is not ready", async () => {
+  it("disables the ask button when the selected agent's connector is not ready", async () => {
     const reason = "Ada's connector isn't ready. Check it in System → Connectors.";
     rebaseMutateAsync.mockRejectedValue(
       new ApiError(
         400,
         conflictBody({
-          canAskAssignee: false,
-          askLabel: undefined,
+          canAskAssignee: true,
+          agents: [
+            { ...adaAgent, unavailableReason: reason },
+            beaAgent,
+          ],
           unavailableReason: reason,
         }),
       ),
@@ -349,10 +417,15 @@ describe('TicketGitActions', () => {
 
     renderActions(makeTicket({ status: 'in_progress' }));
     fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Rebase' }));
+    const dialog = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rebase' }));
 
     expect(await screen.findAllByText(reason)).not.toHaveLength(0);
-    expect(screen.queryByRole('button', { name: /Ask .+ to resolve/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Ask Ada to resolve' })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText('Who should resolve it?'), {
+      target: { value: beaId },
+    });
+    expect(within(dialog).getByRole('button', { name: 'Ask Bea to resolve' })).toBeEnabled();
   });
 
   it('cancels remove worktree without calling the API', async () => {

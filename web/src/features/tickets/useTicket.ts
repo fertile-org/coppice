@@ -218,6 +218,8 @@ type ResolveConflictBody = {
   files: string[];
   /** A merge conflict on a Done ticket moves it back to In Progress. */
   operation: 'merge' | 'rebase';
+  /** Picker selection. The server uses its preselection rule when omitted. */
+  agentId?: string;
 };
 
 async function postResolveConflict(

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
-import type { GitConflict } from '../tickets/conflictOffer';
+import { selectedConflictAgent, type GitConflict } from '../tickets/conflictOffer';
 import {
   MergeBranchDialog,
   MergeBranchTrigger,
@@ -27,6 +27,8 @@ export function AcceptedNotMerged({
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [conflict, setConflict] = useState<GitConflict | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [askedName, setAskedName] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const info = gitInfo.data;
 
@@ -60,8 +62,23 @@ export function AcceptedNotMerged({
     setHidden(true);
   }
 
+  function rememberConflict(next: GitConflict | null) {
+    setConflict(next);
+    setAskedName(null);
+    setSelectedAgentId(next?.defaultAgentId ?? next?.agents[0]?.id ?? null);
+  }
+
+  function closeDialog() {
+    setOpen(false);
+    if (askedName) {
+      setConflict(null);
+      setAskedName(null);
+    }
+  }
+
   async function handleAsk() {
-    if (!conflict?.canAskAssignee || asking) {
+    const selected = conflict ? selectedConflictAgent(conflict, selectedAgentId) : null;
+    if (!conflict || !selected || selected.unavailableReason || asking) {
       return;
     }
     setAsking(true);
@@ -70,9 +87,9 @@ export function AcceptedNotMerged({
         baseBranch: conflict.baseBranch,
         files: conflict.files,
         operation: conflict.operation,
+        agentId: selected.id,
       });
-      setConflict(null);
-      setOpen(false);
+      setAskedName(selected.name);
     } catch (err) {
       const message = parseApiErrorMessage(err);
       toast.error(apiErrorToastMessage(message));
@@ -98,14 +115,18 @@ export function AcceptedNotMerged({
       {info && (
         <MergeBranchDialog
           open={open}
-          onClose={() => setOpen(false)}
+          onClose={closeDialog}
           ticketId={ticket.id}
           defaultBranch={info.defaultBranch}
           branches={info.branches}
           ticketBranch={info.ticketBranch}
           conflict={conflict}
+          selectedAgentId={selectedAgentId}
+          onSelectAgent={setSelectedAgentId}
           asking={asking}
-          onConflict={setConflict}
+          askedName={askedName}
+          reopensTicket={ticket.status === 'done'}
+          onConflict={rememberConflict}
           onAsk={() => void handleAsk()}
           onMerged={handleMerged}
         />

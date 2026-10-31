@@ -22,7 +22,11 @@ import {
   useResolveConflict,
   useTicketGitInfo,
 } from './useTicket';
-import { parseGitConflict, type GitConflict } from './conflictOffer';
+import {
+  parseGitConflict,
+  selectedConflictAgent,
+  type GitConflict,
+} from './conflictOffer';
 
 interface TicketGitActionsProps {
   ticket: Ticket;
@@ -32,29 +36,122 @@ function isFinalReviewOrDone(status: string): boolean {
   return status === 'wait_for_final_review' || status === 'done';
 }
 
+function selectedReason(conflict: GitConflict, selectedAgentId: string | null): string | null {
+  const selected = selectedConflictAgent(conflict, selectedAgentId);
+  if (selected?.unavailableReason) {
+    return selected.unavailableReason;
+  }
+  if (conflict.agents.length === 0) {
+    return conflict.unavailableReason;
+  }
+  return null;
+}
+
+function ConflictPicker({
+  conflict,
+  ticketId,
+  selectedAgentId,
+  onSelectAgent,
+  idSuffix,
+}: {
+  conflict: GitConflict;
+  ticketId: string;
+  selectedAgentId: string | null;
+  onSelectAgent: (id: string) => void;
+  idSuffix: string;
+}) {
+  if (conflict.agents.length === 0) {
+    return null;
+  }
+  const selectId = `conflict-resolver-${ticketId}-${idSuffix}`;
+  const selected = selectedConflictAgent(conflict, selectedAgentId);
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={selectId}>Who should resolve it?</Label>
+      <select
+        id={selectId}
+        aria-label="Who should resolve it?"
+        className="h-9 w-full rounded-md border border-border bg-surface-raised px-2 font-body text-sm text-text-primary"
+        value={selected?.id ?? ''}
+        onChange={(event) => onSelectAgent(event.target.value)}
+      >
+        {conflict.agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function ConflictNotice({
   conflict,
+  ticketId,
+  selectedAgentId,
+  onSelectAgent,
   showAsk,
   asking,
   onAsk,
+  idSuffix,
 }: {
   conflict: GitConflict;
+  ticketId: string;
+  selectedAgentId: string | null;
+  onSelectAgent: (id: string) => void;
   showAsk: boolean;
   asking: boolean;
   onAsk: () => void;
+  idSuffix: string;
 }) {
+  const selected = selectedConflictAgent(conflict, selectedAgentId);
+  const reason = selectedReason(conflict, selectedAgentId);
+  const canAsk = Boolean(selected && !selected.unavailableReason);
   return (
     <div data-testid="git-conflict" className="space-y-2">
       <p className="whitespace-pre-wrap font-body text-sm text-danger">{conflict.message}</p>
       <p className="font-body text-sm text-text-secondary">{conflict.rereviewNote}</p>
-      {conflict.unavailableReason && (
-        <p className="font-body text-sm text-text-secondary">{conflict.unavailableReason}</p>
+      <ConflictPicker
+        conflict={conflict}
+        ticketId={ticketId}
+        selectedAgentId={selectedAgentId}
+        onSelectAgent={onSelectAgent}
+        idSuffix={idSuffix}
+      />
+      {reason && (
+        <p className="font-body text-sm text-text-secondary">{reason}</p>
       )}
-      {showAsk && conflict.canAskAssignee && conflict.askLabel && (
-        <Button type="button" disabled={asking} onClick={onAsk}>
-          {conflict.askLabel}
+      {showAsk && selected && (
+        <Button type="button" disabled={asking || !canAsk} onClick={onAsk}>
+          {selected.askLabel}
         </Button>
       )}
+    </div>
+  );
+}
+
+function ConflictAskedView({
+  agentName,
+  reopensTicket,
+  onClose,
+}: {
+  agentName: string;
+  reopensTicket: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div data-testid="conflict-asked">
+      <DialogTitle>{agentName} is resolving the conflict</DialogTitle>
+      <p className="mt-2 font-body text-sm text-text-secondary">
+        {reopensTicket
+          ? 'The ticket moved to In Progress and the run has started.'
+          : 'The run has started.'}
+      </p>
+      <div className="mt-5 flex justify-end">
+        <Button type="button" onClick={onClose}>
+          Close
+        </Button>
+      </div>
     </div>
   );
 }
@@ -142,7 +239,11 @@ export function MergeBranchDialog({
   branches,
   ticketBranch,
   conflict,
+  selectedAgentId,
+  onSelectAgent,
   asking,
+  askedName,
+  reopensTicket,
   onConflict,
   onAsk,
   onMerged,
@@ -154,7 +255,11 @@ export function MergeBranchDialog({
   branches: string[];
   ticketBranch: string;
   conflict: GitConflict | null;
+  selectedAgentId: string | null;
+  onSelectAgent: (id: string) => void;
   asking: boolean;
+  askedName: string | null;
+  reopensTicket: boolean;
   onConflict: (conflict: GitConflict | null) => void;
   onAsk: () => void;
   onMerged?: () => void;
@@ -203,60 +308,76 @@ export function MergeBranchDialog({
   }
 
   const options = branches.length > 0 ? branches : [defaultBranch];
+  const selected = conflict ? selectedConflictAgent(conflict, selectedAgentId) : null;
+  const canAsk = Boolean(selected && !selected.unavailableReason);
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="z-[60] max-w-md" overlayClassName="z-[60]">
-        <DialogTitle>Merge ticket branch</DialogTitle>
-        <DialogDescription className="mt-1">
-          Merge <span className="font-mono text-xs">{ticketBranch}</span> into a
-          base branch. You can run this multiple times.
-        </DialogDescription>
+        {askedName ? (
+          <ConflictAskedView
+            agentName={askedName}
+            reopensTicket={reopensTicket}
+            onClose={onClose}
+          />
+        ) : (
+          <>
+            <DialogTitle>Merge ticket branch</DialogTitle>
+            <DialogDescription className="mt-1">
+              Merge <span className="font-mono text-xs">{ticketBranch}</span> into a
+              base branch. You can run this multiple times.
+            </DialogDescription>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor={`merge-base-branch-${ticketId}`}>Base branch</Label>
-            <Combobox
-              id={`merge-base-branch-${ticketId}`}
-              value={baseBranch}
-              onValueChange={setBaseBranch}
-              placeholder="Select branch…"
-              searchPlaceholder="Search branches…"
-              options={options.map((branch) => ({ value: branch, label: branch }))}
-            />
-          </div>
+            <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor={`merge-base-branch-${ticketId}`}>Base branch</Label>
+                <Combobox
+                  id={`merge-base-branch-${ticketId}`}
+                  value={baseBranch}
+                  onValueChange={setBaseBranch}
+                  placeholder="Select branch…"
+                  searchPlaceholder="Search branches…"
+                  options={options.map((branch) => ({ value: branch, label: branch }))}
+                />
+              </div>
 
-          {conflict && (
-            <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
-              <ConflictNotice
-                conflict={conflict}
-                showAsk={false}
-                asking={asking}
-                onAsk={onAsk}
-              />
-            </div>
-          )}
+              {conflict && (
+                <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
+                  <ConflictNotice
+                    conflict={conflict}
+                    ticketId={ticketId}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={onSelectAgent}
+                    showAsk={false}
+                    asking={asking}
+                    onAsk={onAsk}
+                    idSuffix="merge"
+                  />
+                </div>
+              )}
 
-          {error && (
-            <p className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
-              {error}
-            </p>
-          )}
+              {error && (
+                <p className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
+                  {error}
+                </p>
+              )}
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            {conflict?.canAskAssignee && conflict.askLabel && (
-              <Button type="button" disabled={asking} onClick={onAsk}>
-                {conflict.askLabel}
-              </Button>
-            )}
-            <Button type="submit" loading={mergeBranch.isPending}>
-              {mergeBranch.isPending ? 'Merging…' : 'Merge'}
-            </Button>
-          </div>
-        </form>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="secondary" loading={mergeBranch.isPending}>
+                  {mergeBranch.isPending ? 'Merging…' : conflict ? 'Merge again' : 'Merge'}
+                </Button>
+                {selected && (
+                  <Button type="button" disabled={asking || !canAsk} onClick={onAsk}>
+                    {selected.askLabel}
+                  </Button>
+                )}
+              </div>
+            </form>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -270,7 +391,10 @@ function RebaseBranchDialog({
   branches,
   ticketBranch,
   conflict,
+  selectedAgentId,
+  onSelectAgent,
   asking,
+  askedName,
   onConflict,
   onAsk,
 }: {
@@ -281,7 +405,10 @@ function RebaseBranchDialog({
   branches: string[];
   ticketBranch: string;
   conflict: GitConflict | null;
+  selectedAgentId: string | null;
+  onSelectAgent: (id: string) => void;
   asking: boolean;
+  askedName: string | null;
   onConflict: (conflict: GitConflict | null) => void;
   onAsk: () => void;
 }) {
@@ -330,63 +457,79 @@ function RebaseBranchDialog({
   }
 
   const options = branches.length > 0 ? branches : [defaultBranch];
+  const selected = conflict ? selectedConflictAgent(conflict, selectedAgentId) : null;
+  const canAsk = Boolean(selected && !selected.unavailableReason);
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="z-[60] max-w-md" overlayClassName="z-[60]">
-        <DialogTitle>Rebase ticket branch</DialogTitle>
-        <DialogDescription className="mt-1">
-          Rebase <span className="font-mono text-xs">{ticketBranch}</span> onto a
-          base branch in the ticket worktree. The worktree must be clean.
-        </DialogDescription>
+        {askedName ? (
+          <ConflictAskedView
+            agentName={askedName}
+            reopensTicket={false}
+            onClose={onClose}
+          />
+        ) : (
+          <>
+            <DialogTitle>Rebase ticket branch</DialogTitle>
+            <DialogDescription className="mt-1">
+              Rebase <span className="font-mono text-xs">{ticketBranch}</span> onto a
+              base branch in the ticket worktree. The worktree must be clean.
+            </DialogDescription>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="rebase-base-branch">Base branch</Label>
-            <Combobox
-              id="rebase-base-branch"
-              value={baseBranch}
-              onValueChange={setBaseBranch}
-              placeholder="Select branch…"
-              searchPlaceholder="Search branches…"
-              options={options.map((branch) => ({ value: branch, label: branch }))}
-            />
-          </div>
+            <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="rebase-base-branch">Base branch</Label>
+                <Combobox
+                  id="rebase-base-branch"
+                  value={baseBranch}
+                  onValueChange={setBaseBranch}
+                  placeholder="Select branch…"
+                  searchPlaceholder="Search branches…"
+                  options={options.map((branch) => ({ value: branch, label: branch }))}
+                />
+              </div>
 
-          {conflict && (
-            <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
-              <ConflictNotice
-                conflict={conflict}
-                showAsk={false}
-                asking={asking}
-                onAsk={onAsk}
-              />
-            </div>
-          )}
+              {conflict && (
+                <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
+                  <ConflictNotice
+                    conflict={conflict}
+                    ticketId={ticketId}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={onSelectAgent}
+                    showAsk={false}
+                    asking={asking}
+                    onAsk={onAsk}
+                    idSuffix="rebase"
+                  />
+                </div>
+              )}
 
-          {error && (
-            <p
-              data-testid="rebase-inline-error"
-              className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger"
-            >
-              {error}
-            </p>
-          )}
+              {error && (
+                <p
+                  data-testid="rebase-inline-error"
+                  className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger"
+                >
+                  {error}
+                </p>
+              )}
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            {conflict?.canAskAssignee && conflict.askLabel && (
-              <Button type="button" disabled={asking} onClick={onAsk}>
-                {conflict.askLabel}
-              </Button>
-            )}
-            <Button type="submit" loading={rebaseBranch.isPending}>
-              {rebaseBranch.isPending ? 'Rebasing…' : 'Rebase'}
-            </Button>
-          </div>
-        </form>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="secondary" loading={rebaseBranch.isPending}>
+                  {rebaseBranch.isPending ? 'Rebasing…' : conflict ? 'Rebase again' : 'Rebase'}
+                </Button>
+                {selected && (
+                  <Button type="button" disabled={asking || !canAsk} onClick={onAsk}>
+                    {selected.askLabel}
+                  </Button>
+                )}
+              </div>
+            </form>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -407,16 +550,43 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   const [rebaseOpen, setRebaseOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<GitConflict | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [askedName, setAskedName] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const askingRef = useRef(false);
   const resolveConflict = useResolveConflict(ticket.id);
 
   useEffect(() => {
     setConflict(null);
+    setSelectedAgentId(null);
+    setAskedName(null);
   }, [ticket.id]);
 
+  function rememberConflict(next: GitConflict | null) {
+    setConflict(next);
+    setAskedName(null);
+    setSelectedAgentId(next?.defaultAgentId ?? next?.agents[0]?.id ?? null);
+  }
+
+  function closeMerge() {
+    setMergeOpen(false);
+    if (askedName) {
+      setConflict(null);
+      setAskedName(null);
+    }
+  }
+
+  function closeRebase() {
+    setRebaseOpen(false);
+    if (askedName) {
+      setConflict(null);
+      setAskedName(null);
+    }
+  }
+
   async function handleAsk() {
-    if (!conflict || askingRef.current || !conflict.canAskAssignee) {
+    const selected = conflict ? selectedConflictAgent(conflict, selectedAgentId) : null;
+    if (!conflict || askingRef.current || !selected || selected.unavailableReason) {
       return;
     }
     askingRef.current = true;
@@ -426,10 +596,9 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         baseBranch: conflict.baseBranch,
         files: conflict.files,
         operation: conflict.operation,
+        agentId: selected.id,
       });
-      setConflict(null);
-      setMergeOpen(false);
-      setRebaseOpen(false);
+      setAskedName(selected.name);
     } catch (err) {
       const message = parseApiErrorMessage(err);
       toast.error(apiErrorToastMessage(message));
@@ -622,13 +791,17 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         </p>
       )}
 
-      {conflict && (
+      {conflict && !askedName && (
         <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
           <ConflictNotice
             conflict={conflict}
+            ticketId={ticket.id}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={setSelectedAgentId}
             showAsk
             asking={asking}
             onAsk={() => void handleAsk()}
+            idSuffix="drawer"
           />
         </div>
       )}
@@ -637,27 +810,34 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         <>
           <RebaseBranchDialog
             open={rebaseOpen}
-            onClose={() => setRebaseOpen(false)}
+            onClose={closeRebase}
             ticketId={ticket.id}
             defaultBranch={gitInfo.defaultBranch}
             branches={gitInfo.branches}
             ticketBranch={gitInfo.ticketBranch}
             conflict={conflict}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={setSelectedAgentId}
             asking={asking}
-            onConflict={setConflict}
+            askedName={askedName}
+            onConflict={rememberConflict}
             onAsk={() => void handleAsk()}
           />
           {showFinalActions && (
             <MergeBranchDialog
               open={mergeOpen}
-              onClose={() => setMergeOpen(false)}
+              onClose={closeMerge}
               ticketId={ticket.id}
               defaultBranch={gitInfo.defaultBranch}
               branches={gitInfo.branches}
               ticketBranch={gitInfo.ticketBranch}
               conflict={conflict}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={setSelectedAgentId}
               asking={asking}
-              onConflict={setConflict}
+              askedName={askedName}
+              reopensTicket={ticket.status === 'done'}
+              onConflict={rememberConflict}
               onAsk={() => void handleAsk()}
             />
           )}
