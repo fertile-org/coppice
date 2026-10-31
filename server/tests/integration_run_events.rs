@@ -143,3 +143,67 @@ async fn orchestrator_hand_off_publishes_queued_run() {
     let queued = RunService::new(pool).get(queued_id).await.expect("queued run");
     assert_eq!(queued.job_type, "work_on_ticket");
 }
+
+#[tokio::test]
+async fn ticket_resume_skips_sessions_from_another_connector() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|_| {}).await;
+    let pool = state.db.as_ref().expect("db pool");
+
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let ticket_id: Uuid = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let agent_id: Uuid = agent_id.parse().unwrap();
+
+    let insert_run = async || {
+        let run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+            VALUES ($1, $2, $3, 'work_on_ticket', 'succeeded', 'permissive-default')
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_id)
+        .bind(agent_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        run_id
+    };
+    let cursor_run = insert_run().await;
+    let opencode_run = insert_run().await;
+    let legacy_run = insert_run().await;
+    let current_run = insert_run().await;
+
+    let runs = RunService::new(pool);
+    runs.set_session_id(cursor_run, "cursor-uuid", "cursor")
+        .await
+        .unwrap();
+    runs.set_session_id(opencode_run, "ses_opencode", "opencode")
+        .await
+        .unwrap();
+    // A row from before `session_connector` existed: nobody can resume it.
+    sqlx::query("UPDATE agent_runs SET session_id = 'ses_legacy' WHERE id = $1")
+        .bind(legacy_run)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let latest = |connector| runs.latest_ticket_session(ticket_id, agent_id, connector, current_run);
+    assert_eq!(
+        latest("cursor").await.unwrap().as_deref(),
+        Some("cursor-uuid")
+    );
+    assert_eq!(
+        latest("opencode").await.unwrap().as_deref(),
+        Some("ses_opencode")
+    );
+    assert_eq!(latest("claude-code").await.unwrap(), None);
+}

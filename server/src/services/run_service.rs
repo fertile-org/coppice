@@ -1162,13 +1162,47 @@ impl<'a> RunService<'a> {
         Ok((row.get("reported_model"), row.get("billed_outside_plan")))
     }
 
-    pub async fn set_session_id(&self, run_id: Uuid, session_id: &str) -> Result<(), RunError> {
-        sqlx::query("UPDATE agent_runs SET session_id = $2 WHERE id = $1")
+    pub async fn set_session_id(
+        &self,
+        run_id: Uuid,
+        session_id: &str,
+        connector: &str,
+    ) -> Result<(), RunError> {
+        sqlx::query("UPDATE agent_runs SET session_id = $2, session_connector = $3 WHERE id = $1")
             .bind(run_id)
             .bind(session_id)
+            .bind(connector)
             .execute(self.pool)
             .await?;
         Ok(())
+    }
+
+    /// The newest session this agent's `connector` left on the ticket. Sessions
+    /// from another connector are skipped: the agent may have switched since.
+    pub async fn latest_ticket_session(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Uuid,
+        connector: &str,
+        excluding_run: Uuid,
+    ) -> Result<Option<String>, RunError> {
+        let session_id = sqlx::query_scalar(
+            r#"
+            SELECT session_id FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND id != $3
+              AND session_connector = $4
+              AND session_id IS NOT NULL AND session_id != ''
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(agent_id)
+        .bind(excluding_run)
+        .bind(connector)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(session_id)
     }
 
     /// Drop a session id captured from a resume attempt that did not continue.

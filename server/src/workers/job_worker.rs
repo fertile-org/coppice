@@ -652,11 +652,14 @@ async fn execute_job(
             let (tx, mut rx) = watch::channel(String::new());
             let pool = pool.clone();
             let run_id = run.id;
+            let connector = connector_name.to_string();
             tokio::spawn(async move {
                 if rx.changed().await.is_ok() {
                     let sid = rx.borrow().clone();
                     if !sid.is_empty() {
-                        let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+                        let _ = RunService::new(&pool)
+                            .set_session_id(run_id, &sid, &connector)
+                            .await;
                     }
                 }
             });
@@ -887,13 +890,16 @@ fn spawn_chat_session_created_tx(
     if !connector_supports_chat_resume(connector_name) {
         return None;
     }
+    let connector = connector_name.to_string();
     let (tx, mut rx) = watch::channel(String::new());
     let (done_tx, done_rx) = oneshot::channel();
     tokio::spawn(async move {
         if rx.changed().await.is_ok() {
             let sid = rx.borrow().clone();
             if !sid.is_empty() {
-                let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+                let _ = RunService::new(&pool)
+                    .set_session_id(run_id, &sid, &connector)
+                    .await;
             }
         }
         let _ = done_tx.send(());
@@ -1656,23 +1662,12 @@ async fn load_resume_session_id(
     if run.job_type != "work_on_ticket" {
         return None;
     }
-    let session_id: Option<String> = sqlx::query_scalar(
-        r#"
-        SELECT session_id FROM agent_runs
-        WHERE ticket_id = $1 AND agent_id = $2 AND id != $3
-          AND session_id IS NOT NULL AND session_id != ''
-        ORDER BY created_at DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(run.ticket_id)
-    .bind(run.agent_id)
-    .bind(run.id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-    session_id
+    let ticket_id = run.ticket_id?;
+    RunService::new(pool)
+        .latest_ticket_session(ticket_id, run.agent_id, connector_name, run.id)
+        .await
+        .ok()
+        .flatten()
 }
 
 async fn fail_job(
