@@ -3,12 +3,17 @@ mod common;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
+use coppice_server::copy::plan::{
+    DESIGN_SUPERSEDED, NO_PM, PLAN_ALREADY_RUNNING, PLAN_DESIGN_FINAL,
+};
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 use coppice_server::services::design_service::{
     CreateScope, DesignError, DesignOption, DesignService,
 };
+use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::run_service::RunService;
+use coppice_server::services::ticket_service::TicketService;
 use coppice_server::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -1361,4 +1366,572 @@ async fn set_from_before_recommendations_has_no_selection() {
     .summary;
     assert!(summary.recommended.is_none());
     assert!(summary.selected.is_none());
+}
+
+const PICK_PLAN: &str = "## Plan\n\n### Approach\nShip it.\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n";
+const B_NOTE: &str = "Update the plan to use design option B: Full-width button with Show all.";
+const A_NOTE: &str = "Update the plan to use design option A: Quiet button after the last card.";
+
+fn planning(fx: &TicketHttp) -> PlanningService<'_> {
+    PlanningService::new(&fx.pool)
+}
+
+fn design_svc(fx: &TicketHttp) -> DesignService<'_> {
+    DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    )
+}
+
+async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> Uuid {
+    let svc = design_svc(fx);
+    let created = svc
+        .create(
+            "Home",
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    for entry in ["a/index.html", "b/index.html"] {
+        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
+            .await
+            .expect("write");
+    }
+    let options = vec![
+        DesignOption {
+            id: "a".into(),
+            title: "A: Quiet button after the last card".into(),
+            entry: "a/index.html".into(),
+        },
+        DesignOption {
+            id: "b".into(),
+            title: "B: Full-width button with Show all".into(),
+            entry: "b/index.html".into(),
+        },
+    ];
+    svc.publish(created.id, run_id, options, "a")
+        .await
+        .expect("publish");
+    created.id
+}
+
+async fn active_plan_run(fx: &TicketHttp) -> Uuid {
+    planning(fx)
+        .active_plan_run(fx.ticket_id)
+        .await
+        .expect("active run")
+        .expect("a plan run is active")
+}
+
+async fn set_run_status(fx: &TicketHttp, run_id: Uuid, status: &str) {
+    sqlx::query("UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1")
+        .bind(run_id)
+        .bind(status)
+        .execute(&fx.pool)
+        .await
+        .expect("finish run");
+}
+
+/// A ticket without a plan or a plan run yet, and with a PM to write one.
+async fn unplanned_with_pm() -> TicketHttp {
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let pool = state.db.clone().expect("db pool");
+    TicketHttp {
+        state,
+        app,
+        cookie,
+        csrf,
+        pool,
+        ticket_id: ticket_id.parse().unwrap(),
+        agent_id: pm_id.parse().unwrap(),
+        design_id: Uuid::nil(),
+        _git_dir: None,
+    }
+}
+
+/// A Plan Review ticket whose current plan was written around option "a",
+/// the recommendation of the set its plan run published.
+async fn plan_review_with_set() -> (TicketHttp, Uuid) {
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show me options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let set_id = publish_plan_options(&fx, run_id, fx.agent_id).await;
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .await
+        .expect("plan with design");
+    set_run_status(&fx, run_id, "succeeded").await;
+    (fx, set_id)
+}
+
+async fn pick(fx: &TicketHttp, set_id: Uuid, option_id: &str) -> axum::response::Response {
+    fx.app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{set_id}/choose"),
+            &format!(r#"{{"optionId":"{option_id}"}}"#),
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("pick")
+}
+
+async fn set_json(fx: &TicketHttp, set_id: Uuid) -> Value {
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/designs/{set_id}"),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("get set");
+    assert_eq!(res.status(), StatusCode::OK);
+    common::json_body(res).await
+}
+
+async fn plan_runs(fx: &TicketHttp) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM agent_runs WHERE ticket_id = $1 AND job_type = 'plan_ticket'",
+    )
+    .bind(fx.ticket_id)
+    .fetch_one(&fx.pool)
+    .await
+    .expect("plan runs")
+}
+
+async fn change_request(fx: &TicketHttp) -> Option<String> {
+    planning(fx)
+        .latest_plan(fx.ticket_id)
+        .await
+        .expect("latest plan")
+        .expect("plan")
+        .change_request
+}
+
+async fn assert_refused(fx: &TicketHttp, set_id: Uuid, option_id: &str, expected: &str) {
+    let runs = plan_runs(fx).await;
+    let res = pick(fx, set_id, option_id).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(common::json_body(res).await["message"], expected);
+    let set = set_json(fx, set_id).await;
+    assert!(set["chosen"].is_null(), "nothing saved: {set}");
+    assert_eq!(plan_runs(fx).await, runs, "no run started");
+}
+
+#[tokio::test]
+async fn picking_the_selected_option_starts_no_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let before = set_json(&fx, set_id).await;
+    assert_eq!(before["choice"]["mode"], "update_plan");
+    assert_eq!(before["choice"]["planOutOfDate"], false);
+    let runs = plan_runs(&fx).await;
+
+    let res = pick(&fx, set_id, "a").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let set = set_json(&fx, set_id).await;
+    assert_eq!(set["chosen"]["id"], "a");
+    assert_eq!(set["choice"]["planOutOfDate"], false);
+    assert_eq!(plan_runs(&fx).await, runs);
+    assert_eq!(change_request(&fx).await, None);
+}
+
+#[tokio::test]
+async fn picking_another_starts_a_run_with_the_note() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let runs = plan_runs(&fx).await;
+
+    let res = pick(&fx, set_id, "b").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(plan_runs(&fx).await, runs + 1);
+    active_plan_run(&fx).await;
+    assert_eq!(change_request(&fx).await.as_deref(), Some(B_NOTE));
+    let set = set_json(&fx, set_id).await;
+    assert_eq!(set["chosen"]["id"], "b");
+    assert_eq!(set["choice"]["mode"], "plan_running");
+    assert_eq!(set["choice"]["planOutOfDate"], false);
+}
+
+#[tokio::test]
+async fn picking_back_to_the_earlier_option_starts_another_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    let run_id = active_plan_run(&fx).await;
+    planning(&fx)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .await
+        .expect("rewritten plan");
+    set_run_status(&fx, run_id, "succeeded").await;
+    let runs = plan_runs(&fx).await;
+    assert_eq!(set_json(&fx, set_id).await["choice"]["planOutOfDate"], false);
+
+    assert_eq!(pick(&fx, set_id, "a").await.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(plan_runs(&fx).await, runs + 1);
+    assert_eq!(change_request(&fx).await.as_deref(), Some(A_NOTE));
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "a");
+}
+
+#[tokio::test]
+async fn pick_is_refused_during_a_plan_run_and_saves_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    planning(&fx)
+        .ask_for_changes(fx.ticket_id, "Tighten the steps.")
+        .await
+        .expect("ask");
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "plan_running");
+
+    assert_refused(&fx, set_id, "b", PLAN_ALREADY_RUNNING).await;
+}
+
+#[tokio::test]
+async fn pick_is_refused_after_approval_and_saves_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let approved = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("approve");
+    assert_eq!(approved.status(), StatusCode::OK);
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "plan_final");
+
+    assert_refused(&fx, set_id, "b", PLAN_DESIGN_FINAL).await;
+}
+
+#[tokio::test]
+async fn pick_is_refused_without_a_planner_and_saves_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    sqlx::query("UPDATE agents SET enabled = false")
+        .execute(&fx.pool)
+        .await
+        .expect("disable agents");
+
+    assert_refused(&fx, set_id, "b", NO_PM).await;
+
+    let notes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
+    )
+    .bind(fx.ticket_id)
+    .bind(NO_PM)
+    .fetch_one(&fx.pool)
+    .await
+    .expect("notes");
+    assert_eq!(notes, 0, "the refusal posts no note");
+    assert_eq!(change_request(&fx).await, None);
+}
+
+#[tokio::test]
+async fn pick_is_refused_on_a_superseded_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    planning(&fx)
+        .ask_for_changes(fx.ticket_id, "New options, please.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    publish_plan_options(&fx, run_id, fx.agent_id).await;
+    set_run_status(&fx, run_id, "succeeded").await;
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
+
+    assert_refused(&fx, set_id, "b", DESIGN_SUPERSEDED).await;
+}
+
+#[tokio::test]
+async fn pick_is_refused_on_an_archived_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    TicketService::new(&fx.pool)
+        .archive(fx.ticket_id)
+        .await
+        .expect("archive");
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
+
+    assert_refused(
+        &fx,
+        set_id,
+        "b",
+        "ticket is archived; unarchive before continuing",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn failed_start_restores_the_earlier_choice() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    sqlx::raw_sql(&format!(
+        r#"
+        CREATE OR REPLACE FUNCTION test_refuse_change_request() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'change request refused by test';
+        END;
+        $$ LANGUAGE plpgsql;
+        DROP TRIGGER IF EXISTS test_refuse_change_request ON ticket_plans;
+        CREATE TRIGGER test_refuse_change_request
+            BEFORE UPDATE OF change_request ON ticket_plans
+            FOR EACH ROW WHEN (OLD.ticket_id = '{}')
+            EXECUTE FUNCTION test_refuse_change_request();
+        "#,
+        fx.ticket_id
+    ))
+    .execute(&fx.pool)
+    .await
+    .expect("install trigger");
+
+    // No earlier choice: the set falls back to its recommendation again.
+    let res = pick(&fx, set_id, "b").await;
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let set = set_json(&fx, set_id).await;
+    assert!(set["chosen"].is_null(), "{set}");
+    assert_eq!(set["selected"]["id"], "a");
+
+    // An earlier choice comes back with who made it and when.
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&fx.pool)
+        .await
+        .expect("user");
+    let at = time::macros::datetime!(2026-01-02 03:04:05 UTC);
+    sqlx::query(
+        r#"
+        UPDATE design_sets
+        SET chosen_option_id = 'a', chosen_by_user_id = $2, chosen_at = $3
+        WHERE id = $1
+        "#,
+    )
+    .bind(set_id)
+    .bind(user_id)
+    .bind(at)
+    .execute(&fx.pool)
+    .await
+    .expect("earlier choice");
+
+    let res = pick(&fx, set_id, "b").await;
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let restored: (Option<String>, Option<Uuid>, Option<time::OffsetDateTime>) = sqlx::query_as(
+        "SELECT chosen_option_id, chosen_by_user_id, chosen_at FROM design_sets WHERE id = $1",
+    )
+    .bind(set_id)
+    .fetch_one(&fx.pool)
+    .await
+    .expect("restored");
+    sqlx::raw_sql(
+        r#"
+        DROP TRIGGER test_refuse_change_request ON ticket_plans;
+        DROP FUNCTION test_refuse_change_request();
+        "#,
+    )
+    .execute(&fx.pool)
+    .await
+    .expect("drop trigger");
+    assert_eq!(restored, (Some("a".into()), Some(user_id), Some(at)));
+    assert!(planning(&fx)
+        .active_plan_run(fx.ticket_id)
+        .await
+        .expect("active run")
+        .is_none());
+}
+
+#[tokio::test]
+async fn failed_rewrite_keeps_choice_and_try_again_starts_a_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    let run_id = active_plan_run(&fx).await;
+    set_run_status(&fx, run_id, "failed").await;
+
+    let set = set_json(&fx, set_id).await;
+    assert_eq!(set["chosen"]["id"], "b");
+    assert_eq!(set["choice"]["mode"], "update_plan");
+    assert_eq!(set["choice"]["planOutOfDate"], true);
+    let runs = plan_runs(&fx).await;
+
+    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(plan_runs(&fx).await, runs + 1);
+    active_plan_run(&fx).await;
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
+}
+
+#[tokio::test]
+async fn pick_with_no_plan_saves_and_starts_no_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    planning(&fx)
+        .start_planning(fx.ticket_id)
+        .await
+        .expect("start planning");
+    let run_id = active_plan_run(&fx).await;
+    let set_id = publish_plan_options(&fx, run_id, fx.agent_id).await;
+    set_run_status(&fx, run_id, "failed").await;
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "save_only");
+    let runs = plan_runs(&fx).await;
+
+    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
+    assert_eq!(plan_runs(&fx).await, runs);
+    let plan = planning(&fx)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .await
+        .expect("next plan");
+    assert_eq!(plan.design_option_id.as_deref(), Some("b"));
+}
+
+#[tokio::test]
+async fn pick_on_a_set_from_before_recommendations_saves_and_starts_no_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    sqlx::query("UPDATE design_sets SET recommended_option_id = NULL WHERE id = $1")
+        .bind(set_id)
+        .execute(&fx.pool)
+        .await
+        .expect("clear recommendation");
+    let before = set_json(&fx, set_id).await;
+    assert_eq!(before["choice"]["mode"], "update_plan");
+    assert_eq!(before["choice"]["planOutOfDate"], false);
+    let runs = plan_runs(&fx).await;
+
+    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
+    assert_eq!(plan_runs(&fx).await, runs);
+    assert_eq!(change_request(&fx).await, None);
+}
+
+#[tokio::test]
+async fn work_run_and_chat_sets_save_and_start_no_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = ticket_http().await;
+    let run_id = start_ticket_run(&fx, fx.agent_id).await;
+    let set_id = publish_html(
+        &fx,
+        run_id,
+        fx.agent_id,
+        "Home",
+        Some(fx.ticket_id),
+        None,
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "save_only");
+    assert_eq!(pick(&fx, set_id, "a").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "a");
+    assert_eq!(plan_runs(&fx).await, 0);
+
+    let created = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{}"}}"#, fx.agent_id),
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("session");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session_id: Uuid = common::json_body(created).await["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let message_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO chat_messages (id, session_id, seq, role, body) VALUES ($1, $2, 0, 'human', 'hi')",
+    )
+    .bind(message_id)
+    .bind(session_id)
+    .execute(&fx.pool)
+    .await
+    .expect("message");
+    let chat_run = RunService::new(&fx.pool)
+        .start_chat_turn(session_id, message_id, fx.agent_id)
+        .await
+        .expect("chat run");
+    let chat_set = publish_html(
+        &fx,
+        chat_run.id,
+        fx.agent_id,
+        "Chat home",
+        None,
+        Some(session_id),
+        "<!doctype html><title>A</title>",
+        "<!doctype html><title>B</title>",
+    )
+    .await;
+    assert_eq!(set_json(&fx, chat_set).await["choice"]["mode"], "save_only");
+    assert_eq!(pick(&fx, chat_set, "a").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(set_json(&fx, chat_set).await["chosen"]["id"], "a");
+    let all_plan_runs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE job_type = 'plan_ticket'")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("all plan runs");
+    assert_eq!(all_plan_runs, 0);
 }

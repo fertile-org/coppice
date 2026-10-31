@@ -57,6 +57,19 @@ pub const WORK_NOT_STARTED: &str =
 pub const PLAN_CHANGES_DISCARDED: &str =
     "The plan run changed some files. Coppice discarded them, and your ticket's code is unchanged.";
 
+/// Choosing a design after the plan was approved.
+pub const PLAN_DESIGN_FINAL: &str =
+    "The plan is approved, so this design is final. To change it, add a comment on the ticket.";
+
+/// Choosing from a set that newer options replaced.
+pub const DESIGN_SUPERSEDED: &str =
+    "Newer design options replaced these. Open the latest ones to choose.";
+
+/// Change request recorded when a different design is chosen in Plan Review.
+pub fn plan_design_change_note(title: &str) -> String {
+    format!("Update the plan to use design option {title}.")
+}
+
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
 pub const STEPS_HEADING: &str = "### Steps";

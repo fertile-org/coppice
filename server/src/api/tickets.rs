@@ -922,7 +922,7 @@ async fn update_ticket(
     Ok(Json(response))
 }
 
-enum UpdateStatusError {
+pub(super) enum UpdateStatusError {
     Status(StatusCode),
     Message(StatusCode, String),
 }
@@ -938,7 +938,7 @@ impl IntoResponse for UpdateStatusError {
     }
 }
 
-fn map_update_status_error(err: TicketError) -> UpdateStatusError {
+pub(super) fn map_update_status_error(err: TicketError) -> UpdateStatusError {
     match err {
         TicketError::Validation(message)
             if message == DONE_REQUIRES_ACCEPT
@@ -1132,7 +1132,9 @@ async fn verify_parent(
     Ok(Json(ticket_to_response(ticket)))
 }
 
-fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateStatusError {
+pub(super) fn map_plan_error(
+    err: crate::services::planning_service::PlanError,
+) -> UpdateStatusError {
     match err {
         crate::services::planning_service::PlanError::Validation(message) => {
             UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
@@ -1642,7 +1644,7 @@ async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: 
 
 /// `ticket.updated` plus `agent_run.started` for each active run, so a run
 /// queued by the service call shows up before a worker picks it up.
-async fn publish_ticket_and_runs(
+pub(super) async fn publish_ticket_and_runs(
     state: &AppState,
     pool: &sqlx::PgPool,
     ticket: &crate::services::ticket_service::TicketWithDisplay,
