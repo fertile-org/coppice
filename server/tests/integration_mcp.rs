@@ -3959,3 +3959,301 @@ async fn knowledge_flag_not_listed_in_chat_profiles() {
         .expect("listed for agent runs");
     assert_eq!(flag["annotations"]["readOnlyHint"], false);
 }
+
+// ---- Task 9: knowledge_propose ----
+
+fn proposal(title: &str, content: &str) -> Value {
+    json!({"type": "workflow_rule", "title": title, "content": content})
+}
+
+#[tokio::test]
+async fn propose_creates_pending_with_source_and_citations() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let repo_id = fixture_repo_id(&fx).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let mut args = proposal(
+        "Quartz migrations run first",
+        "Run the quartz migrations before seeding any fixtures.",
+    );
+    args["confidence"] = json!("high");
+    args["citations"] = json!(["README.md", "../etc/passwd", "gone/missing.txt"]);
+    let out = call_tool_json(&url, &token, "knowledge_propose", args).await;
+    assert_eq!(out["status"], "pending", "{out}");
+    let item: Uuid = out["itemId"].as_str().unwrap().parse().unwrap();
+    let dropped = out["droppedCitations"].as_array().unwrap();
+    assert_eq!(dropped.len(), 1, "{out}");
+    assert_eq!(dropped[0]["path"], "../etc/passwd");
+    assert!(!dropped[0]["reason"].as_str().unwrap().is_empty());
+
+    let (status, reason, decision): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT status, policy_reason, policy_decision FROM knowledge_items WHERE id = $1",
+    )
+    .bind(item)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "pending");
+    assert_eq!(reason.as_deref(), Some("proposed by a working agent"));
+    assert!(decision.is_some());
+    #[allow(clippy::type_complexity)]
+    let (scope, board, source_type, source_id, confidence, provenance_run, created_by): (
+        String,
+        Option<Uuid>,
+        String,
+        Option<Uuid>,
+        String,
+        Option<Uuid>,
+        Option<Uuid>,
+    ) = sqlx::query_as(
+        "SELECT r.scope, r.board_id, r.source_type, r.source_id, r.confidence, p.run_id, r.created_by \
+         FROM knowledge_items i JOIN knowledge_revisions r ON r.id = i.current_revision_id \
+         LEFT JOIN knowledge_provenance p ON p.id = r.provenance_id WHERE i.id = $1",
+    )
+    .bind(item)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(scope, "board");
+    assert_eq!(board, fx.scope.board_id);
+    assert_eq!(source_type, "ticket");
+    assert_eq!(source_id, fx.scope.ticket_id);
+    assert_eq!(confidence, "high");
+    assert_eq!(provenance_run, Some(fx.scope.run_id));
+    assert_eq!(created_by, None);
+    let cites: Vec<(Option<Uuid>, String, Option<String>)> = sqlx::query_as(
+        "SELECT c.repo_id, c.path, c.commit_sha FROM knowledge_citations c \
+         JOIN knowledge_items i ON i.current_revision_id = c.revision_id \
+         WHERE i.id = $1 ORDER BY c.path",
+    )
+    .bind(item)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(cites.len(), 2, "{cites:?}");
+    let readme = cites.iter().find(|c| c.1 == "README.md").expect("README.md");
+    assert_eq!(readme.0, Some(repo_id));
+    assert!(readme.2.is_some());
+    let missing = cites.iter().find(|c| c.1 == "gone/missing.txt").expect("missing");
+    assert!(missing.2.is_none());
+}
+
+#[tokio::test]
+async fn fourth_proposal_in_a_run_hits_limit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    for (title, content) in [
+        ("Alpha cache layout", "Alpha entries expire nightly."),
+        ("Bravo retry budget", "Bravo requests retry twice."),
+        ("Charlie deploy order", "Charlie services deploy last."),
+    ] {
+        let out = call_tool_json(&url, &token, "knowledge_propose", proposal(title, content)).await;
+        assert_eq!(out["status"], "pending", "{out}");
+    }
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "knowledge_propose",
+        proposal("Delta log format", "Delta lines are JSON."),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("limit"), "{text}");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_revisions r JOIN knowledge_provenance p ON p.id = r.provenance_id \
+         WHERE p.run_id = $1",
+    )
+    .bind(fx.scope.run_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 3);
+}
+
+#[tokio::test]
+async fn close_match_returns_existing_item() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let board = fx.scope.board_id.unwrap();
+    let approved = seed_knowledge_with_content(
+        &fx.pool,
+        board,
+        "Gooseberry release checklist",
+        "Tag the gooseberry release after the smoke run passes.",
+        "approved",
+    )
+    .await;
+    let pending = seed_knowledge_with_content(
+        &fx.pool,
+        board,
+        "Elderberry backup schedule",
+        "Elderberry backups run hourly on weekdays.",
+        "pending",
+    )
+    .await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    for (rev, title, content) in [
+        (
+            approved,
+            "Gooseberry release checklist",
+            "Tag the gooseberry release after the smoke run passes.",
+        ),
+        (
+            pending,
+            "Elderberry backup schedule",
+            "Elderberry backups run hourly on weekdays.",
+        ),
+    ] {
+        let out =
+            call_tool_json(&url, &token, "knowledge_propose", proposal(title, content)).await;
+        assert_eq!(out["status"], "existing", "{out}");
+        assert_eq!(
+            out["itemId"].as_str().unwrap(),
+            item_of(&fx.pool, rev).await.to_string()
+        );
+    }
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+}
+
+#[tokio::test]
+async fn propose_requires_a_ticket_and_board() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    for scope in [
+        NewRunToolScope {
+            ticket_id: None,
+            ..fx.scope.clone()
+        },
+        NewRunToolScope {
+            board_id: None,
+            ..fx.scope.clone()
+        },
+    ] {
+        let token = mint_scope(&fx, scope).await;
+        let (is_error, text) = call_tool(
+            &url,
+            &token,
+            "knowledge_propose",
+            proposal("Needs a ticket", "Without a ticket nothing is stored."),
+        )
+        .await;
+        assert!(is_error, "{text}");
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn propose_not_listed_in_chat_or_compaction() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    for profile in [
+        ContextProfile::HumanChat,
+        ContextProfile::Conversation,
+        ContextProfile::KnowledgeCompaction,
+    ] {
+        let token = common::mint_test_token(&fx.state, fx.scope.run_id, profile).await;
+        let res = rpc(&url, &token, "tools/list", json!({})).await;
+        let names: Vec<&str> = res["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(!names.contains(&"knowledge_propose"), "{profile:?} {names:?}");
+        let (is_error, _) = call_tool(
+            &url,
+            &token,
+            "knowledge_propose",
+            proposal("Not allowed here", "Chat cannot propose."),
+        )
+        .await;
+        assert!(is_error, "{profile:?}");
+    }
+    for profile in [ContextProfile::HumanAgent, ContextProfile::Full] {
+        let token = common::mint_test_token(&fx.state, fx.scope.run_id, profile).await;
+        let res = rpc(&url, &token, "tools/list", json!({})).await;
+        let tool = res["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "knowledge_propose")
+            .cloned()
+            .unwrap_or_else(|| panic!("listed for {profile:?}"));
+        assert_eq!(tool["annotations"]["readOnlyHint"], false);
+    }
+}
+
+#[tokio::test]
+async fn proposed_item_is_not_searchable_until_approved() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let out = call_tool_json(
+        &url,
+        &token,
+        "knowledge_propose",
+        proposal("Persimmon cache rule", "Persimmon keys must include the board id."),
+    )
+    .await;
+    let item = out["itemId"].as_str().unwrap().to_string();
+    let search =
+        call_tool_json(&url, &token, "knowledge_search", json!({"query": "persimmon"})).await;
+    assert!(search["items"].as_array().unwrap().is_empty(), "{search}");
+    let (is_error, _) = call_tool(&url, &token, "knowledge_get", json!({"ids": [item]})).await;
+    assert!(is_error);
+
+    let approved = api(
+        &fx.app,
+        "POST",
+        &format!("/api/knowledge/{item}/approve"),
+        json!({"expectedVersion": 1}),
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    assert_eq!(approved["status"], "approved", "{approved}");
+    let search =
+        call_tool_json(&url, &token, "knowledge_search", json!({"query": "persimmon"})).await;
+    assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
+}

@@ -79,7 +79,18 @@ pub fn build_tool_first_context(
          Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.\n\
          Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.\n\
          Use `board_agents` to find agent keys for handoff.\n\
-         Finish by calling `result_submit` with your result; fix and resubmit if it returns errors.\n",
+         ",
+    );
+    if matches!(
+        input.context_profile,
+        ContextProfile::Full | ContextProfile::HumanAgent
+    ) {
+        out.push_str(
+            "If you learn a durable rule a different ticket would need, propose it with `knowledge_propose`; skip ticket outcomes.\n",
+        );
+    }
+    out.push_str(
+        "Finish by calling `result_submit` with your result; fix and resubmit if it returns errors.\n",
     );
     out
 }
@@ -422,6 +433,16 @@ mod tests {
         ] {
             assert!(md.contains(line), "missing {line}");
         }
+    }
+
+    #[test]
+    fn tool_first_context_invites_proposals_only_for_working_agents() {
+        let line = "propose it with `knowledge_propose`";
+        let md = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
+        assert!(md.contains(line));
+        let mut chat = fixture_full_input();
+        chat.context_profile = ContextProfile::HumanChat;
+        assert!(!build_tool_first_context(&chat, &test_skills(), None).contains(line));
     }
 
     #[test]

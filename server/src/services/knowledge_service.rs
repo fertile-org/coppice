@@ -3,17 +3,22 @@ use crate::domain::knowledge::{
     confidence_from_str, confidence_to_str, scope_from_str, scope_to_str, source_type_from_str,
     source_type_to_str, status_from_str, status_to_str, type_from_str, type_to_str,
     validate_revision, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
-    KnowledgeScope, KnowledgeStatus, KnowledgeType,
+    KnowledgeScope, KnowledgeSourceType, KnowledgeStatus, KnowledgeType,
 };
+use crate::knowledge::citations::{insert_citations, ResolvedCitation};
 use crate::knowledge::freshness::{freshness_for, Freshness};
+use crate::knowledge::fts::build_tsquery;
 use crate::knowledge::retrieval::{
-    find_similar_inbox, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
+    find_similar_inbox, near_duplicate_score, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
     INBOX_SIMILAR_MAX_LIMIT,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
+
+/// Lowest [`near_duplicate_score`] at which a proposal counts as already known.
+pub const PROPOSE_DUPLICATE_SCORE: f64 = 0.6;
 
 const ONE_LIVE_REPLACEMENT_INDEX: &str = "knowledge_items_one_live_replacement_idx";
 
@@ -85,6 +90,15 @@ pub struct CompactionProvenance<'a> {
     pub candidate_index: i32,
     pub source_ticket_ids: &'a [Uuid],
     pub supersedes_item_id: Option<Uuid>,
+}
+
+/// The run that proposes an item, and where its work happens.
+#[derive(Debug, Clone, Copy)]
+pub struct RunProposal {
+    pub run_id: Uuid,
+    pub ticket_id: Uuid,
+    pub board_id: Uuid,
+    pub repo_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -209,6 +223,46 @@ impl<'a> KnowledgeService<'a> {
                     .await?;
             activate_revision(tx, item_id, revision_id, self.config).await?;
         }
+        Ok(item_id)
+    }
+
+    /// Insert an item proposed by a working agent. It is always Pending, scoped
+    /// to the run's board and sourced from the run's ticket; the auto-save
+    /// policy never applies. The run is recorded as its provenance.
+    pub async fn create_from_run(
+        &self,
+        run: RunProposal,
+        mut input: KnowledgeRevisionInput,
+        citations: &[ResolvedCitation],
+    ) -> Result<Uuid, KnowledgeError> {
+        input.scope = KnowledgeScope::Board;
+        input.board_id = Some(run.board_id);
+        input.agent_id = None;
+        input.source_type = KnowledgeSourceType::Ticket;
+        input.source_id = Some(run.ticket_id);
+        input.source_run_id = Some(run.run_id);
+        validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
+        let mut tx = self.pool.begin().await?;
+        self.enforce_capacity(&mut tx, &input, None).await?;
+        let item_id = self
+            .insert_item_revision(
+                &mut tx,
+                Uuid::nil(),
+                &input,
+                None,
+                None,
+                KnowledgeStatus::Pending,
+                None,
+                Some(("human_review", "proposed by a working agent")),
+            )
+            .await?;
+        let revision_id: Uuid =
+            sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
+                .bind(item_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        insert_citations(&mut tx, revision_id, run.repo_id, citations).await?;
+        tx.commit().await?;
         Ok(item_id)
     }
 
@@ -800,6 +854,62 @@ async fn enforce_capacity_for_scope(
         }
     }
     Ok(())
+}
+
+/// An approved or pending item on the board (or workspace-wide) that says
+/// nearly the same thing, best match first. `None` when nothing scores at
+/// least [`PROPOSE_DUPLICATE_SCORE`].
+pub async fn find_close_item(
+    pool: &PgPool,
+    board_id: Uuid,
+    title: &str,
+    content: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let Some(tsquery) = build_tsquery(title, content) else {
+        return Ok(None);
+    };
+    let rows = sqlx::query(
+        r#"
+        WITH query AS (
+            SELECT to_tsquery('simple'::regconfig, coppice_unaccent($2::text)) AS q,
+                   coppice_unaccent($3::text) AS proposed_title,
+                   coppice_unaccent($4::text) AS proposed_content
+        )
+        SELECT i.id AS item_id,
+               coppice_unaccent(r.title) AS folded_title,
+               coppice_unaccent(r.content) AS folded_content,
+               query.proposed_title, query.proposed_content
+        FROM knowledge_items i
+        JOIN knowledge_revisions r ON r.id = COALESCE(i.active_revision_id, i.current_revision_id)
+        CROSS JOIN query
+        WHERE i.status IN ('approved', 'pending')
+          AND i.superseded_by IS NULL
+          AND (i.expires_at IS NULL OR i.expires_at > now())
+          AND (r.scope = 'workspace' OR (r.scope = 'board' AND r.board_id = $1))
+          AND r.search_vector @@ query.q
+        ORDER BY ts_rank_cd(r.search_vector, query.q) DESC, i.id ASC
+        LIMIT 50
+        "#,
+    )
+    .bind(board_id)
+    .bind(tsquery)
+    .bind(title)
+    .bind(content)
+    .fetch_all(pool)
+    .await?;
+    let mut best: Option<(f64, Uuid)> = None;
+    for row in rows {
+        let score = near_duplicate_score(
+            row.try_get("proposed_title")?,
+            row.try_get("proposed_content")?,
+            row.try_get("folded_title")?,
+            row.try_get("folded_content")?,
+        );
+        if score >= PROPOSE_DUPLICATE_SCORE && best.is_none_or(|(top, _)| score > top) {
+            best = Some((score, row.try_get("item_id")?));
+        }
+    }
+    Ok(best.map(|(_, id)| id))
 }
 
 fn map_database_error(error: sqlx::Error) -> KnowledgeError {

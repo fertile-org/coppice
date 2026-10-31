@@ -14,13 +14,14 @@ pub enum CoreTool {
     KnowledgeSearch,
     KnowledgeGet,
     KnowledgeFlag,
+    KnowledgePropose,
     CommentPost,
     ResultSubmit,
     OpenRepo,
 }
 
 impl CoreTool {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::BoardList,
         Self::BoardAgents,
         Self::TicketGet,
@@ -30,6 +31,7 @@ impl CoreTool {
         Self::KnowledgeSearch,
         Self::KnowledgeGet,
         Self::KnowledgeFlag,
+        Self::KnowledgePropose,
         Self::CommentPost,
         Self::ResultSubmit,
         Self::OpenRepo,
@@ -46,6 +48,7 @@ impl CoreTool {
             Self::KnowledgeSearch => "knowledge_search",
             Self::KnowledgeGet => "knowledge_get",
             Self::KnowledgeFlag => "knowledge_flag",
+            Self::KnowledgePropose => "knowledge_propose",
             Self::CommentPost => "comment_post",
             Self::ResultSubmit => "result_submit",
             Self::OpenRepo => "open_repo",
@@ -147,6 +150,25 @@ impl CoreTool {
                         "reason": { "type": "string", "maxLength": 1000, "description": "Required for outdated and wrong: what differs and where." },
                     }),
                     &["itemId", "verdict"],
+                ),
+                false,
+            ),
+            Self::KnowledgePropose => (
+                "Propose a durable rule or fact that a different ticket would need. A reviewer approves it before anyone can search it. Do not propose what this ticket did or decided; that stays in the ticket. At most 3 per run. Returns the existing item instead when a close match is already on the board.",
+                object(
+                    json!({
+                        "type": { "type": "string", "enum": KNOWLEDGE_TYPES },
+                        "title": { "type": "string", "description": "Short, specific title." },
+                        "content": { "type": "string", "description": "The rule or fact, with the reason it holds." },
+                        "confidence": { "type": "string", "enum": ["low", "medium", "high"], "description": "Defaults to medium." },
+                        "citations": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "maxItems": 10,
+                            "description": "Repo-relative paths of the code this rests on. Used to tell reviewers and later agents when that code changes.",
+                        },
+                    }),
+                    &["type", "title", "content"],
                 ),
                 false,
             ),
@@ -340,6 +362,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             KnowledgeSearch,
             KnowledgeGet,
             KnowledgeFlag,
+            KnowledgePropose,
             CommentPost,
             ResultSubmit,
         ],
@@ -398,6 +421,7 @@ mod tests {
             "knowledge_search",
             "knowledge_get",
             "knowledge_flag",
+            "knowledge_propose",
             "comment_post",
             "result_submit",
         ];
@@ -407,7 +431,7 @@ mod tests {
         let no_comment: Vec<&str> = all
             .iter()
             .copied()
-            .filter(|n| *n != "comment_post" && *n != "knowledge_flag")
+            .filter(|n| *n != "comment_post" && *n != "knowledge_flag" && *n != "knowledge_propose")
             .collect();
         assert_eq!(names(ContextProfile::HumanChat), no_comment);
         let mut conversation = no_comment.clone();
