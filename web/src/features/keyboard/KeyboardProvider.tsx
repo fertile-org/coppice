@@ -137,13 +137,6 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
       setEnvironment(environment) {
         envRef.current = environment;
       },
-      readShortcutState() {
-        const enabledIds = ['close'];
-        for (const [id, list] of handlersRef.current) {
-          if (list.some((registration) => registration.enabled())) enabledIds.push(id);
-        }
-        return { enabledIds, drawerOpen: envRef.current.drawerOpen };
-      },
       runShortcut(id) {
         const registration = handlersRef.current
           .get(id)

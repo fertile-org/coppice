@@ -120,21 +120,8 @@ describe('shortcut help overlay', () => {
     terminal.remove();
   });
 
-  it('opens from the command palette and jumps to pages with G then a letter', async () => {
+  it('jumps to pages with G then a letter', () => {
     renderHelp(adminSession);
-
-    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
-    const palette = screen.getByPlaceholderText('Search actions, tickets, and agents…');
-    fireEvent.change(palette, { target: { value: 'keyboard shortcuts' } });
-    fireEvent.click(screen.getByRole('option', { name: /Show keyboard shortcuts/ }));
-    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
-    expect(screen.getByText('Go to Plugins')).toBeVisible();
-    expect(screen.getByText('Go to Users')).toBeVisible();
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
 
     fireEvent.keyDown(document, { key: 'g' });
     fireEvent.keyDown(document, { key: 'b' });
@@ -153,14 +140,15 @@ describe('shortcut help overlay', () => {
     renderHelp();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
-    expect(screen.queryByPlaceholderText('Search actions, tickets, and agents…')).toBeNull();
+    expect(screen.queryByPlaceholderText('Search pages, tickets, and agents…')).toBeNull();
     fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
-    expect(screen.getByPlaceholderText('Search actions, tickets, and agents…')).toBeVisible();
-    expect(screen.getByText('Ctrl+P')).toBeVisible();
+    expect(screen.getByPlaceholderText('Search pages, tickets, and agents…')).toBeVisible();
+    expect(screen.getByRole('option', { name: /Keyboard shortcuts/ })).toHaveTextContent('?');
+    expect(screen.queryByRole('option', { name: /Open command palette/ })).toBeNull();
 
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => {
-      expect(screen.queryByPlaceholderText('Search actions, tickets, and agents…')).toBeNull();
+      expect(screen.queryByPlaceholderText('Search pages, tickets, and agents…')).toBeNull();
     });
     fireEvent.keyDown(document, { key: '?' });
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();

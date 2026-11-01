@@ -1,12 +1,9 @@
-import { BOARD_COLUMNS } from '../board/columns';
-import { activeScopes } from './match';
 import { SHORTCUT_ACTIONS } from './registry';
 import {
   formatBinding,
   SHORTCUT_GROUP_ORDER,
   type ShortcutAction,
   type ShortcutGroup,
-  type ShortcutScope,
 } from './types';
 import type { Platform } from './platform';
 
@@ -15,12 +12,15 @@ export const PALETTE_RECENT_KEY = 'coppice.palette.recent';
 
 export const PALETTE_COPY = {
   title: 'Command palette',
-  placeholder: 'Search actions, tickets, and agents…',
+  placeholder: 'Search pages, tickets, and agents…',
   recent: 'Recent',
+  pages: 'Pages',
   empty: 'No matches',
 } as const;
 
-/** Page jumps the palette and the G-then shortcuts share. */
+export const PALETTE_HELP_LABEL = 'Keyboard shortcuts';
+
+/** Page jumps the G-then shortcuts register. Do not add `help.show` here. */
 export const PAGE_ACTION_ROUTES: Readonly<Record<string, string>> = {
   'nav.boards': '/boards',
   'nav.agents': '/agents',
@@ -33,6 +33,12 @@ export const PAGE_ACTION_ROUTES: Readonly<Record<string, string>> = {
   'nav.settings': '/settings',
 };
 
+/** Palette rows only: page jumps plus the in-app shortcuts page. */
+export const PALETTE_ROUTES: Readonly<Record<string, string>> = {
+  ...PAGE_ACTION_ROUTES,
+  'help.show': '/help/shortcuts',
+};
+
 export type PaletteEntry = {
   id: string;
   label: string;
@@ -43,20 +49,6 @@ export type PaletteEntry = {
 };
 
 export type PaletteTicket = { id: string; title: string; boardId?: string };
-
-/** Scopes for the page underneath the palette, ignoring the palette field itself. */
-export function paletteScopes(input: {
-  pathname: string;
-  drawerOpen: boolean;
-}): ShortcutScope[] {
-  return activeScopes({
-    pathname: input.pathname,
-    drawerOpen: input.drawerOpen,
-    modalOpen: false,
-    targetKind: 'plain',
-    foreignDialog: false,
-  });
-}
 
 export function boardIdFromPath(pathname: string): string | undefined {
   const match = /^\/boards\/([^/]+)\/?$/.exec(pathname);
@@ -71,45 +63,21 @@ export type PaletteLayout = {
   empty: boolean;
 };
 
-export function columnJumpPaletteLabel(columnName: string): string {
-  return `Go to ${columnName} column`;
-}
-
-export function paletteActionLabel(
-  action: Pick<ShortcutAction, 'id' | 'label'>,
-  columns: readonly { label: string }[] = BOARD_COLUMNS,
-): string {
-  const match = /^board\.column\.(\d+)$/.exec(action.id);
-  if (!match) return action.label;
-  const column = columns[Number(match[1]) - 1];
-  return column ? columnJumpPaletteLabel(column.label) : action.label;
-}
-
 export function paletteShortcut(action: ShortcutAction, platform: Platform): string {
   return action.bindings.map((binding) => formatBinding(binding, platform)).join(' or ');
 }
 
-function inScope(action: ShortcutAction, scopes: readonly ShortcutScope[]): boolean {
-  return action.scopes.some((scope) => scopes.includes(scope));
-}
-
 export function listPaletteActions(input: {
   omitted: ReadonlySet<string>;
-  scopes: readonly ShortcutScope[];
-  enabled: ReadonlySet<string>;
   platform: Platform;
   actions?: readonly ShortcutAction[];
-  columns?: readonly { label: string }[];
 }): PaletteEntry[] {
-  const actions = input.actions ?? SHORTCUT_ACTIONS;
-  const columns = input.columns ?? BOARD_COLUMNS;
+  const byId = new Map((input.actions ?? SHORTCUT_ACTIONS).map((action) => [action.id, action]));
   const entries: PaletteEntry[] = [];
-  for (const action of actions) {
-    if (input.omitted.has(action.id)) continue;
-    if (!inScope(action, input.scopes)) continue;
-    const pageJump = Object.prototype.hasOwnProperty.call(PAGE_ACTION_ROUTES, action.id);
-    if (!input.enabled.has(action.id) && !pageJump) continue;
-    const label = paletteActionLabel(action, columns);
+  for (const id of Object.keys(PALETTE_ROUTES)) {
+    const action = byId.get(id);
+    if (!action || input.omitted.has(action.id)) continue;
+    const label = action.id === 'help.show' ? PALETTE_HELP_LABEL : action.label;
     const shortcut = action.bindings.length ? paletteShortcut(action, input.platform) : null;
     entries.push({
       id: action.id,
@@ -176,16 +144,13 @@ export function layoutPalette(input: {
 }): PaletteLayout {
   const tickets = ticketEntries(input.tickets);
   const agents = agentEntries(input.agents);
-  const catalog = new Map<string, PaletteEntry>();
-  for (const entry of [...input.actions, ...tickets, ...agents]) {
-    catalog.set(entry.id, entry);
-  }
+  const actionCatalog = new Map(input.actions.map((entry) => [entry.id, entry]));
 
   const query = input.query.trim();
   if (!query) {
     const recent: PaletteEntry[] = [];
     for (const id of input.recentIds) {
-      const entry = catalog.get(id);
+      const entry = actionCatalog.get(id);
       if (!entry || recent.some((item) => item.id === id)) continue;
       recent.push(entry);
       if (recent.length === PALETTE_RECENT_LIMIT) break;

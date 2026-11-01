@@ -48,7 +48,7 @@ describe('SidebarSearch', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Search/ }));
 
-    const input = await screen.findByPlaceholderText('Search actions, tickets, and agents…');
+    const input = await screen.findByPlaceholderText('Search pages, tickets, and agents…');
     expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
     await waitFor(() => {
       expect(input).toHaveFocus();
@@ -60,7 +60,7 @@ describe('SidebarSearch', () => {
     const search = screen.getByRole('button', { name: /Search/ });
 
     fireEvent.click(search);
-    const input = await screen.findByPlaceholderText('Search actions, tickets, and agents…');
+    const input = await screen.findByPlaceholderText('Search pages, tickets, and agents…');
     fireEvent.keyDown(input, { key: 'Escape' });
 
     await waitFor(() => {

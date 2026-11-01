@@ -6,7 +6,9 @@ import {
   ChevronRight,
   CircleHelp,
   DatabaseBackup,
+  FileText,
   FolderGit2,
+  Keyboard,
   LayoutGrid,
   LogOut,
   MessageSquare,
@@ -71,6 +73,17 @@ function isSystemRoute(pathname: string): boolean {
   return pathname === '/system' || pathname.startsWith('/system/');
 }
 
+function isHelpRoute(pathname: string): boolean {
+  return pathname === '/help' || pathname.startsWith('/help/');
+}
+
+const HELP_DOCUMENTATION = { label: 'Documentation', icon: FileText };
+const HELP_SHORTCUTS: NavItem = {
+  to: '/help/shortcuts',
+  label: 'Keyboard shortcuts',
+  icon: Keyboard,
+};
+
 function readSidebarCollapsed(): boolean {
   try {
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
@@ -111,6 +124,23 @@ function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
   );
 }
 
+function DocsSidebarLink({ collapsed }: { collapsed: boolean }) {
+  const { label, icon: Icon } = HELP_DOCUMENTATION;
+  return (
+    <a
+      href={DOCS_URL}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={collapsed ? label : undefined}
+      title={collapsed ? label : undefined}
+      className={navLinkClass({ isActive: false, collapsed })}
+    >
+      <Icon className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+      {!collapsed && <span>{label}</span>}
+    </a>
+  );
+}
+
 function isChatRoute(pathname: string): boolean {
   return pathname === '/chat' || pathname.startsWith('/chat/');
 }
@@ -137,10 +167,15 @@ export function AppShell() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const onSystemRoute = isSystemRoute(pathname);
+  const onHelpRoute = isHelpRoute(pathname);
   const [systemOpen, setSystemOpen] = useState(onSystemRoute);
+  const [helpOpen, setHelpOpen] = useState(onHelpRoute);
   useEffect(() => {
     if (onSystemRoute) setSystemOpen(true);
   }, [onSystemRoute]);
+  useEffect(() => {
+    if (onHelpRoute) setHelpOpen(true);
+  }, [onHelpRoute]);
 
   useEffect(() => {
     try {
@@ -246,17 +281,43 @@ export function AppShell() {
               <SidebarLink item={item} collapsed={sidebarCollapsed} />
             </Fragment>
           ))}
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={sidebarCollapsed ? 'Help' : undefined}
-            title={sidebarCollapsed ? 'Help' : undefined}
-            className={navLinkClass({ isActive: false, collapsed: sidebarCollapsed })}
-          >
-            <CircleHelp className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
-            {!sidebarCollapsed && <span>Help</span>}
-          </a>
+          {sidebarCollapsed ? (
+            <>
+              <DocsSidebarLink collapsed />
+              <SidebarLink item={HELP_SHORTCUTS} collapsed />
+            </>
+          ) : (
+            <div data-testid="nav-group-help">
+              <button
+                type="button"
+                onClick={() => setHelpOpen((open) => !open)}
+                aria-expanded={helpOpen}
+                aria-controls="nav-group-help-items"
+                className={cn(
+                  navLinkClass({ isActive: false, collapsed: false }),
+                  'w-full',
+                  onHelpRoute && !helpOpen && 'text-accent',
+                )}
+              >
+                <CircleHelp className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+                <span className="flex-1 text-left">Help</span>
+                {helpOpen ? (
+                  <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+              </button>
+              {helpOpen ? (
+                <div
+                  id="nav-group-help-items"
+                  className="mt-0.5 flex flex-col gap-0.5 pl-4"
+                >
+                  <DocsSidebarLink collapsed={false} />
+                  <SidebarLink item={HELP_SHORTCUTS} collapsed={false} />
+                </div>
+              ) : null}
+            </div>
+          )}
         </nav>
 
         <div className="shrink-0 border-t border-border p-2">

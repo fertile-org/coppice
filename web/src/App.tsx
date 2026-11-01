@@ -32,6 +32,7 @@ import {
   UpdatesPage,
 } from './features/system/SystemPages';
 import { KeyboardProvider } from './features/keyboard/KeyboardProvider';
+import { KeyboardShortcutsPage } from './features/keyboard/KeyboardShortcutsPage';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
   useEventSocket,
@@ -105,6 +106,7 @@ function App() {
                 <Route path="/system/updates" element={<UpdatesPage />} />
                 <Route path="/logs" element={<LegacyLogsRedirect />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/help/shortcuts" element={<KeyboardShortcutsPage />} />
                 <Route path="/tools" element={<LegacyToolsRedirect />} />
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />

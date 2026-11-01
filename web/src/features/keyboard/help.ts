@@ -5,6 +5,8 @@ import type { Platform } from './platform';
 
 export const HELP_COPY = {
   title: 'Keyboard shortcuts',
+  pageIntro:
+    'Change shortcuts in Settings. Press ? anywhere to see this list without leaving your page.',
   footer: 'Change shortcuts in Settings.',
   skipped:
     "Some shortcuts in Settings couldn't be used. Those rows show the defaults.",
@@ -23,7 +25,6 @@ export type HelpSection = {
 
 /**
  * Help rows use the registry label. Column jumps stay "Go to column {n}".
- * The palette is the surface that renames those rows to the column.
  */
 export function helpSections(input: {
   omitted: ReadonlySet<string>;

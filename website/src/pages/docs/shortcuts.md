@@ -7,7 +7,9 @@ description: "Use Coppice from the keyboard: move around the board, open and mov
 
 # Keyboard shortcuts
 
-Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**. Change shortcuts in Settings.
+Press `?` anywhere to see every shortcut, or open **Help → Keyboard shortcuts** in the sidebar. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**. Change shortcuts in Settings.
+
+The command palette (`Mod+K`) searches pages, tickets, and agents. Board and ticket actions stay on the keyboard — they are not palette rows.
 
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. Sequences are shown as `G then B`.
 
@@ -95,7 +97,7 @@ Shortcuts don't fire while you're typing in a field, and the terminal keeps its 
 
 Change any shortcut in Settings, under `[keybindings]`. Use the command's id from the tables above. Your keys replace the defaults, and an empty value turns the shortcut off.
 
-If a shortcut can't be read, names an unknown command, uses a key another command already has, or belongs to the browser or the system, that command keeps its default. Settings explains why. The shortcut help and the command palette show the keys that are in effect.
+If a shortcut can't be read, names an unknown command, uses a key another command already has, or belongs to the browser or the system, that command keeps its default. Settings explains why. The shortcut help overlay, the Keyboard shortcuts page, and the command palette show the keys that are in effect.
 
 ```toml
 [keybindings]
@@ -103,4 +105,4 @@ If a shortcut can't be read, names an unknown command, uses a key another comman
 "ticket.create" = ""
 ```
 
-Open **Settings**, edit the file, and choose **Save**. The new keys show in the shortcut help and the command palette without a restart.
+Open **Settings**, edit the file, and choose **Save**. The new keys show in the shortcut help, the Keyboard shortcuts page, and the command palette without a restart.
