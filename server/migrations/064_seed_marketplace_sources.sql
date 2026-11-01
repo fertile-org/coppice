@@ -6,13 +6,13 @@ WITH base AS (
     SELECT COALESCE(MAX(position), 0) AS max_pos FROM marketplace_sources
 )
 INSERT INTO marketplace_sources (id, name, kind, git_url, git_ref, position)
-SELECT gen_random_uuid(), v.name, 'git', v.git_url, 'main', base.max_pos + v.offset
+SELECT gen_random_uuid(), v.name, 'git', v.git_url, 'main', base.max_pos + v.seq
 FROM base,
     (VALUES
         (1, 'claude-community', 'https://github.com/anthropics/claude-plugins-community.git'),
         (2, 'superpowers-marketplace', 'https://github.com/obra/superpowers-marketplace.git'),
         (3, 'ponytail', 'https://github.com/DietrichGebert/ponytail.git')
-    ) AS v(offset, name, git_url)
+    ) AS v(seq, name, git_url)
 WHERE NOT EXISTS (
     SELECT 1 FROM marketplace_sources s
     WHERE s.name = v.name OR s.git_url = v.git_url

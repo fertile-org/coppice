@@ -4383,12 +4383,23 @@ async fn marketplace_extra_default_sources_are_non_destructive() {
     let pool = state.db.clone().unwrap();
     let cache = tempfile::tempdir().unwrap();
     let service = MarketplaceService::new(&pool);
-    let seed = include_str!("../migrations/061_seed_marketplace_sources.sql");
+    let seed = include_str!("../migrations/064_seed_marketplace_sources.sql");
 
+    // The test reset empties marketplace_sources, so apply the seeds here.
     service
         .seed_builtin(cache.path())
         .await
         .expect("seed builtin");
+    sqlx::raw_sql(include_str!(
+        "../migrations/056_seed_anthropic_marketplace.sql"
+    ))
+    .execute(&pool)
+    .await
+    .expect("seed Anthropic");
+    sqlx::raw_sql(seed)
+        .execute(&pool)
+        .await
+        .expect("seed extra sources");
     let names: Vec<String> = service
         .list_sources()
         .await
@@ -4858,39 +4869,32 @@ async fn marketplace_list_entries_uses_commit_cache() {
         .await
         .unwrap();
     assert!(
-        first.iter().any(|entry| entry.name == "sample-plugin"),
+        first
+            .iter()
+            .any(|entry| entry.name == "sample-plugin" && entry.version == "1.2.0"),
         "{first:?}"
     );
 
+    // Entries take their name and version from the plugin's manifest, so the
+    // version is what shows whether a catalog was parsed again.
+    let manifest = |version: &str| {
+        json!({ "name": "sample-plugin", "version": version, "description": "Sample" }).to_string()
+    };
+    let manifest_path = "plugins/sample-plugin/.claude-plugin/plugin.json";
     let root = cache.path().join(source.id.to_string());
-    std::fs::write(
-        root.join(".claude-plugin/marketplace.json"),
-        json!({
-            "name": "cache-market",
-            "plugins": [{ "name": "edited-on-disk", "source": "./plugins/sample-plugin" }]
-        })
-        .to_string(),
-    )
-    .unwrap();
+    std::fs::write(root.join(manifest_path), manifest("9.9.9")).unwrap();
     let cached = service
         .list_entries(cache.path(), &EntryFilter::default())
         .await
         .unwrap();
     assert!(
-        cached.iter().any(|entry| entry.name == "sample-plugin"),
+        cached
+            .iter()
+            .any(|entry| entry.name == "sample-plugin" && entry.version == "1.2.0"),
         "cache must ignore the on-disk edit: {cached:?}"
     );
-    assert!(cached.iter().all(|entry| entry.name != "edited-on-disk"));
 
-    std::fs::write(
-        repo.path().join(".claude-plugin/marketplace.json"),
-        json!({
-            "name": "cache-market",
-            "plugins": [{ "name": "after-refresh", "source": "./plugins/sample-plugin" }]
-        })
-        .to_string(),
-    )
-    .unwrap();
+    std::fs::write(repo.path().join(manifest_path), manifest("2.0.0")).unwrap();
     git(repo.path(), &["add", "-A"]);
     git(repo.path(), &["commit", "-q", "-m", "second"]);
     service
@@ -4902,7 +4906,9 @@ async fn marketplace_list_entries_uses_commit_cache() {
         .await
         .unwrap();
     assert!(
-        after.iter().any(|entry| entry.name == "after-refresh"),
+        after
+            .iter()
+            .any(|entry| entry.name == "sample-plugin" && entry.version == "2.0.0"),
         "{after:?}"
     );
 }
