@@ -1,5 +1,12 @@
 import { ApiError } from '../../lib/api';
 
+export interface ConflictAgent {
+  id: string;
+  name: string;
+  askLabel: string;
+  unavailableReason: string | null;
+}
+
 export interface GitConflict {
   operation: 'merge' | 'rebase';
   baseBranch: string;
@@ -8,7 +15,30 @@ export interface GitConflict {
   canAskAssignee: boolean;
   askLabel: string | null;
   unavailableReason: string | null;
+  defaultAgentId: string | null;
+  agents: ConflictAgent[];
   rereviewNote: string;
+}
+
+function parseConflictAgent(value: unknown): ConflictAgent | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const agent = value as Record<string, unknown>;
+  if (
+    typeof agent.id !== 'string' ||
+    typeof agent.name !== 'string' ||
+    typeof agent.askLabel !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: agent.id,
+    name: agent.name,
+    askLabel: agent.askLabel,
+    unavailableReason:
+      typeof agent.unavailableReason === 'string' ? agent.unavailableReason : null,
+  };
 }
 
 export function parseGitConflict(err: unknown): GitConflict | null {
@@ -40,6 +70,12 @@ export function parseGitConflict(err: unknown): GitConflict | null {
     return null;
   }
   const files = offer.files.filter((file): file is string => typeof file === 'string');
+  const agents = Array.isArray(offer.agents)
+    ? offer.agents.flatMap((agent) => {
+        const parsedAgent = parseConflictAgent(agent);
+        return parsedAgent ? [parsedAgent] : [];
+      })
+    : [];
   return {
     operation: offer.operation,
     baseBranch: offer.baseBranch,
@@ -49,6 +85,22 @@ export function parseGitConflict(err: unknown): GitConflict | null {
     askLabel: typeof offer.askLabel === 'string' ? offer.askLabel : null,
     unavailableReason:
       typeof offer.unavailableReason === 'string' ? offer.unavailableReason : null,
+    defaultAgentId: typeof offer.defaultAgentId === 'string' ? offer.defaultAgentId : null,
+    agents,
     rereviewNote: offer.rereviewNote,
   };
+}
+
+export function selectedConflictAgent(
+  conflict: GitConflict,
+  selectedAgentId: string | null,
+): ConflictAgent | null {
+  if (conflict.agents.length === 0) {
+    return null;
+  }
+  return (
+    conflict.agents.find((agent) => agent.id === selectedAgentId) ??
+    conflict.agents.find((agent) => agent.id === conflict.defaultAgentId) ??
+    conflict.agents[0]
+  );
 }

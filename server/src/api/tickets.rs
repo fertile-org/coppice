@@ -2,34 +2,34 @@ use crate::api::agent_runs::{
     load_single_run_response, runs_list_response, RunsListResponse, SingleRunResponse,
 };
 use crate::api::auth::{pool_from_state, AuthUser};
+use crate::copy::conflict::DONE_COLUMN_HOLDS;
+use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
+use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
+use crate::domain::agent_health::AgentHealthStatus;
+use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
-use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
-use crate::services::comment_service::{CommentError, CommentService};
-use crate::copy::conflict::DONE_COLUMN_HOLDS;
-use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
-use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
-use crate::services::planning_service::{PlanningService, StartOutcome};
-use crate::services::stage_owner_service::StageOwnerService;
-use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
-use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::comment_service::{CommentError, CommentService};
+use crate::services::conflict_resolve::{self, ConflictResolveError, GitConflictHttp};
+use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
+use crate::services::planning_service::{PlanningService, StartOutcome};
 use crate::services::restart_service::{RestartError, RestartService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
-use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
-use crate::services::conflict_resolve::{
-    self, ConflictResolveError, GitConflictHttp,
-};
+use crate::services::stage_owner_service::StageOwnerService;
 use crate::services::ticket_git_service::{
     GitConflictKind, TicketGitError, TicketGitInfo, TicketGitService,
 };
-use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
+use crate::services::ticket_service::{
+    TicketError, TicketFilters, TicketService, TicketWithDisplay,
+};
+use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -55,14 +55,23 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}",
             get(get_ticket).patch(update_ticket),
         )
-        .route("/api/tickets/{ticket_id}/status", axum::routing::patch(update_status))
+        .route(
+            "/api/tickets/{ticket_id}/status",
+            axum::routing::patch(update_status),
+        )
         .route("/api/tickets/{ticket_id}/approve-plan", post(approve_plan))
         .route(
             "/api/tickets/{ticket_id}/plan-changes",
             post(ask_for_plan_changes),
         )
-        .route("/api/tickets/{ticket_id}/plan-answers", post(send_plan_answers))
-        .route("/api/tickets/{ticket_id}/verify-parent", post(verify_parent))
+        .route(
+            "/api/tickets/{ticket_id}/plan-answers",
+            post(send_plan_answers),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/verify-parent",
+            post(verify_parent),
+        )
         .route("/api/tickets/{ticket_id}/plan-runs", post(start_plan_run))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
@@ -84,10 +93,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}/final-approve",
             post(final_approve),
         )
-        .route(
-            "/api/tickets/{ticket_id}/git-info",
-            get(ticket_git_info),
-        )
+        .route("/api/tickets/{ticket_id}/git-info", get(ticket_git_info))
         .route(
             "/api/tickets/{ticket_id}/merge-branch",
             post(merge_ticket_branch),
@@ -108,10 +114,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}/push-branch",
             post(push_ticket_branch),
         )
-        .route(
-            "/api/tickets/{ticket_id}/create-pr",
-            post(create_ticket_pr),
-        )
+        .route("/api/tickets/{ticket_id}/create-pr", post(create_ticket_pr))
         .route(
             "/api/tickets/{ticket_id}/resolve-blocker",
             post(resolve_blocker),
@@ -478,9 +481,7 @@ fn map_run_error_response(err: RunError) -> RunAgentError {
             "An active run already exists for this ticket and agent.".into(),
         ),
         RunError::NotFound => RunAgentError::Status(StatusCode::NOT_FOUND),
-        RunError::Validation(msg) => {
-            RunAgentError::Message(StatusCode::BAD_REQUEST, msg.clone())
-        }
+        RunError::Validation(msg) => RunAgentError::Message(StatusCode::BAD_REQUEST, msg.clone()),
         RunError::Database(db_err) => {
             tracing::error!(error = %db_err, "run-agent database error");
             RunAgentError::Message(
@@ -551,7 +552,8 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
         ),
         TicketGitError::ActiveRun => (
             StatusCode::CONFLICT,
-            "Stop the agent run first. Coppice doesn't remove a worktree an agent is working in.".into(),
+            "Stop the agent run first. Coppice doesn't remove a worktree an agent is working in."
+                .into(),
         ),
         TicketGitError::WorktreeMissing => (
             StatusCode::BAD_REQUEST,
@@ -566,10 +568,9 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::BAD_REQUEST,
             crate::copy::conflict::conflict_message(conflict_action(kind), &base_branch, &paths),
         ),
-        TicketGitError::InvalidBranchName => (
-            StatusCode::BAD_REQUEST,
-            "Invalid base branch name.".into(),
-        ),
+        TicketGitError::InvalidBranchName => {
+            (StatusCode::BAD_REQUEST, "Invalid base branch name.".into())
+        }
         TicketGitError::PushDisabled => (
             StatusCode::FORBIDDEN,
             "Git push is disabled. Set git.push_enabled = true in server config.".into(),
@@ -805,7 +806,8 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
-    let ticket = store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
+    let ticket =
+        store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
@@ -913,7 +915,8 @@ async fn update_ticket(
     } else {
         service.get(ticket_id).await.map_err(map_error)?
     };
-    let ticket = store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
+    let ticket =
+        store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
     crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
@@ -976,8 +979,7 @@ async fn update_status(
         .update_status(ticket_id, status, substatus, substatus_metadata)
         .await
         .map_err(map_update_status_error)?;
-    if previous.ticket.status != TicketStatus::Ready
-        && ticket.ticket.status == TicketStatus::Ready
+    if previous.ticket.status != TicketStatus::Ready && ticket.ticket.status == TicketStatus::Ready
     {
         if let Err(err) = PlanningService::new(pool).on_entered_ready(ticket_id).await {
             tracing::warn!(error = %err, %ticket_id, "tech lead run did not start");
@@ -1155,7 +1157,9 @@ async fn with_approved_plan(
         .approved_plan(ticket.ticket.id)
         .await
         .map_err(|err| match err {
-            crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
+            crate::services::planning_service::PlanError::Database(err) => {
+                TicketError::Database(err)
+            }
             crate::services::planning_service::PlanError::Validation(message) => {
                 TicketError::Validation(message)
             }
@@ -1292,6 +1296,7 @@ async fn assign_agent(
     if state.config.workflow.auto_start_runs
         && ticket.ticket.assignee_agent_id.is_some()
         && ticket.ticket.repo_id.is_some()
+        && ticket.ticket.status != TicketStatus::Done
     {
         if let Ok(run) = RunService::new(pool).start_run(ticket_id).await {
             ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
@@ -1322,13 +1327,16 @@ async fn run_agent(
     }
 
     if let Some(agent_id) = ticket.ticket.assignee_agent_id {
-        let agent = AgentService::new(pool).get(agent_id).await.map_err(|err| match err {
-            AgentError::AgentNotFound => RunAgentError::Status(StatusCode::NOT_FOUND),
-            other => {
-                tracing::warn!(error = %other, "load assignee for run failed");
-                RunAgentError::Status(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        })?;
+        let agent = AgentService::new(pool)
+            .get(agent_id)
+            .await
+            .map_err(|err| match err {
+                AgentError::AgentNotFound => RunAgentError::Status(StatusCode::NOT_FOUND),
+                other => {
+                    tracing::warn!(error = %other, "load assignee for run failed");
+                    RunAgentError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            })?;
         let registry = state
             .connectors
             .registry_for(&agent.connector, crate::connectors_runtime::READINESS_WAIT)
@@ -1658,9 +1666,8 @@ async fn ticket_git_info(
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
 ) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let info = ticket_git_service(&state, pool)
         .git_info(ticket_id)
         .await
@@ -1686,9 +1693,8 @@ async fn merge_ticket_branch(
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<MergeBranchBody>,
 ) -> Result<Json<MergeBranchResponse>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let merge = ticket_git_service(&state, pool)
         .merge_ticket_branch(ticket_id, body.base_branch.trim())
         .await;
@@ -1719,7 +1725,9 @@ async fn merge_ticket_branch(
     );
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
-        .map_err(|code| TicketGitApiError::Message(code, "Unable to record merge comment.".into()))?;
+        .map_err(|code| {
+            TicketGitApiError::Message(code, "Unable to record merge comment.".into())
+        })?;
     // The merged work is on the base branch now.
     crate::services::worktree_cleanup::spawn_cleanup(&state, ticket_id);
 
@@ -1745,9 +1753,8 @@ async fn rebase_ticket_branch(
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<RebaseBranchBody>,
 ) -> Result<Json<RebaseBranchResponse>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let base = body
         .base_branch
         .as_deref()
@@ -1786,6 +1793,9 @@ struct ResolveConflictBody {
     /// Done ticket; a missing value is treated as a rebase.
     #[serde(default)]
     operation: Option<String>,
+    /// Agent shown in the picker. Missing uses the server preselection rule.
+    #[serde(default)]
+    agent_id: Option<Uuid>,
 }
 
 enum ResolveConflictApiError {
@@ -1806,16 +1816,22 @@ impl IntoResponse for ResolveConflictApiError {
 
 fn map_resolve_error(err: ConflictResolveError) -> ResolveConflictApiError {
     match err {
-        ConflictResolveError::NoAssignee => ResolveConflictApiError::Message(
+        ConflictResolveError::NoEligibleAgent => ResolveConflictApiError::Message(
             StatusCode::BAD_REQUEST,
-            crate::copy::conflict::NO_ASSIGNEE.to_string(),
+            conflict_resolve::no_eligible_agent_message().to_string(),
         ),
-        ConflictResolveError::ConnectorNotReady { assignee } => {
-            ResolveConflictApiError::Message(
-                StatusCode::BAD_REQUEST,
-                crate::copy::conflict::connector_not_ready_reason(&assignee),
-            )
-        }
+        ConflictResolveError::AgentNotEligible => ResolveConflictApiError::Message(
+            StatusCode::BAD_REQUEST,
+            conflict_resolve::agent_not_eligible_message().to_string(),
+        ),
+        ConflictResolveError::ConnectorNotReady { assignee } => ResolveConflictApiError::Message(
+            StatusCode::BAD_REQUEST,
+            crate::copy::conflict::connector_not_ready_reason(&assignee),
+        ),
+        ConflictResolveError::OtherAgentActive { name } => ResolveConflictApiError::Message(
+            StatusCode::CONFLICT,
+            conflict_resolve::other_agent_active_message(&name),
+        ),
         ConflictResolveError::InvalidBranch => ResolveConflictApiError::Message(
             StatusCode::BAD_REQUEST,
             "Invalid base branch name.".into(),
@@ -1824,6 +1840,16 @@ fn map_resolve_error(err: ConflictResolveError) -> ResolveConflictApiError {
             StatusCode::BAD_REQUEST,
             conflict_resolve::invalid_file_list_message().to_string(),
         ),
+        ConflictResolveError::Agent(err) => match err {
+            AgentError::AgentNotFound => ResolveConflictApiError::Message(
+                StatusCode::BAD_REQUEST,
+                conflict_resolve::agent_not_eligible_message().to_string(),
+            ),
+            other => {
+                tracing::error!(error = %other, "resolve conflict agent lookup failed");
+                ResolveConflictApiError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        },
         ConflictResolveError::Ticket(err) => match err {
             TicketError::TicketNotFound => ResolveConflictApiError::Status(StatusCode::NOT_FOUND),
             TicketError::Archived => ResolveConflictApiError::Message(
@@ -1869,6 +1895,7 @@ async fn resolve_ticket_conflict(
         kind,
         &body.base_branch,
         &body.files,
+        body.agent_id,
         &ready,
     )
     .await
@@ -1912,9 +1939,8 @@ async fn remove_ticket_worktree(
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
 ) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let svc = ticket_git_service(&state, pool);
     let info_before = svc
         .git_info(ticket_id)
@@ -1924,10 +1950,7 @@ async fn remove_ticket_worktree(
         .await
         .map_err(map_ticket_git_error_response)?;
 
-    let comment_body = format!(
-        "**Worktree removed:** `{}`",
-        info_before.worktree_path
-    );
+    let comment_body = format!("**Worktree removed:** `{}`", info_before.worktree_path);
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
         .map_err(|code| {
@@ -1965,9 +1988,8 @@ async fn push_ticket_branch(
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
 ) -> Result<Json<PushBranchResponse>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let push = ticket_git_service(&state, pool)
         .push_branch(ticket_id)
         .await;
@@ -1980,7 +2002,9 @@ async fn push_ticket_branch(
     );
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
-        .map_err(|code| TicketGitApiError::Message(code, "Unable to record push comment.".into()))?;
+        .map_err(|code| {
+            TicketGitApiError::Message(code, "Unable to record push comment.".into())
+        })?;
 
     Ok(Json(PushBranchResponse { push }))
 }
@@ -1991,15 +2015,10 @@ async fn create_ticket_pr(
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<CreatePrBody>,
 ) -> Result<Json<CreatePrResponse>, TicketGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        TicketGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
     let pull_request = ticket_git_service(&state, pool)
-        .create_pr(
-            ticket_id,
-            body.title.as_deref(),
-            body.body.as_deref(),
-        )
+        .create_pr(ticket_id, body.title.as_deref(), body.body.as_deref())
         .await
         .map_err(map_ticket_git_error_response)?;
 
@@ -2009,9 +2028,7 @@ async fn create_ticket_pr(
     );
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
-        .map_err(|code| {
-            TicketGitApiError::Message(code, "Unable to record PR comment.".into())
-        })?;
+        .map_err(|code| TicketGitApiError::Message(code, "Unable to record PR comment.".into()))?;
 
     Ok(Json(CreatePrResponse { pull_request }))
 }
@@ -2060,9 +2077,7 @@ async fn list_children(
         .list_children(ticket_id)
         .await
         .map_err(map_split_error)?;
-    Ok(Json(
-        children.into_iter().map(ticket_to_response).collect(),
-    ))
+    Ok(Json(children.into_iter().map(ticket_to_response).collect()))
 }
 
 async fn resolve_blocker(
@@ -2086,12 +2101,7 @@ async fn resolve_blocker(
     }
 
     let updated = ticket_svc
-        .update_status(
-            ticket_id,
-            ticket.ticket.status,
-            Some(None),
-            Some(None),
-        )
+        .update_status(ticket_id, ticket.ticket.status, Some(None), Some(None))
         .await
         .map_err(map_error)?;
     Ok(Json(ticket_to_response(updated)))

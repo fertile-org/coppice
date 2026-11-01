@@ -7,7 +7,9 @@ pub const REBASE_ACTION: &str = "rebase onto";
 /// "merge into" in [`conflict_message`].
 pub const MERGE_ACTION: &str = "merge into";
 
-pub const NO_ASSIGNEE: &str = "Assign an agent to this ticket to resolve the conflicts.";
+pub const NO_ELIGIBLE_AGENT: &str = "No agent on this board can resolve the conflicts.";
+
+pub const AGENT_NOT_ELIGIBLE: &str = "That agent cannot resolve this conflict.";
 
 pub const REREVIEW_NOTE: &str =
     "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.";
@@ -18,10 +20,10 @@ pub const INVALID_FILE_LIST: &str = "The conflict file list is invalid.";
 pub const DONE_COLUMN_HOLDS: &str =
     "Done tickets can't be moved. Create a new ticket for follow-up work.";
 
-/// Comment posted when a person asks the assignee to resolve a Done ticket's
+/// Comment posted when a person asks an agent to resolve a Done ticket's
 /// merge conflict.
-/// Also copied into the assignee's run context.
-pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
+/// Also copied into that agent's run context.
+pub fn merge_conflict_reopen_comment(branch: &str, files: &[String], agent_name: &str) -> String {
     let listed = if files.is_empty() {
         "- (none listed)".to_string()
     } else {
@@ -33,16 +35,20 @@ pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
     };
     format!(
         "Couldn't merge into {branch} because these files conflict:\n{listed}\n\n\
-         The ticket is back in In Progress with the same assignee. You'll need to accept it again in Human Review before it merges."
+         The ticket is back in In Progress with {agent_name}. You'll need to accept it again in Human Review before it merges."
     )
 }
 
-pub fn connector_not_ready_reason(assignee: &str) -> String {
-    format!("{assignee}'s connector isn't ready. Check it in System → Connectors.")
+pub fn connector_not_ready_reason(agent_name: &str) -> String {
+    format!("{agent_name}'s connector isn't ready. Check it in System → Connectors.")
 }
 
-pub fn ask_to_resolve_label(assignee: &str) -> String {
-    format!("Ask {assignee} to resolve")
+pub fn ask_to_resolve_label(agent_name: &str) -> String {
+    format!("Ask {agent_name} to resolve")
+}
+
+pub fn other_agent_active_reason(agent_name: &str) -> String {
+    format!("{agent_name} already has an active run on this ticket.")
 }
 
 /// Conflict message, including the conflicting files.
@@ -57,7 +63,7 @@ pub fn conflict_message(action: &str, branch: &str, files: &[String]) -> String 
     )
 }
 
-/// Instruction for the assignee's run. Includes [`REREVIEW_NOTE`].
+/// Instruction for the resolving agent's run. Includes [`REREVIEW_NOTE`].
 pub fn resolve_prompt(branch: &str, files: &[String]) -> String {
     let listed = if files.is_empty() {
         "(none listed)".to_string()
@@ -102,8 +108,16 @@ mod tests {
         );
         assert_eq!(ask_to_resolve_label("Ada"), "Ask Ada to resolve");
         assert_eq!(
-            NO_ASSIGNEE,
-            "Assign an agent to this ticket to resolve the conflicts."
+            NO_ELIGIBLE_AGENT,
+            "No agent on this board can resolve the conflicts."
+        );
+        assert_eq!(
+            AGENT_NOT_ELIGIBLE,
+            "That agent cannot resolve this conflict."
+        );
+        assert_eq!(
+            other_agent_active_reason("Ada"),
+            "Ada already has an active run on this ticket."
         );
         assert_eq!(
             connector_not_ready_reason("Ada"),
@@ -131,8 +145,12 @@ mod tests {
             "Done tickets can't be moved. Create a new ticket for follow-up work."
         );
         assert_eq!(
-            merge_conflict_reopen_comment("main", &["README.md".into(), "src/lib.rs".into()]),
-            "Couldn't merge into main because these files conflict:\n- README.md\n- src/lib.rs\n\nThe ticket is back in In Progress with the same assignee. You'll need to accept it again in Human Review before it merges."
+            merge_conflict_reopen_comment(
+                "main",
+                &["README.md".into(), "src/lib.rs".into()],
+                "Frontend Engineer",
+            ),
+            "Couldn't merge into main because these files conflict:\n- README.md\n- src/lib.rs\n\nThe ticket is back in In Progress with Frontend Engineer. You'll need to accept it again in Human Review before it merges."
         );
     }
 }

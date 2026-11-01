@@ -286,7 +286,7 @@ async fn rebase_branch_conflict_aborts_and_leaves_clean_worktree() {
     assert_eq!(body["conflict"]["canAskAssignee"], false);
     assert_eq!(
         body["conflict"]["unavailableReason"],
-        coppice_server::copy::conflict::NO_ASSIGNEE
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
     );
     assert!(body["conflict"]["askLabel"].is_null());
     assert_eq!(
@@ -435,7 +435,7 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
     assert_eq!(body["conflict"]["canAskAssignee"], false);
     assert_eq!(
         body["conflict"]["unavailableReason"],
-        coppice_server::copy::conflict::NO_ASSIGNEE
+        coppice_server::copy::conflict::NO_ELIGIBLE_AGENT
     );
 
     let comments = app
@@ -453,6 +453,7 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
     let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
         "main",
         &["README.md".into()],
+        "Ada",
     );
     assert!(!comments
         .as_array()

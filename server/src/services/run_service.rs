@@ -36,8 +36,12 @@ pub struct StartRunOptions {
     pub context_profile: ContextProfile,
     pub trigger_comment_id: Option<Uuid>,
     /// Move a Done ticket to In Progress in the run-insert transaction, after
-    /// a person asked the assignee to resolve a merge conflict.
+    /// a person asked an agent to resolve a merge conflict.
     pub reopen_done_after_merge_conflict: bool,
+    /// Assignee to set when reopening a Done ticket. Applied in the same
+    /// transaction as the queued run so a failed start leaves the ticket
+    /// Done and unassigned.
+    pub reopen_assignee_id: Option<Uuid>,
 }
 
 impl Default for StartRunOptions {
@@ -46,6 +50,7 @@ impl Default for StartRunOptions {
             context_profile: ContextProfile::Full,
             trigger_comment_id: None,
             reopen_done_after_merge_conflict: false,
+            reopen_assignee_id: None,
         }
     }
 }
@@ -301,6 +306,7 @@ impl<'a> RunService<'a> {
             JOB_TYPE_WORK_ON_TICKET,
             ContextProfile::Full,
             false,
+            None,
         )
         .await?;
 
@@ -697,6 +703,7 @@ impl<'a> RunService<'a> {
             job_type,
             options.context_profile,
             options.reopen_done_after_merge_conflict,
+            options.reopen_assignee_id,
         )
         .await?;
 
@@ -729,6 +736,7 @@ impl<'a> RunService<'a> {
         job_type: &str,
         context_profile: ContextProfile,
         reopen_done_after_merge_conflict: bool,
+        reopen_assignee_id: Option<Uuid>,
     ) -> Result<(), RunError> {
         let row = sqlx::query(
             r#"
@@ -751,7 +759,13 @@ impl<'a> RunService<'a> {
         let substatus = substatus_str.as_deref().and_then(substatus_from_str);
         let substatus_metadata: Option<serde_json::Value> = row.get("substatus_metadata");
         if reopen_done_after_merge_conflict {
-            return Self::reopen_done_after_merge_conflict(tx, ticket_id, current).await;
+            return Self::reopen_done_after_merge_conflict(
+                tx,
+                ticket_id,
+                current,
+                reopen_assignee_id,
+            )
+            .await;
         }
         let Some(new_status) = WorkflowService::resolve_run_start_transition(
             current,
@@ -817,7 +831,8 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
-    /// Done → In Progress after a merge conflict. Keeps the assignee and the
+    /// Done → In Progress after a merge conflict. Sets the asked agent as
+    /// assignee, clears a pending assign recommendation, keeps the
     /// acceptance (marked stale), and lets the ticket back past a full review
     /// cap. This is the only write that leaves Done; dragging still cannot.
     /// `after_status_write(Done, InProgress)` is a no-op, so it is not called.
@@ -825,6 +840,7 @@ impl<'a> RunService<'a> {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         ticket_id: Uuid,
         current: TicketStatus,
+        assignee_id: Option<Uuid>,
     ) -> Result<(), RunError> {
         if current != TicketStatus::Done {
             return Err(RunError::Validation(
@@ -838,12 +854,15 @@ impl<'a> RunService<'a> {
                 substatus = NULL,
                 substatus_metadata = NULL,
                 review_cap_exempt = true,
+                assignee_agent_id = $3,
+                pending_assign_recommendation = NULL,
                 updated_at = now()
             WHERE id = $1
             "#,
         )
         .bind(ticket_id)
         .bind(status_to_str(TicketStatus::InProgress))
+        .bind(assignee_id)
         .execute(&mut **tx)
         .await?;
         HumanReviewService::retain_stale_acceptance(&mut **tx, ticket_id)
