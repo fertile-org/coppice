@@ -97,6 +97,11 @@ pub fn validate_ref(git_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Full 40-character hex object id, as marketplace `source.sha` values use.
+pub fn is_commit_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b: u8| b.is_ascii_hexdigit())
+}
+
 /// The folder name a clone of `url` gets inside a plugin dir.
 pub fn repo_dir_name(url: &str) -> Result<String, String> {
     let path = match url.split_once("://") {
@@ -129,6 +134,14 @@ pub async fn clone(
     let git = Git::new(allow_file, timeout);
     let existed = dest.exists();
     let result = async {
+        if let Some(sha) = git_ref.filter(|value| is_commit_sha(value)) {
+            clone_at_sha(&git, url, sha, dest).await?;
+            let head = git.head(dest).await?;
+            if !head.eq_ignore_ascii_case(sha) {
+                return Err(format!("checked out {head}, expected {sha}"));
+            }
+            return Ok(head);
+        }
         let mut args: Vec<&OsStr> =
             vec![OsStr::new("clone"), OsStr::new("--depth"), OsStr::new("1")];
         if let Some(git_ref) = git_ref {
@@ -145,6 +158,40 @@ pub async fn clone(
         }
     }
     result
+}
+
+/// `git clone --branch` cannot take a SHA. Init, fetch that object, detach.
+async fn clone_at_sha(git: &Git, url: &str, sha: &str, dest: &Path) -> Result<(), String> {
+    git.run(&[OsStr::new("init"), OsStr::new("-q"), dest.as_os_str()])
+        .await?;
+    git.run(&[
+        OsStr::new("-C"),
+        dest.as_os_str(),
+        OsStr::new("remote"),
+        OsStr::new("add"),
+        OsStr::new("origin"),
+        OsStr::new(url),
+    ])
+    .await?;
+    git.run(&[
+        OsStr::new("-C"),
+        dest.as_os_str(),
+        OsStr::new("fetch"),
+        OsStr::new("--depth"),
+        OsStr::new("1"),
+        OsStr::new("origin"),
+        OsStr::new(sha),
+    ])
+    .await?;
+    git.run(&[
+        OsStr::new("-C"),
+        dest.as_os_str(),
+        OsStr::new("checkout"),
+        OsStr::new("--detach"),
+        OsStr::new("FETCH_HEAD"),
+    ])
+    .await?;
+    Ok(())
 }
 
 /// Fetches `git_ref` (or the remote HEAD) into the clone at `root`, checks it
@@ -356,5 +403,107 @@ mod tests {
         let commit = clone(&url, None, &allowed, true, timeout).await.unwrap();
         assert_eq!(commit.len(), 40);
         assert!(allowed.join("README.md").is_file());
+    }
+
+    fn init_repo(src: &Path) {
+        for args in [
+            &["init", "-q"][..],
+            &["add", "-A"],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                "x",
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(src)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
+    fn rev_parse(repo: &Path) -> String {
+        let out = std::process::Command::new("git")
+            .args(["-C", &repo.to_string_lossy(), "rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[tokio::test]
+    async fn clone_pins_sha_when_branch_has_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("README.md"), "first\n").unwrap();
+        init_repo(&src);
+        let first = rev_parse(&src);
+        std::fs::write(src.join("README.md"), "second\n").unwrap();
+        std::fs::write(src.join("later.md"), "new\n").unwrap();
+        for args in [
+            &["add", "-A"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                "second",
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&src)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        let url = format!("file://{}", src.display());
+        let dest = tmp.path().join("pinned");
+        let commit = clone(&url, Some(&first), &dest, true, Duration::from_secs(30))
+            .await
+            .unwrap();
+        assert_eq!(commit, first);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("README.md")).unwrap(),
+            "first\n"
+        );
+        assert!(!dest.join("later.md").exists());
+    }
+
+    #[tokio::test]
+    async fn clone_fails_on_unfetchable_sha() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("README.md"), "x\n").unwrap();
+        init_repo(&src);
+        let url = format!("file://{}", src.display());
+        let dest = tmp.path().join("missing");
+        let err = clone(
+            &url,
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            &dest,
+            true,
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap_err();
+        assert!(!err.is_empty());
+        assert!(!dest.exists());
     }
 }

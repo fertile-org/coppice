@@ -20,7 +20,14 @@ export const PLUGIN_COPY = {
   trustCoppice: 'Coppice',
   trustCommunity: 'Community: not reviewed by Coppice',
   marketplaceEmpty: 'No plugins match these filters.',
+  marketplaceNoneYet: 'No plugins in the marketplace yet.',
   marketplaceNotInstallable: "Can't install from Coppice yet.",
+  marketplaceFetching: (count: number) =>
+    count === 1
+      ? 'Fetching 1 source. Results appear as each one finishes.'
+      : `Fetching ${count} sources. Results appear as each one finishes.`,
+  marketplaceSourceFailed: (name: string) =>
+    `${name} couldn’t load. Showing its last fetched plugins, if any.`,
   installed: 'Installed',
   updateAvailable: 'Update available',
   installing: 'Installing…',

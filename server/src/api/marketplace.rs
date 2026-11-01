@@ -106,7 +106,9 @@ async fn list_sources(
     AuthUser { .. }: AuthUser,
 ) -> Result<Json<Vec<SourceResponse>>, ApiError> {
     let pool = pool_from_state(&state)?;
-    let sources = MarketplaceService::new(pool).list_sources().await?;
+    let sources = MarketplaceService::with_catalog(pool, &state.marketplace)
+        .list_sources()
+        .await?;
     Ok(Json(sources.into_iter().map(source_response).collect()))
 }
 
@@ -116,7 +118,7 @@ async fn add_source(
     Json(body): Json<AddSourceBody>,
 ) -> Result<(StatusCode, Json<SourceResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
-    let source = MarketplaceService::new(pool)
+    let source = MarketplaceService::with_catalog(pool, &state.marketplace)
         .add_git_source(
             &body.name,
             &body.git_url,
@@ -133,7 +135,7 @@ async fn remove_source(
     Path(source_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let pool = pool_from_state(&state)?;
-    MarketplaceService::new(pool)
+    MarketplaceService::with_catalog(pool, &state.marketplace)
         .remove_source(source_id, cache_dir(&state))
         .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -146,7 +148,7 @@ async fn refresh_source(
 ) -> Result<Json<SourceResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let timeout = Duration::from_secs(state.config.plugins.git_timeout_secs);
-    let source = MarketplaceService::new(pool)
+    let source = MarketplaceService::with_catalog(pool, &state.marketplace)
         .refresh_source(
             source_id,
             cache_dir(&state),
@@ -172,7 +174,7 @@ async fn list_entries(
             .map(str::trim)
             .filter(|c| !c.is_empty()),
     };
-    let entries = MarketplaceService::new(pool)
+    let entries = MarketplaceService::with_catalog(pool, &state.marketplace)
         .list_entries(cache_dir(&state), &filter)
         .await?;
     Ok(Json(entries.into_iter().map(entry_response).collect()))
@@ -186,7 +188,7 @@ async fn install_entry(
     Json(body): Json<InstallBody>,
 ) -> Result<Response, ApiError> {
     let pool = pool_from_state(&state)?;
-    let outcome = MarketplaceService::new(pool)
+    let outcome = MarketplaceService::with_catalog(pool, &state.marketplace)
         .install_entry(
             body.source_id,
             cache_dir(&state),
@@ -206,7 +208,7 @@ async fn update_plugin(
     Path(plugin_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let pool = pool_from_state(&state)?;
-    let outcome = MarketplaceService::new(pool)
+    let outcome = MarketplaceService::with_catalog(pool, &state.marketplace)
         .update_entry(
             plugin_id,
             cache_dir(&state),
@@ -250,7 +252,7 @@ fn spawn_job(state: Arc<AppState>, job: MarketplaceJob) {
         let timeout = Duration::from_secs(state.config.plugins.git_timeout_secs);
         let update_of = job.update_of;
         let allow_file = state.config.plugins.allow_file_git_urls;
-        match MarketplaceService::new(pool)
+        match MarketplaceService::with_catalog(pool, &state.marketplace)
             .run_job(job, allow_file, timeout, &state.skills)
             .await
         {

@@ -58,6 +58,8 @@ pub struct AppState {
     /// Shared per-connector in-flight counts. `AppState` is `Clone`; workers
     /// must see the same counters.
     pub connector_slots: Arc<crate::workers::connector_slots::ConnectorSlots>,
+    /// Parsed marketplace catalogs, shared across list/refresh.
+    pub marketplace: Arc<crate::services::marketplace_service::MarketplaceCatalog>,
 }
 
 impl AppState {
@@ -279,6 +281,7 @@ pub async fn test_state() -> Arc<AppState> {
             crate::services::connector_probe_service::ConnectorProbes::new(),
         ),
         connector_slots: Arc::new(crate::workers::connector_slots::ConnectorSlots::new()),
+        marketplace: Arc::new(crate::services::marketplace_service::MarketplaceCatalog::new()),
         config: config.clone(),
         database_url: AppState::share_database_url(&config.database.url),
         db: None,
