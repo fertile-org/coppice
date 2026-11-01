@@ -53,6 +53,11 @@ import {
 import { ReviewWaitingChip } from './ReviewWaitingChip';
 import { useReviewCapacity } from './useReviewCapacity';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
+import {
+  DONE_COLUMN_PAGE_SIZE,
+  sortDoneTickets,
+  visibleDoneTickets,
+} from './doneColumn';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import { buildTicketHierarchyIndex } from './ticketHierarchy';
 import {
@@ -114,6 +119,12 @@ export function BoardPage() {
   const [focusGeneration, setFocusGeneration] = useState(0);
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
+  const [doneLimit, setDoneLimit] = useState(DONE_COLUMN_PAGE_SIZE);
+  const [limitBoardId, setLimitBoardId] = useState(boardId);
+  if (boardId !== limitBoardId) {
+    setLimitBoardId(boardId);
+    setDoneLimit(DONE_COLUMN_PAGE_SIZE);
+  }
   const returnTicketId = useRef<string | null>(null);
 
   // Keep the current object when nothing changed so memoized columns skip.
@@ -185,15 +196,32 @@ export function BoardPage() {
       const list = grouped.get(ticket.status);
       if (list) list.push(ticket);
     }
+    const done = grouped.get('done');
+    if (done) grouped.set('done', sortDoneTickets(done));
     return grouped;
   }, [filteredTickets]);
+
+  const focusedDoneIndex = useMemo(() => {
+    if (focusState?.type !== 'card') return -1;
+    const done = ticketsByStatus.get('done') ?? [];
+    return done.findIndex((ticket) => ticket.id === focusState.ticketId);
+  }, [focusState, ticketsByStatus]);
+
+  const visibleTicketsByStatus = useMemo(() => {
+    const done = ticketsByStatus.get('done') ?? [];
+    const next = new Map(ticketsByStatus);
+    next.set('done', visibleDoneTickets(done, doneLimit, focusedDoneIndex));
+    return next;
+  }, [doneLimit, focusedDoneIndex, ticketsByStatus]);
 
   const columnSnapshots = useMemo<BoardColumnSnapshot[]>(
     () =>
       BOARD_COLUMNS.map((column) => ({
-        ticketIds: (ticketsByStatus.get(column.status) ?? []).map((ticket) => ticket.id),
+        ticketIds: (visibleTicketsByStatus.get(column.status) ?? []).map(
+          (ticket) => ticket.id,
+        ),
       })),
-    [ticketsByStatus],
+    [visibleTicketsByStatus],
   );
   const boardFocus = useMemo(
     () => reconcileBoardFocus(columnSnapshots, focusState),
@@ -208,11 +236,12 @@ export function BoardPage() {
     if (boardId) {
       void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
     }
+    returnTicketId.current = selectedTicketId ?? returnTicketId.current;
     const ticketId = returnTicketId.current;
     if (!ticketId) return;
     setFocusState({ type: 'card', ticketId });
     setFocusGeneration((generation) => generation + 1);
-  }, [boardId, queryClient, setSearchParams]);
+  }, [boardId, queryClient, selectedTicketId, setSearchParams]);
 
   const columnsRef = useRef(columnSnapshots);
   const focusRef = useRef(boardFocus);
@@ -233,6 +262,18 @@ export function BoardPage() {
     setFocusState(next);
     setFocusGeneration((generation) => generation + 1);
   }
+
+  const handleShowMoreDone = useStableCallback(() => {
+    const sorted = ticketsByStatus.get('done') ?? [];
+    const currentVisible = visibleDoneTickets(sorted, doneLimit, focusedDoneIndex);
+    const nextLimit = Math.max(doneLimit, currentVisible.length) + DONE_COLUMN_PAGE_SIZE;
+    const nextVisible = visibleDoneTickets(sorted, nextLimit, focusedDoneIndex);
+    const firstNew = sorted[currentVisible.length];
+    setDoneLimit(nextLimit);
+    if (nextVisible.length >= sorted.length && firstNew) {
+      moveBoardFocus({ type: 'card', ticketId: firstNew.id });
+    }
+  });
 
   useBoardKeyboard({
     enabled: !drawerOpen && !panelOpen,
@@ -442,7 +483,9 @@ export function BoardPage() {
                   key={column.status}
                   column={column}
                   columnIndex={columnIndex}
-                  tickets={ticketsByStatus.get(column.status) ?? []}
+                  tickets={visibleTicketsByStatus.get(column.status) ?? []}
+                  totalCount={(ticketsByStatus.get(column.status) ?? []).length}
+                  onShowMore={column.status === 'done' ? handleShowMoreDone : undefined}
                   hierarchyIndex={hierarchyIndex}
                   agentsById={agentsById}
                   showQuickAdd={column.status === 'backlog'}

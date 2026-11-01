@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
@@ -140,13 +140,21 @@ vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
     open = true,
     onClose,
+    onRestoreFocus,
   }: {
     open?: boolean;
     onClose: () => void;
+    onRestoreFocus?: () => void;
   }) =>
     open ? (
       <div role="dialog" data-shortcut-layer="ticket" data-testid="ticket-drawer">
-        <button type="button" onClick={onClose}>
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onRestoreFocus?.();
+          }}
+        >
           Close drawer
         </button>
       </div>
@@ -177,17 +185,34 @@ function LocationProbe() {
   );
 }
 
-function renderBoard() {
+function OpenTicketViaUrl({ ticketId }: { ticketId: string }) {
+  const [params, setParams] = useSearchParams();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = new URLSearchParams(params);
+        next.set('ticket', ticketId);
+        setParams(next);
+      }}
+    >
+      Open {ticketId} via url
+    </button>
+  );
+}
+
+function renderBoard(entry = '/boards/board-1') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
-    <MemoryRouter initialEntries={['/boards/board-1']}>
+    <MemoryRouter initialEntries={[entry]}>
       <KeyboardProvider>
         <QueryClientProvider client={client}>
           <ToastProvider>
             <SkipToBoard />
             <LocationProbe />
+            <OpenTicketViaUrl ticketId="done-20" />
             <Routes>
               <Route path="/boards/:boardId" element={<BoardPage />} />
               <Route path="*" element={null} />
@@ -638,5 +663,151 @@ describe('board keyboard navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Board settings' }));
     press('j');
     expect(card('Beta', true)).toHaveAttribute('data-board-tabstop', 'true');
+  });
+});
+
+function doneTickets(count: number): Ticket[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeTicket({
+      id: `done-${String(index).padStart(2, '0')}`,
+      title: `Done ${String(index).padStart(2, '0')}`,
+      status: 'done',
+      updatedAt: new Date(Date.UTC(2026, 9, 31, 12, 0, 0) - index * 60_000).toISOString(),
+    }),
+  );
+}
+
+function activateButton(button: HTMLElement, key: string) {
+  button.focus();
+  const event = new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+  });
+  button.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  if (!event.defaultPrevented) {
+    fireEvent.click(button);
+  }
+}
+
+describe('board keyboard navigation with a limited Done column', () => {
+  beforeEach(() => {
+    updateStatus.mockReset();
+    updateStatus.mockResolvedValue(undefined);
+    createTicket.mockReset();
+    createTicket.mockResolvedValue(undefined);
+    approveTicketPlan.mockReset();
+    mergeBranch.mockReset();
+    gitInfoState.current = null;
+    reposState.data = [];
+    ticketsState.active = doneTickets(32);
+  });
+
+  it('stops J/K on the last visible Done card', () => {
+    renderBoard();
+
+    press('g');
+    press('8');
+    expect(document.activeElement).toBe(card('Done 00'));
+
+    for (let step = 0; step < 20; step += 1) {
+      press('j');
+    }
+    expect(document.activeElement).toBe(card('Done 09'));
+    expect(screen.queryByText('Done 10')).toBeNull();
+  });
+
+  it('reveals more with Enter and Space on the button instead of opening a ticket', () => {
+    renderBoard();
+
+    const button = screen.getByRole('button', { name: 'Show 10 more' });
+    activateButton(button, 'Enter');
+    expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    expect(screen.getByText('Done 10')).toBeVisible();
+    expect(screen.getByText('Showing 20 of 32')).toBeVisible();
+
+    activateButton(screen.getByRole('button', { name: 'Show 10 more' }), ' ');
+    expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    expect(screen.getByText('Done 20')).toBeVisible();
+    expect(screen.getByText('Showing 30 of 32')).toBeVisible();
+  });
+
+  it('moves focus to the first newly revealed card when the last click removes the button', () => {
+    ticketsState.active = doneTickets(12);
+    renderBoard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show 2 more' }));
+    expect(screen.queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
+    expect(document.activeElement).toBe(card('Done 10'));
+  });
+
+  it('mounts a hidden Done card and returns focus after closing a ?ticket= drawer', async () => {
+    renderBoard('/boards/board-1?ticket=done-20');
+
+    expect(screen.getByTestId('ticket-drawer')).toBeInTheDocument();
+    expect(screen.queryByText('Done 20')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Done 20')).toBeVisible();
+    expect(document.activeElement).toBe(card('Done 20'));
+  });
+
+  it('returns focus to a later ?ticket= card after an earlier drawer, including restoreBoardFocus', async () => {
+    renderBoard();
+
+    press('g');
+    press('8');
+    press('Enter');
+    expect(screen.getByTestId('location')).toHaveTextContent('ticket=done-00');
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    });
+    expect(document.activeElement).toBe(card('Done 00'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open done-20 via url' }));
+    expect(screen.getByTestId('ticket-drawer')).toBeInTheDocument();
+    expect(screen.queryByText('Done 20')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('ticket-drawer')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Done 20')).toBeVisible();
+    expect(document.activeElement).toBe(card('Done 20'));
+  });
+
+  it('keeps a focused Done card mounted after it is pushed past the page limit', () => {
+    ticketsState.active = doneTickets(10);
+    renderBoard();
+
+    press('g');
+    press('8');
+    for (let step = 0; step < 9; step += 1) {
+      press('j');
+    }
+    expect(document.activeElement).toBe(card('Done 09'));
+
+    ticketsState.active = [
+      makeTicket({
+        id: 'done-new',
+        title: 'Done new',
+        status: 'done',
+        updatedAt: '2026-10-31T13:00:00.000Z',
+      }),
+      ...ticketsState.active,
+    ];
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    const done = screen.getByRole('region', { name: 'Done' });
+    expect(within(done).getByText('11')).toBeVisible();
+    expect(screen.getByText('Done new')).toBeVisible();
+    expect(screen.getByText('Done 09')).toBeVisible();
+    expect(card('Done 09')).toHaveAttribute('data-board-tabstop', 'true');
   });
 });

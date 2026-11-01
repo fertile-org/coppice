@@ -416,3 +416,96 @@ describe('BoardPage render cost when opening a ticket', () => {
     expect(cardRenders.ids).toEqual([]);
   });
 });
+
+function doneTickets(count: number, titlePrefix = 'Done'): Ticket[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeTicket({
+      id: `${titlePrefix}-${String(index).padStart(2, '0')}`,
+      title: `${titlePrefix} ${String(index).padStart(2, '0')}`,
+      status: 'done',
+      updatedAt: new Date(Date.UTC(2026, 9, 31, 12, 0, 0) - index * 60_000).toISOString(),
+    }),
+  );
+}
+
+describe('BoardPage Done column limit', () => {
+  beforeEach(() => {
+    ticketsState.lastIncludeArchived = false;
+    ticketsState.archived = [];
+  });
+
+  it('shows the 10 newest Done tickets and the full count in the header', () => {
+    ticketsState.active = [
+      ...doneTickets(32).reverse(),
+      makeTicket({ id: 'backlog-1', title: 'Backlog card', status: 'backlog' }),
+    ];
+
+    renderBoard();
+
+    const done = screen.getByRole('region', { name: 'Done' });
+    expect(within(done).getByText('32')).toBeVisible();
+    expect(within(done).getByText('Showing 10 of 32')).toBeVisible();
+    expect(within(done).getByRole('button', { name: 'Show 10 more' })).toBeVisible();
+    expect(within(done).getByText('Done 00')).toBeVisible();
+    expect(within(done).getByText('Done 09')).toBeVisible();
+    expect(within(done).queryByText('Done 10')).toBeNull();
+
+    const backlog = screen.getByRole('region', { name: 'Backlog' });
+    expect(within(backlog).getByText('Backlog card')).toBeVisible();
+    expect(within(backlog).queryByText(/Showing \d+ of \d+/)).toBeNull();
+    expect(within(backlog).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
+  });
+
+  it('adds up to 10 cards per click and removes the button when all are shown', () => {
+    ticketsState.active = doneTickets(22);
+
+    renderBoard();
+
+    const done = screen.getByRole('region', { name: 'Done' });
+    fireEvent.click(within(done).getByRole('button', { name: 'Show 10 more' }));
+    expect(within(done).getByText('Showing 20 of 22')).toBeVisible();
+    expect(within(done).getByRole('button', { name: 'Show 2 more' })).toBeVisible();
+    expect(within(done).getByText('Done 19')).toBeVisible();
+    expect(within(done).queryByText('Done 20')).toBeNull();
+
+    fireEvent.click(within(done).getByRole('button', { name: 'Show 2 more' }));
+    expect(within(done).getByText('Done 21')).toBeVisible();
+    expect(within(done).queryByText(/Showing \d+ of \d+/)).toBeNull();
+    expect(within(done).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
+  });
+
+  it('shows every ticket and no footer when Done has 10 or fewer', () => {
+    ticketsState.active = doneTickets(8);
+
+    renderBoard();
+
+    const done = screen.getByRole('region', { name: 'Done' });
+    expect(within(done).getByText('8')).toBeVisible();
+    expect(within(done).getAllByText(/^Done \d+$/)).toHaveLength(8);
+    expect(within(done).queryByText(/Showing \d+ of \d+/)).toBeNull();
+    expect(within(done).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
+  });
+
+  it('applies the page limit and header count to matching tickets only', () => {
+    ticketsState.active = [
+      ...doneTickets(12, 'Keep'),
+      ...doneTickets(12, 'Hide'),
+    ];
+
+    renderBoard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByLabelText('Search'), {
+      target: { value: 'Keep' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    const done = screen.getByRole('region', { name: 'Done' });
+    expect(within(done).getByText('12')).toBeVisible();
+    expect(within(done).getByText('Showing 10 of 12')).toBeVisible();
+    expect(within(done).getByRole('button', { name: 'Show 2 more' })).toBeVisible();
+    expect(within(done).getByText('Keep 00')).toBeVisible();
+    expect(within(done).queryByText('Keep 10')).toBeNull();
+    expect(within(done).queryByText('Hide 00')).toBeNull();
+  });
+});

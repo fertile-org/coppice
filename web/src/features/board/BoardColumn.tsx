@@ -18,6 +18,7 @@ import {
   type BoardColumnDef,
 } from './columns';
 import { boardFocusDomId } from './boardFocus';
+import { DONE_COLUMN_PAGE_SIZE } from './doneColumn';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
@@ -42,6 +43,9 @@ interface BoardColumnProps {
   headingFocused?: boolean;
   onCardFocus?: (ticketId: string) => void;
   onHeadingFocus?: (columnIndex: number) => void;
+  /** Full matching count; defaults to the tickets rendered in this column. */
+  totalCount?: number;
+  onShowMore?: () => void;
 }
 
 /**
@@ -65,6 +69,8 @@ export const BoardColumn = memo(function BoardColumn({
   headingFocused = false,
   onCardFocus,
   onHeadingFocus,
+  totalCount,
+  onShowMore,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const addingRef = useRef(false);
@@ -98,6 +104,9 @@ export const BoardColumn = memo(function BoardColumn({
   const headingFocusable = tickets.length === 0;
   const headingSelected = headingFocusable && headingFocused;
   const headingFocusId = `heading:${columnIndex}`;
+  const matchingCount = totalCount ?? tickets.length;
+  const remaining = matchingCount - tickets.length;
+  const showMore = Boolean(onShowMore) && remaining > 0;
 
   return (
     <section
@@ -135,7 +144,7 @@ export const BoardColumn = memo(function BoardColumn({
             columnAccentClass(column.colorKey),
           ].join(' ')}
         >
-          {tickets.length}
+          {matchingCount}
         </span>
       </header>
 
@@ -186,6 +195,26 @@ export const BoardColumn = memo(function BoardColumn({
             );
           }}
         />
+
+        {showMore && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-center font-body text-xs text-text-muted">
+              Showing {tickets.length} of {matchingCount}
+            </p>
+            <button
+              type="button"
+              onClick={onShowMore}
+              className={[
+                'keyboard-focus w-full rounded-md border bg-transparent px-2 py-2 font-body text-sm',
+                columnBorderClass(column.colorKey),
+                columnAccentClass(column.colorKey),
+                'hover:bg-surface-raised',
+              ].join(' ')}
+            >
+              Show {Math.min(DONE_COLUMN_PAGE_SIZE, remaining)} more
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
