@@ -1299,7 +1299,7 @@ palette.open = \"Mod+P\"
         let shortcuts =
             std::fs::read_to_string(root.join("website/src/pages/docs/shortcuts.md")).unwrap();
         assert!(shortcuts.contains(
-            "If a shortcut can't be read, names an unknown command, uses a key another command already has, or belongs to the browser or the system, that command keeps its default. Settings explains why. The shortcut help and the command palette show the keys that are in effect."
+            "If a shortcut can't be read, names an unknown command, uses a key another command already has, or belongs to the browser or the system, that command keeps its default. Settings explains why. The shortcut help overlay, the Keyboard shortcuts page, and the command palette show the keys that are in effect."
         ));
         let settings =
             std::fs::read_to_string(root.join("website/src/pages/docs/settings.md")).unwrap();
