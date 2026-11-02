@@ -25,7 +25,7 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 3. 选择 **Target directory**（目标目录）。
 4. 点击 **Install**。
 
-Coppice 会用你电脑上的 git 凭据克隆仓库。之后在卡片上点击 **Update** 即可拉取新改动。
+Coppice 会用你电脑上的 git 凭据克隆仓库。之后在详情里点击 **Update** 即可拉取新改动。
 
 <a id="from-a-folder"></a>
 
@@ -42,8 +42,8 @@ Coppice 会用你电脑上的 git 凭据克隆仓库。之后在卡片上点击 
 ## 启用插件
 插件初始为禁用状态。
 
-1. 打开插件卡片上的开关。只有状态为 `ok` 的插件才能启用。
-2. 如果卡片上有 **Settings**，填写每个值并点击 **Save settings**。这些值会加密保存。
+1. 打开插件行上的开关。只有状态为 `ok` 的插件才能启用。
+2. 如果详情里有 **Settings**，填写每个值并点击 **Save settings**。这些值会加密保存。
 3. 点击 **Test**，启动插件的工具并列出它们。启用之前也可以测试。
 
 带本地 MCP 服务器的插件会以你电脑的权限在本机运行。Coppice 会先请你确认。
@@ -53,7 +53,7 @@ Coppice 会用你电脑上的 git 凭据克隆仓库。之后在卡片上点击 
 <a id="choose-which-agents-can-use-it"></a>
 
 ## 选择哪些智能体可以使用
-在卡片的 **Which agents can use it?**（哪些智能体可以使用？）下选择：
+在详情的 **Which agents can use it?**（哪些智能体可以使用？）下选择：
 
 - **All agents**：所有智能体，包括以后新建的。
 - **Choose agents**：只有你勾选的智能体。
@@ -145,7 +145,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 }
 ```
 
-`${NAME}` 会成为插件卡片上的一项设置，`${NAME:-default}` 则为它提供默认值。Coppice 会把 `${CLAUDE_PLUGIN_ROOT}` 替换为插件的安装文件夹，它不是卡片上的设置。不支持 SSE 服务器。
+`${NAME}` 会成为插件详情里的一项设置，`${NAME:-default}` 则为它提供默认值。Coppice 会把 `${CLAUDE_PLUGIN_ROOT}` 替换为插件的安装文件夹，它不是一项设置。不支持 SSE 服务器。
 
 这个示例提供了工具 `hello-coppice__greet` 和技能 `hello-coppice:greeting-style`。完整示例见 [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins)。
 

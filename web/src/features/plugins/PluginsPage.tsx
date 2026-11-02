@@ -4,8 +4,8 @@ import { cn } from '../../lib/utils';
 import { useSession } from '../auth/useSession';
 import { missingSettingsNotice, PLUGIN_COPY, PLUGIN_DOCS_URL } from './copy';
 import { CustomPluginsSection } from './CustomPluginsSection';
+import { InstalledPluginsList } from './InstalledPluginsList';
 import { MarketplaceSection } from './MarketplaceSection';
-import { PluginCard } from './PluginCard';
 import { useMarketplaceSources } from './useMarketplace';
 import { usePluginDirs, usePlugins } from './usePlugins';
 
@@ -48,7 +48,7 @@ export function PluginsPage() {
     setTab('custom');
   }
 
-  /** A marketplace install lands on the new plugin's card so it can be enabled. */
+  /** A marketplace install lands on the new plugin's row so it can be enabled. */
   const handleMarketplaceDone = useCallback((message: string, pluginIds: string[]) => {
     setNotice(message);
     setHighlightIds(pluginIds);
@@ -78,12 +78,6 @@ export function PluginsPage() {
     notice && missingKeys.length > 0
       ? `${notice} ${missingSettingsNotice(missingKeys)}`
       : notice;
-  const clonePluginCounts = new Map<string, number>();
-  for (const plugin of plugins) {
-    if (plugin.gitRoot) {
-      clonePluginCounts.set(plugin.gitRoot, (clonePluginCounts.get(plugin.gitRoot) ?? 0) + 1);
-    }
-  }
 
   return (
     <div className="space-y-8">
@@ -179,19 +173,10 @@ export function PluginsPage() {
                     folder from GitHub.
                   </p>
                 ) : (
-                  <div className="space-y-3">
-                    {plugins.map((plugin) => (
-                      <PluginCard
-                        key={plugin.id}
-                        plugin={plugin}
-                        onInstallFromGit={handleInstallFromGit}
-                        siblingCount={
-                          plugin.gitRoot ? clonePluginCounts.get(plugin.gitRoot) : undefined
-                        }
-                        highlighted={highlightIds.includes(plugin.id)}
-                      />
-                    ))}
-                  </div>
+                  <InstalledPluginsList
+                    onInstallFromGit={handleInstallFromGit}
+                    highlightIds={highlightIds}
+                  />
                 )}
               </section>
             </div>

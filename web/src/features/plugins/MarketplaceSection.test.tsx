@@ -461,32 +461,37 @@ describe('PluginsPage marketplace tab', () => {
         }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Installed', hidden: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('status', { hidden: true })).toHaveTextContent(
       'Installed review-kit. Enable it and choose which agents can use it.',
     );
-    expect(screen.getByRole('tab', { name: 'Installed' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('a path install shows the new plugin card on Installed without a remount', async () => {
+  it('a path install shows the new plugin row on Installed without a remount', async () => {
     renderPage();
     expect(await screen.findByText(/No plugins yet/)).toBeVisible();
     await openMarketplace();
 
     fireEvent.click(within(entryCard(reviewEntry)).getByRole('button', { name: 'Install' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
       'Installed review-kit. Enable it and choose which agents can use it.',
     );
-    const card = await screen.findByTestId(`plugin-card-${installedPlugin.id}`);
-    expect(card).toHaveAttribute('data-highlighted', 'true');
-    expect(within(card).getByText('review-kit')).toBeVisible();
+    const row = await screen.findByTestId(`plugin-row-${installedPlugin.id}`);
+    expect(row).toHaveAttribute('data-highlighted', 'true');
+    expect(within(row).getByText('review-kit')).toBeVisible();
   });
 
   it('a path update shows the refreshed plugin on Installed without a remount', async () => {
     plugins = [lintHelperPlugin];
     renderPage();
     expect(
-      within(await screen.findByTestId(`plugin-card-${lintHelperPlugin.id}`)).getByText('1.0.0'),
+      within(await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`)).getByText('1.0.0'),
     ).toBeVisible();
 
     await openMarketplace();
@@ -494,12 +499,13 @@ describe('PluginsPage marketplace tab', () => {
       within(entryCard(installedUpdatable)).getByRole('button', { name: 'Update available' }),
     );
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
       "Updated lint-helper. Changes apply from each agent's next run.",
     );
-    const card = await screen.findByTestId(`plugin-card-${lintHelperPlugin.id}`);
-    await waitFor(() => expect(within(card).getByText('1.1.0')).toBeVisible());
-    expect(within(card).queryByText('1.0.0')).toBeNull();
+    const row = await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`);
+    await waitFor(() => expect(within(row).getByText('1.1.0')).toBeVisible());
+    expect(within(row).queryByText('1.0.0')).toBeNull();
   });
 
   it('an object install polls the job and reports the failure', async () => {
@@ -546,15 +552,33 @@ describe('PluginsPage marketplace tab', () => {
 
     fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
 
-    const status = await screen.findByRole('status');
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    const status = await screen.findByRole('status', { hidden: true });
     expect(status).toHaveTextContent('Installed github.');
     expect(status).toHaveTextContent(
       'Add GITHUB_PERSONAL_ACCESS_TOKEN in its Settings before agents can use it.',
     );
-    const card = await screen.findByTestId(`plugin-card-${githubPlugin.id}`);
-    expect(card).toHaveAttribute('data-highlighted', 'true');
+    const row = await screen.findByTestId(`plugin-row-${githubPlugin.id}`);
+    expect(row).toHaveAttribute('data-highlighted', 'true');
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
     expect(scrollSpy).toHaveBeenCalled();
     scrollSpy.mockRestore();
+  });
+
+  it('a multi-plugin marketplace install highlights every row and opens no drawer', async () => {
+    const alpha: Plugin = { ...installedPlugin, id: '00000000-0000-4000-8000-0000000000a1', name: 'alpha' };
+    const beta: Plugin = { ...installedPlugin, id: '00000000-0000-4000-8000-0000000000a2', name: 'beta' };
+    plugins = [alpha, beta];
+    jobResult = { ...jobResult, status: 'succeeded', pluginIds: [alpha.id, beta.id] };
+    renderPage();
+    await openMarketplace();
+
+    fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Installed github.');
+    expect(screen.getByTestId(`plugin-row-${alpha.id}`)).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.getByTestId(`plugin-row-${beta.id}`)).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
   });
 
   it('shows why an entry cannot be installed and offers no install button', async () => {
