@@ -181,7 +181,7 @@ describe('DesktopUpdatesSection', () => {
         getUpdateInfo: vi.fn(async () => null),
         checkForUpdates: vi.fn(async () => {
           push({ kind: 'linux', version: '9.0.0' });
-          return { status: 'available', version: '9.0.0' };
+          return { status: 'available' as const, version: '9.0.0' };
         }),
       },
     );
@@ -204,7 +204,7 @@ describe('DesktopUpdatesSection', () => {
     shell(
       { platform: 'linux', macInPlaceUpdates: false },
       {
-        getUpdateInfo: vi.fn(async () => ({ kind: 'linux', version: '9.0.0' })),
+        getUpdateInfo: vi.fn(async () => ({ kind: 'linux' as const, version: '9.0.0' })),
       },
     );
 
@@ -218,7 +218,7 @@ describe('DesktopUpdatesSection', () => {
     shell(
       { platform: 'linux', macInPlaceUpdates: false },
       {
-        getUpdateInfo: vi.fn(async () => ({ kind: 'ready', version: '9.0.0' })),
+        getUpdateInfo: vi.fn(async () => ({ kind: 'ready' as const, version: '9.0.0' })),
         restartToUpdate: vi.fn(async () => undefined),
       },
     );
@@ -240,7 +240,7 @@ describe('DesktopUpdatesSection', () => {
       { platform: 'darwin', macInPlaceUpdates: false },
       {
         getUpdateInfo: vi.fn(async () => ({
-          kind: 'download',
+          kind: 'download' as const,
           version: '9.0.0',
           url: 'https://example/release',
         })),
@@ -280,7 +280,7 @@ describe('DesktopUpdatesSection', () => {
       { platform: 'linux', macInPlaceUpdates: false },
       {
         ...extra,
-        getUpdateInfo: vi.fn(async () => ({ kind: 'linux', version: '9.0.0' })),
+        getUpdateInfo: vi.fn(async () => ({ kind: 'linux' as const, version: '9.0.0' })),
         restartToUpdate: vi.fn(async () => undefined),
       },
     );
@@ -311,7 +311,7 @@ describe('DesktopUpdatesSection', () => {
       {
         ...extra,
         getUpdateInfo: vi.fn(async () => null),
-        checkForUpdates: vi.fn(async () => ({ status: 'available', version: '9.0.0' })),
+        checkForUpdates: vi.fn(async () => ({ status: 'available' as const, version: '9.0.0' })),
       },
     );
 
@@ -333,7 +333,7 @@ describe('DesktopUpdatesSection', () => {
       { platform: 'linux', macInPlaceUpdates: false },
       {
         ...extra,
-        getUpdateInfo: vi.fn(async () => ({ kind: 'linux', version: '9.0.0' })),
+        getUpdateInfo: vi.fn(async () => ({ kind: 'linux' as const, version: '9.0.0' })),
       },
     );
 
@@ -380,7 +380,7 @@ describe('DesktopUpdatesSection', () => {
     shell(
       { platform: 'darwin', macInPlaceUpdates: true },
       {
-        getUpdateInfo: vi.fn(async () => ({ kind: 'ready', version: '9.0.0' })),
+        getUpdateInfo: vi.fn(async () => ({ kind: 'ready' as const, version: '9.0.0' })),
         restartToUpdate: vi.fn(async () => undefined),
       },
     );
