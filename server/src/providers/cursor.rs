@@ -66,11 +66,21 @@ impl AgentProvider for CursorProvider {
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
 
+        // The write deny lives in the per-run cli-config.json, which only
+        // `cursor_mcp_setup` writes. Without it a read-only run would use the
+        // host Cursor config (and `--mode ask` does not block shell).
+        if input.read_only_tools && input.mcp.is_none() {
+            return Err(mcp_unavailable(
+                "cursor read-only runs need MCP access for their per-run permission config",
+            ));
+        }
+
         let mut env = Vec::new();
         let _mcp_worktree;
         if let Some(access) = &input.mcp {
             let state_dir = cursor_state_dir(&input)?;
-            let (mcp_env, guard) = cursor_mcp_setup(access, &state_dir, &worktree)?;
+            let (mcp_env, guard) =
+                cursor_mcp_setup(access, &state_dir, &worktree, input.read_only_tools)?;
             env.extend(mcp_env);
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
             args.push(APPROVE_MCPS_FLAG.to_string());
@@ -309,95 +319,178 @@ fn cursor_cli_args(
 /// fail. Scope the directory to whatever the resume key is instead:
 ///
 /// - chat turns resume by chat session → `chat-sessions/<chat session id>`
-/// - ticket runs resume the newest session for `(ticket, agent)` → `tickets/<ticket id>`
+/// - write-capable ticket runs resume the newest session for `(ticket, agent)`
+///   → `tickets/<ticket id>`
+/// - read-only ticket runs (plan) → `runs/<run id>`, so they do not share
+///   `cli-config.json` with a concurrent write run on the same ticket
 /// - anything else has no resume and stays per run → `runs/<run id>`
 ///
-/// Runs sharing a directory rewrite `cli-config.json` on every turn. The file
-/// is byte-identical across runs of the same server (it does not hold the
-/// token), so concurrent runs on one ticket cannot corrupt each other.
+/// Plan launches with `resume_session_id: None` and does not persist a
+/// session id (`session_created_tx` is unset). Work resume only looks at
+/// stored `session_id` rows, so isolating the plan config dir does not
+/// break `--resume`.
 fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
     let missing = || mcp_unavailable("cursor has no run artifacts dir for CURSOR_CONFIG_DIR");
     let artifacts_dir = input.artifacts_dir.as_deref().ok_or_else(missing)?;
-    let segments: [&str; 2] = match (&input.chat_session_id, &input.ticket_id, &input.run_id) {
-        (Some(chat_session_id), _, _) => ["chat-sessions", chat_session_id],
-        (None, Some(ticket_id), _) => ["tickets", ticket_id],
-        (None, None, Some(run_id)) => ["runs", run_id],
-        (None, None, None) => return Err(missing()),
+    let segments: [&str; 2] = match (
+        &input.chat_session_id,
+        &input.ticket_id,
+        &input.run_id,
+        input.read_only_tools,
+    ) {
+        (Some(chat_session_id), _, _, _) => ["chat-sessions", chat_session_id],
+        (None, Some(_), Some(run_id), true) => ["runs", run_id],
+        (None, Some(ticket_id), _, false) => ["tickets", ticket_id],
+        (None, None, Some(run_id), _) => ["runs", run_id],
+        (None, Some(_), None, true) | (None, None, None, _) => return Err(missing()),
     };
     Ok(artifacts_path(artifacts_dir, &segments)?)
 }
 
-/// Restores `<worktree>/.cursor/mcp.json` when the run ends.
+/// Empty project hooks. A workspace `.cursor/hooks.json` still runs its
+/// `sessionStart` / `beforeReadFile` commands under the `Shell(*)` deny
+/// (`cursor-agent` 2026.10.22-27dcf5f, ask and plan). Plan uses a scratch
+/// worktree of the repo, so a committed hooks file is at the root.
+const EMPTY_CURSOR_HOOKS: &str = r#"{"version":1,"hooks":{}}"#;
+
+/// Empty Claude-format project settings. `.claude/settings.json` and
+/// `.claude/settings.local.json` still run `SessionStart` / `PreToolUse`
+/// under the deny and an empty `.cursor/hooks.json` (`cursor-agent`
+/// 2026.10.22-27dcf5f, ask and plan).
+const EMPTY_CLAUDE_SETTINGS: &str = "{}";
+
+/// Restores files under the worktree when the run ends.
 ///
 /// The CLI has no `--mcp-config`. It reads MCP from the workspace file and
 /// `$HOME/.cursor/mcp.json`. Remapping `HOME` hid the operator login (Keychain
 /// on macOS). Writing the worktree file and putting it back is the remaining
 /// path that keeps auth and still injects the gateway.
+///
+/// Read-only runs also replace `.cursor/cli.json`, `.cursor/hooks.json`,
+/// `.claude/settings.json`, and `.claude/settings.local.json`. A project
+/// allow list in `cli.json` replaces `CURSOR_CONFIG_DIR` permissions.
+/// Repo hooks still run commands even when Shell is denied. Coppice only
+/// overlays the hook paths it knows about; `$HOME/.claude/settings.json`
+/// is left alone (operator-owned).
 struct CursorWorktreeMcp {
-    path: PathBuf,
-    previous: Option<Vec<u8>>,
-    created_dir: bool,
+    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    created_dirs: Vec<PathBuf>,
 }
 
 impl Drop for CursorWorktreeMcp {
     fn drop(&mut self) {
-        match &self.previous {
-            Some(raw) => {
-                let _ = std::fs::write(&self.path, raw);
-            }
-            None => {
-                let _ = std::fs::remove_file(&self.path);
-                if self.created_dir {
-                    if let Some(dir) = self.path.parent() {
-                        let _ = std::fs::remove_dir(dir);
-                    }
+        for (path, previous) in &self.files {
+            match previous {
+                Some(raw) => {
+                    let _ = std::fs::write(path, raw);
+                }
+                None => {
+                    let _ = std::fs::remove_file(path);
                 }
             }
         }
+        for dir in self.created_dirs.iter().rev() {
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+}
+
+fn snapshot_worktree_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    if path.is_file() {
+        Ok(Some(std::fs::read(path)?))
+    } else {
+        Ok(None)
     }
 }
 
 /// Permissions come from `$CURSOR_CONFIG_DIR/cli-config.json`. MCP servers
 /// come from `<worktree>/.cursor/mcp.json`. `HOME` is left alone so the CLI
 /// still finds Keychain / `~/.cursor` login.
+///
+/// Read-only runs deny `Shell(*)` and `Write(**)` and write only the Coppice
+/// gateway into the worktree file. Repo MCP servers are restored after the
+/// run; they are not merged in, because `--approve-mcps` would otherwise
+/// approve them and they can write. `$HOME/.cursor/mcp.json` is still
+/// visible; `Mcp(coppice:*)` should reject those tool calls, but whether
+/// those servers start is untested.
 fn cursor_mcp_setup(
     access: &McpAccess,
     state_dir: &Path,
     worktree: &Path,
+    read_only: bool,
 ) -> std::io::Result<(Vec<(String, String)>, CursorWorktreeMcp)> {
     let config_dir = state_dir.join("cursor-config");
     std::fs::create_dir_all(&config_dir)?;
 
     let spec = McpServerSpec::from_access(access);
     // Without this allow rule `-p` denies every gateway call at the approval prompt.
-    std::fs::write(config_dir.join("cli-config.json"), spec.cursor_cli_config())?;
+    std::fs::write(
+        config_dir.join("cli-config.json"),
+        spec.cursor_cli_config(read_only),
+    )?;
 
     let cursor_dir = worktree.join(".cursor");
+    let claude_dir = worktree.join(".claude");
     let mcp_path = cursor_dir.join("mcp.json");
-    let created_dir = !cursor_dir.exists();
+    let cli_path = cursor_dir.join("cli.json");
+    let hooks_path = cursor_dir.join("hooks.json");
+    let claude_settings = claude_dir.join("settings.json");
+    let claude_local = claude_dir.join("settings.local.json");
+    let mut created_dirs = Vec::new();
+    if !cursor_dir.exists() {
+        created_dirs.push(cursor_dir.clone());
+    }
     std::fs::create_dir_all(&cursor_dir)?;
-    let previous = if mcp_path.is_file() {
-        Some(std::fs::read(&mcp_path)?)
-    } else {
-        None
+    if read_only && !claude_dir.exists() {
+        created_dirs.push(claude_dir.clone());
+    }
+    if read_only {
+        std::fs::create_dir_all(&claude_dir)?;
+    }
+
+    // Snapshot every file we may overwrite before the first write, so a
+    // later write failure still restores through Drop.
+    let mcp_previous = snapshot_worktree_file(&mcp_path)?;
+    let mut files = vec![(mcp_path.clone(), mcp_previous.clone())];
+    if read_only {
+        files.push((cli_path.clone(), snapshot_worktree_file(&cli_path)?));
+        files.push((hooks_path.clone(), snapshot_worktree_file(&hooks_path)?));
+        files.push((
+            claude_settings.clone(),
+            snapshot_worktree_file(&claude_settings)?,
+        ));
+        files.push((claude_local.clone(), snapshot_worktree_file(&claude_local)?));
+    }
+    let guard = CursorWorktreeMcp {
+        files,
+        created_dirs,
     };
-    let body = match &previous {
-        Some(raw) => merge_cursor_mcp_json(raw, &spec),
-        None => spec.cursor_mcp_json(),
+
+    let body = if read_only {
+        spec.cursor_mcp_json()
+    } else {
+        match &mcp_previous {
+            Some(raw) => merge_cursor_mcp_json(raw, &spec),
+            None => spec.cursor_mcp_json(),
+        }
     };
     std::fs::write(&mcp_path, body)?;
     exclude_worktree_mcp(worktree);
+
+    if read_only {
+        // Project `.cursor/cli.json` replaces CURSOR_CONFIG_DIR permissions.
+        std::fs::write(&cli_path, spec.cursor_project_cli_json(true))?;
+        std::fs::write(&hooks_path, EMPTY_CURSOR_HOOKS)?;
+        std::fs::write(&claude_settings, EMPTY_CLAUDE_SETTINGS)?;
+        std::fs::write(&claude_local, EMPTY_CLAUDE_SETTINGS)?;
+    }
 
     Ok((
         vec![(
             "CURSOR_CONFIG_DIR".to_string(),
             config_dir.display().to_string(),
         )],
-        CursorWorktreeMcp {
-            path: mcp_path,
-            previous,
-            created_dir,
-        },
+        guard,
     ))
 }
 
@@ -674,11 +767,20 @@ mod tests {
             "{dir:?}"
         );
 
-        // Ticket runs resume the newest session for the ticket.
+        // Write-capable ticket runs resume the newest session for the ticket.
         let mut ticket = run_input();
         ticket.ticket_id = Some("ticket-7".into());
         let dir = cursor_state_dir(&ticket).expect("ticket dir");
         assert!(dir.ends_with("data/artifacts/tickets/ticket-7"), "{dir:?}");
+
+        // Read-only ticket runs (plan) stay per run so they cannot overwrite
+        // a concurrent write run's cli-config.json.
+        let mut plan = run_input();
+        plan.ticket_id = Some("ticket-7".into());
+        plan.run_id = Some("plan-9".into());
+        plan.read_only_tools = true;
+        let dir = cursor_state_dir(&plan).expect("plan dir");
+        assert!(dir.ends_with("data/artifacts/runs/plan-9"), "{dir:?}");
 
         // Everything else never resumes and stays per run.
         let dir = cursor_state_dir(&run_input()).expect("run dir");
@@ -714,7 +816,7 @@ mod tests {
         let run_dir = tmp.path().join("runs").join("run-1");
         std::fs::create_dir_all(&worktree).expect("worktree");
 
-        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree).expect("setup");
+        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree, false).expect("setup");
         let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, ["CURSOR_CONFIG_DIR"]);
         assert_eq!(
@@ -730,7 +832,7 @@ mod tests {
 
         let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
             .expect("cli config");
-        assert_eq!(cli_raw, spec.cursor_cli_config());
+        assert_eq!(cli_raw, spec.cursor_cli_config(false));
         assert!(!run_dir.join("cursor-home").exists());
 
         drop(guard);
@@ -748,7 +850,7 @@ mod tests {
         std::fs::write(&mcp_path, existing).expect("existing mcp");
 
         let (env, guard) =
-            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree).expect("setup");
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, false).expect("setup");
         assert!(env.iter().all(|(k, _)| k != "HOME"));
 
         let merged: serde_json::Value =
@@ -763,6 +865,153 @@ mod tests {
         drop(guard);
         assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
         assert!(cursor_dir.is_dir(), "pre-existing .cursor must stay");
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_denies_shell_and_write() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let run_dir = tmp.path().join("runs").join("run-ro");
+        std::fs::create_dir_all(worktree.join(".cursor")).expect("project cursor dir");
+        std::fs::write(
+            worktree.join(".cursor").join("cli.json"),
+            r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#,
+        )
+        .expect("project allow");
+
+        let spec = McpServerSpec::from_access(&access());
+        let (env, guard) = cursor_mcp_setup(&access(), &run_dir, &worktree, true).expect("setup");
+        assert!(env.iter().all(|(k, _)| k != "HOME"), "{env:?}");
+        let config_dir = run_dir.join("cursor-config").display().to_string();
+        assert_eq!(
+            env.iter()
+                .find(|(k, _)| k == "CURSOR_CONFIG_DIR")
+                .map(|(_, v)| v.as_str()),
+            Some(config_dir.as_str())
+        );
+
+        let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
+            .expect("cli config");
+        let parsed: serde_json::Value = serde_json::from_str(&cli_raw).expect("cli json");
+        assert_eq!(
+            parsed["permissions"]["allow"],
+            serde_json::json!(["Mcp(coppice:*)"])
+        );
+        assert_eq!(
+            parsed["permissions"]["deny"],
+            serde_json::json!(["Shell(*)", "Write(**)"])
+        );
+        // Per-run config only. A project `.cursor/cli.json` that allows writes
+        // is replaced for the run so it cannot override the deny.
+        assert!(!run_dir.join("cursor-config").join("cli.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor").join("cli.json")).expect("live"),
+            spec.cursor_project_cli_json(true)
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor").join("hooks.json")).expect("hooks"),
+            EMPTY_CURSOR_HOOKS
+        );
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor").join("cli.json")).expect("restored"),
+            r#"{"permissions":{"allow":["Shell(*)","Write(**)"],"deny":[]}}"#
+        );
+        assert!(
+            !worktree.join(".cursor").join("hooks.json").exists(),
+            "created hooks.json must be removed"
+        );
+        assert!(
+            !worktree.join(".claude").exists(),
+            "created .claude must be removed"
+        );
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_strips_repo_mcp_and_restores_it() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let cursor_dir = worktree.join(".cursor");
+        std::fs::create_dir_all(&cursor_dir).expect("cursor dir");
+        let mcp_path = cursor_dir.join("mcp.json");
+        let existing = r#"{"mcpServers":{"leaky":{"command":"sh","args":["-c","touch leaked"]}}}"#;
+        std::fs::write(&mcp_path, existing).expect("existing mcp");
+
+        let (_env, guard) =
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, true).expect("setup");
+
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&mcp_path).expect("read")).expect("json");
+        assert!(live["mcpServers"]["leaky"].is_null(), "{live}");
+        assert_eq!(
+            live["mcpServers"]["coppice"]["url"],
+            "http://127.0.0.1:5000/mcp"
+        );
+
+        drop(guard);
+        assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_disables_repo_hooks_and_restores_them() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let cursor_dir = worktree.join(".cursor");
+        std::fs::create_dir_all(&cursor_dir).expect("cursor dir");
+        let hooks_path = cursor_dir.join("hooks.json");
+        let existing = r#"{"version":1,"hooks":{"sessionStart":[{"command":"touch hook-fired"}]}}"#;
+        std::fs::write(&hooks_path, existing).expect("existing hooks");
+
+        let (_env, guard) =
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, true).expect("setup");
+
+        assert_eq!(
+            std::fs::read_to_string(&hooks_path).expect("live"),
+            EMPTY_CURSOR_HOOKS
+        );
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(&hooks_path).expect("restored"),
+            existing
+        );
+    }
+
+    #[test]
+    fn cursor_mcp_setup_read_only_disables_claude_hooks_and_restores_them() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let claude_dir = worktree.join(".claude");
+        std::fs::create_dir_all(&claude_dir).expect("claude dir");
+        let settings = claude_dir.join("settings.json");
+        let local = claude_dir.join("settings.local.json");
+        let existing_settings =
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch fired"}]}]}}"#;
+        let existing_local =
+            r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"touch local"}]}]}}"#;
+        std::fs::write(&settings, existing_settings).expect("settings");
+        std::fs::write(&local, existing_local).expect("local");
+
+        let (_env, guard) =
+            cursor_mcp_setup(&access(), &tmp.path().join("run"), &worktree, true).expect("setup");
+
+        assert_eq!(
+            std::fs::read_to_string(&settings).expect("live settings"),
+            EMPTY_CLAUDE_SETTINGS
+        );
+        assert_eq!(
+            std::fs::read_to_string(&local).expect("live local"),
+            EMPTY_CLAUDE_SETTINGS
+        );
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(&settings).expect("restored settings"),
+            existing_settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(&local).expect("restored local"),
+            existing_local
+        );
+        assert!(claude_dir.is_dir(), "pre-existing .claude must stay");
     }
 
     #[test]

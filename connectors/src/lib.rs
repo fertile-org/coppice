@@ -40,8 +40,13 @@ pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
         // against a scripted model; enforcement is the CLI's, not the model's.
         // Grok: its read-only sandbox plus commands refused by Coppice (real
         // model). Codex: OS `--sandbox read-only` (real model, 0.163.0).
-        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX => ChatReadOnlyStatus::Passed,
-        CLAUDE_CODE | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
+        // Cursor: per-run cli-config deny plus project `.cursor/cli.json`,
+        // empty `.cursor/hooks.json`, and empty `.claude` settings overlays
+        // (real model, cursor-agent 2026.10.22-27dcf5f).
+        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK | CODEX | CURSOR => {
+            ChatReadOnlyStatus::Passed
+        }
+        CLAUDE_CODE | KILO_CODE => ChatReadOnlyStatus::Untested,
         _ => ChatReadOnlyStatus::Unavailable,
     }
 }
@@ -267,10 +272,14 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            // `--mode ask` blocks edit/apply, not shell writes, so compaction
-            // cannot treat Cursor as read-only. Chat still launches in ask
-            // mode and shows the untested banner. Plan runs pass `--mode plan`.
-            read_only_tools: false,
+            // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
+            // write a per-run deny for Shell(*) and Write(**) and overlay
+            // project `.cursor/cli.json`, empty `.cursor/hooks.json`, and
+            // empty `.claude` settings so a repo allow or hook cannot
+            // replace it.
+            // Live probe passed on cursor-agent 2026.10.22-27dcf5f
+            // (`server/tests/real_cursor.rs`).
+            read_only_tools: true,
             chat_resume: true,
             session_events: true,
             run_resume: true,
@@ -623,7 +632,7 @@ mod tests {
             false,
         );
         assert_row(
-            CURSOR, CursorHome, Dash, Structured, false, true, true, true, false,
+            CURSOR, CursorHome, Dash, Structured, true, true, true, true, false,
         );
         assert_row(
             CODEX,

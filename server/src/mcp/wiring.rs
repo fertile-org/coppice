@@ -87,7 +87,7 @@ impl McpServerSpec {
 
     /// `<run config dir>/cli-config.json`. Without the allow rule `-p` denies
     /// every gateway call at the approval prompt.
-    pub fn cursor_cli_config(&self) -> String {
+    pub fn cursor_cli_config(&self, read_only: bool) -> String {
         #[derive(Serialize)]
         struct CliConfigFile {
             version: u32,
@@ -99,14 +99,37 @@ impl McpServerSpec {
             deny: Vec<String>,
         }
 
+        // `--mode ask` does not stop shell writes, so read-only runs deny them here.
+        let deny = if read_only {
+            vec!["Shell(*)".to_string(), "Write(**)".to_string()]
+        } else {
+            Vec::new()
+        };
         let file = CliConfigFile {
             version: 1,
             permissions: CliPermissions {
                 allow: vec![format!("Mcp({}:*)", self.name)],
-                deny: Vec::new(),
+                deny,
             },
         };
         serde_json::to_string(&file).expect("cursor cli-config.json serializes")
+    }
+
+    /// `<worktree>/.cursor/cli.json`. Same allow/deny as `cursor_cli_config`,
+    /// without `version` — the project schema rejects that key.
+    pub fn cursor_project_cli_json(&self, read_only: bool) -> String {
+        let deny = if read_only {
+            vec!["Shell(*)".to_string(), "Write(**)".to_string()]
+        } else {
+            Vec::new()
+        };
+        serde_json::to_string(&json!({
+            "permissions": {
+                "allow": [format!("Mcp({}:*)", self.name)],
+                "deny": deny,
+            }
+        }))
+        .expect("cursor project cli.json serializes")
     }
 
     /// The per-run `OPENCODE_CONFIG`.
@@ -181,8 +204,16 @@ mod tests {
     #[test]
     fn cursor_cli_config_matches_baseline() {
         assert_eq!(
-            spec().cursor_cli_config(),
+            spec().cursor_cli_config(false),
             r#"{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}"#
+        );
+        assert_eq!(
+            spec().cursor_cli_config(true),
+            r#"{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":["Shell(*)","Write(**)"]}}"#
+        );
+        assert_eq!(
+            spec().cursor_project_cli_json(true),
+            r#"{"permissions":{"allow":["Mcp(coppice:*)"],"deny":["Shell(*)","Write(**)"]}}"#
         );
     }
 
@@ -234,7 +265,9 @@ mod tests {
         let rendered = [
             spec.claude_json(),
             spec.cursor_mcp_json(),
-            spec.cursor_cli_config(),
+            spec.cursor_cli_config(false),
+            spec.cursor_cli_config(true),
+            spec.cursor_project_cli_json(true),
             spec.opencode_json(),
             spec.kilo_json(),
             spec.codex_args().join(" "),

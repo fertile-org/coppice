@@ -35,7 +35,7 @@ Coppice 執行你已經在用的代理 CLI，例如 Claude Code、Codex、Cursor
 
 開啟 **Chat**（聊天），點選一個代理，就可以聊你的程式碼、一個想法或某個工單。每個代理都能看到你所有的倉庫、看板、工單和 Knowledge（知識庫）。它可以起草工單或建議一條 Knowledge 筆記，但在你批准之前什麼都不會儲存。選擇 **New chat** 可以另開一個聊天。
 
-所有 CLI 都能聊天。Coppice 還沒有確認 Claude Code、Codex、Cursor 或 Kilo Code 能保持只讀，所以它們的聊天會顯示一條提示橫幅。代理仍然可以在你的電腦上執行命令。
+所有 CLI 都能聊天。Coppice 還沒有確認 Claude Code、Codex 或 Kilo Code 能保持只讀，所以它們的聊天會顯示一條提示橫幅。代理仍然可以在你的電腦上執行命令。
 
 <a id="everything-is-on-the-card"></a>
 
