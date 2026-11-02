@@ -135,6 +135,7 @@ export async function resetMarketingWorkspace() {
     set -eu
     rm -rf ${REPO_PATH}
     rm -rf /data/worktrees/TICKET-*
+    rm -rf /data/artifacts/designs
     mkdir -p ${PLUGIN_DIR}
     find ${PLUGIN_DIR} -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     `,

@@ -50,18 +50,20 @@ PM エージェントが計画を下書きし、あなたが承認します。�
 
 ## 使い方
 
-1. **作業を任せる。** チケットを書くか、エージェントが提案したチケットを承認します。PM エージェントに割り当てると計画を下書きし、誰かがコードを書く前にあなたが承認します。**Skip planning** をオンにすると、チケットは直接 Ready に進みます。
+1. **作業を任せる。** チケットを書くか、エージェントが提案したチケットを承認します。PM エージェントに割り当てると計画を下書きし、UI の変更にはデザイン案も提示します。誰かがコードを書く前にあなたが承認します。**Skip planning** をオンにすると、チケットは直接 Ready に進みます。
 2. **エージェントに作らせる。** チケットごとに専用の git worktree があるので、並行して動くエージェントがメインのチェックアウトに触れることはありません。どの実行もライブで追えます。
 3. **Human Review。** アプリで diff を読み、どの行にもコメントできます。あなたが承認するまで、何も完了にはなりません。
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="ボード：Backlog、Plan Review、Ready、In Progress の列とチケットのカード" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="PM エージェントがチケットに下書きした計画：アプローチ、手順、リスク、対象外" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="コードレビュー：承認済みの計画、変更されたファイル、行コメント付きの diff" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="ボード：Backlog、Plan Review、Ready、In Progress の列とチケットのカード" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="デザイン案のポップアップ：3 つの案がタブで並び、プレビュー、Recommended バッジ、Choose ボタンがある" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM エージェントがチケットに下書きした計画：アプローチ、手順、リスク、対象外" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="コードレビュー：承認済みの計画、変更されたファイル、行コメント付きの diff" /></td>
   </tr>
   <tr>
     <td align="center">すべてのエージェントを 1 つのボードに</td>
+    <td align="center">デザイン案を比較</td>
     <td align="center">まず計画を承認</td>
     <td align="center">diff を 1 行ずつレビュー</td>
   </tr>
