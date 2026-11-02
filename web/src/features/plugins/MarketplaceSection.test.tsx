@@ -30,6 +30,9 @@ const defaultDir: PluginDir = {
   isDefault: true,
 };
 
+/** Within 24h so useMarketplaceFirstFetch does not auto-refresh. */
+const FRESH_AT = new Date().toISOString();
+
 const coppiceSource: MarketplaceSource = {
   id: '00000000-0000-4000-8000-000000000100',
   name: 'coppice',
@@ -49,7 +52,7 @@ const communitySource: MarketplaceSource = {
   gitUrl: 'https://github.com/acme/plugins.git',
   gitRef: null,
   commitSha: 'abc1234',
-  refreshedAt: new Date().toISOString(),
+  refreshedAt: FRESH_AT,
   lastError: null,
   position: 1,
 };
@@ -140,6 +143,15 @@ const installedPlugin: Plugin = {
   agentIds: [],
 };
 
+const lintHelperPlugin: Plugin = {
+  ...installedPlugin,
+  id: installedUpdatable.installedPluginId!,
+  relPath: 'lint-helper',
+  name: 'lint-helper',
+  version: '1.0.0',
+  description: 'Runs the team linters',
+};
+
 let entries: MarketplaceEntry[];
 let sources: MarketplaceSource[];
 let plugins: Plugin[];
@@ -203,7 +215,7 @@ describe('PluginsPage marketplace tab', () => {
     localStorage.clear();
     entries = [githubEntry, reviewEntry, npmEntry, installedUpdatable];
     sources = [
-      { ...coppiceSource, refreshedAt: new Date().toISOString() },
+      { ...coppiceSource, refreshedAt: FRESH_AT },
       communitySource,
     ];
     plugins = [];
@@ -260,9 +272,33 @@ describe('PluginsPage marketplace tab', () => {
       if (path === '/api/marketplace/install' && method === 'POST') {
         const body = JSON.parse(init.body as string) as { entry: string };
         if (body.entry === 'review-kit') {
+          if (!plugins.some((plugin) => plugin.id === installedPlugin.id)) {
+            plugins = [...plugins, installedPlugin];
+          }
+          entries = entries.map((entry) =>
+            entry.name === 'review-kit'
+              ? { ...entry, installedPluginId: installedPlugin.id }
+              : entry,
+          );
           return Promise.resolve(json(installedPlugin, 201));
         }
         return Promise.resolve(json(jobResult, 202));
+      }
+      if (path.match(/^\/api\/marketplace\/plugins\/[^/]+\/update$/) && method === 'POST') {
+        const id = path.split('/')[4];
+        const current = plugins.find((plugin) => plugin.id === id);
+        const updated: Plugin = current
+          ? { ...current, version: installedUpdatable.version }
+          : { ...lintHelperPlugin, id, version: installedUpdatable.version };
+        plugins = current
+          ? plugins.map((plugin) => (plugin.id === id ? updated : plugin))
+          : [...plugins, updated];
+        entries = entries.map((entry) =>
+          entry.installedPluginId === id
+            ? { ...entry, version: updated.version, updateAvailable: false }
+            : entry,
+        );
+        return Promise.resolve(json(updated));
       }
       if (path.startsWith('/api/plugin-installs/')) {
         return Promise.resolve(json(jobResult));
@@ -372,7 +408,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('fetches each never-loaded source once when Marketplace opens', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: new Date().toISOString() },
+      { ...coppiceSource, refreshedAt: FRESH_AT },
       unfetchedSource,
     ];
     renderPage();
@@ -398,7 +434,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('keeps healthy entries visible when a first fetch fails', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: new Date().toISOString() },
+      { ...coppiceSource, refreshedAt: FRESH_AT },
       { ...unfetchedSource, lastError: 'network offline' },
     ];
     renderPage();
@@ -433,6 +469,43 @@ describe('PluginsPage marketplace tab', () => {
     expect(screen.getByRole('status', { hidden: true })).toHaveTextContent(
       'Installed review-kit. Enable it and choose which agents can use it.',
     );
+  });
+
+  it('a path install shows the new plugin row on Installed without a remount', async () => {
+    renderPage();
+    expect(await screen.findByText(/No plugins yet/)).toBeVisible();
+    await openMarketplace();
+
+    fireEvent.click(within(entryCard(reviewEntry)).getByRole('button', { name: 'Install' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
+      'Installed review-kit. Enable it and choose which agents can use it.',
+    );
+    const row = await screen.findByTestId(`plugin-row-${installedPlugin.id}`);
+    expect(row).toHaveAttribute('data-highlighted', 'true');
+    expect(within(row).getByText('review-kit')).toBeVisible();
+  });
+
+  it('a path update shows the refreshed plugin on Installed without a remount', async () => {
+    plugins = [lintHelperPlugin];
+    renderPage();
+    expect(
+      within(await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`)).getByText('1.0.0'),
+    ).toBeVisible();
+
+    await openMarketplace();
+    fireEvent.click(
+      within(entryCard(installedUpdatable)).getByRole('button', { name: 'Update available' }),
+    );
+
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
+      "Updated lint-helper. Changes apply from each agent's next run.",
+    );
+    const row = await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`);
+    await waitFor(() => expect(within(row).getByText('1.1.0')).toBeVisible());
+    expect(within(row).queryByText('1.0.0')).toBeNull();
   });
 
   it('an object install polls the job and reports the failure', async () => {
@@ -621,7 +694,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('refreshes a source from the dialog and opens it from the failure warning', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: new Date().toISOString() },
+      { ...coppiceSource, refreshedAt: FRESH_AT },
       communitySource,
       { ...unfetchedSource, refreshedAt: '2026-10-25T10:00:00Z', lastError: 'network offline' },
     ];
@@ -781,7 +854,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('a retry shows the spinner while the refresh is in flight', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: new Date().toISOString() },
+      { ...coppiceSource, refreshedAt: FRESH_AT },
       { ...communitySource, lastError: 'catalog missing' },
     ];
     const hold = deferred();

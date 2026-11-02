@@ -210,11 +210,23 @@ export function useRemoveMarketplaceSource() {
 }
 
 export function useInstallMarketplaceEntry() {
-  return useMutation({ mutationFn: installEntry });
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: installEntry,
+    onSuccess: (started) => {
+      if (started.type === 'plugin') invalidateMarketplace(queryClient);
+    },
+  });
 }
 
 export function useUpdateMarketplacePlugin() {
-  return useMutation({ mutationFn: updateEntry });
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateEntry,
+    onSuccess: (started) => {
+      if (started.type === 'plugin') invalidateMarketplace(queryClient);
+    },
+  });
 }
 
 /** Polls a marketplace job until it settles, then refreshes the marketplace and plugins. */

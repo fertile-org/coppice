@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { DesktopAppInfo, DesktopUpdateCheck } from '../../lib/desktop';
+import { Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { LINUX_GUIDE_TEXT, LinuxUpdateGuide, runIsActive } from '../../components/LinuxUpdateGuide';
 import { Button } from '../../components/ui/button';
 import { Switch } from '../../components/ui/switch';
+import type { DesktopAppInfo, DesktopUpdateCheck, DesktopUpdateInfo } from '../../lib/desktop';
 
 export function updateHelperText(info: Pick<DesktopAppInfo, 'platform' | 'macInPlaceUpdates'>): string {
   if (info.platform === 'darwin' && info.macInPlaceUpdates) {
@@ -35,14 +37,81 @@ function checkText(state: CheckState): string | null {
   }
 }
 
+const RUN_BLOCKED_TEXT = 'Wait for the agent run to finish, then try again.';
+
+function UpdateGuidePanel({
+  info,
+  platform,
+  runBlocked,
+  onRestart,
+  onDownload,
+}: {
+  info: DesktopUpdateInfo;
+  platform: string;
+  runBlocked: boolean;
+  onRestart: () => void;
+  onDownload: (url: string) => void;
+}) {
+  const linuxAvailable = info.kind === 'linux';
+  const linuxReady = info.kind === 'ready' && platform === 'linux';
+  const macReady = info.kind === 'ready' && platform === 'darwin';
+  const macDownload = info.kind === 'download';
+  if (!linuxAvailable && !linuxReady && !macReady && !macDownload) {
+    return null;
+  }
+
+  return (
+    <section className="max-w-xl rounded-md border border-border bg-surface p-4">
+      <h2 className="font-display text-base font-semibold text-text-primary">
+        Update to Coppice {info.version}
+      </h2>
+      {linuxAvailable ? (
+        <>
+          <p className="mt-1 font-body text-sm text-text-secondary">{LINUX_GUIDE_TEXT}</p>
+          <LinuxUpdateGuide />
+        </>
+      ) : null}
+      {linuxReady ? (
+        <>
+          <p className="mt-3 flex items-center gap-2 font-body text-sm text-text-primary">
+            <Check className="size-4 shrink-0 text-accent" aria-hidden="true" />
+            Coppice {info.version} is installed. Restart to start using it. Your boards and
+            settings stay.
+          </p>
+          <Button type="button" className="mt-3" onClick={onRestart}>
+            Restart Coppice
+          </Button>
+        </>
+      ) : null}
+      {macReady ? (
+        <Button type="button" className="mt-3" onClick={onRestart}>
+          Restart to update
+        </Button>
+      ) : null}
+      {macDownload ? (
+        <Button type="button" className="mt-3" onClick={() => onDownload(info.url)}>
+          Download update
+        </Button>
+      ) : null}
+      {runBlocked ? (
+        <p className="mt-3 font-body text-sm text-text-secondary">{RUN_BLOCKED_TEXT}</p>
+      ) : null}
+    </section>
+  );
+}
+
 export function DesktopUpdatesSection() {
   const desktop = typeof window !== 'undefined' ? window.coppiceDesktop : undefined;
   const supported = Boolean(desktop?.appInfo && desktop.getUpdateSettings && desktop.checkForUpdates);
   const [version, setVersion] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string | null>(null);
   const [helper, setHelper] = useState<string | null>(null);
   const [automatic, setAutomatic] = useState(true);
   const [ready, setReady] = useState(false);
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' });
+  const [update, setUpdate] = useState<DesktopUpdateInfo | null>(null);
+  const [runBlocked, setRunBlocked] = useState(false);
+  const lastInfoRef = useRef<DesktopUpdateInfo | null>(null);
 
   useEffect(() => {
     if (!supported || !desktop?.appInfo || !desktop.getUpdateSettings) return;
@@ -51,6 +120,7 @@ export function DesktopUpdatesSection() {
       .then(([info, settings]) => {
         if (cancelled) return;
         setVersion(info.version);
+        setPlatform(info.platform);
         setHelper(updateHelperText(info));
         setAutomatic(settings.automaticUpdates);
         setReady(true);
@@ -62,6 +132,48 @@ export function DesktopUpdatesSection() {
       cancelled = true;
     };
   }, [desktop, supported]);
+
+  useEffect(() => {
+    const getUpdateInfo = desktop?.getUpdateInfo;
+    const onUpdateInfo = desktop?.onUpdateInfo;
+    if (!getUpdateInfo && !onUpdateInfo) return;
+    let cancelled = false;
+    let seenBroadcast = false;
+    const apply = (info: DesktopUpdateInfo | null) => {
+      if (cancelled) return;
+      const prev = lastInfoRef.current;
+      lastInfoRef.current = info;
+      setUpdate(info);
+      setRunBlocked(false);
+      setCheck((current) => {
+        if (current.kind === 'checking') return current;
+        if (info == null) {
+          if (prev != null && current.kind === 'available') return { kind: 'idle' };
+          return current;
+        }
+        if (info.kind === 'ready') {
+          return current.kind === 'available' ? { kind: 'idle' } : current;
+        }
+        return { kind: 'available', version: info.version };
+      });
+    };
+    const unsubscribe = onUpdateInfo?.((info) => {
+      seenBroadcast = true;
+      apply(info);
+    });
+    getUpdateInfo?.()
+      .then((info) => {
+        if (seenBroadcast) return;
+        apply(info);
+      })
+      .catch(() => {
+        /* update checks are best-effort */
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [desktop]);
 
   if (!supported || !ready || version == null || helper == null) return null;
 
@@ -80,12 +192,37 @@ export function DesktopUpdatesSection() {
     setCheck({ kind: 'checking' });
     try {
       const result: DesktopUpdateCheck = (await desktop?.checkForUpdates?.()) ?? { status: 'error' };
-      if (result.status === 'available') setCheck({ kind: 'available', version: result.version });
-      else if (result.status === 'up-to-date') setCheck({ kind: 'up-to-date' });
-      else setCheck({ kind: 'error' });
+      setCheck(() => {
+        if (lastInfoRef.current?.kind === 'ready') return { kind: 'idle' };
+        if (result.status === 'available') return { kind: 'available', version: result.version };
+        if (result.status === 'up-to-date') return { kind: 'up-to-date' };
+        return { kind: 'error' };
+      });
     } catch {
-      setCheck({ kind: 'error' });
+      setCheck(() => (lastInfoRef.current?.kind === 'ready' ? { kind: 'idle' } : { kind: 'error' }));
     }
+  }
+
+  function restart() {
+    void runIsActive().then((active) => {
+      if (active) {
+        setRunBlocked(true);
+        return;
+      }
+      setRunBlocked(false);
+      void desktop?.restartToUpdate?.();
+    });
+  }
+
+  function download(url: string) {
+    void runIsActive().then((active) => {
+      if (active) {
+        setRunBlocked(true);
+        return;
+      }
+      setRunBlocked(false);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    });
   }
 
   const status = checkText(check);
@@ -112,6 +249,15 @@ export function DesktopUpdatesSection() {
           </p>
         ) : null}
       </div>
+      {update ? (
+        <UpdateGuidePanel
+          info={update}
+          platform={platform ?? ''}
+          runBlocked={runBlocked}
+          onRestart={restart}
+          onDownload={download}
+        />
+      ) : null}
     </section>
   );
 }
