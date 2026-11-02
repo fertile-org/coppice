@@ -108,6 +108,25 @@ function renderCard(
   );
 }
 
+function renderDetails(target: Plugin = plugin) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ConfirmProvider>
+          <PluginDetails
+            plugin={target}
+            updating={false}
+            onUpdate={() => undefined}
+          />
+        </ConfirmProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 function callFor(path: string) {
   const call = fetchMock.mock.calls.find(([p]) => p === path) as
     | [string, RequestInit]
@@ -116,7 +135,7 @@ function callFor(path: string) {
   return call![1];
 }
 
-describe('PluginCard', () => {
+describe('PluginDetails', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -423,6 +442,15 @@ describe('PluginCard', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
     expect(await screen.findByText('plugin is not ok')).toBeVisible();
+  });
+
+  it('shows the plugin load error in full in the details, not only the row', () => {
+    const message =
+      'plugin name `coppice` is reserved and the manifest could not be read from disk';
+    renderDetails({ ...plugin, status: 'invalid', error: message, mcpServers: [], settings: [] });
+
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByTestId(`plugin-row-${plugin.id}`)).not.toBeInTheDocument();
   });
 
   it('shows server health', () => {

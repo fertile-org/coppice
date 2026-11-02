@@ -59,6 +59,8 @@ export function InstalledPluginsList({
     [plugins, query, filter],
   );
   const selected = plugins.find((plugin) => plugin.id === selectedId) ?? null;
+  const [shown, setShown] = useState(selected);
+  if (selected && selected !== shown) setShown(selected);
   const clonePluginCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const plugin of plugins) {
@@ -176,28 +178,28 @@ export function InstalledPluginsList({
       <RepoDrawer
         open={selected !== null}
         ariaLabel="Plugin details"
-        title={selected?.name ?? ''}
-        description={selected?.description || undefined}
+        title={shown?.name ?? ''}
+        description={shown?.description || undefined}
         onClose={close}
         onRestoreFocus={restoreFocus}
       >
-        {selected && (
+        {shown && (
           <PluginDetails
-            key={selected.id}
-            plugin={selected}
+            key={shown.id}
+            plugin={shown}
             onInstallFromGit={onInstallFromGit}
             siblingCount={
-              selected.gitRoot ? clonePluginCounts.get(selected.gitRoot) : undefined
+              shown.gitRoot ? clonePluginCounts.get(shown.gitRoot) : undefined
             }
-            update={updates[selected.id]}
+            update={updates[shown.id]}
             updating={
               updatePlugin.isPending ||
-              updates[selected.id]?.status === 'running' ||
-              (Boolean(updateIds[selected.id]) &&
-                updates[selected.id]?.status !== 'failed' &&
-                updates[selected.id]?.status !== 'succeeded')
+              updates[shown.id]?.status === 'running' ||
+              (Boolean(updateIds[shown.id]) &&
+                updates[shown.id]?.status !== 'failed' &&
+                updates[shown.id]?.status !== 'succeeded')
             }
-            onUpdate={() => startUpdate(selected)}
+            onUpdate={() => startUpdate(shown)}
           />
         )}
       </RepoDrawer>

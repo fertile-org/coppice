@@ -46,12 +46,17 @@ export function pluginNeedsAttention(plugin: Plugin): boolean {
 }
 
 export function attentionReason(plugin: Plugin): string | null {
+  if (plugin.status !== 'ok') return null;
   const setting = plugin.settings.find(
     (s) => s.source === 'missing' || s.needsReentry === true,
   );
-  if (setting) return setting.key;
+  if (setting) {
+    return setting.needsReentry === true
+      ? `Re-enter setting ${setting.key}`
+      : `Missing setting ${setting.key}`;
+  }
   const server = plugin.mcpServers.find((s) => s.health === 'unhealthy');
-  return server?.name ?? null;
+  return server ? `MCP server ${server.name} is unhealthy` : null;
 }
 
 export function rowSecondaryText(

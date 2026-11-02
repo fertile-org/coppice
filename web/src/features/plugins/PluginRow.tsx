@@ -61,7 +61,7 @@ export function PluginRow({
       data-highlighted={highlighted || undefined}
       className={cn(
         'flex h-14 items-center gap-3 overflow-hidden border-t border-border px-3.5 first:border-t-0',
-        selected && 'bg-moss-500/10',
+        selected ? 'bg-moss-500/10' : 'hover:bg-moss-500/5',
         highlighted && 'ring-2 ring-inset ring-moss-500',
       )}
     >
@@ -69,7 +69,7 @@ export function PluginRow({
         type="button"
         ref={onButtonRef}
         onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        className="keyboard-focus flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left"
       >
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
@@ -86,6 +86,7 @@ export function PluginRow({
           {line && (
             <span
               role={line.alert ? 'alert' : undefined}
+              title={line.text}
               className={cn('mt-0.5 block truncate font-body text-xs', TONE_CLASS[line.tone])}
             >
               {line.text}
@@ -95,7 +96,7 @@ export function PluginRow({
         {!isExternal && (
           <span
             data-testid="plugin-agent-access-summary"
-            className="shrink-0 text-right font-body text-xs text-text-muted"
+            className="hidden shrink-0 text-right font-body text-xs text-text-muted sm:block"
           >
             {plugin.skills.length} {plugin.skills.length === 1 ? 'skill' : 'skills'}
             {' · '}

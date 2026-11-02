@@ -346,6 +346,9 @@ export function PluginDetails({
           {plugin.status}
         </span>
       </div>
+      {plugin.error && (
+        <p className="mt-1 font-body text-xs text-danger">{plugin.error}</p>
+      )}
       {plugin.marketplace && (
         <p className="mt-2 font-body text-xs text-text-muted">
           {`From marketplace ${plugin.marketplace.name}`}

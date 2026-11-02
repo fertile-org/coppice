@@ -169,17 +169,40 @@ describe('rowSecondaryText', () => {
         plugin({ settings: [{ key: 'ROOT', configured: false, source: 'missing' }] }),
         null,
       ),
-    ).toEqual({ text: 'ROOT', alert: false, tone: 'warning' });
+    ).toEqual({ text: 'Missing setting ROOT', alert: false, tone: 'warning' });
+    expect(
+      rowSecondaryText(
+        plugin({
+          settings: [
+            { key: 'API_TOKEN', configured: false, source: 'missing', needsReentry: true },
+          ],
+        }),
+        null,
+      ),
+    ).toEqual({ text: 'Re-enter setting API_TOKEN', alert: false, tone: 'warning' });
     expect(
       rowSecondaryText(
         plugin({ mcpServers: [{ name: 'fake', kind: 'stdio', health: 'unhealthy' }] }),
         null,
       ),
-    ).toEqual({ text: 'fake', alert: false, tone: 'warning' });
+    ).toEqual({ text: 'MCP server fake is unhealthy', alert: false, tone: 'warning' });
     expect(rowSecondaryText(plugin(), null)).toEqual({
       text: 'A sample plugin',
       alert: false,
       tone: 'muted',
     });
+  });
+
+  it('does not use a missing setting as the line on a shadowed plugin', () => {
+    expect(
+      rowSecondaryText(
+        plugin({
+          status: 'shadowed',
+          error: null,
+          settings: [{ key: 'ROOT', configured: false, source: 'missing' }],
+        }),
+        null,
+      ),
+    ).toEqual({ text: 'A sample plugin', alert: false, tone: 'muted' });
   });
 });
