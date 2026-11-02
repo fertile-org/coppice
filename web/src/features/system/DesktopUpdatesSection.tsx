@@ -65,7 +65,7 @@ function UpdateGuidePanel({
       <h2 className="font-display text-base font-semibold text-text-primary">
         Update to Coppice {info.version}
       </h2>
-      {linuxAvailable || linuxReady ? (
+      {linuxAvailable ? (
         <>
           <p className="mt-1 font-body text-sm text-text-secondary">{LINUX_GUIDE_TEXT}</p>
           <LinuxUpdateGuide />

@@ -298,6 +298,8 @@ describe('DesktopUpdatesSection', () => {
         'Coppice 9.0.0 is installed. Restart to start using it. Your boards and settings stay.',
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(APT_COMMAND)).not.toBeInTheDocument();
+    expect(screen.queryByText(LINUX_GUIDE)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Restart Coppice' }));
     await waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
   });
