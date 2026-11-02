@@ -10,11 +10,11 @@ A plugin is a folder in the Claude Code / Cursor plugin format. It can contain:
 |------|------|---------------------|
 | Skills | `skills/<name>/SKILL.md` | Markdown instructions. The agent sees each skill's name and description and loads the full text with `skill_load` only when it needs it. |
 | Tools | `.mcp.json` | MCP servers the plugin starts (stdio) or connects to (HTTP). Their tools appear to the agent as `<plugin>__<tool>`. |
-| Settings | `${VAR}` placeholders in `.mcp.json` | Values a tool needs (API keys, paths). Entered on the plugin card, stored encrypted, never shown again. |
+| Settings | `${VAR}` placeholders in `.mcp.json` | Values a tool needs (API keys, paths). Entered in the plugin details drawer, stored encrypted, never shown again. |
 
 A plugin is not a rule set and does not change workflow, statuses, or permissions. Coppice's own rules (collaboration, splitting, role stages) ship as the built-in `coppice` plugin, which every agent always has.
 
-Coppice also ships a first-party **`design`** plugin for UI work. It is **auto-enabled** and granted to **All agents** by default. Agents use gateway tools `design__create`, `design__write`, `design__publish`, and `design__list` to draft HTML previews and **publish** two or three options for the human to **Choose** in the run UI (not via a stdio MCP child from `.mcp.json`). The skill **`design-ui-options`** tells agents when to publish instead of putting HTML in the ticket, and planning runs are told to use it for tickets that change what people see. The agent must name a **recommended** option, and the plan is written around the option in use (the human's choice, otherwise the recommendation). The Detail tab shows a **Click to open design options** card above the plan, and its popup previews every option. Picking a different option while the plan is in Plan Review has the planner rewrite the plan around it: Approve stays disabled until the rewrite finishes, and once the plan is approved the choice is final. If a rewrite fails, the card says the plan wasn't updated and the popup offers **Try again**; Approve stays available, and work follows the chosen option if someone approves anyway. Work runs and sub-tickets follow the option in use, and `design__list` / `ticket_get` give the path of its HTML so a building agent can read the mockup. Publishing stays optional: Plan Review only waits while a plan run is queued or running. Turn the plugin off on its Plugins card, or drop it from an agent's access list, if you do not want that flow.
+Coppice also ships a first-party **`design`** plugin for UI work. It is **auto-enabled** and granted to **All agents** by default. Agents use gateway tools `design__create`, `design__write`, `design__publish`, and `design__list` to draft HTML previews and **publish** two or three options for the human to **Choose** in the run UI (not via a stdio MCP child from `.mcp.json`). The skill **`design-ui-options`** tells agents when to publish instead of putting HTML in the ticket, and planning runs are told to use it for tickets that change what people see. The agent must name a **recommended** option, and the plan is written around the option in use (the human's choice, otherwise the recommendation). The Detail tab shows a **Click to open design options** card above the plan, and its popup previews every option. Picking a different option while the plan is in Plan Review has the planner rewrite the plan around it: Approve stays disabled until the rewrite finishes, and once the plan is approved the choice is final. If a rewrite fails, the card says the plan wasn't updated and the popup offers **Try again**; Approve stays available, and work follows the chosen option if someone approves anyway. Work runs and sub-tickets follow the option in use, and `design__list` / `ticket_get` give the path of its HTML so a building agent can read the mockup. Publishing stays optional: Plan Review only waits while a plan run is queued or running. Turn the plugin off on its Installed row, or drop it from an agent's access list, if you do not want that flow.
 
 `commands/`, `agents/`, and `hooks/` folders are detected and listed as **Not supported yet**; they never run.
 
@@ -35,7 +35,7 @@ Installing an entry adds one plugin folder to your default plugin directory. The
 
 Catalog plugins work for every agent you give access to, whatever its connector, because they reach the agent through the Coppice MCP gateway. Coppice does not write into any CLI config (`~/.claude`, `~/.cursor`, `~/.codex`, …) or into the worktree. Cards show **Coppice** or **Community: not reviewed by Coppice**.
 
-Placeholders such as `${GITHUB_PERSONAL_ACCESS_TOKEN}` resolve from the plugin's settings first, then from the server's environment. A catalog plugin can therefore pick up that variable from the host without a setting. The card shows where the value came from.
+Placeholders such as `${GITHUB_PERSONAL_ACCESS_TOKEN}` resolve from the plugin's settings first, then from the server's environment. A catalog plugin can therefore pick up that variable from the host without a setting. The details drawer shows where the value came from.
 
 **Contributing to the Coppice catalog:** add a folder under `server/marketplace/coppice/plugins/<name>/` and list it in `server/marketplace/coppice/.claude-plugin/marketplace.json`. Skills should name only `<plugin>__<tool>` gateway tools and generic shell or git commands, never one CLI. The unit test that parses every embedded entry must pass.
 
@@ -55,7 +55,7 @@ Coppice reads repositories the way the rest of the ecosystem publishes them, wit
 
 Skills are found up to 3 folders deep inside each skills folder (`skills/<category>/<group>/<name>/SKILL.md` at most). A folder with a `SKILL.md` is one skill; nothing below it is searched. Folders starting with `.` and `node_modules` are skipped. A skill's name is its folder name.
 
-**Marketplaces.** Each `plugins` entry with a path `source` (`"./plugins/foo"`, `"plugins/foo"`, or `"./"`) is read as a plugin or skills folder inside the repository. It is named by its `plugin.json` `name`, or else the entry `name`, and its card shows `From marketplace <name>`. Entries whose `source` is an object (`github`, `git-subdir`, `url`, `npm`, …) live in another repository and are not fetched: they appear with status `external`, a link to their repository when Coppice can derive one, and an **Install from git** button that fills in the install form. When the marketplace is added as a source on the **Marketplace** tab, the same entries install from there instead, one plugin each. If two entries point at the same path, the first one is used.
+**Marketplaces.** Each `plugins` entry with a path `source` (`"./plugins/foo"`, `"plugins/foo"`, or `"./"`) is read as a plugin or skills folder inside the repository. It is named by its `plugin.json` `name`, or else the entry `name`, and its details show `From marketplace <name>`. Entries whose `source` is an object (`github`, `git-subdir`, `url`, `npm`, …) live in another repository and are not fetched: they appear with status `external`, a link to their repository when Coppice can derive one, and an **Install from git** button that fills in the install form. When the marketplace is added as a source on the **Marketplace** tab, the same entries install from there instead, one plugin each. If two entries point at the same path, the first one is used.
 
 ## Using plugins
 
@@ -72,13 +72,13 @@ To try the flow, add the [`examples/plugins`](https://github.com/fertile-org/cop
 
 ### 2. Enable it and fill in settings
 
-Plugins start **disabled**. On the plugin card:
+Plugins start **disabled**. Open a plugin's row, then:
 
-1. If the card lists **Settings**, enter the values and **Save**. If you haven't saved a value, a badge shows where it would come from: **From your environment** (an environment variable with the same name that Coppice was started with), **Default** (the plugin's built-in default), or **Missing** (the plugin's MCP server won't start until you set it). If you open Coppice from the Dock or your app menu, variables set in your shell profile may not reach it, so enter the value on the card instead.
+1. If the details list **Settings**, enter the values and **Save**. If you haven't saved a value, a badge shows where it would come from: **From your environment** (an environment variable with the same name that Coppice was started with), **Default** (the plugin's built-in default), or **Missing** (the plugin's MCP server won't start until you set it). If you open Coppice from the Dock or your app menu, variables set in your shell profile may not reach it, so enter the value in the details instead.
 2. Press **Test** to start the plugin's MCP servers and list their tools. This works while disabled.
-3. Turn on the switch to enable it.
+3. Turn on the switch on the row to enable it.
 
-**Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
+**Switching skills off.** Each skill in the details has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
 A plugin with local (**stdio**) MCP servers runs programs on your computer with your computer's privileges. Before you turn one on, or test it while it's off, Coppice asks you to confirm:
 
@@ -88,9 +88,9 @@ The same prompt names any settings whose value would come from your computer's e
 
 ### 3. Choose which agents can use it
 
-On the plugin card, **Which agents can use it?** is **All agents** or **Choose agents**. **All agents** includes agents you create later. **Choose agents** is a checklist; the card reads **All agents**, **1 agent**, **N agents**, or **No agents**.
+In the plugin details, **Which agents can use it?** is **All agents** or **Choose agents**. **All agents** includes agents you create later. **Choose agents** is a checklist; the row reads **All agents**, **1 agent**, **N agents**, or **No agents**.
 
-The agent form has the same choice under **Skills**. Checking or unchecking a plugin there updates the plugin card, and editing the card updates the agent form. One assignment record backs both.
+The agent form has the same choice under **Skills**. Checking or unchecking a plugin there updates the plugin row, and editing the details updates the agent form. One assignment record backs both.
 
 Skills-only plugins start as **All agents**. A plugin that runs a local MCP server starts as **No agents**. A later rescan keeps the choice you made.
 
@@ -116,8 +116,8 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | `ok` | Loaded; can be enabled and given to agents. |
 | `shadowed` | A plugin with the same name in an earlier directory is used instead. |
 | `missing` | The folder is gone. Agent assignments are kept and return when the folder does. |
-| `invalid` | The plugin could not be read; the card shows the error. |
-| `external` | A marketplace entry that lives in another repository. It cannot be enabled, tested, updated, or attached; install it from the **Marketplace** tab after adding its marketplace as a source, or separately with **Install from git** on the card. |
+| `invalid` | The plugin could not be read; the row shows the error. |
+| `external` | A marketplace entry that lives in another repository. It cannot be enabled, tested, updated, or attached; install it from the **Marketplace** tab after adding its marketplace as a source, or separately with **Install from git** in its details. |
 
 **Update** pulls the whole cloned repository once and refreshes every plugin that came from it (the button's tooltip says `Updates all N plugins from this repository` when there are several). Their MCP servers are stopped. Plugins whose entry disappeared become `missing`; new entries appear disabled.
 
@@ -145,7 +145,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | A skill shows an error | `SKILL.md` needs YAML frontmatter with both `name` and `description` (`invalid frontmatter YAML: …` means the block does not parse). The rest of the plugin still works. |
 | A skill shows `duplicate skill name` | Another skill in the same plugin has the same folder name; the first by path is used. |
 | A skill shows `path escapes plugin root` | The skill folder or its `SKILL.md` is a symlink pointing outside the plugin. |
-| Test says `missing setting "X"` | Enter setting `X` on the card, or give it a default in `.mcp.json`. |
+| Test says `missing setting "X"` | Enter setting `X` in the plugin details, or give it a default in `.mcp.json`. |
 | Test fails to start a stdio server | Is the command installed and on your PATH? Coppice reads your PATH from your login shell when it opens, so quit and reopen Coppice after installing something new. |
 | Agent never uses the plugin | Is it enabled, and can that agent use it (**All agents**, or that agent is checked)? Check the run's **Tools & Skills** tab. |
 
@@ -239,14 +239,14 @@ SSE-only servers (`"type": "sse"`) are listed as unsupported. `mcpServers` may a
 
 ### Settings and placeholders
 
-Every `${NAME}` in `command`, `args`, `env` values, `url`, or `headers` values becomes a setting on the plugin card. When the plugin's MCP server starts, each is resolved in order:
+Every `${NAME}` in `command`, `args`, `env` values, `url`, or `headers` values becomes a setting in the plugin details. When the plugin's MCP server starts, each is resolved in order:
 
-1. the value saved on the card;
+1. the value saved in the details;
 2. an environment variable `NAME` that Coppice was started with (never names starting with `COPPICE_`, nor `DATABASE_URL` or `SECRETS_MASTER_KEY`);
 3. the default in `${NAME:-default}`;
 4. otherwise that MCP server fails to start with `missing setting "NAME"`.
 
-Use a default for optional values. Leave secrets without one, so each person enters their own on the card.
+Use a default for optional values. Leave secrets without one, so each person enters their own in the details.
 
 ### Tools
 
@@ -259,8 +259,8 @@ Use a default for optional values. Leave secrets without one, so each person ent
 ### Develop and test locally
 
 1. Put your plugin in a folder and add that folder (or its parent) as a plugin directory.
-2. Press **Test** on the card after each change to `.mcp.json` or your MCP server's code; it restarts the plugin's servers. Press **Rescan** after adding or renaming skills or editing `plugin.json`.
-3. Choose **All agents** or check that agent on the card, then run a ticket. Check **Tools & Skills** on the run.
+2. Press **Test** in the plugin details after each change to `.mcp.json` or your MCP server's code; it restarts the plugin's servers. Press **Rescan** after adding or renaming skills or editing `plugin.json`.
+3. Choose **All agents** or check that agent in the details, then run a ticket. Check **Tools & Skills** on the run.
 
 You can also talk to a stdio server by hand:
 

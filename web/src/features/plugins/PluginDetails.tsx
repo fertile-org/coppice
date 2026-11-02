@@ -1,61 +1,22 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '../../components/ui/button';
-import { useConfirm, type ConfirmFn } from '../../components/ui/confirm-dialog';
+import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Switch } from '../../components/ui/switch';
 import type {
   Plugin,
+  PluginInstall,
   PluginMcpServerHealth,
-  PluginStatus,
 } from '../../lib/schemas/plugin';
-import { cn } from '../../lib/utils';
 import { parseApiErrorMessage } from '../../lib/api';
+import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
-import { PLUGIN_COPY, pluginAgentSummary } from './copy';
+import { PLUGIN_COPY } from './copy';
+import { confirmStart } from './pluginConsent';
+import { STATUS_HINTS, statusPillClass } from './installedPlugins';
 import { PluginSettingsForm } from './PluginSettingsForm';
 import { PluginTestResults } from './PluginTestResults';
-import {
-  usePluginInstall,
-  useSetPluginAgents,
-  useSetPluginEnabled,
-  useSetSkillEnabled,
-  useTestPlugin,
-  useUpdatePlugin,
-} from './usePlugins';
-
-const STDIO_RISK =
-  "Local MCP servers run on your computer with your computer's privileges.";
-
-/** Names keys only; the values never reach the browser. */
-function envRisk(keys: string[]): string {
-  const list = keys.join(', ');
-  return keys.length === 1
-    ? `Setting ${list} is not set here, so your computer's environment value for it will be sent to the plugin.`
-    : `Settings ${list} are not set here, so your computer's environment values for them will be sent to the plugin.`;
-}
-
-/** Starting a disabled plugin's servers (enable or Test) needs the admin's consent. */
-async function confirmStart(plugin: Plugin, confirm: ConfirmFn): Promise<boolean> {
-  if (plugin.enabled) return true;
-  const envKeys = plugin.settings.filter((s) => s.source === 'env').map((s) => s.key);
-  const risks = [
-    plugin.mcpServers.some((server) => server.kind === 'stdio') ? STDIO_RISK : null,
-    envKeys.length > 0 ? envRisk(envKeys) : null,
-  ].filter((risk): risk is string => risk !== null);
-  return (
-    risks.length === 0 ||
-    confirm({ title: `${risks.join(' ')} Enable anyway?`, danger: true })
-  );
-}
-
-const STATUS_HINTS: Record<PluginStatus, string> = {
-  ok: 'Loaded and ready to enable.',
-  shadowed:
-    'Another plugin with the same name in an earlier plugin directory is used instead.',
-  missing: 'The folder is gone from disk. Agent assignments are kept until it returns.',
-  invalid: 'The plugin could not be read. See the error below.',
-  external: 'Lives in another repository; install it separately.',
-};
+import { useSetPluginAgents, useSetSkillEnabled, useTestPlugin } from './usePlugins';
 
 const HEALTH_HINTS: Record<PluginMcpServerHealth, string> = {
   stopped: 'Not running. Starts when an agent run or Test needs it.',
@@ -80,6 +41,13 @@ function healthClass(health: PluginMcpServerHealth): string {
   }
 }
 
+function skillsHeader(skills: Plugin['skills']): string {
+  const on = skills.filter((skill) => skill.enabled).length;
+  return on === skills.length
+    ? `Skills (${skills.length})`
+    : `Skills (${on} of ${skills.length} on)`;
+}
+
 function McpServersSection({ plugin }: { plugin: Plugin }) {
   const [error, setError] = useState<string | null>(null);
   const testPlugin = useTestPlugin(plugin.id);
@@ -98,7 +66,7 @@ function McpServersSection({ plugin }: { plugin: Plugin }) {
 
   return (
     <div className="mt-3 border-t border-border pt-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <p className="font-body text-xs font-medium text-text-secondary">MCP servers</p>
         <Button
           type="button"
@@ -139,30 +107,6 @@ function McpServersSection({ plugin }: { plugin: Plugin }) {
       )}
     </div>
   );
-}
-
-function statusPillClass(status: PluginStatus): string {
-  const base =
-    'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 font-body text-xs';
-  switch (status) {
-    case 'ok':
-      return `${base} border-success-muted bg-success-muted text-success`;
-    case 'shadowed':
-      return `${base} border-info-muted bg-info-muted text-info`;
-    case 'missing':
-      return `${base} border-warning-muted bg-warning-muted text-warning`;
-    case 'invalid':
-      return `${base} border-danger-muted bg-danger-muted/40 text-danger`;
-    case 'external':
-      return `${base} border-border bg-paper-200 text-text-secondary`;
-  }
-}
-
-function skillsHeader(skills: Plugin['skills']): string {
-  const on = skills.filter((skill) => skill.enabled).length;
-  return on === skills.length
-    ? `Skills (${skills.length})`
-    : `Skills (${on} of ${skills.length} on)`;
 }
 
 function AgentAccessSection({ plugin }: { plugin: Plugin }) {
@@ -365,158 +309,84 @@ function ExternalSource({
   );
 }
 
-interface PluginCardProps {
+interface PluginDetailsProps {
   plugin: Plugin;
   onInstallFromGit?: (url: string) => void;
-  /** Plugins sharing this plugin's git clone, itself included. */
   siblingCount?: number;
-  /** Set right after a marketplace install: scroll to the card and mark it. */
-  highlighted?: boolean;
+  update?: PluginInstall;
+  updating: boolean;
+  onUpdate: () => void;
 }
 
-export function PluginCard({
+export function PluginDetails({
   plugin,
   onInstallFromGit,
   siblingCount = 1,
-  highlighted = false,
-}: PluginCardProps) {
-  const [updateId, setUpdateId] = useState<string | null>(null);
+  update,
+  updating,
+  onUpdate,
+}: PluginDetailsProps) {
   const [error, setError] = useState<string | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const setEnabled = useSetPluginEnabled();
-  const updatePlugin = useUpdatePlugin();
-  const confirm = useConfirm();
-  const { data: update } = usePluginInstall(updateId);
   const isExternal = plugin.status === 'external';
-  const canToggle = plugin.enabled || plugin.status === 'ok';
-  const updating = updatePlugin.isPending || update?.status === 'running';
-
-  useEffect(() => {
-    if (highlighted) cardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-  }, [highlighted]);
-
-  async function handleToggle() {
-    setError(null);
-    if (!(await confirmStart(plugin, confirm))) return;
-    try {
-      await setEnabled.mutateAsync({ id: plugin.id, enabled: !plugin.enabled });
-    } catch (err) {
-      setError(parseApiErrorMessage(err, 'Unable to update plugin.'));
-    }
-  }
 
   async function handleUpdate() {
     setError(null);
     try {
-      const started = await updatePlugin.mutateAsync(plugin.id);
-      setUpdateId(started.id);
+      await Promise.resolve(onUpdate());
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Unable to start update.'));
     }
   }
 
   return (
-    <div
-      ref={cardRef}
-      data-testid={`plugin-card-${plugin.id}`}
-      data-highlighted={highlighted || undefined}
-      className={cn(
-        'rounded-xl border border-border bg-surface-raised p-4 shadow-card',
-        highlighted && 'ring-2 ring-moss-500',
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-display text-base font-semibold text-text-primary">
-              {plugin.name}
-            </h3>
-            <span className="font-mono text-xs text-text-muted">{plugin.version}</span>
-            <span
-              title={STATUS_HINTS[plugin.status]}
-              className={statusPillClass(plugin.status)}
-            >
-              {plugin.status}
-            </span>
-          </div>
-          {plugin.description && (
-            <p className="mt-1 font-body text-sm text-text-secondary">
-              {plugin.description}
-            </p>
-          )}
-          {plugin.marketplace && (
-            <p className="mt-1 font-body text-xs text-text-muted">
-              {`From marketplace ${plugin.marketplace.name}`}
-            </p>
-          )}
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 font-body text-xs text-text-muted">
-            <span>{plugin.source === 'git' ? 'Git' : 'Local'}</span>
-            {plugin.gitCommit && (
-              <span className="font-mono" title={plugin.gitCommit}>
-                {plugin.gitCommit.slice(0, 7)}
-              </span>
-            )}
-            {!isExternal && (
-              <>
-                <span>·</span>
-                <span>
-                  {plugin.skills.length} {plugin.skills.length === 1 ? 'skill' : 'skills'}
-                </span>
-                <span>·</span>
-                <span>
-                  {plugin.mcpServers.length}{' '}
-                  {plugin.mcpServers.length === 1 ? 'MCP server' : 'MCP servers'}
-                </span>
-                <span>·</span>
-                <span data-testid="plugin-agent-access-summary">
-                  {pluginAgentSummary(plugin.agentAccess, plugin.agentIds.length)}
-                </span>
-              </>
-            )}
-          </p>
-          {plugin.error && (
-            <p className="mt-1 font-body text-xs text-danger">{plugin.error}</p>
-          )}
-          {plugin.unsupported.length > 0 && (
-            <p className="mt-1 font-body text-xs text-warning">
-              {`Not supported yet: ${plugin.unsupported.join(', ')}`}
-            </p>
-          )}
-        </div>
-        {!isExternal && (
-          <div className="flex shrink-0 items-center gap-2">
-            {plugin.source === 'git' && (
-              <Button
-                type="button"
-                variant="secondary"
-                title={
-                  siblingCount > 1
-                    ? `Updates all ${siblingCount} plugins from this repository`
-                    : undefined
-                }
-                onClick={() => void handleUpdate()}
-                loading={updating}
-              >
-                {updating ? 'Updating…' : 'Update'}
-              </Button>
-            )}
-            <Switch
-              checked={plugin.enabled}
-              aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.name}`}
-              title={canToggle ? undefined : 'Only plugins with status ok can be enabled'}
-              disabled={!canToggle || setEnabled.isPending}
-              onCheckedChange={() => void handleToggle()}
-            />
-          </div>
-        )}
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-xs text-text-muted">{plugin.version}</span>
+        <span title={STATUS_HINTS[plugin.status]} className={statusPillClass(plugin.status)}>
+          {plugin.status}
+        </span>
       </div>
-
+      {plugin.marketplace && (
+        <p className="mt-2 font-body text-xs text-text-muted">
+          {`From marketplace ${plugin.marketplace.name}`}
+        </p>
+      )}
+      <p className="mt-1 font-body text-xs text-text-muted">
+        <span>{plugin.source === 'git' ? 'Git' : 'Local'}</span>
+        {plugin.gitCommit && (
+          <>
+            {' '}
+            <span className="font-mono" title={plugin.gitCommit}>
+              {plugin.gitCommit.slice(0, 7)}
+            </span>
+          </>
+        )}
+      </p>
+      {plugin.unsupported.length > 0 && (
+        <p className="mt-1 font-body text-xs text-warning">
+          {`Not supported yet: ${plugin.unsupported.join(', ')}`}
+        </p>
+      )}
       {plugin.external && (
         <ExternalSource external={plugin.external} onInstallFromGit={onInstallFromGit} />
       )}
-
-      {!isExternal && <AgentAccessSection plugin={plugin} />}
-
+      {!isExternal && plugin.source === 'git' && (
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            title={
+              siblingCount > 1
+                ? `Updates all ${siblingCount} plugins from this repository`
+                : undefined
+            }
+            onClick={() => void handleUpdate()}
+            loading={updating}
+          >
+            {updating ? 'Updating…' : 'Update'}
+          </Button>
+        </div>
+      )}
       {update?.status === 'failed' && (
         <p role="alert" className="mt-2 font-body text-xs text-danger">
           Update failed: {update.error ?? 'unknown error'}
@@ -527,7 +397,7 @@ export function PluginCard({
           {error}
         </p>
       )}
-
+      {!isExternal && <AgentAccessSection plugin={plugin} />}
       {!isExternal && plugin.mcpServers.length > 0 && (
         <McpServersSection plugin={plugin} />
       )}

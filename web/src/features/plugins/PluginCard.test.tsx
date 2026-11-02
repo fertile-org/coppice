@@ -1,13 +1,13 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { setCsrfToken } from '../../lib/api';
 import { pluginSchema, type Plugin, type PluginTestResult } from '../../lib/schemas/plugin';
-import { PluginCard } from './PluginCard';
+import { PluginDetails } from './PluginDetails';
+import { PluginRow } from './PluginRow';
 
 const plugin: Plugin = {
   id: '00000000-0000-4000-8000-000000000010',
@@ -73,7 +73,11 @@ function json(body: unknown, status = 200) {
 
 function renderCard(
   target: Plugin = plugin,
-  props: Partial<Omit<ComponentProps<typeof PluginCard>, 'plugin'>> = {},
+  props: {
+    onInstallFromGit?: (url: string) => void;
+    siblingCount?: number;
+    highlighted?: boolean;
+  } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -82,7 +86,22 @@ function renderCard(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ConfirmProvider>
-          <PluginCard plugin={target} {...props} />
+          <ul>
+            <PluginRow
+              plugin={target}
+              selected={false}
+              highlighted={props.highlighted ?? false}
+              actionError={null}
+              onOpen={() => undefined}
+            />
+          </ul>
+          <PluginDetails
+            plugin={target}
+            onInstallFromGit={props.onInstallFromGit}
+            siblingCount={props.siblingCount}
+            updating={false}
+            onUpdate={() => undefined}
+          />
         </ConfirmProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -426,7 +445,7 @@ describe('PluginCard', () => {
   it('status pill and server health explain themselves', () => {
     renderCard({ ...plugin, status: 'shadowed' });
 
-    expect(screen.getByText('shadowed')).toHaveAttribute(
+    expect(screen.getAllByText('shadowed')[0]).toHaveAttribute(
       'title',
       expect.stringMatching(/earlier plugin directory/),
     );
@@ -617,7 +636,7 @@ describe('PluginCard', () => {
     );
 
     expect(screen.getByText(`Lives in another repository: ${url}`)).toBeVisible();
-    expect(screen.getByText('external')).toHaveAttribute(
+    expect(screen.getAllByText('external')[0]).toHaveAttribute(
       'title',
       'Lives in another repository; install it separately.',
     );

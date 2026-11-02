@@ -27,7 +27,7 @@ Five sources are listed out of the box: **coppice**, the catalog that ships with
 
 Click **Manage sources** to see each source and its last refresh. To list more plugins, add a git repository that has a `.claude-plugin/marketplace.json`. Coppice fetches its catalog right away. Click **Refresh** (or **Retry** after an error) to fetch a source again. You can remove any source except **coppice**. If you remove one, the plugins you installed from it stay installed. A removed default source does not come back.
 
-**Example: GitHub.** Install `github` from the marketplace. On its card, open **Settings**, paste a GitHub personal access token into `GITHUB_PERSONAL_ACCESS_TOKEN`, and click **Save settings**. Click **Test** to list its tools, then enable it and pick the agents that can use it. This token is separate from the GitHub token in **Settings** that Coppice uses for pull requests.
+**Example: GitHub.** Install `github` from the marketplace. Open it, then in **Settings** paste a GitHub personal access token into `GITHUB_PERSONAL_ACCESS_TOKEN`, and click **Save settings**. Click **Test** to list its tools, then enable it and pick the agents that can use it. This token is separate from the GitHub token in **Settings** that Coppice uses for pull requests.
 
 ### From git or a folder
 Open the **Custom** tab. There are two ways.
@@ -38,7 +38,7 @@ Open the **Custom** tab. There are two ways.
 3. Pick a **Target directory**.
 4. Click **Install**.
 
-Coppice clones the repo with your computer's git credentials. Click **Update** on the card later to pull new changes.
+Coppice clones the repo with your computer's git credentials. Click **Update** in its details later to pull new changes.
 
 #### From a folder
 1. Under **Plugin directories**, click **Browse…** and pick a folder. Or type it in **Directory path**.
@@ -51,8 +51,8 @@ If two folders have a plugin with the same name, the one higher in the list wins
 ## Enable it
 Plugins start disabled.
 
-1. Turn on the switch on the plugin's card. Only plugins with status `ok` can be enabled.
-2. If the card has **Settings**, fill in each value and click **Save settings**. Values are stored encrypted.
+1. Turn on the switch on the plugin's row. Only plugins with status `ok` can be enabled.
+2. If its details have **Settings**, fill in each value and click **Save settings**. Values are stored encrypted.
 3. Click **Test** to start the plugin's tools and list them. This works before you enable it.
 
 A plugin with a local MCP server runs on your computer with your computer's privileges. Coppice asks you to confirm first.
@@ -60,7 +60,7 @@ A plugin with a local MCP server runs on your computer with your computer's priv
 Each skill has its own switch. A skill you turn off is hidden from every agent, even in runs already going.
 
 ## Choose which agents can use it
-On the card, under **Which agents can use it?**, pick:
+In its details, under **Which agents can use it?**, pick:
 
 - **All agents**: every agent, including ones you create later.
 - **Choose agents**: only the agents you check.
@@ -144,7 +144,7 @@ Add `.mcp.json` with an `mcpServers` map. Each server is local or remote.
 }
 ```
 
-`${NAME}` becomes a setting on the plugin's card. `${NAME:-default}` gives it a default. Coppice fills in `${CLAUDE_PLUGIN_ROOT}` with the plugin's install folder. It is not a card setting. SSE servers aren't supported.
+`${NAME}` becomes a setting in the plugin's details. `${NAME:-default}` gives it a default. Coppice fills in `${CLAUDE_PLUGIN_ROOT}` with the plugin's install folder. It is not a setting. SSE servers aren't supported.
 
 This example exposes the tool `hello-coppice__greet` and the skill `hello-coppice:greeting-style`. See the full example in [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins).
 

@@ -49,7 +49,7 @@ const communitySource: MarketplaceSource = {
   gitUrl: 'https://github.com/acme/plugins.git',
   gitRef: null,
   commitSha: 'abc1234',
-  refreshedAt: '2026-10-31T10:00:00Z',
+  refreshedAt: new Date().toISOString(),
   lastError: null,
   position: 1,
 };
@@ -203,7 +203,7 @@ describe('PluginsPage marketplace tab', () => {
     localStorage.clear();
     entries = [githubEntry, reviewEntry, npmEntry, installedUpdatable];
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: new Date().toISOString() },
       communitySource,
     ];
     plugins = [];
@@ -372,7 +372,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('fetches each never-loaded source once when Marketplace opens', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: new Date().toISOString() },
       unfetchedSource,
     ];
     renderPage();
@@ -398,7 +398,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('keeps healthy entries visible when a first fetch fails', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: new Date().toISOString() },
       { ...unfetchedSource, lastError: 'network offline' },
     ];
     renderPage();
@@ -425,10 +425,14 @@ describe('PluginsPage marketplace tab', () => {
         }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Installed', hidden: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('status', { hidden: true })).toHaveTextContent(
       'Installed review-kit. Enable it and choose which agents can use it.',
     );
-    expect(screen.getByRole('tab', { name: 'Installed' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('an object install polls the job and reports the failure', async () => {
@@ -475,15 +479,33 @@ describe('PluginsPage marketplace tab', () => {
 
     fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
 
-    const status = await screen.findByRole('status');
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    const status = await screen.findByRole('status', { hidden: true });
     expect(status).toHaveTextContent('Installed github.');
     expect(status).toHaveTextContent(
       'Add GITHUB_PERSONAL_ACCESS_TOKEN in its Settings before agents can use it.',
     );
-    const card = await screen.findByTestId(`plugin-card-${githubPlugin.id}`);
-    expect(card).toHaveAttribute('data-highlighted', 'true');
+    const row = await screen.findByTestId(`plugin-row-${githubPlugin.id}`);
+    expect(row).toHaveAttribute('data-highlighted', 'true');
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
     expect(scrollSpy).toHaveBeenCalled();
     scrollSpy.mockRestore();
+  });
+
+  it('a multi-plugin marketplace install highlights every row and opens no drawer', async () => {
+    const alpha: Plugin = { ...installedPlugin, id: '00000000-0000-4000-8000-0000000000a1', name: 'alpha' };
+    const beta: Plugin = { ...installedPlugin, id: '00000000-0000-4000-8000-0000000000a2', name: 'beta' };
+    plugins = [alpha, beta];
+    jobResult = { ...jobResult, status: 'succeeded', pluginIds: [alpha.id, beta.id] };
+    renderPage();
+    await openMarketplace();
+
+    fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Installed github.');
+    expect(screen.getByTestId(`plugin-row-${alpha.id}`)).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.getByTestId(`plugin-row-${beta.id}`)).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
   });
 
   it('shows why an entry cannot be installed and offers no install button', async () => {
@@ -599,7 +621,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('refreshes a source from the dialog and opens it from the failure warning', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: new Date().toISOString() },
       communitySource,
       { ...unfetchedSource, refreshedAt: '2026-10-25T10:00:00Z', lastError: 'network offline' },
     ];
@@ -759,7 +781,7 @@ describe('PluginsPage marketplace tab', () => {
 
   it('a retry shows the spinner while the refresh is in flight', async () => {
     sources = [
-      { ...coppiceSource, refreshedAt: '2026-10-31T10:00:00Z' },
+      { ...coppiceSource, refreshedAt: new Date().toISOString() },
       { ...communitySource, lastError: 'catalog missing' },
     ];
     const hold = deferred();

@@ -161,12 +161,15 @@ describe('PluginsPage', () => {
   it('renders plugin cards with status and unsupported parts', async () => {
     renderPage();
 
-    const card = await screen.findByTestId(`plugin-card-${samplePlugin.id}`);
-    expect(within(card).getByText('sample-plugin')).toBeVisible();
-    expect(within(card).getByText('1.2.0')).toBeVisible();
-    expect(within(card).getByText('Not supported yet: commands, hooks')).toBeVisible();
-    expect(within(card).getByText('ok')).toBeVisible();
-    expect(within(card).getByText('abcdef1')).toBeVisible();
+    const row = await screen.findByTestId(`plugin-row-${samplePlugin.id}`);
+    expect(within(row).getByText('sample-plugin')).toBeVisible();
+    expect(within(row).getByText('1.2.0')).toBeVisible();
+    expect(within(row).queryByText('Which agents can use it?')).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: /sample-plugin/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Plugin details' });
+    expect(within(drawer).getByText('Not supported yet: commands, hooks')).toBeVisible();
+    expect(within(drawer).getByText('ok')).toBeVisible();
+    expect(within(drawer).getByText('abcdef1')).toBeVisible();
   });
 
   it('enable toggle is disabled for shadowed plugins', async () => {
@@ -316,6 +319,7 @@ describe('PluginsPage', () => {
     ];
     renderPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: /remote-plugin/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Install from git' }));
 
     expect(screen.getByRole('tab', { name: 'Custom' })).toHaveAttribute(
@@ -361,7 +365,8 @@ describe('PluginsPage', () => {
       await screen.findByText('Installed marketplace-repo: 2 plugins (alpha, beta-skills)'),
     ).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Installed' }));
-    const update = within(await screen.findByTestId(`plugin-card-${alpha.id}`)).getByRole(
+    fireEvent.click(within(await screen.findByTestId(`plugin-row-${alpha.id}`)).getByRole('button', { name: /alpha/ }));
+    const update = within(await screen.findByRole('dialog', { name: 'Plugin details' })).getByRole(
       'button',
       { name: 'Update' },
     );
@@ -434,6 +439,145 @@ describe('PluginsPage', () => {
       `/api/plugin-dirs/${extraDir.id}`,
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+
+  it('clicking the switch does not open the drawer and still asks to enable', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
+    expect(await screen.findByRole('dialog', { name: STDIO_WARNING })).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
+  });
+
+  it('search and filters narrow the list and counts match the plugins shown', async () => {
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'All 2' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Enabled 0' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Disabled 2' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Needs attention 0' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enabled 0' }));
+    expect(screen.getByText('No plugins match.')).toBeVisible();
+    expect(screen.queryByTestId(`plugin-row-${samplePlugin.id}`)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disabled 2' }));
+    expect(screen.getByTestId(`plugin-row-${samplePlugin.id}`)).toBeVisible();
+    expect(screen.getByTestId(`plugin-row-${shadowedPlugin.id}`)).toBeVisible();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search installed plugins' }), {
+      target: { value: 'shadowed' },
+    });
+    expect(screen.getByRole('button', { name: 'All 1' })).toBeVisible();
+    expect(screen.getByTestId(`plugin-row-${shadowedPlugin.id}`)).toBeVisible();
+    expect(screen.queryByTestId(`plugin-row-${samplePlugin.id}`)).not.toBeInTheDocument();
+  });
+
+  it('needs attention lists invalid, missing setting, re-entry and unhealthy MCP, not shadowed', async () => {
+    const invalid: Plugin = {
+      ...samplePlugin,
+      id: '00000000-0000-4000-8000-000000000021',
+      name: 'broken',
+      status: 'invalid',
+      error: 'plugin name is reserved',
+      unsupported: [],
+      mcpServers: [],
+    };
+    const missingSetting: Plugin = {
+      ...samplePlugin,
+      id: '00000000-0000-4000-8000-000000000022',
+      name: 'github',
+      settings: [{ key: 'GITHUB_TOKEN', configured: false, source: 'missing' }],
+      unsupported: [],
+      mcpServers: [],
+    };
+    const reentry: Plugin = {
+      ...samplePlugin,
+      id: '00000000-0000-4000-8000-000000000023',
+      name: 'secrets',
+      settings: [
+        { key: 'API_TOKEN', configured: false, source: 'missing', needsReentry: true },
+      ],
+      unsupported: [],
+      mcpServers: [],
+    };
+    const unhealthy: Plugin = {
+      ...samplePlugin,
+      id: '00000000-0000-4000-8000-000000000024',
+      name: 'mcp-fake',
+      mcpServers: [{ name: 'fake', kind: 'stdio', health: 'unhealthy' }],
+      unsupported: [],
+    };
+    plugins = [invalid, missingSetting, reentry, unhealthy, shadowedPlugin, samplePlugin];
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Needs attention 4' }));
+    const rows = screen.getAllByTestId(/^plugin-row-/);
+    expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual([
+      `plugin-row-${invalid.id}`,
+      `plugin-row-${missingSetting.id}`,
+      `plugin-row-${unhealthy.id}`,
+      `plugin-row-${reentry.id}`,
+    ]);
+    expect(screen.queryByTestId(`plugin-row-${shadowedPlugin.id}`)).not.toBeInTheDocument();
+  });
+
+  it('closing the drawer during Update keeps polling and shows a failure on the row', async () => {
+    const job: PluginInstall = {
+      id: '00000000-0000-4000-8000-000000000099',
+      pluginDirId: defaultDir.id,
+      kind: 'update',
+      gitUrl: samplePlugin.gitUrl!,
+      gitRef: null,
+      pluginId: samplePlugin.id,
+      pluginIds: [samplePlugin.id],
+      status: 'failed',
+      error: 'fetch failed',
+    };
+    mocks.apiFetch.mockImplementation((path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/plugin-dirs' && method === 'GET') return Promise.resolve(json(dirs));
+      if (path === '/api/plugins' && method === 'GET') return Promise.resolve(json(plugins));
+      if (path === '/api/agents' && method === 'GET') return Promise.resolve(json({ items: [] }));
+      if (path === `/api/plugins/${samplePlugin.id}/update` && method === 'POST') {
+        return Promise.resolve(json({ ...job, status: 'running', error: null }, 202));
+      }
+      if (path === `/api/plugin-installs/${job.id}`) return Promise.resolve(json(job));
+      return Promise.reject(new Error(`unexpected ${method} ${path}`));
+    });
+    renderPage();
+
+    fireEvent.click(
+      within(await screen.findByTestId(`plugin-row-${samplePlugin.id}`)).getByRole('button', {
+        name: /sample-plugin/,
+      }),
+    );
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Plugin details' })).getByRole(
+        'button',
+        { name: 'Update' },
+      ),
+    );
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Plugin details' })).getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Update failed: fetch failed');
+    expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
+  });
+
+  it('closing the drawer returns focus to its row', async () => {
+    renderPage();
+
+    const open = within(await screen.findByTestId(`plugin-row-${samplePlugin.id}`)).getByRole(
+      'button',
+      { name: /sample-plugin/ },
+    );
+    fireEvent.click(open);
+    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument(),
+    );
+    expect(open).toHaveFocus();
   });
 
   it('confirming remove plugin directory deletes it', async () => {

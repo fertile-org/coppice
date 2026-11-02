@@ -25,7 +25,7 @@ Ouvrez l’onglet **Custom**. Il y a deux façons de faire.
 3. Choisissez un **Target directory**.
 4. Cliquez sur **Install**.
 
-Coppice clone le dépôt avec les identifiants git de votre ordinateur. Cliquez plus tard sur **Update** sur la carte pour récupérer les nouveautés.
+Coppice clone le dépôt avec les identifiants git de votre ordinateur. Cliquez plus tard sur **Update** dans ses détails pour récupérer les nouveautés.
 
 <a id="from-a-folder"></a>
 
@@ -42,8 +42,8 @@ Si deux dossiers ont un plugin du même nom, celui qui est le plus haut dans la 
 ## L’activer
 Les plugins démarrent désactivés.
 
-1. Activez l’interrupteur sur la carte du plugin. Seuls les plugins avec le statut `ok` peuvent être activés.
-2. Si la carte a des **Settings**, remplissez chaque valeur et cliquez sur **Save settings**. Les valeurs sont stockées chiffrées.
+1. Activez l’interrupteur sur la ligne du plugin. Seuls les plugins avec le statut `ok` peuvent être activés.
+2. Si ses détails ont des **Settings**, remplissez chaque valeur et cliquez sur **Save settings**. Les valeurs sont stockées chiffrées.
 3. Cliquez sur **Test** pour démarrer les outils du plugin et les lister. Ça marche avant même de l’activer.
 
 Un plugin avec un serveur MCP local tourne sur votre ordinateur, avec les privilèges de votre ordinateur. Coppice vous demande de confirmer d’abord.
@@ -53,7 +53,7 @@ Chaque skill a son propre interrupteur. Une skill désactivée est cachée à to
 <a id="choose-which-agents-can-use-it"></a>
 
 ## Choisir quels agents peuvent s’en servir
-Sur la carte, sous **Which agents can use it?**, choisissez :
+Dans ses détails, sous **Which agents can use it?**, choisissez :
 
 - **All agents** : tous les agents, y compris ceux que vous créerez plus tard.
 - **Choose agents** : seulement les agents que vous cochez.
@@ -145,7 +145,7 @@ Ajoutez un `.mcp.json` avec une table `mcpServers`. Chaque serveur est local ou 
 }
 ```
 
-`${NAME}` devient un réglage sur la carte du plugin. `${NAME:-default}` lui donne une valeur par défaut. Coppice remplace `${CLAUDE_PLUGIN_ROOT}` par le dossier d’installation du plugin. Ce n’est pas un réglage de la carte. Les serveurs SSE ne sont pas pris en charge.
+`${NAME}` devient un réglage dans les détails du plugin. `${NAME:-default}` lui donne une valeur par défaut. Coppice remplace `${CLAUDE_PLUGIN_ROOT}` par le dossier d’installation du plugin. Ce n’est pas un réglage. Les serveurs SSE ne sont pas pris en charge.
 
 Cet exemple expose l’outil `hello-coppice__greet` et la skill `hello-coppice:greeting-style`. Voir l’exemple complet dans [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins).
 

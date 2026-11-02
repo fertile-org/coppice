@@ -25,7 +25,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 3. 選擇 **Target directory**（目標目錄）。
 4. 點選 **Install**。
 
-Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在卡片上點選 **Update** 即可拉取新改動。
+Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裏點選 **Update** 即可拉取新改動。
 
 <a id="from-a-folder"></a>
 
@@ -42,8 +42,8 @@ Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在卡片上點選 
 ## 啓用外掛
 外掛初始為停用狀態。
 
-1. 開啓外掛卡片上的開關。只有狀態為 `ok` 的外掛才能啓用。
-2. 如果卡片上有 **Settings**，填寫每個值並點選 **Save settings**。這些值會加密儲存。
+1. 開啓外掛列上的開關。只有狀態為 `ok` 的外掛才能啓用。
+2. 如果詳情裏有 **Settings**，填寫每個值並點選 **Save settings**。這些值會加密儲存。
 3. 點選 **Test**，啓動外掛的工具並列出它們。啓用之前也可以測試。
 
 帶本地 MCP 伺服器的外掛會以你電腦的許可權在本機執行。Coppice 會先請你確認。
@@ -53,7 +53,7 @@ Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在卡片上點選 
 <a id="choose-which-agents-can-use-it"></a>
 
 ## 選擇哪些代理可以使用
-在卡片的 **Which agents can use it?**（哪些代理可以使用？）下選擇：
+在詳情的 **Which agents can use it?**（哪些代理可以使用？）下選擇：
 
 - **All agents**：所有代理，包括以後新建的。
 - **Choose agents**：只有你勾選的代理。
@@ -145,7 +145,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 }
 ```
 
-`${NAME}` 會成為外掛卡片上的一項設定，`${NAME:-default}` 則為它提供預設值。Coppice 會把 `${CLAUDE_PLUGIN_ROOT}` 替換為外掛的安裝資料夾，它不是卡片上的設定。不支援 SSE 伺服器。
+`${NAME}` 會成為外掛詳情裏的一項設定，`${NAME:-default}` 則為它提供預設值。Coppice 會把 `${CLAUDE_PLUGIN_ROOT}` 替換為外掛的安裝資料夾，它不是一項設定。不支援 SSE 伺服器。
 
 這個示例提供了工具 `hello-coppice__greet` 和技能 `hello-coppice:greeting-style`。完整示例見 [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins)。
 

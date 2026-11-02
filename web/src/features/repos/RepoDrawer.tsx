@@ -13,6 +13,8 @@ export interface RepoDrawerProps {
   title: string;
   description?: string;
   onClose: () => void;
+  /** Same as TicketDrawer: drawers with no SheetTrigger return focus here. */
+  onRestoreFocus?: () => void;
   children: ReactNode;
 }
 
@@ -23,6 +25,7 @@ export function RepoDrawer({
   title,
   description,
   onClose,
+  onRestoreFocus,
   children,
 }: RepoDrawerProps) {
   return (
@@ -33,6 +36,11 @@ export function RepoDrawer({
         {...(description ? {} : { 'aria-describedby': undefined })}
         className="max-w-lg"
         overlayProps={{ 'data-testid': 'repo-drawer-backdrop' }}
+        onCloseAutoFocus={(event) => {
+          if (!onRestoreFocus) return;
+          event.preventDefault();
+          onRestoreFocus();
+        }}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div className="min-w-0">

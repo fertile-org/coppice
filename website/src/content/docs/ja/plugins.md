@@ -25,7 +25,7 @@ description: "プラグインは Coppice のエージェントにスキルと MC
 3. **Target directory** を選びます。
 4. **Install** をクリックします。
 
-Coppice はあなたのコンピューターの git 認証情報でリポジトリをクローンします。あとで新しい変更を取り込むには、カードの **Update** をクリックします。
+Coppice はあなたのコンピューターの git 認証情報でリポジトリをクローンします。あとで新しい変更を取り込むには、詳細の **Update** をクリックします。
 
 <a id="from-a-folder"></a>
 
@@ -42,8 +42,8 @@ Coppice はあなたのコンピューターの git 認証情報でリポジト�
 ## 有効にする
 プラグインは無効の状態で始まります。
 
-1. プラグインのカードのスイッチをオンにします。有効にできるのはステータスが `ok` のプラグインだけです。
-2. カードに **Settings** がある場合は、各値を入力して **Save settings** をクリックします。値は暗号化して保存されます。
+1. プラグインの行のスイッチをオンにします。有効にできるのはステータスが `ok` のプラグインだけです。
+2. 詳細に **Settings** がある場合は、各値を入力して **Save settings** をクリックします。値は暗号化して保存されます。
 3. **Test** をクリックすると、プラグインのツールを起動して一覧にします。有効にする前でも使えます。
 
 ローカルの MCP サーバーを持つプラグインは、あなたのコンピューター上で、あなたのコンピューターの権限で動きます。Coppice は先に確認を求めます。
@@ -53,7 +53,7 @@ Coppice はあなたのコンピューターの git 認証情報でリポジト�
 <a id="choose-which-agents-can-use-it"></a>
 
 ## 使えるエージェントを選ぶ
-カードの **Which agents can use it?** で、次のどちらかを選びます。
+詳細の **Which agents can use it?** で、次のどちらかを選びます。
 
 - **All agents**：あとで作るものも含めて、すべてのエージェント。
 - **Choose agents**：チェックしたエージェントだけ。
@@ -145,7 +145,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 }
 ```
 
-`${NAME}` はプラグインのカードの設定項目になります。`${NAME:-default}` で既定値を付けられます。`${CLAUDE_PLUGIN_ROOT}` には Coppice がプラグインのインストール先フォルダーを入れます。これはカードの設定項目ではありません。SSE サーバーには対応していません。
+`${NAME}` はプラグイン詳細の設定項目になります。`${NAME:-default}` で既定値を付けられます。`${CLAUDE_PLUGIN_ROOT}` には Coppice がプラグインのインストール先フォルダーを入れます。これは設定項目ではありません。SSE サーバーには対応していません。
 
 この例では、ツール `hello-coppice__greet` とスキル `hello-coppice:greeting-style` が使えるようになります。完全な例は [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins) にあります。
 

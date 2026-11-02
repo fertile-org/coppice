@@ -25,7 +25,7 @@ Mở tab **Custom**. Có hai cách.
 3. Chọn **Target directory**.
 4. Bấm **Install**.
 
-Coppice clone repo bằng thông tin đăng nhập git trên máy bạn. Sau này bấm **Update** trên thẻ để kéo thay đổi mới về.
+Coppice clone repo bằng thông tin đăng nhập git trên máy bạn. Sau này bấm **Update** trong chi tiết để kéo thay đổi mới về.
 
 <a id="from-a-folder"></a>
 
@@ -42,8 +42,8 @@ Nếu hai thư mục có plugin trùng tên, plugin trong thư mục đứng tr�
 ## Bật plugin
 Plugin mới thêm vào đều đang tắt.
 
-1. Bật công tắc trên thẻ plugin. Chỉ plugin ở trạng thái `ok` mới bật được.
-2. Nếu thẻ có mục **Settings**, điền từng giá trị rồi bấm **Save settings**. Các giá trị này được mã hóa khi lưu.
+1. Bật công tắc trên hàng plugin. Chỉ plugin ở trạng thái `ok` mới bật được.
+2. Nếu chi tiết có mục **Settings**, điền từng giá trị rồi bấm **Save settings**. Các giá trị này được mã hóa khi lưu.
 3. Bấm **Test** để khởi động công cụ của plugin và xem danh sách công cụ. Chưa bật plugin vẫn bấm được.
 
 Plugin có MCP server chạy cục bộ sẽ chạy trên máy bạn với quyền của chính máy bạn, nên Coppice sẽ hỏi bạn xác nhận trước.
@@ -53,7 +53,7 @@ Mỗi skill có công tắc riêng. Skill nào bị tắt sẽ ẩn với mọi 
 <a id="choose-which-agents-can-use-it"></a>
 
 ## Chọn agent nào được dùng
-Trên thẻ, ở mục **Which agents can use it?**, chọn:
+Trong chi tiết, ở mục **Which agents can use it?**, chọn:
 
 - **All agents**: mọi agent, kể cả agent tạo sau này.
 - **Choose agents**: chỉ những agent bạn đánh dấu.
@@ -145,7 +145,7 @@ Thêm file `.mcp.json` có map `mcpServers`. Mỗi server chạy cục bộ ho�
 }
 ```
 
-`${NAME}` sẽ thành một ô thiết lập trên thẻ plugin, còn `${NAME:-default}` có thêm giá trị mặc định. Coppice tự điền `${CLAUDE_PLUGIN_ROOT}` bằng thư mục cài plugin, nên biến này không hiện trên thẻ. Chưa hỗ trợ server SSE.
+`${NAME}` sẽ thành một ô thiết lập trong chi tiết plugin, còn `${NAME:-default}` có thêm giá trị mặc định. Coppice tự điền `${CLAUDE_PLUGIN_ROOT}` bằng thư mục cài plugin, nên biến này không hiện thành ô thiết lập. Chưa hỗ trợ server SSE.
 
 Ví dụ này cung cấp công cụ `hello-coppice__greet` và skill `hello-coppice:greeting-style`. Xem ví dụ đầy đủ trong [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins).
 
