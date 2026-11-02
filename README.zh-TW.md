@@ -50,18 +50,20 @@
 
 ## 工作方式
 
-1. **把工作交出去。** 寫一個工單，或批准代理建議的工單。把它指派給你的 PM 代理，它會起草一份計劃，經你批准後才會有人寫程式碼。開啟 **Skip planning**（跳過規劃），工單會直接進入 Ready。
+1. **把工作交出去。** 寫一個工單，或批准代理建議的工單。把它指派給你的 PM 代理，它會起草一份計劃，並為介面改動提供設計方案，經你批准後才會有人寫程式碼。開啟 **Skip planning**（跳過規劃），工單會直接進入 Ready。
 2. **讓代理去構建。** 每個工單都有自己的 git worktree，並行的代理永遠不會碰你的主檢出目錄。任何一次執行都可以即時檢視。
 3. **人工審查。** 在應用裡閱讀 diff，可以評論任意一行。你接受之前，什麼都不算完成。
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 欄，以及工單卡片" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="PM 代理在工單上起草的計劃：方法、步驟、風險和不在範圍內的內容" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="程式碼審查：已批准的計劃、改動的檔案，以及帶行內評論的 diff" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 欄，以及工單卡片" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="設計方案彈窗：三個方案以分頁排列，附預覽、Recommended 標記和 Choose 按鈕" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM 代理在工單上起草的計劃：方法、步驟、風險和不在範圍內的內容" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="程式碼審查：已批准的計劃、改動的檔案，以及帶行內評論的 diff" /></td>
   </tr>
   <tr>
     <td align="center">所有代理，一塊看板</td>
+    <td align="center">比較設計方案</td>
     <td align="center">先批准計劃</td>
     <td align="center">逐行審查 diff</td>
   </tr>

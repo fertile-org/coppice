@@ -17,7 +17,7 @@
  *   website/public/assets/marketing.gif   960px wide
  *   static/marketing.gif                  same GIF
  *   website/public/assets/hero-screenshot.png
- *   static/screenshots/01-… through 07-…
+ *   static/screenshots/01-… through 08-…
  *
  * Run after the screenshot stack is up:
  *   node e2e/screenshot/capture-hero.mjs
@@ -25,10 +25,16 @@
 
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import {
+  DESIGN_OPTIONS,
+  DESIGN_SET_TITLE,
+  RECOMMENDED_OPTION_ID,
+} from './design-options.mjs';
 import { resetMarketingWorkspace } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
@@ -58,6 +64,7 @@ const LINE_COMMENT = 'Use the existing theme hook.';
 const CAPTIONS = [
   'Write a ticket.',
   'Your PM agent drafts a plan.',
+  'It shows you design options.',
   'You approve it.',
   'Agents build, review, and test.',
   'Review the diff. Comment on any line.',
@@ -67,7 +74,7 @@ const CAPTIONS = [
 const PLAN_BODY = `## Plan
 
 ### Approach
-Add a dark mode toggle on the Settings page. Keep the choice on this machine and apply it through the theme hook the rest of the app already uses.
+Build design option A: a switch in the Settings row. Keep the choice on this machine and apply it through the theme hook the rest of the app already uses.
 
 ### Steps
 - [ ] Add the Settings toggle
@@ -310,10 +317,8 @@ async function seedSupporting(auth, agentIds, boardId) {
       await api('PATCH', `/api/tickets/${created.id}`, auth, { skipPlanning: true });
     }
     if (ticket.status === 'done') {
-      await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
-        status: 'wait_for_final_review',
-      });
-      await api('POST', `/api/tickets/${created.id}/final-approve`, auth, {});
+      // Accepting needs a real branch, and this card is only set dressing.
+      await psql(`UPDATE tickets SET status = 'done' WHERE id = ${sqlQuote(created.id)}::uuid;`);
     } else if (ticket.status !== 'backlog') {
       await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
         status: ticket.status,
@@ -360,21 +365,76 @@ async function seedWorkspace(auth) {
   return { agentIds, repoId: repo.id, boardId: board.id };
 }
 
+async function writeDesignFile(rel, html) {
+  const dest = `/data/artifacts/${rel}`;
+  await run(
+    composeArgs([
+      'exec',
+      '-T',
+      '-u',
+      '0:0',
+      'server',
+      'sh',
+      '-c',
+      'mkdir -p "$(dirname "$1")" && cat > "$1"',
+      'sh',
+      dest,
+    ]),
+    { input: html },
+  );
+}
+
+/** What a finished planning run leaves behind: its run, design options, and plan. */
 async function attachPlan(ticketId, agentId) {
+  const runId = randomUUID();
+  const setId = randomUUID();
+  const dir = `designs/${setId}`;
+  for (const option of DESIGN_OPTIONS) {
+    await writeDesignFile(`${dir}/${option.entry}`, option.html);
+  }
+  const options = DESIGN_OPTIONS.map(({ id, title, entry }) => ({ id, title, entry }));
   await psql(`
-    INSERT INTO ticket_comments (
-      id, ticket_id, author_type, author_id, body, intent,
-      mentions, attachment_ids, plan_content_version
+    INSERT INTO agent_runs (
+      id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+      context_profile, started_at, ended_at
+    ) VALUES (
+      ${sqlQuote(runId)}::uuid,
+      ${sqlQuote(ticketId)}::uuid,
+      ${sqlQuote(agentId)}::uuid,
+      'plan_ticket',
+      'succeeded',
+      'permissive-default',
+      'full',
+      now() - interval '2 minutes',
+      now()
+    );
+    INSERT INTO design_sets (
+      id, title, ticket_id, run_id, agent_id, dir, options,
+      recommended_option_id, published_at
+    ) VALUES (
+      ${sqlQuote(setId)}::uuid,
+      ${sqlQuote(DESIGN_SET_TITLE)},
+      ${sqlQuote(ticketId)}::uuid,
+      ${sqlQuote(runId)}::uuid,
+      ${sqlQuote(agentId)}::uuid,
+      ${sqlQuote(dir)},
+      ${sqlQuote(JSON.stringify(options))}::jsonb,
+      ${sqlQuote(RECOMMENDED_OPTION_ID)},
+      now()
+    );
+    INSERT INTO ticket_plans (
+      id, ticket_id, run_id, agent_id, revision, body, content_version,
+      design_set_id, design_option_id
     ) VALUES (
       gen_random_uuid(),
       ${sqlQuote(ticketId)}::uuid,
-      'agent',
+      ${sqlQuote(runId)}::uuid,
       ${sqlQuote(agentId)}::uuid,
+      1,
       $plan$${PLAN_BODY}$plan$,
-      'plan',
-      '[]'::jsonb,
-      '{}',
-      (SELECT content_version FROM tickets WHERE id = ${sqlQuote(ticketId)}::uuid)
+      (SELECT content_version FROM tickets WHERE id = ${sqlQuote(ticketId)}::uuid),
+      ${sqlQuote(setId)}::uuid,
+      ${sqlQuote(RECOMMENDED_OPTION_ID)}
     );
   `);
 }
@@ -422,7 +482,7 @@ async function assertClean(page, label) {
     fail(`${label}: forbidden word ${hit[0]} in ${JSON.stringify(bodyText.slice(0, 700))}`);
   }
   if (bodyText.includes('/data/') || /Technical Lead|couldn't start/.test(bodyText)) {
-    fail(`${label}: internal note is visible: ${JSON.stringify(bodyText.slice(0, 700))}`);
+    { const at = bodyText.search(/\/data\/|Technical Lead|couldn't start/); fail(`${label}: internal note is visible: ${JSON.stringify(bodyText.slice(Math.max(0, at - 200), at + 200))}`); }
   }
   if (/board settings|review cap|waiting for review/i.test(bodyText)) {
     fail(`${label}: review cap chrome is visible`);
@@ -508,6 +568,7 @@ const MARKERS = [
   { name: 'start', css: 'rgb(255, 0, 96)', rgb: [255, 0, 96] },
   { name: 'draft', css: 'rgb(120, 0, 255)', rgb: [120, 0, 255] },
   { name: 'plan', css: 'rgb(0, 255, 170)', rgb: [0, 255, 170] },
+  { name: 'design', css: 'rgb(190, 0, 255)', rgb: [190, 0, 255] },
   { name: 'preapprove', css: 'rgb(0, 90, 255)', rgb: [0, 90, 255] },
   { name: 'ready', css: 'rgb(255, 128, 0)', rgb: [255, 128, 0] },
   { name: 'build', css: 'rgb(255, 220, 0)', rgb: [255, 220, 0] },
@@ -519,6 +580,7 @@ const SEGMENT_NAMES = [
   'write',
   'draft',
   'plan',
+  'design',
   'preapprove',
   'approve',
   'build',
@@ -530,6 +592,7 @@ const SEGMENT_FRAMES = {
   write: 'board-left',
   draft: 'board-left',
   plan: 'plan',
+  design: 'design',
   preapprove: 'board-left',
   approve: 'board-left',
   build: 'board-waiting',
@@ -1084,7 +1147,8 @@ try:
             previous = center
         else:
             previous = None
-        if accept_time - 0.05 <= time <= accept_time + 2.7:
+        # Samples are 0.2s apart, so the window must beat the 2.5s floor by more than that.
+        if accept_time - 0.05 <= time <= accept_time + 2.9:
             if len(found) != 1:
                 raise SystemExit(f"accept caption missing at {time:.2f}s")
             accept_times.append(time)
@@ -1237,7 +1301,7 @@ async function assemble(raw, pulses, stills) {
     fail(`marker sequence was ${runs.map((run) => run.name).join(',') || 'empty'}`);
   }
 
-  const corner = await samplePixels(raw, 12, '22:22:0:0');
+  const corner = await samplePixels(raw, 12, '14:14:0:0');
   const cues = pipCues(corner);
   const pulseCues = cues.filter((cue) => cue.kind === 'pulse');
   const stillCues = cues.filter((cue) => cue.kind === 'still');
@@ -1301,7 +1365,8 @@ async function assemble(raw, pulses, stills) {
     raw,
     '-an',
     '-vf',
-    'split[base][patch];[patch]crop=22:22:28:0[cover];[base][cover]overlay=0:0',
+    // The cue square sits left of the logo. Cover it with the blank sidebar below it.
+    'split[base][patch];[patch]crop=14:14:0:14[cover];[base][cover]overlay=0:0',
     '-c:v',
     'libx264',
     '-pix_fmt',
@@ -1419,6 +1484,7 @@ async function assemble(raw, pulses, stills) {
   const stillNames = {
     write: '01-write-ticket.png',
     plan: '02-plan.png',
+    design: '08-design-options.png',
     diff: '05-diff.png',
     accept: '06-accept.png',
   };
@@ -1475,7 +1541,7 @@ async function assemble(raw, pulses, stills) {
   }
   if (gif.width !== GIF_WIDTH) fail(`gif width is ${gif.width}, expected ${GIF_WIDTH}`);
   const seconds = Number(mp4.duration);
-  if (seconds < 24 || seconds >= 30) fail(`hero duration ${seconds.toFixed(2)}s is outside 24–30s`);
+  if (seconds < 24 || seconds >= 36) fail(`hero duration ${seconds.toFixed(2)}s is outside 24–36s`);
   const gifBytes = (await stat(GIF_SITE)).size;
   if (gifBytes > 10 * 1024 * 1024) {
     fail(`gif is ${(gifBytes / (1024 * 1024)).toFixed(1)}MB, over 10MB`);
@@ -1504,6 +1570,8 @@ async function record(scene) {
       recordVideo: { dir: videoDir, size: VIEWPORT },
     });
     await context.addInitScript((styleText) => {
+      // Design previews are sandboxed iframes with no storage.
+      if (window !== window.top) return;
       localStorage.setItem('coppice.theme', 'light');
       localStorage.setItem('coppice.sidebar.collapsed', '0');
       localStorage.setItem('coppice.plugins.guideOpen', '0');
@@ -1573,24 +1641,28 @@ async function record(scene) {
     page.on('pageerror', (error) => {
       console.log(`hero: pageerror ${error.message}`);
     });
-    await page.route('**/api/tickets/*/comments', async (route) => {
+    await page.route(/\/api\/tickets\/[^/]+\/comments(\?|$)/, async (route) => {
       if (route.request().method() !== 'GET') {
         await route.continue();
         return;
       }
       const response = await route.fetch();
       const body = await response.json().catch(() => null);
-      if (!Array.isArray(body)) {
+      const comments = Array.isArray(body) ? body : body?.items;
+      if (!Array.isArray(comments)) {
         await route.fulfill({ response });
         return;
       }
-      const filtered = body.filter((comment) => {
+      const filtered = comments.filter((comment) => {
         const text = String(comment.body ?? '');
         if (comment.intent === 'system_event') return false;
         if (/Technical Lead|couldn.t start|No PM agent is available/.test(text)) return false;
         return true;
       });
-      await route.fulfill({ status: response.status(), json: filtered });
+      await route.fulfill({
+        status: response.status(),
+        json: Array.isArray(body) ? filtered : { ...body, items: filtered },
+      });
     });
 
     let captionAt = 0;
@@ -1660,7 +1732,7 @@ async function record(scene) {
           pip = document.createElement('div');
           pip.id = 'coppice-hero-pip';
           pip.style.cssText =
-            'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;pointer-events:none;';
+            'position:fixed;left:0;top:0;width:14px;height:14px;z-index:2147483647;pointer-events:none;';
           document.body.appendChild(pip);
         }
         document.body.appendChild(pip);
@@ -1690,6 +1762,12 @@ async function record(scene) {
         radius: box.radius,
       });
       await flashPip('#ff00ff');
+    };
+
+    // Runs behind a scene veil: these moves come from the API, not this page.
+    const reloadBoard = async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({ timeout: 30_000 });
     };
 
     await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
@@ -1738,6 +1816,7 @@ async function record(scene) {
       });
       await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
       await attachPlan(ticket.id, scene.agentIds.PM);
+      await reloadBoard();
       const landed = storyCard('Plan Review');
       await landed.waitFor({ timeout: 15_000 });
       await pinBoardLeft(page);
@@ -1756,16 +1835,44 @@ async function record(scene) {
       await page.getByText('acme-web', { exact: true }).first().waitFor();
       await page.getByRole('heading', { name: 'Plan', level: 2 }).scrollIntoViewIfNeeded();
       await page.getByText('Add the Settings toggle').waitFor();
+      await page.getByText('Click to open design options').waitFor();
       await preparePage(page);
     });
     await assertClean(page, 'scene plan');
     await hold(page, 200);
     await markStill('plan');
-    await hold(page, 1700);
+    await hold(page, 2400);
 
-    const detail = page.locator('[aria-label="Ticket detail"]');
+    const designDialog = page.getByRole('dialog', { name: 'Design options' });
+    const showOption = async (label, heading) => {
+      await designDialog.getByRole('tab', { name: new RegExp(`^${label}: `) }).click();
+      await page
+        .frameLocator(`iframe[title^="${label}: "]`)
+        .getByText(heading, { exact: true })
+        .waitFor({ timeout: 15_000 });
+    };
     await cutScene(MARKERS[3], async () => {
       await fadeCaption(CAPTIONS[2]);
+      await page.getByText('Click to open design options').click();
+      await designDialog.waitFor({ timeout: 15_000 });
+      await showOption('A', 'Dark mode');
+      await preparePage(page);
+    });
+    await assertClean(page, 'scene design');
+    await hold(page, 2400);
+    await showOption('B', 'Theme');
+    await designDialog.getByRole('button', { name: 'Choose B and update plan' }).waitFor();
+    await hold(page, 200);
+    await markStill('design');
+    await hold(page, 1500);
+    await showOption('C', 'Theme');
+    await hold(page, 2200);
+
+    const detail = page.locator('[aria-label="Ticket detail"]');
+    await cutScene(MARKERS[4], async () => {
+      await fadeCaption(CAPTIONS[3]);
+      await designDialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await designDialog.waitFor({ state: 'hidden', timeout: 15_000 });
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       await planCard.waitFor({ timeout: 15_000 });
       await pinBoardLeft(page);
@@ -1774,7 +1881,7 @@ async function record(scene) {
     await assertClean(page, 'scene preapprove');
     await hold(page, 1600);
 
-    await cutScene(MARKERS[4], async () => {
+    await cutScene(MARKERS[5], async () => {
       await planCard.click();
       await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
       await page.getByRole('button', { name: 'Approve plan' }).click();
@@ -1790,8 +1897,8 @@ async function record(scene) {
     await hold(page, 3800);
 
     const short = ticket.id.split('-')[0];
-    await cutScene(MARKERS[5], async () => {
-      await fadeCaption(CAPTIONS[3]);
+    await cutScene(MARKERS[6], async () => {
+      await fadeCaption(CAPTIONS[4]);
       await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
         status: 'wait_for_final_review',
       });
@@ -1800,6 +1907,7 @@ async function record(scene) {
         SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
         WHERE id = ${sqlQuote(ticket.id)}::uuid;
       `);
+      await reloadBoard();
       const waiting = storyCard('Wait for Human Review');
       await waiting.waitFor({ timeout: 15_000 });
       columnScroll = await showColumn(page, 'Wait for Human Review');
@@ -1813,8 +1921,8 @@ async function record(scene) {
 
     const worktree = await worktreePromise;
     if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
-    await cutScene(MARKERS[6], async () => {
-      await fadeCaption(CAPTIONS[4]);
+    await cutScene(MARKERS[7], async () => {
+      await fadeCaption(CAPTIONS[5]);
       const review = new URL('/code', WEB);
       review.searchParams.set('repoId', scene.repoId);
       review.searchParams.set('ticketId', ticket.id);
@@ -1843,8 +1951,8 @@ async function record(scene) {
     // Still diff after the comment posts, long enough to read the line.
     await hold(page, 3100);
 
-    await cutScene(MARKERS[7], async () => {
-      await fadeCaption(CAPTIONS[5]);
+    await cutScene(MARKERS[8], async () => {
+      await fadeCaption(CAPTIONS[6]);
       await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
         waitUntil: 'domcontentloaded',
       });
@@ -1858,9 +1966,9 @@ async function record(scene) {
     });
     await assertClean(page, 'scene accept');
     // Accept dialog. Was ~5.7s. The same caption continues onto the Done board.
-    await hold(page, 1500);
+    await hold(page, 2000);
     const acceptDialog = page.getByRole('dialog', { name: 'Accept this ticket?' });
-    await cutScene(MARKERS[8], async () => {
+    await cutScene(MARKERS[9], async () => {
       await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
       await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
       await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
@@ -1883,8 +1991,8 @@ async function record(scene) {
     await sleep(300);
     await pulseCue(storyCard('Done'));
     await markStill('accept');
-    // Resting Done hold. 3.6s here is about 2.9s after the 1.25× speed-up.
-    await hold(page, 3600);
+    // Resting Done hold. 4.2s here is about 3.4s after the 1.25× speed-up.
+    await hold(page, 4200);
 
     const video = page.video();
     await page.close();

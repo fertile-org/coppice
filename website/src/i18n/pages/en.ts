@@ -12,10 +12,11 @@ export const pages = {
     hero: {
       stillAlt: 'Coppice board with tickets for the acme-web repository',
       videoAlt:
-        'Coppice: write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it.',
+        'Coppice: write a ticket, compare design options, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it.',
       captions: [
         'Write a ticket.',
         'Your PM agent drafts a plan.',
+        'It shows you design options.',
         'You approve it.',
         'Agents build, review, and test.',
         'Review the diff. Comment on any line.',
@@ -32,7 +33,7 @@ export const pages = {
     steps: [
       {
         title: 'Hand off the work.',
-        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan you approve before anyone writes code.',
+        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan and shows you design options for UI changes. You approve before anyone writes code.',
       },
       {
         title: 'Let agents build.',

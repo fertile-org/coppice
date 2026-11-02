@@ -14,10 +14,11 @@ export const pages: Pages = {
     hero: {
       stillAlt: 'Bảng Coppice với các ticket của repository acme-web',
       videoAlt:
-        'Coppice: viết ticket, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Chỉ khi bạn chấp nhận thì việc mới tính là xong.',
+        'Coppice: viết ticket, so sánh các phương án thiết kế, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Chỉ khi bạn chấp nhận thì việc mới tính là xong.',
       captions: [
         'Viết một ticket.',
         'Agent PM soạn kế hoạch.',
+        'Nó đưa ra các phương án thiết kế.',
         'Bạn duyệt.',
         'Các agent viết code, review và test.',
         'Xem diff, góp ý ở bất kỳ dòng nào.',
@@ -34,7 +35,7 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Giao việc.',
-        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch để bạn duyệt trước khi ai đụng vào code.',
+        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai đụng vào code.',
       },
       {
         title: 'Để agent bắt tay vào làm.',

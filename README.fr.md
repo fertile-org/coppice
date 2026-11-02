@@ -50,18 +50,20 @@ Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de com
 
 ## Comment ça marche
 
-1. **Confiez le travail.** Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM, qui rédige un plan que vous approuvez avant que quiconque n’écrive du code. Activez **Skip planning** (sauter la planification) pour envoyer un ticket directement en Ready.
+1. **Confiez le travail.** Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM, qui rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez avant que quiconque n’écrive du code. Activez **Skip planning** (sauter la planification) pour envoyer un ticket directement en Ready.
 2. **Laissez les agents construire.** Chaque ticket a son propre worktree git, donc les agents qui travaillent en parallèle ne touchent jamais à votre checkout principal. Suivez n’importe quel lancement en direct.
 3. **Human Review.** Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté.
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="Le tableau : colonnes Backlog, Plan Review, Ready et In Progress avec des cartes de tickets" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="Un plan rédigé par l’agent PM sur un ticket : approche, étapes, risques et hors périmètre" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="Revue de code : le plan approuvé, les fichiers modifiés et le diff avec un commentaire sur une ligne" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="Le tableau : colonnes Backlog, Plan Review, Ready et In Progress avec des cartes de tickets" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="La fenêtre des options de design : trois options en onglets, avec aperçu, badge Recommended et bouton Choose" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="Un plan rédigé par l’agent PM sur un ticket : approche, étapes, risques et hors périmètre" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Revue de code : le plan approuvé, les fichiers modifiés et le diff avec un commentaire sur une ligne" /></td>
   </tr>
   <tr>
     <td align="center">Un tableau pour tous les agents</td>
+    <td align="center">Comparez les options de design</td>
     <td align="center">Approuvez d’abord le plan</td>
     <td align="center">Relisez le diff, ligne par ligne</td>
   </tr>

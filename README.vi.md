@@ -50,18 +50,20 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
 
 ## Cách hoạt động
 
-1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch để bạn duyệt trước khi ai đụng vào code. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
+1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai đụng vào code. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
 2. **Để agent bắt tay vào làm.** Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ đụng vào bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.
 3. **Human Review.** Đọc diff ngay trong ứng dụng, góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong.
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="Bảng: các cột Backlog, Plan Review, Ready và In Progress với các thẻ ticket" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="Kế hoạch do agent PM soạn trên một ticket: hướng làm, các bước, rủi ro và phần ngoài phạm vi" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="Code review: kế hoạch đã duyệt, các file thay đổi và diff kèm một góp ý trên dòng code" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="Bảng: các cột Backlog, Plan Review, Ready và In Progress với các thẻ ticket" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="Cửa sổ phương án thiết kế: ba phương án dạng tab, có xem trước, nhãn Recommended và nút Choose" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="Kế hoạch do agent PM soạn trên một ticket: hướng làm, các bước, rủi ro và phần ngoài phạm vi" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Code review: kế hoạch đã duyệt, các file thay đổi và diff kèm một góp ý trên dòng code" /></td>
   </tr>
   <tr>
     <td align="center">Mọi agent trên một bảng</td>
+    <td align="center">So sánh các phương án thiết kế</td>
     <td align="center">Duyệt kế hoạch trước khi làm</td>
     <td align="center">Review diff từng dòng</td>
   </tr>

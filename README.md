@@ -50,18 +50,20 @@ Download, open, work. There's nothing to set up: no Docker and no Coppice accoun
 
 ## How it works
 
-1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan you approve before anyone writes code. Turn on **Skip planning** to send a ticket straight to Ready.
+1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan and shows you design options for UI changes. You approve before anyone writes code. Turn on **Skip planning** to send a ticket straight to Ready.
 2. **Let agents build.** Each ticket gets its own git worktree, so parallel agents never touch your main checkout. Follow any run live.
 3. **Human Review.** Read the diff in the app and comment on any line. Nothing counts as done until you accept it.
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="The board: Backlog, Plan Review, Ready and In Progress columns with ticket cards" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="A plan the PM agent drafted on a ticket, with approach, steps, risks and out of scope" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="Code review: the approved plan, changed files and the diff with an inline comment" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="The board: Backlog, Plan Review, Ready and In Progress columns with ticket cards" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="The design options popup: three options as tabs, with a live preview, a Recommended badge and a Choose button" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="A plan the PM agent drafted on a ticket, with approach, steps, risks and out of scope" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Code review: the approved plan, changed files and the diff with an inline comment" /></td>
   </tr>
   <tr>
     <td align="center">One board for every agent</td>
+    <td align="center">Compare the design options</td>
     <td align="center">Approve the plan first</td>
     <td align="center">Review the diff, line by line</td>
   </tr>

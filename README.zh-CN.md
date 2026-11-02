@@ -50,18 +50,20 @@
 
 ## 工作方式
 
-1. **把工作交出去。** 写一个工单，或批准智能体建议的工单。把它指派给你的 PM 智能体，它会起草一份计划，经你批准后才会有人写代码。打开 **Skip planning**（跳过规划），工单会直接进入 Ready。
+1. **把工作交出去。** 写一个工单，或批准智能体建议的工单。把它指派给你的 PM 智能体，它会起草一份计划，并为界面改动提供设计方案，经你批准后才会有人写代码。打开 **Skip planning**（跳过规划），工单会直接进入 Ready。
 2. **让智能体去构建。** 每个工单都有自己的 git worktree，并行的智能体永远不会碰你的主检出目录。任何一次运行都可以实时查看。
 3. **人工审核。** 在应用里阅读 diff，可以评论任意一行。你接受之前，什么都不算完成。
 
 <table>
   <tr>
-    <td width="33%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 列，以及工单卡片" /></td>
-    <td width="33%"><img src="static/screenshots/02-plan.png" alt="PM 智能体在工单上起草的计划：方法、步骤、风险和不在范围内的内容" /></td>
-    <td width="33%"><img src="static/screenshots/05-diff.png" alt="代码审查：已批准的计划、改动的文件，以及带行内评论的 diff" /></td>
+    <td width="25%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 列，以及工单卡片" /></td>
+    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="设计方案弹窗：三个方案以标签页排列，带预览、Recommended 标记和 Choose 按钮" /></td>
+    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM 智能体在工单上起草的计划：方法、步骤、风险和不在范围内的内容" /></td>
+    <td width="25%"><img src="static/screenshots/05-diff.png" alt="代码审查：已批准的计划、改动的文件，以及带行内评论的 diff" /></td>
   </tr>
   <tr>
     <td align="center">所有智能体，一块看板</td>
+    <td align="center">比较设计方案</td>
     <td align="center">先批准计划</td>
     <td align="center">逐行审查 diff</td>
   </tr>

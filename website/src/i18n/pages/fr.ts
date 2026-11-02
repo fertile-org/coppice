@@ -14,10 +14,11 @@ export const pages: Pages = {
     hero: {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:
-        'Coppice : écrivez un ticket, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté.',
+        'Coppice : écrivez un ticket, comparez les options de design, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté.',
       captions: [
         'Écrivez un ticket.',
         'Votre agent PM rédige un plan.',
+        'Il vous montre des options de design.',
         'Vous l’approuvez.',
         'Les agents construisent, relisent et testent.',
         'Relisez le diff. Commentez n’importe quelle ligne.',
@@ -34,7 +35,7 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Confiez le travail.',
-        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM, qui rédige un plan que vous approuvez avant que quiconque n’écrive du code.',
+        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM, qui rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez avant que quiconque n’écrive du code.',
       },
       {
         title: 'Laissez les agents construire.',
