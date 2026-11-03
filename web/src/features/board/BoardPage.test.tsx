@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { BoardPage } from './BoardPage';
 
@@ -113,8 +113,14 @@ vi.mock('./useTickets', () => ({
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn() }),
 }));
 
+const boardsState = vi.hoisted(() => ({
+  data: [{ id: 'board-1', name: 'Launch plan' }] as { id: string; name: string }[] | undefined,
+  isPending: false,
+}));
+
 vi.mock('../boards/useBoards', () => ({
   setLastBoardId: vi.fn(),
+  useBoards: () => boardsState,
 }));
 
 vi.mock('../agents/useAgents', () => ({
@@ -171,6 +177,35 @@ function renderBoard(initialEntry = '/boards/board-1') {
     </MemoryRouter>,
   );
 }
+
+describe('BoardPage heading', () => {
+  beforeEach(() => {
+    ticketsState.active = [];
+    ticketsState.archived = [];
+  });
+  afterEach(() => {
+    boardsState.data = [{ id: 'board-1', name: 'Launch plan' }];
+    boardsState.isPending = false;
+  });
+
+  it('shows the name of the open board', () => {
+    renderBoard();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Launch plan');
+  });
+
+  it('does not flash a generic title while boards load', () => {
+    boardsState.data = undefined;
+    boardsState.isPending = true;
+    renderBoard();
+    expect(screen.getByRole('heading', { level: 1 })).not.toHaveTextContent('Board');
+  });
+
+  it('falls back to Board when the board is not in the list', () => {
+    boardsState.data = [];
+    renderBoard();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Board');
+  });
+});
 
 describe('BoardPage ticket hierarchy', () => {
   beforeEach(() => {

@@ -108,6 +108,7 @@ vi.mock('./useTickets', () => ({
 
 vi.mock('../boards/useBoards', () => ({
   setLastBoardId: vi.fn(),
+  useBoards: () => ({ data: [], isPending: false }),
 }));
 
 vi.mock('../agents/useAgents', () => ({

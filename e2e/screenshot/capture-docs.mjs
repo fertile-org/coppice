@@ -470,7 +470,7 @@ async function captureBacklogTicket(page, scene) {
   // The plan run control sits on the Backlog card, so the board, the new
   // ticket, and the button are all in the frame.
   await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({ timeout: 30_000 });
+  await page.getByRole('heading', { name: 'Coppice', level: 1 }).waitFor({ timeout: 30_000 });
   const backlog = page.getByRole('region', { name: 'Backlog' });
   await backlog.getByText('Add a health check to the API').waitFor();
   await backlog.getByRole('button', { name: 'Run agent', exact: true }).waitFor();

@@ -95,6 +95,7 @@ describe('BoardPage drop on Done', () => {
   beforeEach(() => {
     apiFetch.mockReset();
     apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/boards') return { json: async () => [] };
       if (init?.method === 'PATCH' && String(path).endsWith('/status')) {
         throw new ApiError(
           400,

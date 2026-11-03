@@ -22,7 +22,7 @@ import { useRepos } from '../repos/useRepos';
 import { AcceptTicketDialog } from '../tickets/AcceptTicketDialog';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
-import { setLastBoardId } from '../boards/useBoards';
+import { setLastBoardId, useBoards } from '../boards/useBoards';
 import {
   BoardFilterButton,
   BoardFilterDrawer,
@@ -81,6 +81,8 @@ function resolveDropStatus(
 
 export function BoardPage() {
   const { boardId } = useParams<{ boardId: string }>();
+  const { data: boards, isPending: boardsPending } = useBoards();
+  const boardName = boards?.find((board) => board.id === boardId)?.name;
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
@@ -428,8 +430,8 @@ export function BoardPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-text-primary">
-            Board
+          <h1 className="break-words font-display text-2xl font-semibold text-text-primary">
+            {boardName ?? (boardsPending ? '\u00a0' : 'Board')}
           </h1>
           <p className="mt-1 font-body text-sm text-text-secondary">
             Drag tickets between columns to update status.

@@ -1767,11 +1767,11 @@ async function record(scene) {
     // Runs behind a scene veil: these moves come from the API, not this page.
     const reloadBoard = async () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({ timeout: 30_000 });
+      await page.getByRole('heading', { name: REPO_NAME, level: 1 }).waitFor({ timeout: 30_000 });
     };
 
     await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({ timeout: 30_000 });
+    await page.getByRole('heading', { name: REPO_NAME, level: 1 }).waitFor({ timeout: 30_000 });
     await page.getByText('Remember the last open settings tab').waitFor();
     await page.getByText('Tighten spacing on the settings form').waitFor();
     await preparePage(page);

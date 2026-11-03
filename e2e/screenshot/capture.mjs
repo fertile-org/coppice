@@ -408,7 +408,7 @@ async function captureFrames(page, scene) {
   frames['01-final-review'] = await shoot(page, '01-final-review');
 
   await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({
+  await page.getByRole('heading', { name: 'Coppice', level: 1 }).waitFor({
     timeout: 30_000,
   });
   for (const label of COLUMN_LABELS) {
