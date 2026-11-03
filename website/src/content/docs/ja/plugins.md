@@ -15,7 +15,23 @@ description: "プラグインは Coppice のエージェントにスキルと MC
 <a id="install-a-plugin"></a>
 
 ## プラグインをインストールする
-**Custom** タブを開きます。方法は 2 つあります。
+**Plugins** ページには 3 つのタブがあります。**Installed** には入手元を問わずすべてのプラグインが並びます。**Marketplace** は最も手早く追加できる方法です。**Custom** は git やフォルダーからインストールします。
+
+<a id="from-the-marketplace"></a>
+
+### マーケットプレイスから
+1. **Plugins** を開き、**Marketplace** タブに切り替えます。
+2. 検索するか、ソースやカテゴリーで絞り込みます。
+3. 項目の **Install** をクリックします。
+
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Plugins ページの Marketplace タブ。検索、ソースのフィルター、Install ボタン付きのプラグインカードが表示されている。">
+<figcaption>数千のプラグインから検索し、ワンクリックでインストールできます。</figcaption>
+</figure>
+
+プラグインは無効の状態で **Installed** タブに追加されます。設定を入力して有効にしてください（下記参照）。
+
+git やフォルダーからインストールするには、**Custom** タブを開きます。方法は 2 つあります。
 
 <a id="from-git"></a>
 

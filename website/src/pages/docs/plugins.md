@@ -21,6 +21,11 @@ The **Plugins** page has three tabs: **Installed** lists every plugin you have, 
 2. Search, or filter by source or category.
 3. Click **Install** on an entry.
 
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="The Marketplace tab on the Plugins page, with search, source filters and plugin cards with Install buttons.">
+<figcaption>Search thousands of plugins, and install one with a click.</figcaption>
+</figure>
+
 The plugin lands on the **Installed** tab, disabled. Fill in its settings and enable it (see below). A plugin works for every agent you give it to, whatever CLI the agent runs on.
 
 Five sources are listed out of the box: **coppice**, the catalog that ships with Coppice; **claude-plugins-official** and **claude-community**, Anthropic's official and community directories; **superpowers-marketplace**; and **ponytail**. Each source loads on its own the first time you open the **Marketplace** tab, and again in the background if it is older than 24 hours. A failed source chip shows an error; click it to retry that source. Cards marked **Coppice** come from the Coppice catalog. Every other card is marked **Community: not reviewed by Coppice**. Review them before you enable them. A catalog entry that pins a `sha` installs that exact commit, even if the branch has moved.

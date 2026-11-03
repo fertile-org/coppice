@@ -15,7 +15,23 @@ Le plugin intégré `coppice` est toujours là. Ses skills ne peuvent pas être 
 <a id="install-a-plugin"></a>
 
 ## Installer un plugin
-Ouvrez l’onglet **Custom**. Il y a deux façons de faire.
+La page **Plugins** a trois onglets : **Installed** liste tous vos plugins, quelle que soit leur origine. **Marketplace** est le moyen le plus rapide d’en ajouter un. **Custom** installe depuis git ou un dossier.
+
+<a id="from-the-marketplace"></a>
+
+### Depuis la marketplace
+1. Ouvrez **Plugins** et passez à l’onglet **Marketplace**.
+2. Cherchez, ou filtrez par source ou par catégorie.
+3. Cliquez sur **Install** sur une entrée.
+
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="L’onglet Marketplace de la page Plugins, avec la recherche, les filtres par source et des cartes de plugins avec un bouton Install.">
+<figcaption>Cherchez parmi des milliers de plugins, et installez-en un en un clic.</figcaption>
+</figure>
+
+Le plugin arrive désactivé dans l’onglet **Installed**. Renseignez ses réglages et activez-le (voir plus bas).
+
+Pour installer depuis git ou un dossier, ouvrez l’onglet **Custom**. Il y a deux façons de faire.
 
 <a id="from-git"></a>
 

@@ -6,7 +6,8 @@
  * coppice-screenshot Compose project, desktop mode, and a 1440×900 light
  * frame. Installs a Cursor CLI that prints a stable model list, seeds one
  * PM agent, one repository, and one Backlog ticket, then writes WebP files
- * under website/public/assets/docs/.
+ * under website/public/assets/docs/. The marketplace still shows the real
+ * catalogs, so this run needs network access.
  *
  * Run after the screenshot stack is up:
  *   node e2e/screenshot/capture-docs.mjs
@@ -49,6 +50,10 @@ const SHOTS = [
   {
     name: 'backlog-ticket',
     alt: 'A board with a new ticket in Backlog and the Run agent button showing.',
+  },
+  {
+    name: 'plugin-marketplace',
+    alt: 'The Marketplace tab on the Plugins page, with search, source filters and plugin cards with Install buttons.',
   },
 ];
 
@@ -473,6 +478,27 @@ async function captureBacklogTicket(page, scene) {
   await shoot(page, 'backlog-ticket');
 }
 
+// The real catalogs, fetched by the server the first time the tab opens.
+async function captureMarketplace(page) {
+  await page.goto(`${WEB}/settings/plugins`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('tab', { name: 'Marketplace' }).click();
+  await page.getByRole('heading', { name: 'Plugin marketplace' }).waitFor({ timeout: 30_000 });
+  const sources = ['coppice', 'claude-plugins-official', 'claude-community', 'superpowers-marketplace', 'ponytail'];
+  await page.waitForFunction(
+    (names) =>
+      names.every((name) =>
+        [...document.querySelectorAll('button')].some((el) =>
+          new RegExp(`^${name}\\s*[1-9]\\d*$`).test(el.innerText.trim()),
+        ),
+      ),
+    sources,
+    { timeout: 300_000 },
+  );
+  await page.getByRole('heading', { name: 'github', exact: true }).waitFor({ timeout: 30_000 });
+  await preparePage(page);
+  await shoot(page, 'plugin-marketplace');
+}
+
 async function capture(scene) {
   const browser = await launchBrowser();
   try {
@@ -493,6 +519,7 @@ async function capture(scene) {
     await captureModelPicker(page);
     await captureNewAgent(page);
     await captureBacklogTicket(page, scene);
+    await captureMarketplace(page);
   } finally {
     await browser.close();
   }

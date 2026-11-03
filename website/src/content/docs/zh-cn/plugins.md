@@ -15,7 +15,23 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 <a id="install-a-plugin"></a>
 
 ## 安装插件
-打开 **Custom**（自定义）标签页。有两种方式。
+**Plugins** 页面有三个标签页：**Installed** 列出你拥有的所有插件，无论来源。**Marketplace** 是添加插件最快的方式。**Custom** 从 git 或文件夹安装。
+
+<a id="from-the-marketplace"></a>
+
+### 从插件市场安装
+1. 打开 **Plugins**，切换到 **Marketplace** 标签页。
+2. 搜索，或按来源、类别筛选。
+3. 点击条目上的 **Install**。
+
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Plugins 页面的 Marketplace 标签页，包含搜索框、来源筛选和带 Install 按钮的插件卡片。">
+<figcaption>在数千个插件中搜索，一键安装。</figcaption>
+</figure>
+
+插件会出现在 **Installed** 标签页，处于禁用状态。填写设置后启用它（见下文）。
+
+要从 git 或文件夹安装，请打开 **Custom** 标签页。有两种方式。
 
 <a id="from-git"></a>
 

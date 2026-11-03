@@ -15,7 +15,23 @@ Plugin `coppice` có sẵn và luôn ở đó. Bạn không tắt được các 
 <a id="install-a-plugin"></a>
 
 ## Cài plugin
-Mở tab **Custom**. Có hai cách.
+Trang **Plugins** có ba tab: **Installed** liệt kê mọi plugin bạn có, dù đến từ đâu. **Marketplace** là cách nhanh nhất để thêm plugin. **Custom** cài từ git hoặc từ thư mục.
+
+<a id="from-the-marketplace"></a>
+
+### Từ marketplace
+1. Mở **Plugins** và chuyển sang tab **Marketplace**.
+2. Tìm kiếm, hoặc lọc theo nguồn hay danh mục.
+3. Bấm **Install** trên một mục.
+
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Tab Marketplace trên trang Plugins, có ô tìm kiếm, bộ lọc theo nguồn và các thẻ plugin với nút Install.">
+<figcaption>Tìm trong hàng nghìn plugin và cài chỉ với một cú nhấp.</figcaption>
+</figure>
+
+Plugin sẽ xuất hiện ở tab **Installed**, ở trạng thái tắt. Điền phần cài đặt rồi bật nó (xem bên dưới).
+
+Để cài từ git hoặc từ thư mục, mở tab **Custom**. Có hai cách.
 
 <a id="from-git"></a>
 

@@ -15,7 +15,23 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 <a id="install-a-plugin"></a>
 
 ## 安裝外掛
-打開 **Custom**（自訂）分頁。有兩種方式。
+**Plugins** 頁面有三個分頁：**Installed** 列出你擁有的所有外掛，無論來源。**Marketplace** 是新增外掛最快的方式。**Custom** 從 git 或資料夾安裝。
+
+<a id="from-the-marketplace"></a>
+
+### 從外掛市集安裝
+1. 開啓 **Plugins**，切換到 **Marketplace** 分頁。
+2. 搜尋，或按來源、類別篩選。
+3. 點擊項目上的 **Install**。
+
+<figure>
+<img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Plugins 頁面的 Marketplace 分頁，包含搜尋框、來源篩選和帶 Install 按鈕的外掛卡片。">
+<figcaption>在數千個外掛中搜尋，一鍵安裝。</figcaption>
+</figure>
+
+外掛會出現在 **Installed** 分頁，處於停用狀態。填寫設定後啓用它（見下文）。
+
+要從 git 或資料夾安裝，請開啓 **Custom** 分頁。有兩種方式。
 
 <a id="from-git"></a>
 
