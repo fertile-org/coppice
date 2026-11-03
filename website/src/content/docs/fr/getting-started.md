@@ -17,9 +17,9 @@ Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, C
 
 1. Installez la CLI et connectez-vous dans votre terminal, comme d’habitude.
 2. Dans Coppice, ouvrez **System** dans la barre latérale, puis **Connectors**.
-3. Trouvez la carte de votre CLI. Elle affiche **Ready** quand Coppice peut l’utiliser.
+3. Trouvez la ligne de votre CLI. Elle affiche **Ready** quand Coppice peut l’utiliser. Ouvrez la ligne pour les détails.
 
-Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** sur la carte. Cliquez ensuite sur **Run check**.
+Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** dans le tiroir de détails. Cliquez ensuite sur **Run check**.
 
 Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppice ne peut pas vérifier leur connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
 

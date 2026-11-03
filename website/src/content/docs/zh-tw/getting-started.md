@@ -17,9 +17,9 @@ description: "從全新安裝到第一次執行代理只需五步：登入代理
 
 1. 像平常一樣安裝 CLI，並在終端裡登入。
 2. 在 Coppice 側邊欄中開啟 **System**（系統），再開啟 **Connectors**（聯結器）。
-3. 找到你的 CLI 卡片。Coppice 可以使用它時，卡片會顯示 **Ready**（就緒）。
+3. 找到你的 CLI 列。Coppice 可以使用它時，會顯示 **Ready**（就緒）。點開該列可看詳細資料。
 
-如果顯示 **Found, not signed in**（已找到，未登入），請在終端裡登入該 CLI。如果顯示 **Not on your PATH**（不在 PATH 中），請安裝它，或按卡片上的 **Install docs**（安裝文件）操作。然後點選 **Run check**（執行檢查）。
+如果顯示 **Found, not signed in**（已找到，未登入），請在終端裡登入該 CLI。如果顯示 **Not on your PATH**（不在 PATH 中），請安裝它，或在詳細資料側欄按 **Install docs**（安裝文件）。然後點選 **Run check**（執行檢查）。
 
 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示 **Installed**（已安裝）。不消耗你的套餐額度，Coppice 就無法檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
 

@@ -17,9 +17,9 @@ description: "インストール直後から最初のエージェント実行ま
 
 1. いつもどおりの方法で CLI をインストールし、ターミナルでサインインします。
 2. Coppice のサイドバーで **System** を開き、**Connectors** を開きます。
-3. 使う CLI のカードを探します。Coppice が使える状態なら **Ready** と表示されます。
+3. 使う CLI の行を探します。Coppice が使える状態なら **Ready** と表示されます。行を開くと詳細が見られます。
 
-**Found, not signed in** と表示されたら、ターミナルで CLI にサインインしてください。**Not on your PATH** と表示されたら、CLI をインストールするか、カードの **Install docs** に従ってください。そのあと **Run check** をクリックします。
+**Found, not signed in** と表示されたら、ターミナルで CLI にサインインしてください。**Not on your PATH** と表示されたら、CLI をインストールするか、詳細ドロワーの **Install docs** に従ってください。そのあと **Run check** をクリックします。
 
 Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示されます。Coppice はあなたのプランを使わずにこれらのサインインを確認できないので、サインアウトしていると実行時にエラーが表示されます。
 

@@ -17,9 +17,9 @@ Nhà cung cấp là agent CLI mà Coppice chạy giúp bạn: Claude Code, Codex
 
 1. Cài CLI và đăng nhập trong terminal, như bạn vẫn làm.
 2. Trong Coppice, mở **System** ở thanh bên, rồi chọn **Connectors**.
-3. Tìm thẻ của CLI đó. Thẻ hiện **Ready** là Coppice dùng được.
+3. Tìm dòng của CLI đó. Dòng hiện **Ready** là Coppice dùng được. Mở dòng để xem chi tiết.
 
-Nếu thẻ hiện **Found, not signed in**, hãy đăng nhập CLI trong terminal. Nếu hiện **Not on your PATH**, hãy cài CLI, hoặc làm theo **Install docs** trên thẻ. Xong thì bấm **Run check**.
+Nếu hiện **Found, not signed in**, hãy đăng nhập CLI trong terminal. Nếu hiện **Not on your PATH**, hãy cài CLI, hoặc làm theo **Install docs** trong ngăn chi tiết. Xong thì bấm **Run check**.
 
 Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Coppice không kiểm tra được trạng thái đăng nhập của các CLI này nếu không dùng đến gói của bạn, nên nếu bạn đã đăng xuất thì lần chạy sẽ báo lỗi.
 
