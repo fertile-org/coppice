@@ -21,14 +21,11 @@ docs/     # contributor docs (philosophy, milestones, development)
 website/  # Astro marketing site + user docs (M12)
 ```
 
-See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for full layout and package boundaries.
-
 ## How to use these docs
 
-1. Read the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for overall decisions.
-2. Implement milestones **in order** — each builds on the prior.
-3. Do not skip acceptance criteria; cumulative `docker compose up` must work after each milestone.
-4. Use `MockProvider` for automated agent tests, and for Compose/dev builds that enable the `mock-provider` feature. Desktop installers and release builds do not ship it ([mock provider](../providers/mock.md)). Real CLI adapters are configured manually.
+1. Implement milestones **in order** — each builds on the prior.
+2. Do not skip acceptance criteria; cumulative `docker compose up` must work after each milestone.
+3. Use `MockProvider` for automated agent tests, and for Compose/dev builds that enable the `mock-provider` feature. Desktop installers and release builds do not ship it ([mock provider](../providers/mock.md)). Real CLI adapters are configured manually.
 
 ## Milestones
 

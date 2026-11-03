@@ -21,7 +21,7 @@ Ship Coppice as a desktop app: the user downloads one installer, opens it, and C
 ## Out of scope
 
 - Windows; auto-update; Postgres major-version upgrade of existing data; remote database
-- In-app install or login of agent CLIs (research item in [TODOS.md](../../TODOS.md))
+- In-app install or login of agent CLIs
 
 ## Dependencies
 
@@ -29,7 +29,7 @@ Ship Coppice as a desktop app: the user downloads one installer, opens it, and C
 
 ## Design
 
-[Design spec](../superpowers/specs/2026-10-04-desktop-release-design.md) — runtime, data layout, Postgres lifecycle, shutdown budget, Electron shell, packaging, release pipeline, testing. Release and install guide: [development.md](../development.md#desktop-release-tag-and-publish).
+Release and install guide: [development.md](../development.md#desktop-release-tag-and-publish).
 
 ## Acceptance criteria
 
@@ -64,7 +64,6 @@ From the spec (need the live tag check or manual acceptance):
 
 ## References
 
-- [Implementation plan](../superpowers/plans/2026-10-04-desktop-release.md)
 - [desktop/README.md](../../desktop/README.md)
 - [M12 — Beta Release](./M12-beta-release.md)
 - [M13 — Security & sandbox](./M13-security-and-sandbox.md)

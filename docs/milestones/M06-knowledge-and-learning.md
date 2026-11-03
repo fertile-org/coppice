@@ -4,7 +4,7 @@
 
 Controlled agent memory: typed knowledge with pgvector retrieval, context budget enforcement, learning extraction, and a human-governed Knowledge Inbox.
 
-> **Amendment (2026-09-28).** Embeddings and the extraction provider were removed with no fallback. Retrieval is Postgres full-text search, and extraction is done by an admin-selected agent that compacts Done tickets into Pending candidates in batches (scheduled plus manual Compact now, failure-only notifications). References below to pgvector, `EmbeddingProvider`, embedding status, and the Learning Extractor describe the original M06 delivery. Current design: [agent compaction + full-text search](../superpowers/specs/2026-09-28-knowledge-agent-compaction-fts-design.md); operator settings: [Knowledge configuration](../operations.md#knowledge-configuration).
+> **Amendment (2026-09-28).** Embeddings and the extraction provider were removed with no fallback. Retrieval is Postgres full-text search, and extraction is done by an admin-selected agent that compacts Done tickets into Pending candidates in batches (scheduled plus manual Compact now, failure-only notifications). References below to pgvector, `EmbeddingProvider`, embedding status, and the Learning Extractor describe the original M06 delivery. Operator settings: [Knowledge configuration](../operations.md#knowledge-configuration).
 
 ## Product scope
 
@@ -33,7 +33,7 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 
 ## Architecture contract
 
-The reviewed design gate is [M06 Knowledge and Learning Design](../superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md). It fixes the trust boundary, revision model, vector dimension, retrieval ordering, capacity envelope, token counter, worker ownership, and API contract. The matching implementation plan is [here](../superpowers/plans/2026-08-03-m06-knowledge-and-learning.md).
+The reviewed design gate fixed the trust boundary, revision model, vector dimension, retrieval ordering, capacity envelope, token counter, worker ownership, and API contract.
 
 ### Server modules
 

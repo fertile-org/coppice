@@ -41,7 +41,6 @@ Placeholders such as `${GITHUB_PERSONAL_ACCESS_TOKEN}` resolve from the plugin's
 
 **Two GitHub tokens:** the forge token from Settings (used by the git and PR features, M07) and the `github` plugin's `GITHUB_PERSONAL_ACCESS_TOKEN` (used by its MCP server) are separate. Setting one does not set the other.
 
-Design: [plugin marketplace spec](superpowers/specs/2026-10-25-plugin-marketplace-design.md), [Plugins page UI/UX](superpowers/specs/2026-10-28-plugins-page-uiux-design.md).
 
 ### Supported layouts
 

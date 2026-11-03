@@ -105,7 +105,7 @@ Admins manage plugins in **Settings → Plugins**. Claude Code / Cursor format p
 
 ### Desktop release (tag and publish)
 
-Desktop installers are built by `.github/workflows/release.yml` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)). Four targets: macOS arm64 and x64 `.dmg` (plus a `.zip` for in-place updates), Linux amd64 and arm64 `.deb`. No Windows.
+Desktop installers are built by `.github/workflows/release.yml`. Four targets: macOS arm64 and x64 `.dmg` (plus a `.zip` for in-place updates), Linux amd64 and arm64 `.deb`. No Windows.
 
 **Cut a release** (maintainers):
 

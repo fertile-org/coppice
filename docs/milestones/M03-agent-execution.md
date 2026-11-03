@@ -4,8 +4,6 @@
 
 Agents execute work on tickets through the job queue and mock provider, using **admin-registered local git repositories** and Coppice-managed worktrees. Includes global repository registry (Settings UI), context packages, and machine-readable result contracts driving ticket updates and comments.
 
-**Design spec:** [docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md](../superpowers/specs/2026-06-08-m03-registered-repositories-design.md)
-
 ## Product scope
 
 ### Registered repositories (retcon)
@@ -145,6 +143,5 @@ Server image needs `git` CLI (worktree commands). **No `repo_data` volume.**
 
 ## References
 
-- [Registered repositories design spec](../superpowers/specs/2026-06-08-m03-registered-repositories-design.md)
 - Product design §10 (runs), §11 (worktrees), §16 (context), §17 (result contract)
 - Framework selection §2 (job queue, git CLI)

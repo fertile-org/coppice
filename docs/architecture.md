@@ -90,7 +90,7 @@ workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 workers/connector_slots.rs in-process per-connector in-flight counts + claim mutex
 ```
 
-**Registered repositories:** Admin registers operator-managed git checkouts via `local_path` (instance-wide). Optional `remote_url` for display and future PR APIs. Coppice does **not** `git clone`. See [M03 registered repositories spec](superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
+**Registered repositories:** Admin registers operator-managed git checkouts via `local_path` (instance-wide). Optional `remote_url` for display and future PR APIs. Coppice does **not** `git clone`.
 
 **Stage owners (In Review, In QA):** when an implementer finishes, the workflow gate moves the ticket to In Review; when the Tech Lead approves, to In QA. `WorkflowService::resolve_transition` picks the owner for that stage: an eligible `assignTo` from the finishing agent wins, else the oldest enabled eligible agent (`domain/workflow.rs` `stage_owner_for`: Tech Lead or reviewer for In Review, QC for In QA), with a system note when an `assignTo` was replaced. With no eligible agent the ticket enters the stage unassigned and a note names the missing role. The orchestrator starts the new owner's `work_on_ticket` run when `auto_start_runs` is on; `workflow.auto_assign` for the source status turns the assignment into a pending recommendation. A person dragging a card into In Review or In QA goes through `StageOwnerService::on_entered_review_stage`, which applies `auto_assign` for the target status and does nothing while the ticket has a queued or running run. Plan Review and Wait for Human Review are the only stops that wait for a person.
 
@@ -210,7 +210,7 @@ services/plugin_settings_service.rs  encrypted, write-only plugin settings
 
 ## Plugins and skills (M10)
 
-Plugins are Claude Code / Cursor format folders, `npx skills` style skills repos, or Claude Code marketplaces (one row per entry), loaded unchanged ([design](superpowers/specs/2026-10-04-standard-skills-and-marketplaces-design.md)). Parsing and filesystem work live in `plugins/`; state, rules, and enablement live in the service.
+Plugins are Claude Code / Cursor format folders, `npx skills` style skills repos, or Claude Code marketplaces (one row per entry), loaded unchanged. Parsing and filesystem work live in `plugins/`; state, rules, and enablement live in the service.
 
 ```text
 plugins/manifest.rs         parse_plugin: plugin.json + one CapabilityParser per capability
@@ -327,7 +327,7 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Desktop mode (M11)
 
-`coppice-server desktop --data-dir <D> --resources <R>` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)) is the single child process of the Electron shell (`desktop/main.mjs`).
+`coppice-server desktop --data-dir <D> --resources <R>` is the single child process of the Electron shell (`desktop/main.mjs`).
 
 - **Data dir `D`** (Electron `userData`): `config.toml` is generated once; later connector on/off changes patch that file in place and keep comments and other keys. Settings saves the editor text verbatim (after the same startup validation), atomically, and keeps the previous good file as `config.toml.bak`. `secrets/` is generated once and never overwritten. Postgres cluster in `pg/data`, storage dirs.
 - **Resources `R`:** `bin/coppice-server`, a pinned Postgres 16 bundle (`desktop/postgres.lock.json`), `web/`, agent templates. The server exports `COPPICE_PG_BIN_DIR` / `COPPICE_PG_LIB_DIR` (`R/postgres/bin`, `R/postgres/lib`) so Tools → Backup runs the bundled `pg_dump` / `psql` by absolute path (with `LD_LIBRARY_PATH` on Linux for that command only); `PATH` is left alone, so agents keep the user's own `psql`.

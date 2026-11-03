@@ -15,7 +15,7 @@ Observable agent runs through a live terminal stream in the browser, persisted l
 - Terminal log saved as artifact on filesystem after run completes (not in Postgres body)
 - Board card badge: live run indicator
 - SPA subscribes to `/ws/events` for board refresh
-- **Run completion toasts** (deferred from pre-M04 polish; see [ticket drawer & run errors spec](../superpowers/specs/2026-06-08-ticket-drawer-and-run-errors-design.md) §3):
+- **Run completion toasts** (deferred from pre-M04 polish):
   - App-level toast stack, **top-right** of viewport
   - On `agent_run.finished`: success toast (subtle, auto-dismiss ~3s); failure toast (persistent until dismiss/click)
   - Failure toast click: open ticket drawer → **Agent Runs** tab → scroll to run + brief highlight + expanded error

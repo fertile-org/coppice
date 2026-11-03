@@ -19,3 +19,6 @@ dist
 /desktop/.cache/
 /desktop/dist/
 /desktop/updater-mode.json
+
+# Local design specs and plans from agent sessions (not published)
+docs/superpowers/

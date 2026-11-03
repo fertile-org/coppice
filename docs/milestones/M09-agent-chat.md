@@ -111,8 +111,8 @@ Do **not** implement M09 before M07 and M08 acceptance. Design-gate docs (spec +
 
 ### Design gate (required before coding)
 
-1. Spec under `docs/superpowers/specs/` — API, cwd resolver, `conversation` vs `human_chat`/`full`, write-denial matrix, streaming choice, action schemas, UI reuse map, philosophy note
-2. Plan under `docs/superpowers/plans/` — sequenced tasks + test matrix
+1. Design spec — API, cwd resolver, `conversation` vs `human_chat`/`full`, write-denial matrix, streaming choice, action schemas, UI reuse map, philosophy note
+2. Implementation plan — sequenced tasks + test matrix
 3. Explicit non-goals and regression cases for M06 inbox + existing mention Chat mode
 
 ### Suggested server modules
@@ -187,10 +187,7 @@ Live tokens: reuse `GET /ws/agent-runs/:runId/live` for the turn run.
 
 ## Related docs
 
-- [Design gate](../superpowers/specs/2026-09-08-m09-agent-chat-design.md)
-- [Implementation plan](../superpowers/plans/2026-09-08-m09-agent-chat.md)
 - [M06 — Knowledge & learning](./M06-knowledge-and-learning.md)
 - [M07 — Trust & signals](./M07-trust-and-signals.md)
 - [M08 — Connector operator CLI](./M08-connector-operator-cli.md)
-- [Human @mention agent runs](../superpowers/specs/2026-06-14-human-mention-agent-runs-design.md) — `human_chat` coexistence
 - [Product design](../philosophy/final_agent_workspace_product_design.md) — §3.2 / §9.1 amended by this milestone for human↔agent chat only
