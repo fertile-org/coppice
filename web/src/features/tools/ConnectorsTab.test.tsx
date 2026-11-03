@@ -143,8 +143,14 @@ function renderTab() {
   );
 }
 
-async function card(id: string) {
-  return within(await screen.findByTestId(`connector-card-${id}`));
+async function row(id: string) {
+  return within(await screen.findByTestId(`connector-row-${id}`));
+}
+
+async function openDrawer(id: string) {
+  const connectorRow = await screen.findByTestId(`connector-row-${id}`);
+  fireEvent.click(within(connectorRow).getByRole('button'));
+  return within(await screen.findByLabelText('Connector details'));
 }
 
 function callsFor(path: string, method: string) {
@@ -165,52 +171,74 @@ describe('ConnectorsTab', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows status per connector', async () => {
+  it('lists connectors as rows sorted with attention first', async () => {
+    renderTab();
+    await row('claude-code');
+    const rows = screen.getAllByTestId(/connector-row-/);
+    expect(rows.map((el) => el.getAttribute('data-testid'))).toEqual([
+      'connector-row-claude-code',
+      'connector-row-codex',
+      'connector-row-opencode',
+      'connector-row-kilo-code',
+    ]);
+  });
+
+  it('shows status in the drawer and attention on the row', async () => {
     renderTab();
 
-    const kiloCard = await card('kilo-code');
-    expect(kiloCard.getByText('Installed')).toBeVisible();
-    expect(
-      kiloCard.getByText(
-        "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
-      ),
-    ).toBeVisible();
-    expect(kiloCard.getByText('/home/coppice/.local/bin/kilo')).toBeVisible();
-    expect(kiloCard.getByText('kilo 9.9.9')).toBeVisible();
-    expect(kiloCard.getByText(/KILO_API_KEY/)).toBeVisible();
-    expect(kiloCard.getByText(/\.kilocode/)).toBeVisible();
-    expect(kiloCard.queryByText(/restart the server/)).not.toBeInTheDocument();
-    expect(kiloCard.getByRole('switch', { name: 'Enabled Kilo Code' })).toHaveAttribute(
+    const kiloRow = await row('kilo-code');
+    expect(kiloRow.getByText('Installed · kilo 9.9.9')).toBeVisible();
+    expect(kiloRow.getByRole('switch', { name: 'Enabled Kilo Code' })).toHaveAttribute(
       'aria-checked',
       'false',
     );
-    expect(kiloCard.getByRole('button', { name: 'Test connection' })).toBeDisabled();
 
-    const claudeCard = await card('claude-code');
-    expect(claudeCard.getByText('Not on your PATH')).toBeVisible();
+    const kiloDrawer = await openDrawer('kilo-code');
+    expect(kiloDrawer.getByText('Installed')).toBeVisible();
     expect(
-      claudeCard.getByText('Run claude login or set ANTHROPIC_API_KEY'),
+      kiloDrawer.getByText(
+        "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
+      ),
     ).toBeVisible();
-    expect(claudeCard.getByRole('link', { name: /install docs/i })).toHaveAttribute(
+    expect(kiloDrawer.getByText('/home/coppice/.local/bin/kilo')).toBeVisible();
+    expect(kiloDrawer.getByText('kilo 9.9.9')).toBeVisible();
+    expect(kiloDrawer.getByText(/KILO_API_KEY/)).toBeVisible();
+    expect(kiloDrawer.getByText(/\.kilocode/)).toBeVisible();
+    expect(kiloDrawer.queryByText(/restart the server/)).not.toBeInTheDocument();
+    expect(kiloDrawer.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+    fireEvent.click(kiloDrawer.getByRole('button', { name: 'Close' }));
+
+    const claudeRow = await row('claude-code');
+    expect(claudeRow.getByText('Not on your PATH')).toBeVisible();
+    const claudeDrawer = await openDrawer('claude-code');
+    expect(claudeDrawer.getByText('Not on your PATH')).toBeVisible();
+    expect(
+      claudeDrawer.getByText('Run claude login or set ANTHROPIC_API_KEY'),
+    ).toBeVisible();
+    expect(claudeDrawer.getByRole('link', { name: /install docs/i })).toHaveAttribute(
       'href',
       'https://docs.anthropic.com/claude-code',
     );
   });
 
-  it('filters connectors by name or id', async () => {
+  it('filters connectors by search and chips', async () => {
     renderTab();
-    await card('kilo-code');
+    await row('kilo-code');
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
       target: { value: 'claude' },
     });
-    expect(screen.getByTestId('connector-card-claude-code')).toBeInTheDocument();
-    expect(screen.queryByTestId('connector-card-kilo-code')).not.toBeInTheDocument();
+    expect(screen.getByTestId('connector-row-claude-code')).toBeInTheDocument();
+    expect(screen.queryByTestId('connector-row-kilo-code')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All 1' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention/ }));
+    expect(screen.getByTestId('connector-row-claude-code')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
       target: { value: 'nothing-like-this' },
     });
-    expect(screen.getByText('No connector matches “nothing-like-this”.')).toBeInTheDocument();
+    expect(screen.getByText('No connectors match.')).toBeInTheDocument();
   });
 
   it('shows the oldest CLI version Coppice runs', async () => {
@@ -220,10 +248,11 @@ describe('ConnectorsTab', () => {
         : undefined,
     );
     renderTab();
-    const kiloCard = await card('kilo-code');
-    expect(kiloCard.getByText('Needs version 2.0.0 or later')).toBeVisible();
-    const codexCard = await card('codex');
-    expect(codexCard.queryByText(/Needs version/)).not.toBeInTheDocument();
+    const kiloDrawer = await openDrawer('kilo-code');
+    expect(kiloDrawer.getByText('Needs version 2.0.0 or later')).toBeVisible();
+    fireEvent.click(kiloDrawer.getByRole('button', { name: 'Close' }));
+    const codexDrawer = await openDrawer('codex');
+    expect(codexDrawer.queryByText(/Needs version/)).not.toBeInTheDocument();
   });
 
   it('shows checking state before the first probe', async () => {
@@ -235,9 +264,12 @@ describe('ConnectorsTab', () => {
     );
     renderTab();
 
-    const claudeCard = await card('claude-code');
-    expect(claudeCard.getAllByText('Checking…').length).toBeGreaterThan(0);
-    expect(claudeCard.queryByText('Not on your PATH')).not.toBeInTheDocument();
+    const claudeRow = await row('claude-code');
+    expect(claudeRow.getByText('Checking…')).toBeVisible();
+    expect(claudeRow.queryByText('Not on your PATH')).not.toBeInTheDocument();
+    const claudeDrawer = await openDrawer('claude-code');
+    expect(claudeDrawer.getAllByText('Checking…').length).toBeGreaterThan(0);
+    expect(claudeDrawer.queryByText('Not on your PATH')).not.toBeInTheDocument();
   });
 
   it('polls statuses until startup probes finish', async () => {
@@ -251,9 +283,9 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const claudeCard = await card('claude-code');
-    expect(claudeCard.getAllByText('Checking…').length).toBeGreaterThan(0);
-    expect(await claudeCard.findByText('Not on your PATH', {}, { timeout: 5000 })).toBeVisible();
+    const claudeRow = await row('claude-code');
+    expect(claudeRow.getByText('Checking…')).toBeVisible();
+    expect(await claudeRow.findByText('Not on your PATH', {}, { timeout: 5000 })).toBeVisible();
     expect(lists).toBe(2);
   }, 10_000);
 
@@ -263,16 +295,17 @@ describe('ConnectorsTab', () => {
     expect(connectorStatusesRefetchInterval([claude, { ...codex, probedAt: null }])).toBe(2_000);
   });
 
-  it('shows last real run', async () => {
+  it('shows last real run in the drawer', async () => {
     renderTab();
 
-    const codexCard = await card('codex');
-    expect(codexCard.getByText('ticket_get ✓ · result_submit ✗')).toBeVisible();
-    expect(codexCard.getByRole('button', { name: 'Open ticket' })).toBeVisible();
-    expect((await card('opencode')).getByText('No runs yet')).toBeVisible();
+    const codexDrawer = await openDrawer('codex');
+    expect(codexDrawer.getByText('ticket_get ✓ · result_submit ✗')).toBeVisible();
+    expect(codexDrawer.getByRole('button', { name: 'Open ticket' })).toBeVisible();
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Close' }));
+    expect((await openDrawer('opencode')).getByText('No runs yet')).toBeVisible();
   });
 
-  it('run check posts with csrf and refreshes card', async () => {
+  it('run check posts with csrf and refreshes drawer', async () => {
     stubApi((path, init) =>
       path === '/api/tools/connectors/codex/check' && init.method === 'POST'
         ? json({ ...codex, cli: { ...codex.cli, probe: { status: 'ok', detail: 'codex 2.0.0' } } })
@@ -280,10 +313,10 @@ describe('ConnectorsTab', () => {
     );
     renderTab();
 
-    const codexCard = await card('codex');
-    fireEvent.click(codexCard.getByRole('button', { name: 'Run check' }));
+    const codexDrawer = await openDrawer('codex');
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
 
-    expect(await codexCard.findByText('codex 2.0.0')).toBeVisible();
+    expect(await codexDrawer.findByText('codex 2.0.0')).toBeVisible();
     const [, init] = callsFor('/api/tools/connectors/codex/check', 'POST')[0];
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
   });
@@ -296,15 +329,15 @@ describe('ConnectorsTab', () => {
     );
     renderTab();
 
-    const codexCard = await card('codex');
-    expect(codexCard.queryByText('now')).not.toBeInTheDocument();
-    fireEvent.click(codexCard.getByRole('button', { name: 'Run check' }));
+    const codexDrawer = await openDrawer('codex');
+    expect(codexDrawer.queryByText('now')).not.toBeInTheDocument();
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
 
-    expect(await codexCard.findByText('now')).toBeVisible();
-    expect(codexCard.getByText('Checked')).toBeVisible();
+    expect(await codexDrawer.findByText('now')).toBeVisible();
+    expect(codexDrawer.getByText('Checked')).toBeVisible();
   });
 
-  it('run check failure shows the error on the card', async () => {
+  it('run check failure shows the error in the drawer', async () => {
     stubApi((path, init) =>
       path === '/api/tools/connectors/codex/check' && init.method === 'POST'
         ? new Response('', { status: 500 })
@@ -312,21 +345,21 @@ describe('ConnectorsTab', () => {
     );
     renderTab();
 
-    const codexCard = await card('codex');
-    fireEvent.click(codexCard.getByRole('button', { name: 'Run check' }));
+    const codexDrawer = await openDrawer('codex');
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
 
-    expect(await codexCard.findByRole('alert')).toHaveTextContent('Check failed.');
+    expect(await codexDrawer.findByRole('alert')).toHaveTextContent('Check failed.');
   });
 
   it('test connection disabled without agents', async () => {
     renderTab();
 
-    const claudeCard = await card('claude-code');
+    const claudeDrawer = await openDrawer('claude-code');
     await waitFor(() =>
-      expect(claudeCard.getByText(/Create an agent with this connector first/)).toBeVisible(),
+      expect(claudeDrawer.getByText(/Create an agent with this connector first/)).toBeVisible(),
     );
-    expect(claudeCard.getByRole('button', { name: 'Test connection' })).toBeDisabled();
-    expect(claudeCard.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
+    expect(claudeDrawer.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+    expect(claudeDrawer.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents');
   });
 
   it('test connection polls to passed', async () => {
@@ -343,13 +376,13 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const codexCard = await card('codex');
+    const codexDrawer = await openDrawer('codex');
     await waitFor(() =>
-      expect(codexCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+      expect(codexDrawer.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
-    fireEvent.click(codexCard.getByRole('button', { name: 'Test connection' }));
-    selectComboboxOption(codexCard.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
-    fireEvent.click(codexCard.getByRole('button', { name: 'Start test' }));
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Test connection' }));
+    selectComboboxOption(codexDrawer.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Start test' }));
 
     await waitFor(() =>
       expect(callsFor('/api/tools/connectors/codex/test', 'POST')).toHaveLength(1),
@@ -366,6 +399,56 @@ describe('ConnectorsTab', () => {
     );
   });
 
+  it('test keeps polling after the drawer closes and a filter hides the row', async () => {
+    let polls = 0;
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors/codex/test' && init.method === 'POST') {
+        return json({ checkId: CHECK_ID, runId: RUN_ID });
+      }
+      if (path === `/api/tools/connector-checks/${CHECK_ID}`) {
+        polls += 1;
+        return json(check(polls < 3 ? 'running' : 'passed'));
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const codexDrawer = await openDrawer('codex');
+    await waitFor(() =>
+      expect(codexDrawer.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+    );
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Test connection' }));
+    selectComboboxOption(codexDrawer.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Start test' }));
+    expect(
+      await within(await screen.findByTestId('connector-test-result-codex')).findByText(
+        'Running…',
+      ),
+    ).toBeVisible();
+    expect((await row('codex')).getByText('Running…')).toBeVisible();
+
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Close' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
+      target: { value: 'claude' },
+    });
+    expect(screen.queryByTestId('connector-row-codex')).not.toBeInTheDocument();
+
+    await waitFor(
+      () =>
+        expect(callsFor(`/api/tools/connector-checks/${CHECK_ID}`, 'GET').length).toBeGreaterThan(2),
+      { timeout: 5000 },
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
+      target: { value: '' },
+    });
+    const codexRow = await row('codex');
+    await waitFor(() => expect(codexRow.queryByText('Running…')).not.toBeInTheDocument(), {
+      timeout: 5000,
+    });
+    const reopened = await openDrawer('codex');
+    expect(await reopened.findByText('Passed')).toBeVisible();
+  }, 10_000);
+
   it('test connection start refreshes statuses', async () => {
     stubApi((path, init) => {
       if (path === '/api/tools/connectors/codex/test' && init.method === 'POST') {
@@ -378,14 +461,14 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const codexCard = await card('codex');
+    const codexDrawer = await openDrawer('codex');
     await waitFor(() =>
-      expect(codexCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+      expect(codexDrawer.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
     expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(1);
-    fireEvent.click(codexCard.getByRole('button', { name: 'Test connection' }));
-    selectComboboxOption(codexCard.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
-    fireEvent.click(codexCard.getByRole('button', { name: 'Start test' }));
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Test connection' }));
+    selectComboboxOption(codexDrawer.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Start test' }));
 
     await waitFor(() =>
       expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(2),
@@ -406,13 +489,13 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const openCard = await card('opencode');
+    const openDrawerPanel = await openDrawer('opencode');
     await waitFor(() =>
-      expect(openCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+      expect(openDrawerPanel.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
-    fireEvent.click(openCard.getByRole('button', { name: 'Test connection' }));
-    expect(openCard.getByLabelText('Agent')).toHaveTextContent('Open Dev');
-    fireEvent.click(openCard.getByRole('button', { name: 'Start test' }));
+    fireEvent.click(openDrawerPanel.getByRole('button', { name: 'Test connection' }));
+    expect(openDrawerPanel.getByLabelText('Agent')).toHaveTextContent('Open Dev');
+    fireEvent.click(openDrawerPanel.getByRole('button', { name: 'Start test' }));
 
     const result = within(await screen.findByTestId('connector-test-result-opencode'));
     expect(await result.findByText('Failed')).toBeVisible();
@@ -427,14 +510,14 @@ describe('ConnectorsTab', () => {
     );
     renderTab();
 
-    const openCard = await card('opencode');
+    const openDrawerPanel = await openDrawer('opencode');
     await waitFor(() =>
-      expect(openCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+      expect(openDrawerPanel.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
-    fireEvent.click(openCard.getByRole('button', { name: 'Test connection' }));
-    fireEvent.click(openCard.getByRole('button', { name: 'Start test' }));
+    fireEvent.click(openDrawerPanel.getByRole('button', { name: 'Test connection' }));
+    fireEvent.click(openDrawerPanel.getByRole('button', { name: 'Start test' }));
 
-    expect(await openCard.findByRole('alert')).toHaveTextContent(
+    expect(await openDrawerPanel.findByRole('alert')).toHaveTextContent(
       'A test is already running for this connector.',
     );
   });
@@ -448,8 +531,8 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const codexCard = await card('codex');
-    const toggle = await codexCard.findByRole('switch', { name: 'Enabled Codex' });
+    const codexRow = await row('codex');
+    const toggle = await codexRow.findByRole('switch', { name: 'Enabled Codex' });
     await waitFor(() => expect(toggle).toBeEnabled());
     fireEvent.click(toggle);
 
@@ -467,6 +550,26 @@ describe('ConnectorsTab', () => {
     expect(JSON.parse(String(callsFor('/api/tools/connectors/codex', 'PATCH')[0][1].body))).toEqual({
       enabled: false,
     });
+  });
+
+  it('turns off a connector with no agents immediately', async () => {
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors/claude-code' && init.method === 'PATCH') {
+        return json({ ...claude, enabled: false });
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const claudeRow = await row('claude-code');
+    const toggle = await claudeRow.findByRole('switch', { name: 'Enabled Claude Code' });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(callsFor('/api/tools/connectors/claude-code', 'PATCH')).toHaveLength(1),
+    );
+    expect(screen.queryByRole('button', { name: 'Turn off' })).not.toBeInTheDocument();
   });
 
   it('checks one model as not covered by the plan', async () => {
@@ -497,18 +600,18 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const cursorCard = await card('cursor');
-    const disclosure = cursorCard.getByRole('button', { name: 'Models not covered by my plan' });
+    const cursorDrawer = await openDrawer('cursor');
+    const disclosure = cursorDrawer.getByRole('button', { name: 'Models not covered by my plan' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     expect(
-      cursorCard.getByText('Runs on these models show Billed outside your plan.'),
+      cursorDrawer.getByText('Runs on these models show Billed outside your plan.'),
     ).toBeVisible();
-    expect(cursorCard.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(cursorDrawer.queryByRole('checkbox')).not.toBeInTheDocument();
 
     fireEvent.click(disclosure);
-    const composer = await cursorCard.findByRole('checkbox', { name: /Composer 2.5/ });
+    const composer = await cursorDrawer.findByRole('checkbox', { name: /Composer 2.5/ });
     expect(composer).not.toBeChecked();
-    expect(cursorCard.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
+    expect(cursorDrawer.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
 
     fireEvent.click(composer);
 
@@ -548,21 +651,21 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const cursorCard = await card('cursor');
-    const disclosure = cursorCard.getByRole('button', { name: 'Models not covered by my plan' });
+    const cursorDrawer = await openDrawer('cursor');
+    const disclosure = cursorDrawer.getByRole('button', { name: 'Models not covered by my plan' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    const composer = await cursorCard.findByRole('checkbox', { name: /Composer 2.5/ });
+    const composer = await cursorDrawer.findByRole('checkbox', { name: /Composer 2.5/ });
     expect(composer).toBeChecked();
-    expect(cursorCard.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
+    expect(cursorDrawer.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
 
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-    expect(cursorCard.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
+    expect(cursorDrawer.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
 
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    expect(cursorCard.getByRole('checkbox', { name: /Composer 2.5/ })).toBeChecked();
-    expect(cursorCard.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
+    expect(cursorDrawer.getByRole('checkbox', { name: /Composer 2.5/ })).toBeChecked();
+    expect(cursorDrawer.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
   });
 
   it('offers Refresh models when the live list fails', async () => {
@@ -594,13 +697,13 @@ describe('ConnectorsTab', () => {
     });
     renderTab();
 
-    const cursorCard = await card('cursor');
+    const cursorDrawer = await openDrawer('cursor');
     expect(
-      await cursorCard.findByText(
+      await cursorDrawer.findByText(
         "Couldn't get Cursor's models. Click Refresh models to try again.",
       ),
     ).toBeVisible();
-    fireEvent.click(cursorCard.getByRole('button', { name: 'Refresh models' }));
+    fireEvent.click(cursorDrawer.getByRole('button', { name: 'Refresh models' }));
 
     await waitFor(() =>
       expect(

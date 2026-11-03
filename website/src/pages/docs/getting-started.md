@@ -16,9 +16,9 @@ A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, Op
 
 1. Install the CLI and sign in to it in your terminal, the way you normally would.
 2. In Coppice, open **System** in the sidebar, then **Connectors**.
-3. Find your CLI's card. It shows **Ready** when Coppice can use it.
+3. Find your CLI's row. It shows **Ready** when Coppice can use it. Open the row for details.
 
-If it shows **Found, not signed in**, sign in to the CLI in your terminal. If it shows **Not on your PATH**, install it, or follow **Install docs** on the card. Then click **Run check**.
+If it shows **Found, not signed in**, sign in to the CLI in your terminal. If it shows **Not on your PATH**, install it, or follow **Install docs** in the details drawer. Then click **Run check**.
 
 Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed**. Coppice can't check their sign-in without using your plan, so a run shows an error if you're signed out.
 

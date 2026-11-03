@@ -17,9 +17,9 @@ description: "从全新安装到第一次运行智能体只需五步：登录智
 
 1. 像平常一样安装 CLI，并在终端里登录。
 2. 在 Coppice 侧边栏中打开 **System**（系统），再打开 **Connectors**（连接器）。
-3. 找到你的 CLI 卡片。Coppice 可以使用它时，卡片会显示 **Ready**（就绪）。
+3. 找到你的 CLI 行。Coppice 可以使用它时，会显示 **Ready**（就绪）。点开该行可看详细信息。
 
-如果显示 **Found, not signed in**（已找到，未登录），请在终端里登录该 CLI。如果显示 **Not on your PATH**（不在 PATH 中），请安装它，或按卡片上的 **Install docs**（安装文档）操作。然后点击 **Run check**（运行检查）。
+如果显示 **Found, not signed in**（已找到，未登录），请在终端里登录该 CLI。如果显示 **Not on your PATH**（不在 PATH 中），请安装它，或在详细信息侧栏按 **Install docs**（安装文档）。然后点击 **Run check**（运行检查）。
 
 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已安装）。不消耗你的套餐额度，Coppice 就无法检查它们的登录状态，所以如果你已退出登录，运行时会报错。
 

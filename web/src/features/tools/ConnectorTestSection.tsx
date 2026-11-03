@@ -9,11 +9,8 @@ import type {
 } from '../../lib/schemas/connectorDiagnostics';
 import { useAgents } from '../agents/useAgents';
 import { CHECK_STATUS_LABELS, checkStatusClass } from './connectorFormat';
-import {
-  isActiveCheck,
-  useConnectorCheck,
-  useStartConnectorTest,
-} from './useConnectorDiagnostics';
+import { isActiveCheckStatus } from './connectorList';
+import { useStartConnectorTest } from './useConnectorDiagnostics';
 
 function startErrorFallback(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Unable to start test.';
@@ -56,25 +53,34 @@ function CheckResult({
   );
 }
 
-export function ConnectorTestSection({ connector }: { connector: ConnectorStatus }) {
+interface ConnectorTestSectionProps {
+  connector: ConnectorStatus;
+  checkId: string | null;
+  check: ConnectorCheck | undefined;
+  checkError: boolean;
+  onStarted: (checkId: string) => void;
+}
+
+export function ConnectorTestSection({
+  connector,
+  checkId,
+  check,
+  checkError,
+  onStarted,
+}: ConnectorTestSectionProps) {
   const { data: agents, isSuccess: agentsLoaded } = useAgents();
   const startTest = useStartConnectorTest(connector.id);
   const selectId = useId();
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState('');
-  const [checkId, setCheckId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const matching = agents?.filter((agent) => agent.connector === connector.id) ?? [];
   const selected = agentId || (matching.length === 1 ? matching[0].id : '');
-  const lastCheck = connector.lastCheck;
-  const activeId =
-    checkId ?? (lastCheck && isActiveCheck(lastCheck.status) ? lastCheck.id : null);
-  const checkQuery = useConnectorCheck(activeId);
   const testing =
-    Boolean(activeId) &&
-    !checkQuery.isError &&
-    (!checkQuery.data || isActiveCheck(checkQuery.data.status));
+    Boolean(checkId) &&
+    !checkError &&
+    (!check || isActiveCheckStatus(check.status));
   const noAgents = agentsLoaded && matching.length === 0;
   const canTest = connector.enabled && matching.length > 0 && !testing;
 
@@ -83,7 +89,7 @@ export function ConnectorTestSection({ connector }: { connector: ConnectorStatus
     setError(null);
     try {
       const started = await startTest.mutateAsync(selected);
-      setCheckId(started.checkId);
+      onStarted(started.checkId);
       setOpen(false);
     } catch (err) {
       setError(parseApiErrorMessage(err, startErrorFallback(err)));
@@ -142,11 +148,11 @@ export function ConnectorTestSection({ connector }: { connector: ConnectorStatus
           </Button>
         </div>
       )}
-      {activeId && (
+      {checkId && (
         <CheckResult
           connectorId={connector.id}
-          check={checkQuery.data}
-          isError={checkQuery.isError}
+          check={check}
+          isError={checkError}
         />
       )}
       {error && (

@@ -10,6 +10,7 @@ import {
   type ConnectorStatus,
   type StartConnectorTest,
 } from '../../lib/schemas/connectorDiagnostics';
+import { isActiveCheckStatus } from './connectorList';
 
 export const TOOL_CONNECTORS_QUERY_KEY = ['tool-connectors'] as const;
 
@@ -20,9 +21,7 @@ export function connectorCheckQueryKey(id: string) {
 const CHECK_POLL_MS = 2_000;
 const PROBE_POLL_MS = 2_000;
 
-export function isActiveCheck(status: ConnectorCheck['status'] | undefined): boolean {
-  return status === 'queued' || status === 'running';
-}
+export const isActiveCheck = isActiveCheckStatus;
 
 async function fetchConnectorStatuses(): Promise<ConnectorStatus[]> {
   const res = await apiFetch('/api/tools/connectors');
