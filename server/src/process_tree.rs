@@ -600,7 +600,8 @@ impl Drop for TrackedProcess {
 }
 
 /// True when `pid` is running. Zombies count as gone. On macOS, where `/proc`
-/// is absent, `kill(pid, 0)` is the check.
+/// is absent, `kill(pid, 0)` is the check, and ps rules out a zombie (which
+/// `kill` still reaches until its parent reaps it).
 pub fn process_alive(pid: u32) -> bool {
     if pid <= 1 {
         return false;
@@ -613,7 +614,7 @@ pub fn process_alive(pid: u32) -> bool {
     }
     let rc = unsafe { libc::kill(pid as i32, 0) };
     if rc == 0 {
-        return true;
+        return !ps_state(pid).is_some_and(|state| state.starts_with('Z'));
     }
     io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
@@ -938,6 +939,15 @@ fn ps_ppid(pid: u32) -> Option<u32> {
         return None;
     }
     String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+fn ps_state(pid: u32) -> Option<String> {
+    let output = ps_output(&["-p", &pid.to_string(), "-o", "state="])?;
+    if !output.status.success() {
+        return None;
+    }
+    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!state.is_empty()).then_some(state)
 }
 
 fn ps_group_members(pgid: u32) -> Vec<u32> {

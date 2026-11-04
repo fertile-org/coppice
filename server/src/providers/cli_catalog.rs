@@ -300,7 +300,9 @@ mod tests {
         ];
         for (name, args, shown) in cases {
             let bin = dir.path().join(name);
-            std::fs::write(&bin, []).unwrap();
+            // A missing interpreter fails exec everywhere. An empty file does
+            // not: macOS retries it as a shell script, which exits 0.
+            std::fs::write(&bin, "#!/nonexistent/interpreter\n").unwrap();
             let mut perms = std::fs::metadata(&bin).unwrap().permissions();
             perms.set_mode(0o755);
             std::fs::set_permissions(&bin, perms).unwrap();

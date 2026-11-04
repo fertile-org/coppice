@@ -1810,10 +1810,13 @@ async fn test_of_disabled_plugin_leaves_no_process_running() {
     let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["servers"][0]["status"], "ok", "{body}");
-    let pid = std::fs::read_to_string(root.join("pid.txt")).unwrap();
-    let proc_path = Path::new("/proc").join(pid.trim());
+    let pid: u32 = std::fs::read_to_string(root.join("pid.txt"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while proc_path.exists() {
+    while coppice_server::process_tree::process_alive(pid) {
         assert!(
             std::time::Instant::now() < deadline,
             "tested server still running"

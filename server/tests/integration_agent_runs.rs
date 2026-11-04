@@ -483,8 +483,19 @@ async fn run_agent_waits_for_the_startup_connector_check() {
     );
 }
 
+/// Resident memory in KiB: `/proc` on Linux, `ps` where there is no `/proc` (macOS).
 fn process_rss_kb() -> u64 {
-    let status = std::fs::read_to_string("/proc/self/status").expect("status");
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("ps");
+        assert!(output.status.success(), "ps: {output:?}");
+        return String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .expect("ps rss kb");
+    };
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix("VmRSS:") {
             return rest

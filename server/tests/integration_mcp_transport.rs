@@ -13,6 +13,7 @@ use coppice_server::mcp::proxy::{
 };
 use coppice_server::plugins::capability::{McpServerEntry, McpServerTransport};
 use coppice_server::plugins::placeholders::ResolvedTransport;
+use coppice_server::process_tree::process_alive;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -224,13 +225,16 @@ async fn stdio_tools_changed_flag() {
 async fn close_kills_child() {
     let dir = tempfile::tempdir().unwrap();
     let conn = connect_stdio(&[("FAKE_MCP_PID_FILE", "pid.txt")], dir.path()).await;
-    let pid = std::fs::read_to_string(dir.path().join("pid.txt")).unwrap();
-    let proc_path = Path::new("/proc").join(pid.trim());
-    assert!(proc_path.exists());
+    let pid: u32 = std::fs::read_to_string(dir.path().join("pid.txt"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(process_alive(pid));
     conn.close().await;
     assert!(conn.is_closed());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while proc_path.exists() {
+    while process_alive(pid) {
         assert!(tokio::time::Instant::now() < deadline, "child still alive");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -554,17 +558,18 @@ async fn pool_shutdown_all_stops_every_server() {
     for spec in &specs {
         assert_eq!(pool_echo(&pool, spec, "x").await, "x");
     }
-    let procs: Vec<_> = [a.path(), b.path()]
+    let pids: Vec<u32> = [a.path(), b.path()]
         .iter()
-        .map(|root| Path::new("/proc").join(read_pid(root).trim()))
+        .map(|root| read_pid(root).trim().parse().expect("pid"))
         .collect();
+    assert!(pids.iter().all(|pid| process_alive(*pid)));
 
     pool.shutdown_all().await;
     for spec in &specs {
         assert_eq!(pool.health(&spec.key), ServerHealth::Stopped);
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while procs.iter().any(|p| p.exists()) {
+    while pids.iter().any(|pid| process_alive(*pid)) {
         assert!(tokio::time::Instant::now() < deadline, "server still alive");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
