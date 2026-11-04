@@ -201,6 +201,7 @@ async fn run_check(
             cancel_rx: Some(stream.cancelled_rx()),
             model_provider: agent.model_provider.clone(),
             model: agent.model.clone(),
+            thinking_level: agent.thinking_level,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,

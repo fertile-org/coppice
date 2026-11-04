@@ -50,7 +50,8 @@ coppice connector doctor claude-code
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **claude-code**.
 3. Leave the model on Claude Code's default, or pick a model from the list (sonnet, opus, haiku, and fable are headings). Refresh models loads that list again.
-4. Assign the agent to a ticket and start a run.
+4. Optionally pick a **Thinking level** (Low, Medium, High, Max). It becomes `claude --effort <level>`; Claude's `xhigh` is not on the shared scale. Leaving it on the default passes no `--effort`.
+5. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
 
@@ -81,7 +82,7 @@ Start at **System → Connectors** (admin): it shows whether `claude` is found, 
 
 ## How Coppice runs Claude Code (reference)
 
-Ticket runs spawn `claude -p "<prompt>" --output-format stream-json --verbose --permission-mode bypassPermissions` with the worktree as the process cwd, then optional `--allowedTools`, `--model`, `--resume`, and per-run MCP flags. Chat and plan runs replace `bypassPermissions` with `--permission-mode dontAsk` and pass `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task`. Chat also passes `--settings {"disableAllHooks":true}` and `--setting-sources user`. Those pinned flags live on the connector descriptor. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract. A result ends the run even if `claude` is still waiting on a background command.
+Ticket runs spawn `claude -p "<prompt>" --output-format stream-json --verbose --permission-mode bypassPermissions` with the worktree as the process cwd, then optional `--allowedTools`, `--model`, `--effort`, `--resume`, and per-run MCP flags. Chat and plan runs replace `bypassPermissions` with `--permission-mode dontAsk` and pass `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task`. Chat also passes `--settings {"disableAllHooks":true}` and `--setting-sources user`. Those pinned flags live on the connector descriptor. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract. A result ends the run even if `claude` is still waiting on a background command.
 
 Read-only runs (chat, planning, Test connection's read-only phases) also let Coppice decide every tool call. They pass `--input-format stream-json` and write two lines to stdin instead of putting the prompt after `-p`: an `initialize` control request that registers a `PreToolUse` hook, then the prompt as a `user` message. Before each tool runs, Claude Code sends a `hook_callback` request and Coppice answers allow for `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `ToolSearch` (it loads deferred MCP tools), `LS`, and `mcp__coppice__*`, and deny for everything else. Stdin closes when the result arrives. Checked on 2.1.302: the callbacks still arrive with `disableAllHooks`, a deny holds even for a tool on `--allowedTools`, and a read-only chat turn read a file while a shell command and a file write did not run (`tests/real_claude_code.rs`, `COPPICE_REAL_CLAUDE=1`). `dontAsk` and the tool lists stay as a second layer if the handshake is rejected.
 

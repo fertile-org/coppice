@@ -316,6 +316,7 @@ async fn conversation_profile_starts_kilo_read_only_chat() {
             cancel_rx: None,
             model_provider: None,
             model: None,
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,

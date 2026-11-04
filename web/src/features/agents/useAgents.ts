@@ -6,7 +6,7 @@ import {
   ModelsRequestError,
   modelsRequestError,
 } from './modelList';
-import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent';
+import type { CreateAgentInput, ThinkingLevel, UpdateAgentInput } from '../../lib/schemas/agent';
 import { connectorListSchema, type Connector } from '../../lib/schemas/connector';
 import { TOOL_CONNECTORS_QUERY_KEY } from '../tools/useConnectorDiagnostics';
 
@@ -34,6 +34,7 @@ export interface Agent {
   connector: string;
   modelProvider?: string | null;
   model?: string | null;
+  thinkingLevel?: ThinkingLevel | null;
   health: 'unknown' | 'healthy' | 'missing_config' | 'unhealthy';
   healthDetail?: string | null;
   enabled: boolean;
@@ -49,6 +50,7 @@ export interface ConnectorOption {
   readiness?: 'ready' | 'found_not_signed_in' | 'not_on_path' | 'found' | null;
   /** On in the live registry. Only these can run; the rest are listed to say why not. */
   enabled?: boolean;
+  caps?: { thinkingLevel?: boolean };
 }
 
 export interface ModelProviderOption {

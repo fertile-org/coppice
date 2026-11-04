@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+/** One scale for every connector; each adapter maps it to its CLI's flag. */
+export const thinkingLevelSchema = z.enum(['low', 'medium', 'high', 'max']);
+
+export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>;
+
 export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   presetId: z.string().uuid().optional(),
@@ -9,6 +14,7 @@ export const createAgentSchema = z.object({
   connector: z.string().optional(),
   modelProvider: z.string().optional(),
   model: z.string().optional(),
+  thinkingLevel: thinkingLevelSchema.optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -22,6 +28,7 @@ export const updateAgentSchema = z.object({
   connector: z.string().optional(),
   modelProvider: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
+  thinkingLevel: thinkingLevelSchema.nullable().optional(),
   enabled: z.boolean().optional(),
 });
 

@@ -47,6 +47,7 @@ function baseValues(overrides: Partial<AgentFormValues> = {}): AgentFormValues {
     connector: 'cursor',
     modelProvider: '',
     model: '',
+    thinkingLevel: '',
     enabled: true,
     pluginIds: [],
     ...overrides,

@@ -121,6 +121,7 @@ mod tests {
             connector: connector.into(),
             model_provider: model_provider.map(Into::into),
             model: None,
+            thinking_level: None,
             enabled: true,
             preset_source: None,
             created_at: now,

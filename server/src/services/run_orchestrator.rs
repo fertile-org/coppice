@@ -1415,6 +1415,7 @@ mod tests {
             connector: "mock".into(),
             model_provider: None,
             model: None,
+            thinking_level: None,
             enabled,
             preset_source: Some(key.into()),
             created_at: time::OffsetDateTime::now_utc(),

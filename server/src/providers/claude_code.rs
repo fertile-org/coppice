@@ -9,6 +9,7 @@ use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
 };
+use crate::domain::agent::ThinkingLevel;
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::services::ticket_attachments;
@@ -69,6 +70,15 @@ fn claude_mcp_args(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<St
 
 fn append_model_flag(args: &mut Vec<String>, model: Option<&str>) {
     crate::providers::model_flag::push_model_flag(args, "--model", model);
+}
+
+/// `claude --effort` takes `low, medium, high, xhigh, max`. The shared scale
+/// has no `xhigh`, so each level passes through under its own name.
+fn append_effort_flag(args: &mut Vec<String>, level: Option<ThinkingLevel>) {
+    if let Some(level) = level {
+        args.push("--effort".to_string());
+        args.push(level.as_str().to_string());
+    }
 }
 
 fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
@@ -152,6 +162,7 @@ impl AgentProvider for ClaudeCodeProvider {
         }
 
         append_model_flag(&mut args, input.model.as_deref());
+        append_effort_flag(&mut args, input.thinking_level);
 
         // Resume a previous claude-code session if we have its session_id.
         if let Some(sid) = &input.resume_session_id {
@@ -879,6 +890,23 @@ mod tests {
                 args.iter().all(|arg| arg != "--model" && arg != "-m"),
                 "model {model:?} launched {args:?}"
             );
+        }
+    }
+
+    #[test]
+    fn thinking_level_sets_effort_flag() {
+        let mut args = Vec::new();
+        append_effort_flag(&mut args, None);
+        assert!(args.is_empty(), "no level leaves the CLI default: {args:?}");
+        for (level, value) in [
+            (ThinkingLevel::Low, "low"),
+            (ThinkingLevel::Medium, "medium"),
+            (ThinkingLevel::High, "high"),
+            (ThinkingLevel::Max, "max"),
+        ] {
+            let mut args = Vec::new();
+            append_effort_flag(&mut args, Some(level));
+            assert_eq!(args, ["--effort", value]);
         }
     }
 

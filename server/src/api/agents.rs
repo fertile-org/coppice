@@ -1,6 +1,6 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::connectors_runtime::ConnectorConfigError;
-use crate::domain::agent::{Agent, AgentPreset};
+use crate::domain::agent::{Agent, AgentPreset, ThinkingLevel};
 use crate::services::agent_health::{health_status_to_str, AgentHealthRegistry};
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::AppState;
@@ -47,6 +47,7 @@ struct AgentResponse {
     connector: String,
     model_provider: Option<String>,
     model: Option<String>,
+    thinking_level: Option<&'static str>,
     health: String,
     health_detail: Option<String>,
     enabled: bool,
@@ -87,6 +88,7 @@ struct CreateAgentBody {
     connector: Option<String>,
     model_provider: Option<String>,
     model: Option<String>,
+    thinking_level: Option<String>,
     enabled: Option<bool>,
 }
 
@@ -112,6 +114,9 @@ struct UpdateAgentBody {
     /// Missing keeps the saved model. JSON `null` or `""` clears it.
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
     model: Option<Option<String>>,
+    /// Missing keeps the saved level. JSON `null` or `""` clears it.
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
+    thinking_level: Option<Option<String>>,
     enabled: Option<bool>,
 }
 
@@ -145,6 +150,7 @@ fn agent_to_response_with_turn_on(
         connector: agent.connector,
         model_provider: agent.model_provider,
         model: agent.model,
+        thinking_level: agent.thinking_level.map(ThinkingLevel::as_str),
         health: health_status_to_str(record.status).into(),
         health_detail: record.detail,
         enabled: agent.enabled,
@@ -250,6 +256,7 @@ async fn create_agent(
                 body.connector.as_deref(),
                 body.model_provider.as_deref(),
                 body.model.as_deref(),
+                body.thinking_level.as_deref(),
                 body.enabled,
             )
             .await
@@ -269,6 +276,7 @@ async fn create_agent(
                 body.connector.as_deref(),
                 body.model_provider.as_deref(),
                 body.model.as_deref(),
+                body.thinking_level.as_deref(),
                 body.enabled,
             )
             .await
@@ -319,6 +327,7 @@ async fn update_agent(
             body.connector.as_deref(),
             body.model_provider.as_ref().map(|value| value.as_deref()),
             body.model.as_ref().map(|value| value.as_deref()),
+            body.thinking_level.as_ref().map(|value| value.as_deref()),
             body.enabled,
         )
         .await

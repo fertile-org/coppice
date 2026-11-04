@@ -419,6 +419,7 @@ async fn drive_plan_run(
             cancel_rx: Some(cancel_rx),
             model_provider: agent.model_provider.clone(),
             model: agent.model.clone(),
+            thinking_level: agent.thinking_level,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,

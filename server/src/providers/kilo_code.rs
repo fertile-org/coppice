@@ -437,6 +437,7 @@ mod tests {
             cancel_rx: None,
             model_provider: Some("anthropic".into()),
             model: Some("claude-sonnet-4-20250514".into()),
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
@@ -468,6 +469,7 @@ mod tests {
             cancel_rx: None,
             model_provider: Some("anthropic".into()),
             model: Some("anthropic/claude-sonnet-4-20250514".into()),
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
@@ -481,6 +483,7 @@ mod tests {
         let tilde = AgentRunInput {
             model_provider: Some("~openai".into()),
             model: Some("~openai/gpt-4o".into()),
+            thinking_level: None,
             ..input
         };
         assert_eq!(
@@ -508,6 +511,7 @@ mod tests {
             cancel_rx: None,
             model_provider: Some("anthropic".into()),
             model: Some("anthropic/claude-sonnet-4-20250514".into()),
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
@@ -539,6 +543,7 @@ mod tests {
             cancel_rx: None,
             model_provider: Some("anthropic".into()),
             model: None,
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
@@ -598,6 +603,7 @@ mod tests {
             cancel_rx: None,
             model_provider: None,
             model: None,
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
