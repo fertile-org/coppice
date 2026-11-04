@@ -556,6 +556,79 @@ fn bytes_to_os(bytes: &[u8]) -> OsString {
     }
 }
 
+/// Stderr kept for error messages. Past this, the pipe is still read and dropped.
+const STDERR_KEEP_BYTES: usize = 8 * 1024;
+/// After exit, how long to wait for a pipe to close. A background process the
+/// command left behind can hold it open; the output read so far is kept.
+const STDOUT_GRACE: Duration = Duration::from_secs(2);
+const STDERR_GRACE: Duration = Duration::from_millis(500);
+
+fn take_bytes(buf: &Mutex<Vec<u8>>) -> Vec<u8> {
+    buf.lock()
+        .map(|mut guard| std::mem::take(&mut *guard))
+        .unwrap_or_default()
+}
+
+/// Read `pipe` until it closes while the process runs, keeping at most `keep`
+/// bytes. Reading only after exit stalls any command that fills the pipe
+/// (64 KiB): it blocks writing while we wait for it to exit.
+fn drain_async<R>(
+    pipe: Option<R>,
+    keep: usize,
+) -> (Arc<Mutex<Vec<u8>>>, tokio::task::JoinHandle<()>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let collected = Arc::clone(&buf);
+    let task = tokio::spawn(async move {
+        let Some(mut pipe) = pipe else {
+            return;
+        };
+        let mut tmp = [0u8; 8 * 1024];
+        loop {
+            match tokio::io::AsyncReadExt::read(&mut pipe, &mut tmp).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if let Ok(mut guard) = collected.lock() {
+                        let room = keep.saturating_sub(guard.len());
+                        guard.extend_from_slice(&tmp[..n.min(room)]);
+                    }
+                }
+            }
+        }
+    });
+    (buf, task)
+}
+
+/// Blocking twin of [`drain_async`]: a reader thread, and a channel that
+/// signals when the pipe closed.
+fn drain_blocking<R>(pipe: Option<R>) -> (Arc<Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>)
+where
+    R: Read + Send + 'static,
+{
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let collected = Arc::clone(&buf);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        if let Some(mut pipe) = pipe {
+            let mut tmp = [0u8; 8 * 1024];
+            loop {
+                match pipe.read(&mut tmp) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if let Ok(mut guard) = collected.lock() {
+                            guard.extend_from_slice(&tmp[..n]);
+                        }
+                    }
+                }
+            }
+        }
+        let _ = done_tx.send(());
+    });
+    (buf, done_rx)
+}
+
 /// Wait for `cmd` and keep stderr if the process times out.
 pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunOutput {
     cmd.kill_on_drop(true)
@@ -572,48 +645,15 @@ pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunO
             });
         }
     };
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-    let stderr_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let collected = Arc::clone(&stderr_buf);
-    let drain = tokio::spawn(async move {
-        let Some(mut pipe) = stderr_pipe else {
-            return;
-        };
-        let mut tmp = [0u8; 1024];
-        let mut all = Vec::new();
-        loop {
-            match tokio::io::AsyncReadExt::read(&mut pipe, &mut tmp).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    all.extend_from_slice(&tmp[..n]);
-                    if all.len() >= 8 * 1024 {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        if let Ok(mut guard) = collected.lock() {
-            *guard = all;
-        }
-    });
+    let (stdout_buf, stdout_task) = drain_async(child.stdout.take(), usize::MAX);
+    let (stderr_buf, stderr_task) = drain_async(child.stderr.take(), STDERR_KEEP_BYTES);
 
     match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => {
-            let mut stdout = Vec::new();
-            if let Some(mut pipe) = stdout_pipe {
-                let _ = tokio::time::timeout(
-                    Duration::from_secs(2),
-                    tokio::io::AsyncReadExt::read_to_end(&mut pipe, &mut stdout),
-                )
-                .await;
-            }
-            let _ = tokio::time::timeout(Duration::from_millis(500), drain).await;
-            let stderr = stderr_buf
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
+            let _ = tokio::time::timeout(STDOUT_GRACE, stdout_task).await;
+            let _ = tokio::time::timeout(STDERR_GRACE, stderr_task).await;
+            let stdout = take_bytes(&stdout_buf);
+            let stderr = take_bytes(&stderr_buf);
             let stderr_line = first_stderr_line(&stderr);
             RunOutput::Exit(Exit {
                 status: Some(status),
@@ -622,20 +662,22 @@ pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunO
                 stderr_line,
             })
         }
-        Ok(Err(err)) => RunOutput::Exit(Exit {
-            status: None,
-            stdout: Vec::new(),
-            stderr: err.to_string().into_bytes(),
-            stderr_line: Some(err.to_string()),
-        }),
+        Ok(Err(err)) => {
+            stdout_task.abort();
+            stderr_task.abort();
+            RunOutput::Exit(Exit {
+                status: None,
+                stdout: Vec::new(),
+                stderr: err.to_string().into_bytes(),
+                stderr_line: Some(err.to_string()),
+            })
+        }
         Err(_) => {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_millis(500), child.wait()).await;
-            let _ = tokio::time::timeout(Duration::from_millis(200), drain).await;
-            let stderr = stderr_buf
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
+            stdout_task.abort();
+            let _ = tokio::time::timeout(Duration::from_millis(200), stderr_task).await;
+            let stderr = take_bytes(&stderr_buf);
             RunOutput::TimedOut {
                 stderr_line: first_stderr_line(&stderr),
             }
@@ -653,22 +695,18 @@ pub fn wait_blocking(
         .stderr(Stdio::piped());
     detach_session(&mut cmd);
     let mut child = cmd.spawn()?;
+    let (stdout_buf, stdout_done) = drain_blocking(child.stdout.take());
+    let (stderr_buf, stderr_done) = drain_blocking(child.stderr.take());
     let started = Instant::now();
     loop {
         match child.try_wait()? {
             Some(status) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_end(&mut stderr);
-                }
+                let _ = stdout_done.recv_timeout(STDOUT_GRACE);
+                let _ = stderr_done.recv_timeout(STDERR_GRACE);
                 return Ok(std::process::Output {
                     status,
-                    stdout,
-                    stderr,
+                    stdout: take_bytes(&stdout_buf),
+                    stderr: take_bytes(&stderr_buf),
                 });
             }
             None if started.elapsed() >= timeout => {
@@ -854,5 +892,93 @@ fi"#
         let missing = home.path().join("not-a-shell");
         let (_, spawn_log) = warnings_during(|| capture_shell(&missing, Duration::from_secs(2)));
         assert!(spawn_log.contains("spawn"), "{spawn_log}");
+    }
+
+    /// More than a pipe holds (64 KiB on Linux and macOS).
+    const BIG: usize = 300_000;
+
+    fn sh(body: &str) -> tokio::process::Command {
+        let mut cmd = tokio::process::Command::new("/bin/sh");
+        cmd.args(["-c", body]);
+        cmd
+    }
+
+    fn sh_blocking(body: &str) -> std::process::Command {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args(["-c", body]);
+        cmd
+    }
+
+    #[tokio::test]
+    async fn finish_returns_output_larger_than_a_pipe() {
+        let started = Instant::now();
+        let output = finish(
+            sh(&format!("head -c {BIG} /dev/zero")),
+            Duration::from_secs(10),
+        )
+        .await;
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "stalled on a full pipe"
+        );
+        let RunOutput::Exit(exit) = output else {
+            panic!("expected exit");
+        };
+        assert!(exit.status.is_some_and(|status| status.success()));
+        assert_eq!(exit.stdout.len(), BIG);
+    }
+
+    /// Closing stderr at the cap would kill a noisy command with SIGPIPE.
+    #[tokio::test]
+    async fn finish_keeps_reading_stderr_past_its_cap() {
+        let output = finish(
+            sh(&format!("exec head -c {BIG} /dev/zero >&2")),
+            Duration::from_secs(10),
+        )
+        .await;
+        let RunOutput::Exit(exit) = output else {
+            panic!("expected exit");
+        };
+        assert!(exit.success(), "writer was cut off: {:?}", exit.status);
+        assert_eq!(exit.stderr.len(), STDERR_KEEP_BYTES);
+    }
+
+    #[tokio::test]
+    async fn finish_still_times_out() {
+        let started = Instant::now();
+        let output = finish(sh("echo slow >&2; sleep 30"), Duration::from_millis(300)).await;
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let RunOutput::TimedOut { stderr_line } = output else {
+            panic!("expected timeout");
+        };
+        assert_eq!(stderr_line.as_deref(), Some("slow"));
+    }
+
+    #[test]
+    fn wait_blocking_returns_output_larger_than_a_pipe() {
+        let started = Instant::now();
+        let output = wait_blocking(
+            sh_blocking(&format!(
+                "head -c {BIG} /dev/zero; head -c {BIG} /dev/zero >&2"
+            )),
+            Duration::from_secs(10),
+        )
+        .expect("output");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "stalled on a full pipe"
+        );
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), BIG);
+        assert_eq!(output.stderr.len(), BIG);
+    }
+
+    #[test]
+    fn wait_blocking_still_times_out() {
+        let started = Instant::now();
+        let err = wait_blocking(sh_blocking("sleep 30"), Duration::from_millis(300))
+            .expect_err("timeout");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
     }
 }
