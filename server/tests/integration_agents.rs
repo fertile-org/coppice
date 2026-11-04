@@ -382,7 +382,7 @@ async fn list_connectors_returns_console_and_caps() {
             "id": "mock",
             "displayName": descriptor.display_name,
             "console": "plain",
-            "caps": { "readOnlyTools": true, "chatResume": true },
+            "caps": { "readOnlyTools": true, "chatResume": true, "thinkingLevel": false },
             "enabled": true,
             "readiness": "ready",
             "docsUrl": descriptor.install.docs_url

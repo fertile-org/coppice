@@ -1202,6 +1202,7 @@ mod tests {
             connector: "claude-code".into(),
             model_provider: None,
             model: None,
+            thinking_level: None,
             enabled,
             preset_source: Some(key.into()),
             created_at: OffsetDateTime::from_unix_timestamp(created_secs).unwrap(),

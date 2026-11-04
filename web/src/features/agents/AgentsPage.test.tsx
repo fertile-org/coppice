@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   connectors: [{ id: 'mock', displayName: 'Mock' }] as {
     id: string;
     displayName?: string;
+    caps?: { thinkingLevel?: boolean };
   }[],
   agents: null as Agent[] | null,
 }));
@@ -180,6 +181,69 @@ describe('AgentsPage order', () => {
       .map((row) => serverOrder.find((name) => row.textContent?.includes(name)))
       .filter((name): name is string => name !== undefined);
     expect(rendered).toEqual(serverOrder);
+  });
+});
+
+describe('AgentsPage thinking level', () => {
+  beforeEach(() => {
+    mocks.connectors = [
+      { id: 'claude-code', displayName: 'Claude Code', caps: { thinkingLevel: true } },
+      { id: 'cursor', displayName: 'Cursor', caps: { thinkingLevel: false } },
+    ];
+  });
+
+  afterEach(() => {
+    mocks.agents = null;
+    mocks.connectors = [{ id: 'mock', displayName: 'Mock' }];
+  });
+
+  function row(name: string) {
+    return screen.getByRole('row', { name: new RegExp(name) });
+  }
+
+  it('shows the level beside the model where the connector uses it', () => {
+    mocks.agents = [
+      {
+        ...agent,
+        id: '00000000-0000-4000-8000-0000000000c1',
+        name: 'Thinker',
+        connector: 'claude-code',
+        modelProvider: 'opus',
+        model: 'claude-opus-5-5',
+        thinkingLevel: 'high',
+      },
+      {
+        ...agent,
+        id: '00000000-0000-4000-8000-0000000000c2',
+        name: 'Quick',
+        connector: 'claude-code',
+        thinkingLevel: 'low',
+      },
+    ];
+
+    renderPage('/agents');
+
+    expect(row('Thinker')).toHaveTextContent('opus/claude-opus-5-5 · high thinking');
+    expect(row('Quick')).toHaveTextContent('low thinking');
+  });
+
+  it('hides a saved level the connector ignores', () => {
+    mocks.agents = [
+      {
+        ...agent,
+        id: '00000000-0000-4000-8000-0000000000c3',
+        name: 'Switched',
+        connector: 'cursor',
+        modelProvider: 'cursor',
+        model: 'auto',
+        thinkingLevel: 'max',
+      },
+    ];
+
+    renderPage('/agents');
+
+    expect(row('Switched')).toHaveTextContent('cursor/auto');
+    expect(row('Switched')).not.toHaveTextContent('thinking');
   });
 });
 

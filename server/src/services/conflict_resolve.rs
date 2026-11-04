@@ -478,6 +478,7 @@ mod tests {
             connector: "mock".into(),
             model_provider: None,
             model: None,
+            thinking_level: None,
             enabled,
             preset_source: preset.map(str::to_string),
             created_at: OffsetDateTime::from_unix_timestamp(created).unwrap(),

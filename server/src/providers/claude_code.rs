@@ -9,6 +9,7 @@ use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
 };
+use crate::domain::agent::ThinkingLevel;
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::services::ticket_attachments;
@@ -69,6 +70,27 @@ fn claude_mcp_args(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<St
 
 fn append_model_flag(args: &mut Vec<String>, model: Option<&str>) {
     crate::providers::model_flag::push_model_flag(args, "--model", model);
+}
+
+/// The contract's `--effort` and its version floor. An older or unknown CLI
+/// gets no flag and runs at its default effort instead of failing.
+fn append_effort_flag(
+    args: &mut Vec<String>,
+    contract: &coppice_connectors::RunContract,
+    level: Option<ThinkingLevel>,
+    version: &str,
+) {
+    let Some(level) = level else {
+        return;
+    };
+    match contract.thinking_args(level.as_str(), Some(version)) {
+        Some(flag) => args.extend(flag),
+        None => tracing::warn!(
+            version,
+            level = level.as_str(),
+            "Claude Code {version} does not take this thinking level; running at its default effort"
+        ),
+    }
 }
 
 fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
@@ -152,6 +174,7 @@ impl AgentProvider for ClaudeCodeProvider {
         }
 
         append_model_flag(&mut args, input.model.as_deref());
+        append_effort_flag(&mut args, &contract, input.thinking_level, &version);
 
         // Resume a previous claude-code session if we have its session_id.
         if let Some(sid) = &input.resume_session_id {
@@ -879,6 +902,36 @@ mod tests {
                 args.iter().all(|arg| arg != "--model" && arg != "-m"),
                 "model {model:?} launched {args:?}"
             );
+        }
+    }
+
+    #[test]
+    fn thinking_level_sets_effort_flag() {
+        let contract = &coppice_connectors::run_contract::CLAUDE_CODE;
+        let mut args = Vec::new();
+        append_effort_flag(&mut args, contract, None, "2.1.318");
+        assert!(args.is_empty(), "no level leaves the CLI default: {args:?}");
+        for (level, value) in [
+            (ThinkingLevel::Low, "low"),
+            (ThinkingLevel::Medium, "medium"),
+            (ThinkingLevel::High, "high"),
+            (ThinkingLevel::Max, "max"),
+        ] {
+            for version in ["2.1.111", "2.1.318", "3.0.0"] {
+                let mut args = Vec::new();
+                append_effort_flag(&mut args, contract, Some(level), version);
+                assert_eq!(args, ["--effort", value], "version {version}");
+            }
+        }
+    }
+
+    #[test]
+    fn older_cli_runs_at_default_effort() {
+        let contract = &coppice_connectors::run_contract::CLAUDE_CODE;
+        for version in ["2.0.0", "2.1.72", "2.1.110"] {
+            let mut args = Vec::new();
+            append_effort_flag(&mut args, contract, Some(ThinkingLevel::Max), version);
+            assert!(args.is_empty(), "version {version} launched {args:?}");
         }
     }
 

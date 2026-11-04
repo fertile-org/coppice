@@ -27,6 +27,7 @@ import {
   turnedOffConnectorName,
 } from './modelList';
 import { AGENT_COPY } from './copy';
+import { thinkingLevelSchema, type ThinkingLevel } from '../../lib/schemas/agent';
 import { isAssignable } from '../plugins/assignable';
 import { PLUGIN_COPY } from '../plugins/copy';
 import { usePlugins } from '../plugins/usePlugins';
@@ -39,6 +40,8 @@ export interface AgentFormValues {
   connector: string;
   modelProvider: string;
   model: string;
+  /** `''` leaves the choice to the CLI. */
+  thinkingLevel: ThinkingLevel | '';
   enabled: boolean;
   pluginIds: string[];
 }
@@ -69,6 +72,7 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     connector: agent.connector,
     modelProvider: agent.modelProvider?.trim() ?? '',
     model: agent.model?.trim() ?? '',
+    thinkingLevel: agent.thinkingLevel ?? '',
     enabled: agent.enabled,
     pluginIds: [],
   };
@@ -87,6 +91,7 @@ export function presetToFormValues(
     connector,
     modelProvider: '',
     model: '',
+    thinkingLevel: '',
     enabled: true,
     pluginIds: [],
   };
@@ -139,6 +144,16 @@ function modelPickerOptions({
     });
   }
   return options;
+}
+
+function thinkingLevelPickerOptions(defaultLabel: string): ComboboxOption[] {
+  return [
+    { value: '', label: defaultLabel },
+    ...thinkingLevelSchema.options.map((value) => ({
+      value,
+      label: AGENT_COPY.thinkingLevelNames[value],
+    })),
+  ];
 }
 
 function connectorOptionLabel(option: ConnectorOption): string {
@@ -259,6 +274,7 @@ export function AgentForm({
   const connectorName =
     selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector;
   const defaultModelLabel = connectorDefaultModelLabel(connectorName);
+  const showThinkingLevel = selectedConnector?.caps?.thinkingLevel === true;
   const modelsFailureLine = modelsFailureExtra(values.connector, modelsErrorDetail);
   const turnedOffName = turnedOffConnectorName(modelsErrorMessage);
   const { data: plugins, isLoading: pluginsLoading } = usePlugins();
@@ -328,7 +344,10 @@ export function AgentForm({
     const pluginIds = plugins
       ? values.pluginIds.filter((id) => assignableIds.has(id))
       : values.pluginIds;
-    await onSubmit({ ...values, pluginIds });
+    // A hidden level would be saved without the user seeing it (the server
+    // drops it too). Keep it while the connector list is still loading.
+    const thinkingLevel = selectedConnector && !showThinkingLevel ? '' : values.thinkingLevel;
+    await onSubmit({ ...values, pluginIds, thinkingLevel });
   }
 
   const displayError = error ?? localError;
@@ -566,6 +585,26 @@ export function AgentForm({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {showThinkingLevel && (
+        <div>
+          <label
+            htmlFor="agent-thinking-level"
+            className="mb-1 block font-body text-sm font-medium text-bark-800"
+          >
+            {AGENT_COPY.thinkingLevelLabel}
+          </label>
+          <Combobox
+            id="agent-thinking-level"
+            value={values.thinkingLevel}
+            onValueChange={(value) =>
+              updateField('thinkingLevel', value as AgentFormValues['thinkingLevel'])
+            }
+            placeholder={defaultModelLabel}
+            options={thinkingLevelPickerOptions(defaultModelLabel)}
+          />
         </div>
       )}
 

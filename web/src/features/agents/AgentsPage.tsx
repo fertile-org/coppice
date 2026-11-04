@@ -36,6 +36,7 @@ import {
 } from './useAgents';
 import { KnowledgeCompactionCard } from './KnowledgeCompactionCard';
 import { useKnowledgeSettings } from '../settings/useKnowledgeSettings';
+import { AGENT_COPY } from './copy';
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -182,6 +183,7 @@ function CreateAgentDialog({
           connector: formValues.connector,
           modelProvider: formValues.modelProvider || undefined,
           model: formValues.model || undefined,
+          thinkingLevel: formValues.thinkingLevel || undefined,
         });
         if (agent.connectorTurnedOn?.displayName) {
           toast.success(turnedOnToast(agent.connectorTurnedOn.displayName));
@@ -325,6 +327,7 @@ function EditAgentDialog({
         connector: formValues.connector,
         modelProvider: formValues.modelProvider.trim() ? formValues.modelProvider.trim() : null,
         model: formValues.model.trim() ? formValues.model.trim() : null,
+        thinkingLevel: formValues.thinkingLevel || null,
         enabled: formValues.enabled,
       });
       if (agent.connectorTurnedOn?.displayName) {
@@ -416,19 +419,32 @@ function PluginDeepLinkBanner({
   );
 }
 
+/** Model and thinking level under the connector name. The level shows only where it applies. */
+function agentModelLine(agent: Agent, thinkingLevelApplies: boolean): string | null {
+  const parts: string[] = [];
+  if (agent.modelProvider && agent.model) parts.push(`${agent.modelProvider}/${agent.model}`);
+  if (thinkingLevelApplies && agent.thinkingLevel) {
+    parts.push(AGENT_COPY.thinkingLevelInTable.replaceAll('{level}', agent.thinkingLevel));
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 function AgentRow({
   agent,
+  thinkingLevelApplies,
   isCompactor,
   onEdit,
   onToggleEnabled,
   toggling,
 }: {
   agent: Agent;
+  thinkingLevelApplies: boolean;
   isCompactor: boolean;
   onEdit: (agent: Agent) => void;
   onToggleEnabled: (agent: Agent) => void;
   toggling: boolean;
 }) {
+  const modelLine = agentModelLine(agent, thinkingLevelApplies);
   return (
     <tr
       tabIndex={0}
@@ -462,10 +478,8 @@ function AgentRow({
       </td>
       <td className="px-4 py-3 font-body text-sm text-text-secondary">
         <div>{agent.connector}</div>
-        {agent.modelProvider && agent.model && (
-          <div className="mt-0.5 font-mono text-xs text-text-muted">
-            {agent.modelProvider}/{agent.model}
-          </div>
+        {modelLine && (
+          <div className="mt-0.5 font-mono text-xs text-text-muted">{modelLine}</div>
         )}
       </td>
       <td className="px-4 py-3">
@@ -673,6 +687,10 @@ export function AgentsPage() {
                 <AgentRow
                   key={agent.id}
                   agent={agent}
+                  thinkingLevelApplies={
+                    connectorOptions.find((option) => option.id === agent.connector)?.caps
+                      ?.thinkingLevel === true
+                  }
                   isCompactor={agent.id === compactorId}
                   onEdit={openEdit}
                   onToggleEnabled={(a) => void toggleEnabled(a)}

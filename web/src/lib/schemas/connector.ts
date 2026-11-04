@@ -23,6 +23,7 @@ export const connectorSchema = z.object({
   caps: z.object({
     readOnlyTools: z.boolean(),
     chatResume: z.boolean(),
+    thinkingLevel: z.boolean().optional(),
   }),
   enabled: z.boolean().optional(),
   readiness: connectorReadinessSchema.nullish(),

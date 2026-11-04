@@ -43,6 +43,7 @@ struct ConnectorResponse {
 struct ConnectorCapsResponse {
     read_only_tools: bool,
     chat_resume: bool,
+    thinking_level: bool,
 }
 
 #[derive(Serialize)]
@@ -167,6 +168,7 @@ async fn list_connectors(
                 caps: ConnectorCapsResponse {
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,
+                    thinking_level: descriptor.takes_thinking_level(),
                 },
                 enabled: registry.has(descriptor.id),
                 readiness,

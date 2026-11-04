@@ -8,7 +8,7 @@ pub mod sign_in;
 
 pub use run_contract::{
     version_at_least, version_token, LaunchSubst, PermissionMode, PinnedFlag, PromptPlace,
-    RunContract,
+    RunContract, ThinkingFlag,
 };
 
 pub const MOCK: &str = "mock";
@@ -68,6 +68,13 @@ pub struct ConnectorDescriptor {
     pub run_contract: RunContract,
     /// Oldest CLI version Coppice runs. Older versions fail at run start.
     pub min_version: Option<MinVersion>,
+}
+
+impl ConnectorDescriptor {
+    /// The connector maps the agent's thinking level to a CLI flag.
+    pub fn takes_thinking_level(&self) -> bool {
+        self.run_contract.thinking_level.is_some()
+    }
 }
 
 /// A version floor and why it exists.
@@ -600,6 +607,12 @@ mod tests {
                 run_server,
             },
             "{id} caps"
+        );
+        // Only Claude Code maps the thinking level to a flag so far.
+        assert_eq!(
+            d.takes_thinking_level(),
+            id == CLAUDE_CODE,
+            "{id} thinking level"
         );
     }
 

@@ -1,4 +1,4 @@
-use crate::domain::agent::{compare_agents_for_board, Agent, AgentPreset};
+use crate::domain::agent::{compare_agents_for_board, Agent, AgentPreset, ThinkingLevel};
 use crate::services::plugin_service::PluginService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -46,7 +46,8 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, responsibilities, system_prompt,
-                connector, model_provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, thinking_level, enabled, preset_source,
+                created_at, updated_at
             FROM agents
             ORDER BY created_at ASC, id ASC
             "#,
@@ -64,7 +65,8 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, responsibilities, system_prompt,
-                connector, model_provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, thinking_level, enabled, preset_source,
+                created_at, updated_at
             FROM agents
             WHERE id = $1
             "#,
@@ -102,6 +104,7 @@ impl<'a> AgentService<'a> {
         connector: Option<&str>,
         model_provider: Option<&str>,
         model: Option<&str>,
+        thinking_level: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         if name.trim().is_empty() {
@@ -120,6 +123,7 @@ impl<'a> AgentService<'a> {
 
         let preset = self.get_preset(preset_id).await?;
         let connector = resolve_new_connector(connector)?;
+        let thinking_level = for_connector(connector, parse_thinking_level(thinking_level)?);
         let agent = self
             .insert_agent(
                 name,
@@ -129,6 +133,7 @@ impl<'a> AgentService<'a> {
                 connector,
                 model_provider,
                 model,
+                thinking_level,
                 enabled.unwrap_or(true),
                 Some(&preset.key),
             )
@@ -152,6 +157,7 @@ impl<'a> AgentService<'a> {
         connector: Option<&str>,
         model_provider: Option<&str>,
         model: Option<&str>,
+        thinking_level: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         if name.trim().is_empty() {
@@ -172,6 +178,7 @@ impl<'a> AgentService<'a> {
         }
 
         let connector = resolve_new_connector(connector)?;
+        let thinking_level = for_connector(connector, parse_thinking_level(thinking_level)?);
         self.insert_agent(
             name,
             role,
@@ -180,6 +187,7 @@ impl<'a> AgentService<'a> {
             connector,
             model_provider,
             model,
+            thinking_level,
             enabled.unwrap_or(true),
             None,
         )
@@ -197,6 +205,7 @@ impl<'a> AgentService<'a> {
         connector: Option<&str>,
         model_provider: Option<Option<&str>>,
         model: Option<Option<&str>>,
+        thinking_level: Option<Option<&str>>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         let current = self.get(agent_id).await?;
@@ -210,6 +219,13 @@ impl<'a> AgentService<'a> {
         let model_provider =
             resolve_cleared_text(model_provider, current.model_provider.as_deref());
         let model = resolve_cleared_text(model, current.model.as_deref());
+        let thinking_level = match thinking_level {
+            None => current.thinking_level,
+            Some(value) => parse_thinking_level(value)?,
+        };
+        // Moving to a connector without the capability drops the level, so
+        // no hidden level comes back if the agent later moves back.
+        let thinking_level = for_connector(connector, thinking_level);
         let enabled = enabled.unwrap_or(current.enabled);
 
         let row = sqlx::query(
@@ -223,12 +239,14 @@ impl<'a> AgentService<'a> {
                 connector = $6,
                 model_provider = $7,
                 model = $8,
-                enabled = $9,
+                thinking_level = $9,
+                enabled = $10,
                 updated_at = now()
             WHERE id = $1
             RETURNING
                 id, name, role, responsibilities, system_prompt,
-                connector, model_provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, thinking_level, enabled, preset_source,
+                created_at, updated_at
             "#,
         )
         .bind(agent_id)
@@ -239,6 +257,7 @@ impl<'a> AgentService<'a> {
         .bind(connector)
         .bind(model_provider)
         .bind(model)
+        .bind(thinking_level.map(ThinkingLevel::as_str))
         .bind(enabled)
         .fetch_optional(self.pool)
         .await?
@@ -296,6 +315,7 @@ impl<'a> AgentService<'a> {
         connector: &str,
         model_provider: Option<&str>,
         model: Option<&str>,
+        thinking_level: Option<ThinkingLevel>,
         enabled: bool,
         preset_source: Option<&str>,
     ) -> Result<Agent, AgentError> {
@@ -304,12 +324,13 @@ impl<'a> AgentService<'a> {
             r#"
             INSERT INTO agents (
                 id, name, role, responsibilities, system_prompt,
-                connector, model_provider, model, enabled, preset_source
+                connector, model_provider, model, thinking_level, enabled, preset_source
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING
                 id, name, role, responsibilities, system_prompt,
-                connector, model_provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, thinking_level, enabled, preset_source,
+                created_at, updated_at
             "#,
         )
         .bind(id)
@@ -320,6 +341,7 @@ impl<'a> AgentService<'a> {
         .bind(connector)
         .bind(model_provider)
         .bind(model)
+        .bind(thinking_level.map(ThinkingLevel::as_str))
         .bind(enabled)
         .bind(preset_source)
         .fetch_one(self.pool)
@@ -327,6 +349,24 @@ impl<'a> AgentService<'a> {
 
         Ok(row_to_agent(&row))
     }
+}
+
+/// Blank or missing means "the CLI's default". Anything off the scale is refused.
+fn parse_thinking_level(value: Option<&str>) -> Result<Option<ThinkingLevel>, AgentError> {
+    match value.map(str::trim).filter(|text| !text.is_empty()) {
+        None => Ok(None),
+        Some(text) => ThinkingLevel::parse(text).map(Some).ok_or_else(|| {
+            AgentError::Validation(format!(
+                "thinkingLevel must be one of low, medium, high, max (got `{text}`)"
+            ))
+        }),
+    }
+}
+
+/// A level is stored only for a connector that maps it to a flag. Elsewhere it
+/// would do nothing and the form could not show or clear it.
+fn for_connector(connector: &str, level: Option<ThinkingLevel>) -> Option<ThinkingLevel> {
+    level.filter(|_| coppice_connectors::get(connector).is_some_and(|d| d.takes_thinking_level()))
 }
 
 /// Dev/test builds default a missing connector to mock. Release builds refuse
@@ -377,11 +417,29 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
         connector: row.get("connector"),
         model_provider: row.get("model_provider"),
         model: row.get("model"),
+        thinking_level: stored_thinking_level(row),
         enabled: row.get("enabled"),
         preset_source: row.get("preset_source"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
+}
+
+/// The column's CHECK keeps it on the scale. A value outside it (a level added
+/// in SQL before this code knows it) reads as the CLI default, and the warning
+/// says so, because the next save from the form overwrites it.
+fn stored_thinking_level(row: &sqlx::postgres::PgRow) -> Option<ThinkingLevel> {
+    let stored = row.get::<Option<String>, _>("thinking_level")?;
+    let level = ThinkingLevel::parse(&stored);
+    if level.is_none() {
+        let agent_id: Uuid = row.get("id");
+        tracing::warn!(
+            %agent_id,
+            stored,
+            "agent has an unknown thinking level; using the connector's default"
+        );
+    }
+    level
 }
 
 #[cfg(test)]
@@ -421,11 +479,14 @@ mod tests {
                 Some("cursor"),
                 Some("cursor"),
                 Some("auto"),
+                Some("high"),
                 Some(true),
             )
             .await
             .expect("create");
         assert_eq!(created.model.as_deref(), Some("auto"));
+        // Cursor has no thinking level capability, so the level is not stored.
+        assert!(created.thinking_level.is_none());
         assert_eq!(created.model_provider.as_deref(), Some("cursor"));
 
         let cleared = service
@@ -438,17 +499,20 @@ mod tests {
                 None,
                 Some(None),
                 Some(None),
+                Some(None),
                 None,
             )
             .await
             .expect("clear");
         assert!(cleared.model.is_none());
         assert!(cleared.model_provider.is_none());
+        assert!(cleared.thinking_level.is_none());
 
         let kept = service
             .update(
                 created.id,
                 Some("Renamed"),
+                None,
                 None,
                 None,
                 None,
@@ -483,5 +547,134 @@ mod tests {
         let service = AgentService::new(&pool);
         let presets = service.list_presets().await.expect("list presets");
         assert_eq!(presets.len(), 10);
+    }
+    #[test]
+    fn thinking_level_parses_the_shared_scale() {
+        assert_eq!(parse_thinking_level(None).unwrap(), None);
+        assert_eq!(parse_thinking_level(Some("  ")).unwrap(), None);
+        assert_eq!(
+            parse_thinking_level(Some(" max ")).unwrap(),
+            Some(ThinkingLevel::Max)
+        );
+        for level in ["low", "medium", "high", "max"] {
+            let parsed = parse_thinking_level(Some(level)).unwrap().unwrap();
+            assert_eq!(parsed.as_str(), level);
+        }
+        assert!(matches!(
+            parse_thinking_level(Some("xhigh")),
+            Err(AgentError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_sets_keeps_and_rejects_thinking_level() {
+        let pool = match crate::db::shared_test_pool().await {
+            Ok(pool) => pool,
+            Err(_) => return,
+        };
+        crate::db::truncate_test_workspace(&pool).await.ok();
+        let service = AgentService::new(&pool);
+        let created = service
+            .create(
+                "Thinker",
+                "Developer",
+                &[],
+                "You think.",
+                Some("claude-code"),
+                None,
+                None,
+                None,
+                Some(true),
+            )
+            .await
+            .expect("create");
+        assert!(created.thinking_level.is_none());
+
+        let set = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Some("low")),
+                None,
+            )
+            .await
+            .expect("set");
+        assert_eq!(set.thinking_level, Some(ThinkingLevel::Low));
+
+        let kept = service
+            .update(
+                created.id,
+                Some("Renamed"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("keep");
+        assert_eq!(kept.thinking_level, Some(ThinkingLevel::Low));
+
+        let rejected = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Some("ultra")),
+                None,
+            )
+            .await;
+        assert!(matches!(rejected, Err(AgentError::Validation(_))));
+        let after = service.get(created.id).await.expect("get");
+        assert_eq!(after.thinking_level, Some(ThinkingLevel::Low));
+
+        // A connector without the capability drops the level, even one sent
+        // in the same request, and it stays gone after moving back.
+        let moved = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                Some(coppice_connectors::CODEX),
+                None,
+                None,
+                Some(Some("max")),
+                None,
+            )
+            .await
+            .expect("move to codex");
+        assert!(moved.thinking_level.is_none());
+        let back = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                Some(coppice_connectors::CLAUDE_CODE),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("move back");
+        assert!(back.thinking_level.is_none());
     }
 }

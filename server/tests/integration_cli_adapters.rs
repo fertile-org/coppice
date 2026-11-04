@@ -58,6 +58,7 @@ fn run_input(worktree: &Path) -> AgentRunInput {
         cancel_rx: None,
         model_provider: None,
         model: None,
+        thinking_level: None,
         session_created_tx: None,
         resume_context: None,
         resume_session_id: None,

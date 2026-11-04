@@ -101,6 +101,7 @@ function baseValues(overrides: Partial<AgentFormValues> = {}): AgentFormValues {
     connector: 'mock',
     modelProvider: '',
     model: '',
+    thinkingLevel: '',
     enabled: true,
     pluginIds: [],
     ...overrides,
@@ -380,6 +381,98 @@ describe('AgentForm model choice', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].model).toBe('');
     expect(onSubmit.mock.calls[0][0].modelProvider).toBe('');
+  });
+});
+
+describe('AgentForm thinking level', () => {
+  beforeEach(() => {
+    mocks.plugins = [];
+    mocks.groups = [];
+    mocks.modelsLoading = false;
+    mocks.modelsError = false;
+    mocks.modelsDetail = null;
+    mocks.modelsErrorMessage = null;
+    mocks.uncoveredIds = [];
+  });
+
+  const claudeCode: ConnectorOption = {
+    id: 'claude-code',
+    displayName: 'Claude Code',
+    caps: { thinkingLevel: true },
+  };
+
+  it('is hidden for a connector without the capability', () => {
+    render(
+      <Harness
+        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor', caps: { thinkingLevel: false } }]}
+      />,
+    );
+
+    expect(screen.queryByRole('combobox', { name: 'Thinking level' })).toBeNull();
+  });
+
+  it('defaults to the connector and submits the picked level', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <Harness
+        initial={baseValues({ connector: 'claude-code', systemPrompt: 'Help' })}
+        onSubmit={onSubmit}
+        connectorOptions={[claudeCode]}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Thinking level' });
+    expect(trigger).toHaveTextContent("Claude Code's default");
+    selectComboboxOption(trigger, 'High');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].thinkingLevel).toBe('high');
+  });
+
+  it('shows a saved level and keeps it when the connector changes', () => {
+    const agent: Agent = {
+      id: 'a1',
+      name: 'Builder',
+      role: 'Developer',
+      responsibilities: [],
+      systemPrompt: 'Help',
+      connector: 'claude-code',
+      thinkingLevel: 'max',
+      health: 'healthy',
+      enabled: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    const values = agentToFormValues(agent);
+    expect(values.thinkingLevel).toBe('max');
+    expect(agentToFormValues({ ...agent, thinkingLevel: null }).thinkingLevel).toBe('');
+
+    render(
+      <Harness
+        initial={values}
+        onSubmit={vi.fn()}
+        connectorOptions={[claudeCode, { id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: 'Thinking level' })).toHaveTextContent('Max');
+  });
+
+  it('clears a hidden level on submit', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <Harness
+        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help', thinkingLevel: 'max' })}
+        onSubmit={onSubmit}
+        connectorOptions={[claudeCode, { id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].thinkingLevel).toBe('');
   });
 });
 

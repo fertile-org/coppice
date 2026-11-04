@@ -51,7 +51,7 @@ Each connector has a `[agent.connectors.<id>]` section in `config.toml`:
 | `run_timeout_secs` | all | `1800` |
 | `serve_hostname` | `opencode` | `127.0.0.1` (each run's server picks a free port; `serve_port` is ignored) |
 
-Each agent picks a connector and a model on the Agents page. When a connector has more than one provider, those names are headings in the model list. Refresh models loads the list again. There is no default-connector setting. With the `mock-provider` feature, creating an agent that omits a connector uses `mock`. Old `default_connector` / `default_provider` keys and `AGENT_DEFAULT_PROVIDER` are ignored.
+Each agent picks a connector and a model on the Agents page. When a connector has more than one provider, those names are headings in the model list. Refresh models loads the list again. Connectors whose run contract names a thinking flag (`RunContract::thinking_level`, Claude Code today) also show a **Thinking level** picker: Low, Medium, High, or Max, one scale for every connector. The contract holds the flag and the oldest CLI version that takes it; an older CLI gets no flag. The API reports it as `caps.thinkingLevel`. Left on the connector's default, no flag is passed. Moving the agent to a connector without a thinking flag clears its level. There is no default-connector setting. With the `mock-provider` feature, creating an agent that omits a connector uses `mock`. Old `default_connector` / `default_provider` keys and `AGENT_DEFAULT_PROVIDER` are ignored.
 
 Where the config lives:
 

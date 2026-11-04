@@ -39,6 +39,37 @@ pub fn compare_agents_for_board(a: &Agent, b: &Agent) -> Ordering {
         .then_with(|| a.id.cmp(&b.id))
 }
 
+/// How hard the model thinks, on one scale for every connector. Each adapter
+/// maps it to its CLI's own flag; connectors without one ignore it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingLevel {
+    Low,
+    Medium,
+    High,
+    Max,
+}
+
+impl ThinkingLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Max => "max",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "max" => Some(Self::Max),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentPreset {
     pub id: Uuid,
@@ -58,6 +89,7 @@ pub struct Agent {
     pub connector: String,
     pub model_provider: Option<String>,
     pub model: Option<String>,
+    pub thinking_level: Option<ThinkingLevel>,
     pub enabled: bool,
     pub preset_source: Option<String>,
     pub created_at: OffsetDateTime,
@@ -78,6 +110,7 @@ mod tests {
             connector: "mock".into(),
             model_provider: None,
             model: None,
+            thinking_level: None,
             enabled: true,
             preset_source: preset.map(str::to_string),
             created_at: OffsetDateTime::from_unix_timestamp(created_at).unwrap(),

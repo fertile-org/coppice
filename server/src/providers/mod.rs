@@ -90,6 +90,8 @@ pub struct AgentRunInput {
     pub cancel_rx: Option<watch::Receiver<bool>>,
     pub model_provider: Option<String>,
     pub model: Option<String>,
+    /// The agent's thinking level; adapters without a matching flag ignore it.
+    pub thinking_level: Option<crate::domain::agent::ThinkingLevel>,
     pub session_created_tx: Option<watch::Sender<String>>,
     pub resume_context: Option<String>,
     pub resume_session_id: Option<String>,
@@ -574,6 +576,7 @@ mod tests {
             cancel_rx: None,
             model_provider: None,
             model: None,
+            thinking_level: None,
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
