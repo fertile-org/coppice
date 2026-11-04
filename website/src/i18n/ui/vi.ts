@@ -22,6 +22,7 @@ export const ui: Ui = {
     providers: 'Nhà cung cấp',
     faq: 'Hỏi đáp',
     github: 'GitHub',
+    sponsor: 'Tài trợ',
   },
   docs: {
     navLabel: 'Tài liệu',

@@ -22,6 +22,7 @@ export const ui: Ui = {
     providers: 'プロバイダー',
     faq: 'よくある質問',
     github: 'GitHub',
+    sponsor: 'スポンサー',
   },
   docs: {
     navLabel: 'ドキュメント',

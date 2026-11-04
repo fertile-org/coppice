@@ -28,6 +28,7 @@ export const ui = {
     providers: 'Providers',
     faq: 'FAQ',
     github: 'GitHub',
+    sponsor: 'Sponsor',
   },
   docs: {
     navLabel: 'Documentation',
