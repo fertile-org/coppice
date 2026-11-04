@@ -28,6 +28,16 @@ pub struct PinnedFlag {
     pub reason: &'static str,
 }
 
+/// How a CLI takes the agent's thinking level: `<flag> <level>`, with the
+/// level under its own name (`low`, `medium`, `high`, `max`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThinkingFlag {
+    pub flag: &'static str,
+    /// Older or unknown versions get no flag and run at the CLI's default.
+    pub min_version: &'static str,
+    pub reason: &'static str,
+}
+
 /// Approval / permission mode. Separate from [`RunContract::leading`] and
 /// [`RunContract::trailing`] so a later milestone can swap it for a sandbox flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +83,9 @@ pub struct RunContract {
     /// mode, so planning stays prompt-only and must not invent a flag.
     /// A later milestone can tighten this field.
     pub plan_mode: Option<&'static [&'static str]>,
+    /// `None` means the connector does not take a thinking level, and the
+    /// agent form hides the picker.
+    pub thinking_level: Option<ThinkingFlag>,
 }
 
 /// Values substituted into `{worktree}`, `{hostname}`, and `{port}` tokens.
@@ -123,6 +136,16 @@ impl RunContract {
             self.permission_mode.min_version,
             self.permission_mode.gate,
         )
+    }
+
+    /// Argv for the agent's thinking level. `None` when the connector takes no
+    /// level or `version` is older than (or not known to meet) the flag's floor.
+    pub fn thinking_args(&self, level: &str, version: Option<&str>) -> Option<Vec<String>> {
+        let thinking = self.thinking_level?;
+        if !version.is_some_and(|found| version_at_least(found, thinking.min_version)) {
+            return None;
+        }
+        Some(vec![thinking.flag.to_string(), level.to_string()])
     }
 
     /// Place the prompt according to [`RunContract::prompt`].
@@ -176,6 +199,7 @@ pub const MOCK: RunContract = RunContract {
     result_before_exit: false,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 pub const CLAUDE_CODE: RunContract = RunContract {
@@ -210,6 +234,15 @@ pub const CLAUDE_CODE: RunContract = RunContract {
     prompt: PromptPlace::AfterDashP,
     // Planning is a read-only run and uses the read-only flags above.
     plan_mode: None,
+    thinking_level: Some(ThinkingFlag {
+        flag: "--effort",
+        // 2.1.72 dropped `max` and 2.1.111 added `xhigh`. From 2.1.111
+        // `--effort` takes `low, medium, high, xhigh, max`, and the CLI
+        // matches the level to the model itself: a model without that level
+        // falls back to one it has. Checked on 2.1.318: `haiku` at `max` runs.
+        min_version: "2.1.111",
+        reason: "Sets the agent's thinking level. Older builds lack the flag or some levels.",
+    }),
 };
 
 pub const CODEX: RunContract = RunContract {
@@ -242,6 +275,7 @@ pub const CODEX: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 /// GitHub Copilot CLI over ACP (`copilot --acp`). Deny rules win over
@@ -273,6 +307,7 @@ pub const COPILOT: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 /// Qwen Code over ACP (`qwen --acp`). Its plan mode refuses MCP tool calls
@@ -304,6 +339,7 @@ pub const QWEN_CODE: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 /// Kimi Code over ACP (`kimi acp`). Its mode is a session option, set to
@@ -325,6 +361,7 @@ pub const KIMI: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 /// Grok over ACP (`grok agent stdio`). Agent options go between `agent` and
@@ -355,6 +392,7 @@ pub const GROK: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 pub const CURSOR: RunContract = RunContract {
@@ -388,6 +426,7 @@ pub const CURSOR: RunContract = RunContract {
     prompt: PromptPlace::AfterDashP,
     // Cursor's plan mode. Chat stays on `--mode ask` via read_only.
     plan_mode: Some(&["--mode", "plan"]),
+    thinking_level: None,
 };
 
 pub const KILO_CODE: RunContract = RunContract {
@@ -413,6 +452,7 @@ pub const KILO_CODE: RunContract = RunContract {
     result_before_exit: true,
     prompt: PromptPlace::Append,
     plan_mode: Some(&["--auto", "--agent", "plan"]),
+    thinking_level: None,
 };
 
 pub const OPENCODE: RunContract = RunContract {
@@ -440,6 +480,7 @@ pub const OPENCODE: RunContract = RunContract {
     result_before_exit: false,
     prompt: PromptPlace::None,
     plan_mode: None,
+    thinking_level: None,
 };
 
 fn push_flag(out: &mut Vec<String>, flag: &PinnedFlag, subst: &LaunchSubst<'_>) {
@@ -555,6 +596,16 @@ mod tests {
             port: "4096",
             version,
         }
+    }
+
+    #[test]
+    fn thinking_args_follow_the_version_floor() {
+        let args = |version| CLAUDE_CODE.thinking_args("high", version);
+        assert_eq!(args(Some("2.1.111")).unwrap(), ["--effort", "high"]);
+        assert_eq!(args(Some("2.1.318")).unwrap(), ["--effort", "high"]);
+        assert_eq!(args(Some("2.1.110")), None);
+        assert_eq!(args(None), None);
+        assert_eq!(CODEX.thinking_args("high", Some("9.9.9")), None);
     }
 
     #[test]

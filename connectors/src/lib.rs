@@ -8,7 +8,7 @@ pub mod sign_in;
 
 pub use run_contract::{
     version_at_least, version_token, LaunchSubst, PermissionMode, PinnedFlag, PromptPlace,
-    RunContract,
+    RunContract, ThinkingFlag,
 };
 
 pub const MOCK: &str = "mock";
@@ -68,6 +68,13 @@ pub struct ConnectorDescriptor {
     pub run_contract: RunContract,
     /// Oldest CLI version Coppice runs. Older versions fail at run start.
     pub min_version: Option<MinVersion>,
+}
+
+impl ConnectorDescriptor {
+    /// The connector maps the agent's thinking level to a CLI flag.
+    pub fn takes_thinking_level(&self) -> bool {
+        self.run_contract.thinking_level.is_some()
+    }
 }
 
 /// A version floor and why it exists.
@@ -225,8 +232,6 @@ pub struct Capabilities {
     pub run_resume: bool,
     /// Keeps a per-run server process the watchdog tracks.
     pub run_server: bool,
-    /// Adapter maps the agent's thinking level to a CLI flag.
-    pub thinking_level: bool,
 }
 
 const CONNECTORS: &[ConnectorDescriptor] = &[
@@ -253,7 +258,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: false,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::MOCK,
         min_version: None,
@@ -287,7 +291,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: true,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::CURSOR,
         min_version: None,
@@ -314,7 +317,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: true,
             run_server: false,
-            thinking_level: true,
         },
         run_contract: run_contract::CLAUDE_CODE,
         min_version: Some(MinVersion {
@@ -344,7 +346,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::CODEX,
         min_version: None,
@@ -376,7 +377,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::KILO_CODE,
         min_version: None,
@@ -409,7 +409,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: true,
-            thinking_level: false,
         },
         run_contract: run_contract::OPENCODE,
         min_version: Some(MinVersion {
@@ -439,7 +438,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::COPILOT,
         min_version: None,
@@ -466,7 +464,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::QWEN_CODE,
         min_version: None,
@@ -493,7 +490,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::KIMI,
         min_version: None,
@@ -520,7 +516,6 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             session_events: true,
             run_resume: false,
             run_server: false,
-            thinking_level: false,
         },
         run_contract: run_contract::GROK,
         min_version: None,
@@ -610,10 +605,14 @@ mod tests {
                 session_events,
                 run_resume,
                 run_server,
-                // Only Claude Code maps the thinking level to a flag so far.
-                thinking_level: id == CLAUDE_CODE,
             },
             "{id} caps"
+        );
+        // Only Claude Code maps the thinking level to a flag so far.
+        assert_eq!(
+            d.takes_thinking_level(),
+            id == CLAUDE_CODE,
+            "{id} thinking level"
         );
     }
 
@@ -754,7 +753,6 @@ mod tests {
             session_events: true,
             run_resume: false,
             run_server: true,
-            thinking_level: false,
         })
         .unwrap();
         assert_eq!(
@@ -765,7 +763,6 @@ mod tests {
                 "sessionEvents": true,
                 "runResume": false,
                 "runServer": true,
-                "thinkingLevel": false,
             })
         );
     }

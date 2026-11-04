@@ -366,9 +366,7 @@ fn parse_thinking_level(value: Option<&str>) -> Result<Option<ThinkingLevel>, Ag
 /// A level is stored only for a connector that maps it to a flag. Elsewhere it
 /// would do nothing and the form could not show or clear it.
 fn for_connector(connector: &str, level: Option<ThinkingLevel>) -> Option<ThinkingLevel> {
-    level.filter(|_| {
-        coppice_connectors::get(connector).is_some_and(|descriptor| descriptor.caps.thinking_level)
-    })
+    level.filter(|_| coppice_connectors::get(connector).is_some_and(|d| d.takes_thinking_level()))
 }
 
 /// Dev/test builds default a missing connector to mock. Release builds refuse
@@ -419,15 +417,29 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
         connector: row.get("connector"),
         model_provider: row.get("model_provider"),
         model: row.get("model"),
-        thinking_level: row
-            .get::<Option<String>, _>("thinking_level")
-            .as_deref()
-            .and_then(ThinkingLevel::parse),
+        thinking_level: stored_thinking_level(row),
         enabled: row.get("enabled"),
         preset_source: row.get("preset_source"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
+}
+
+/// The column's CHECK keeps it on the scale. A value outside it (a level added
+/// in SQL before this code knows it) reads as the CLI default, and the warning
+/// says so, because the next save from the form overwrites it.
+fn stored_thinking_level(row: &sqlx::postgres::PgRow) -> Option<ThinkingLevel> {
+    let stored = row.get::<Option<String>, _>("thinking_level")?;
+    let level = ThinkingLevel::parse(&stored);
+    if level.is_none() {
+        let agent_id: Uuid = row.get("id");
+        tracing::warn!(
+            %agent_id,
+            stored,
+            "agent has an unknown thinking level; using the connector's default"
+        );
+    }
+    level
 }
 
 #[cfg(test)]

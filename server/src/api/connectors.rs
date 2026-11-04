@@ -168,7 +168,7 @@ async fn list_connectors(
                 caps: ConnectorCapsResponse {
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,
-                    thinking_level: descriptor.caps.thinking_level,
+                    thinking_level: descriptor.takes_thinking_level(),
                 },
                 enabled: registry.has(descriptor.id),
                 readiness,

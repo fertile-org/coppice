@@ -36,6 +36,7 @@ import {
 } from './useAgents';
 import { KnowledgeCompactionCard } from './KnowledgeCompactionCard';
 import { useKnowledgeSettings } from '../settings/useKnowledgeSettings';
+import { AGENT_COPY } from './copy';
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -422,7 +423,9 @@ function PluginDeepLinkBanner({
 function agentModelLine(agent: Agent, thinkingLevelApplies: boolean): string | null {
   const parts: string[] = [];
   if (agent.modelProvider && agent.model) parts.push(`${agent.modelProvider}/${agent.model}`);
-  if (thinkingLevelApplies && agent.thinkingLevel) parts.push(`${agent.thinkingLevel} thinking`);
+  if (thinkingLevelApplies && agent.thinkingLevel) {
+    parts.push(AGENT_COPY.thinkingLevelInTable.replaceAll('{level}', agent.thinkingLevel));
+  }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 

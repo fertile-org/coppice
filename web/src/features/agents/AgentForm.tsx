@@ -27,7 +27,7 @@ import {
   turnedOffConnectorName,
 } from './modelList';
 import { AGENT_COPY } from './copy';
-import type { ThinkingLevel } from '../../lib/schemas/agent';
+import { thinkingLevelSchema, type ThinkingLevel } from '../../lib/schemas/agent';
 import { isAssignable } from '../plugins/assignable';
 import { PLUGIN_COPY } from '../plugins/copy';
 import { usePlugins } from '../plugins/usePlugins';
@@ -146,15 +146,14 @@ function modelPickerOptions({
   return options;
 }
 
-const THINKING_LEVEL_OPTIONS: { value: ThinkingLevel; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'max', label: 'Max' },
-];
-
 function thinkingLevelPickerOptions(defaultLabel: string): ComboboxOption[] {
-  return [{ value: '', label: defaultLabel }, ...THINKING_LEVEL_OPTIONS];
+  return [
+    { value: '', label: defaultLabel },
+    ...thinkingLevelSchema.options.map((value) => ({
+      value,
+      label: AGENT_COPY.thinkingLevelNames[value],
+    })),
+  ];
 }
 
 function connectorOptionLabel(option: ConnectorOption): string {
@@ -276,7 +275,6 @@ export function AgentForm({
     selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector;
   const defaultModelLabel = connectorDefaultModelLabel(connectorName);
   const showThinkingLevel = selectedConnector?.caps?.thinkingLevel === true;
-  const defaultThinkingLabel = `${connectorName}'s default`;
   const modelsFailureLine = modelsFailureExtra(values.connector, modelsErrorDetail);
   const turnedOffName = turnedOffConnectorName(modelsErrorMessage);
   const { data: plugins, isLoading: pluginsLoading } = usePlugins();
@@ -596,7 +594,7 @@ export function AgentForm({
             htmlFor="agent-thinking-level"
             className="mb-1 block font-body text-sm font-medium text-bark-800"
           >
-            Thinking level
+            {AGENT_COPY.thinkingLevelLabel}
           </label>
           <Combobox
             id="agent-thinking-level"
@@ -604,8 +602,8 @@ export function AgentForm({
             onValueChange={(value) =>
               updateField('thinkingLevel', value as AgentFormValues['thinkingLevel'])
             }
-            placeholder={defaultThinkingLabel}
-            options={thinkingLevelPickerOptions(defaultThinkingLabel)}
+            placeholder={defaultModelLabel}
+            options={thinkingLevelPickerOptions(defaultModelLabel)}
           />
         </div>
       )}
