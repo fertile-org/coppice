@@ -365,14 +365,7 @@ fn capture_shell_result(
     let mut child = cmd.spawn().map_err(|err| format!("spawn: {err}"))?;
     // Read while the shell runs. A full pipe otherwise blocks `env -0` until
     // the timeout, which looks like a hung login shell.
-    let stdout = child.stdout.take();
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        if let Some(mut stdout) = stdout {
-            let _ = stdout.read_to_end(&mut bytes);
-        }
-        bytes
-    });
+    let stdout = drain_blocking(child.stdout.take(), usize::MAX);
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -382,7 +375,7 @@ fn capture_shell_result(
                 kill_session(pid);
                 let _ = child.kill();
                 let _ = wait_briefly(&mut child, Duration::from_millis(500));
-                let _ = join_briefly(reader, Duration::from_millis(500));
+                stdout.finish_within(Duration::from_millis(500));
                 return Err("timeout".to_string());
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
@@ -390,12 +383,15 @@ fn capture_shell_result(
                 kill_session(child.id());
                 let _ = child.kill();
                 let _ = wait_briefly(&mut child, Duration::from_millis(500));
-                let _ = join_briefly(reader, Duration::from_millis(500));
+                stdout.finish_within(Duration::from_millis(500));
                 return Err(format!("wait: {err}"));
             }
         }
     };
-    let bytes = reader.join().unwrap_or_default();
+    // Both markers are written before the shell exits, so a pipe a leftover
+    // process holds open past the grace loses nothing this needs.
+    stdout.finish_within(STDOUT_GRACE);
+    let bytes = stdout.take();
     if !status.as_ref().is_some_and(|status| status.success()) {
         let code = status.as_ref().and_then(|status| status.code());
         return Err(match code {
@@ -479,17 +475,6 @@ fn session_of(pid: u32) -> Option<u32> {
         .and_then(|session| session.parse().ok())
 }
 
-fn join_briefly<T: Send + 'static>(
-    handle: std::thread::JoinHandle<T>,
-    grace: Duration,
-) -> Option<T> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(handle.join());
-    });
-    rx.recv_timeout(grace).ok().and_then(Result::ok)
-}
-
 /// After a timeout signal, do not block on a shell that ignored it.
 fn wait_briefly(child: &mut std::process::Child, grace: Duration) -> Result<ExitStatus, String> {
     let started = Instant::now();
@@ -559,7 +544,10 @@ fn bytes_to_os(bytes: &[u8]) -> OsString {
 /// Stderr kept for error messages. Past this, the pipe is still read and dropped.
 const STDERR_KEEP_BYTES: usize = 8 * 1024;
 /// After exit, how long to wait for a pipe to close. A background process the
-/// command left behind can hold it open; the output read so far is kept.
+/// command left behind can hold it open. The output read so far is kept (the
+/// command itself has exited, so what is missing is that process's), and the
+/// reader stops, so the next write from that process fails instead of
+/// growing a buffer nobody reads.
 const STDOUT_GRACE: Duration = Duration::from_secs(2);
 const STDERR_GRACE: Duration = Duration::from_millis(500);
 
@@ -569,9 +557,17 @@ fn take_bytes(buf: &Mutex<Vec<u8>>) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+fn keep_bytes(buf: &Mutex<Vec<u8>>, bytes: &[u8], keep: usize) {
+    if let Ok(mut guard) = buf.lock() {
+        let room = keep.saturating_sub(guard.len());
+        guard.extend_from_slice(&bytes[..bytes.len().min(room)]);
+    }
+}
+
 /// Read `pipe` until it closes while the process runs, keeping at most `keep`
 /// bytes. Reading only after exit stalls any command that fills the pipe
-/// (64 KiB): it blocks writing while we wait for it to exit.
+/// (64 KiB): it blocks writing while we wait for it to exit. Abort the task to
+/// stop reading; that closes the pipe.
 fn drain_async<R>(
     pipe: Option<R>,
     keep: usize,
@@ -588,45 +584,74 @@ where
         let mut tmp = [0u8; 8 * 1024];
         loop {
             match tokio::io::AsyncReadExt::read(&mut pipe, &mut tmp).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if let Ok(mut guard) = collected.lock() {
-                        let room = keep.saturating_sub(guard.len());
-                        guard.extend_from_slice(&tmp[..n.min(room)]);
-                    }
-                }
+                Ok(0) => break,
+                Ok(n) => keep_bytes(&collected, &tmp[..n], keep),
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => break,
             }
         }
     });
     (buf, task)
 }
 
-/// Blocking twin of [`drain_async`]: a reader thread, and a channel that
-/// signals when the pipe closed.
-fn drain_blocking<R>(pipe: Option<R>) -> (Arc<Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>)
+/// Blocking twin of [`drain_async`]: one reader thread per pipe.
+struct BlockingDrain {
+    buf: Arc<Mutex<Vec<u8>>>,
+    /// Signals when the pipe closed.
+    done: std::sync::mpsc::Receiver<()>,
+    /// Set to stop reading. A blocking read cannot be cancelled, so the thread
+    /// stops at its next read and then closes the pipe.
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl BlockingDrain {
+    /// Wait up to `grace` for the pipe to close, then stop reading. True when
+    /// it closed in time.
+    fn finish_within(&self, grace: Duration) -> bool {
+        let closed = self.done.recv_timeout(grace).is_ok();
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        closed
+    }
+
+    fn take(&self) -> Vec<u8> {
+        take_bytes(&self.buf)
+    }
+}
+
+fn drain_blocking<R>(pipe: Option<R>, keep: usize) -> BlockingDrain
 where
     R: Read + Send + 'static,
 {
     let buf = Arc::new(Mutex::new(Vec::new()));
     let collected = Arc::clone(&buf);
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = Arc::clone(&stop);
+    let (done_tx, done) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         if let Some(mut pipe) = pipe {
             let mut tmp = [0u8; 8 * 1024];
-            loop {
+            while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 match pipe.read(&mut tmp) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if let Ok(mut guard) = collected.lock() {
-                            guard.extend_from_slice(&tmp[..n]);
-                        }
-                    }
+                    Ok(0) => break,
+                    Ok(n) => keep_bytes(&collected, &tmp[..n], keep),
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
                 }
             }
         }
         let _ = done_tx.send(());
     });
-    (buf, done_rx)
+    BlockingDrain { buf, done, stop }
+}
+
+fn log_open_pipes(stdout_closed: bool, stderr_closed: bool) {
+    if !(stdout_closed && stderr_closed) {
+        tracing::debug!(
+            stdout_closed,
+            stderr_closed,
+            "command exited but a process it left behind still held its output; kept what was read"
+        );
+    }
 }
 
 /// Wait for `cmd` and keep stderr if the process times out.
@@ -634,6 +659,7 @@ pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunO
     cmd.kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    detach_session_tokio(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) => {
@@ -645,13 +671,18 @@ pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunO
             });
         }
     };
-    let (stdout_buf, stdout_task) = drain_async(child.stdout.take(), usize::MAX);
-    let (stderr_buf, stderr_task) = drain_async(child.stderr.take(), STDERR_KEEP_BYTES);
+    let (stdout_buf, mut stdout_task) = drain_async(child.stdout.take(), usize::MAX);
+    let (stderr_buf, mut stderr_task) = drain_async(child.stderr.take(), STDERR_KEEP_BYTES);
 
     match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => {
-            let _ = tokio::time::timeout(STDOUT_GRACE, stdout_task).await;
-            let _ = tokio::time::timeout(STDERR_GRACE, stderr_task).await;
+            let (stdout_closed, stderr_closed) = tokio::join!(
+                tokio::time::timeout(STDOUT_GRACE, &mut stdout_task),
+                tokio::time::timeout(STDERR_GRACE, &mut stderr_task),
+            );
+            stdout_task.abort();
+            stderr_task.abort();
+            log_open_pipes(stdout_closed.is_ok(), stderr_closed.is_ok());
             let stdout = take_bytes(&stdout_buf);
             let stderr = take_bytes(&stderr_buf);
             let stderr_line = first_stderr_line(&stderr);
@@ -673,15 +704,41 @@ pub async fn finish(mut cmd: tokio::process::Command, timeout: Duration) -> RunO
             })
         }
         Err(_) => {
+            // The whole session, so a helper the command started (ssh under
+            // `git fetch`) does not outlive it and hold the pipes open.
+            if let Some(pid) = child.id() {
+                let _ = tokio::task::spawn_blocking(move || kill_session(pid)).await;
+            }
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_millis(500), child.wait()).await;
             stdout_task.abort();
-            let _ = tokio::time::timeout(Duration::from_millis(200), stderr_task).await;
+            let _ = tokio::time::timeout(Duration::from_millis(200), &mut stderr_task).await;
+            stderr_task.abort();
             let stderr = take_bytes(&stderr_buf);
             RunOutput::TimedOut {
                 stderr_line: first_stderr_line(&stderr),
             }
         }
+    }
+}
+
+fn detach_session_tokio(cmd: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    {
+        // SAFETY: `setsid` is async-signal-safe and touches no other memory.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = cmd;
     }
 }
 
@@ -695,24 +752,35 @@ pub fn wait_blocking(
         .stderr(Stdio::piped());
     detach_session(&mut cmd);
     let mut child = cmd.spawn()?;
-    let (stdout_buf, stdout_done) = drain_blocking(child.stdout.take());
-    let (stderr_buf, stderr_done) = drain_blocking(child.stderr.take());
+    let stdout = drain_blocking(child.stdout.take(), usize::MAX);
+    let stderr = drain_blocking(child.stderr.take(), STDERR_KEEP_BYTES);
     let started = Instant::now();
     loop {
         match child.try_wait()? {
             Some(status) => {
-                let _ = stdout_done.recv_timeout(STDOUT_GRACE);
-                let _ = stderr_done.recv_timeout(STDERR_GRACE);
+                // One deadline for both pipes: the readers ran the whole time,
+                // so stderr gets what is left of its grace, not a second wait.
+                let exited = Instant::now();
+                let stdout_closed = stdout.finish_within(STDOUT_GRACE);
+                let stderr_closed =
+                    stderr.finish_within(STDERR_GRACE.saturating_sub(exited.elapsed()));
+                log_open_pipes(stdout_closed, stderr_closed);
                 return Ok(std::process::Output {
                     status,
-                    stdout: take_bytes(&stdout_buf),
-                    stderr: take_bytes(&stderr_buf),
+                    stdout: stdout.take(),
+                    stderr: stderr.take(),
                 });
             }
             None if started.elapsed() >= timeout => {
                 kill_session(child.id());
                 let _ = child.kill();
                 let _ = wait_briefly(&mut child, Duration::from_millis(500));
+                stdout
+                    .stop
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                stderr
+                    .stop
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     format!("command timed out after {}s", timeout.as_secs()),
@@ -970,7 +1038,8 @@ fi"#
         );
         assert!(output.status.success());
         assert_eq!(output.stdout.len(), BIG);
-        assert_eq!(output.stderr.len(), BIG);
+        // Read to the end so the writer is not cut off, but capped like `finish`.
+        assert_eq!(output.stderr.len(), STDERR_KEEP_BYTES);
     }
 
     #[test]
@@ -980,5 +1049,121 @@ fi"#
             .expect_err("timeout");
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    /// Gone, or a zombie waiting for whoever adopted it.
+    fn process_gone(pid: i32) -> bool {
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return true;
+        }
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| {
+                let end = stat.rfind(')')?;
+                stat[end + 1..].split_whitespace().next().map(|s| s == "Z")
+            })
+            .unwrap_or(false)
+    }
+
+    fn wait_gone(pid: i32) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(5) {
+            if process_gone(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    fn read_pid(path: &Path) -> i32 {
+        let started = Instant::now();
+        loop {
+            if let Some(pid) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "no pid file");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Exits at once but leaves a writer on stdout that never stops.
+    fn leaves_a_writer(pid_file: &Path) -> String {
+        format!(
+            "echo done; (while :; do echo more; sleep 0.05; done) & echo $! > {}",
+            pid_file.display()
+        )
+    }
+
+    // Multi-thread like the server: an aborted reader is dropped by a worker
+    // while this test blocks waiting for the writer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn finish_stops_reading_a_pipe_a_leftover_process_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("writer.pid");
+        let started = Instant::now();
+        let output = finish(sh(&leaves_a_writer(&pid_file)), Duration::from_secs(10)).await;
+        assert!(started.elapsed() < Duration::from_secs(4));
+        let RunOutput::Exit(exit) = output else {
+            panic!("expected exit");
+        };
+        assert!(String::from_utf8_lossy(&exit.stdout).starts_with("done\n"));
+        // The reader closed the pipe, so the writer's next echo fails.
+        assert!(wait_gone(read_pid(&pid_file)), "writer still running");
+    }
+
+    #[test]
+    fn wait_blocking_stops_reading_a_pipe_a_leftover_process_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("writer.pid");
+        let started = Instant::now();
+        let output = wait_blocking(
+            sh_blocking(&leaves_a_writer(&pid_file)),
+            Duration::from_secs(10),
+        )
+        .expect("output");
+        assert!(started.elapsed() < Duration::from_secs(4));
+        assert!(String::from_utf8_lossy(&output.stdout).starts_with("done\n"));
+        assert!(wait_gone(read_pid(&pid_file)), "writer still running");
+    }
+
+    #[tokio::test]
+    async fn finish_timeout_kills_what_the_command_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let body = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+        let output = finish(sh(&body), Duration::from_millis(500)).await;
+        assert!(matches!(output, RunOutput::TimedOut { .. }));
+        assert!(
+            wait_gone(read_pid(&pid_file)),
+            "background sleep outlived the timeout"
+        );
+    }
+
+    /// A read interrupted by a signal is retried, not taken as the end.
+    #[test]
+    fn drain_blocking_retries_an_interrupted_read() {
+        struct Interrupting(Vec<std::io::Result<Vec<u8>>>);
+        impl Read for Interrupting {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.is_empty() {
+                    return Ok(0);
+                }
+                let bytes = self.0.remove(0)?;
+                buf[..bytes.len()].copy_from_slice(&bytes);
+                Ok(bytes.len())
+            }
+        }
+        let pipe = Interrupting(vec![
+            Ok(b"ab".to_vec()),
+            Err(std::io::ErrorKind::Interrupted.into()),
+            Ok(b"cd".to_vec()),
+        ]);
+        let drain = drain_blocking(Some(pipe), usize::MAX);
+        assert!(drain.finish_within(Duration::from_secs(2)));
+        assert_eq!(drain.take(), b"abcd");
     }
 }
