@@ -45,6 +45,8 @@ fn macos_product_version() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+// Linux-only at runtime; tests exercise it everywhere.
+#[cfg(any(not(target_os = "macos"), test))]
 pub(crate) fn pretty_name(contents: &str) -> String {
     for line in contents.lines() {
         let Some(value) = line.strip_prefix("PRETTY_NAME=") else {
@@ -55,6 +57,7 @@ pub(crate) fn pretty_name(contents: &str) -> String {
     String::new()
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn unquote(value: &str) -> String {
     let bytes = value.as_bytes();
     if bytes.len() >= 2 {

@@ -482,12 +482,14 @@ gpt-5.5-high - GPT-5.5 1M High
     async fn spawn_failure_names_the_models_invocation() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("agent");
-        std::fs::write(&bin, []).unwrap();
+        // A missing interpreter fails exec everywhere. An empty file does not:
+        // macOS retries it as a shell script, which exits 0.
+        std::fs::write(&bin, "#!/nonexistent/interpreter\n").unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         let host = test_host(dir.path().as_os_str(), dir.path());
         let err = list_cursor_models_with(&host, "agent")
             .await
-            .expect_err("empty executable");
+            .expect_err("executable with a missing interpreter");
         let text = err.to_string();
         assert!(
             text.starts_with("Couldn't start `agent models`: "),

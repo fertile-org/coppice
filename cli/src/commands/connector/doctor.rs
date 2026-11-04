@@ -520,7 +520,9 @@ mod tests {
             std::env::set_current_dir(dir.path().join("server")).unwrap();
             let found = repo_root_with_makefile();
             std::env::set_current_dir(prev_cwd).unwrap();
-            assert_eq!(found.as_deref(), Some(dir.path()));
+            // The cwd comes back resolved (macOS: /var -> /private/var).
+            let expected = dir.path().canonicalize().unwrap();
+            assert_eq!(found.as_deref(), Some(expected.as_path()));
         });
     }
 }
