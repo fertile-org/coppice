@@ -1,5 +1,8 @@
 # Copy to config.toml in the repo root for local development.
 # Optional global defaults: ~/.config/coppice/config.toml (lower priority than config.toml).
+# A relative folder path starts at the folder of the file that sets it, and
+# `~/` at your home folder. Defaults and environment variables start at the
+# directory the server runs in.
 
 [server]
 port = 5000

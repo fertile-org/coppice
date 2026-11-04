@@ -231,6 +231,9 @@ pub fn changes_need_restart(before: &AppConfig, after: &AppConfig) -> bool {
     // The sweep reads retention_days from disk on its next pass.
     before.logs.retention_days = 0;
     after.logs.retention_days = 0;
+    // Only where a path points matters, not how it was spelled.
+    before.written_paths.clear();
+    after.written_paths.clear();
     before != after
 }
 
@@ -426,6 +429,16 @@ fn offset_line_col(text: &str, offset: usize) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn respelling_a_path_needs_no_restart() {
+        let before =
+            validate_config_text("[agent]\nworktrees_path = \"./data/worktrees\"\n").unwrap();
+        let same = validate_config_text("[agent]\nworktrees_path = \"data/worktrees\"\n").unwrap();
+        let moved = validate_config_text("[agent]\nworktrees_path = \"data/other\"\n").unwrap();
+        assert!(!changes_need_restart(&before, &same));
+        assert!(changes_need_restart(&before, &moved));
+    }
 
     fn write(path: &Path, text: &str) {
         if let Some(parent) = path.parent() {

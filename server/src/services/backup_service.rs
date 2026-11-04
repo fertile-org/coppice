@@ -157,9 +157,10 @@ fn export_to_path_with(
 }
 
 /// `config.toml` for a backup. Secret fields are removed and credentials are
-/// stripped from URL values. One function so export cannot forget a field.
+/// stripped from URL values. Paths keep the config's spelling rather than this
+/// machine's absolute folders. One function so export cannot forget a field.
 pub fn sanitize_config_toml(config: &AppConfig) -> Result<String, String> {
-    let raw = toml::to_string_pretty(config).map_err(|err| err.to_string())?;
+    let raw = toml::to_string_pretty(&config.as_written()).map_err(|err| err.to_string())?;
     let mut doc = raw
         .parse::<toml_edit::DocumentMut>()
         .map_err(|err| err.to_string())?;
