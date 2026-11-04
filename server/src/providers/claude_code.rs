@@ -72,13 +72,31 @@ fn append_model_flag(args: &mut Vec<String>, model: Option<&str>) {
     crate::providers::model_flag::push_model_flag(args, "--model", model);
 }
 
+/// First Claude Code release whose `--effort` takes the full
+/// `low, medium, high, xhigh, max` set (2.1.111 added `xhigh`; 2.1.72 had
+/// dropped `max`). From here the CLI also matches the level to the model on
+/// its own: a model without a level falls back to one it has, and a model
+/// without effort gets none, so Coppice does not check models itself.
+const EFFORT_MIN_VERSION: &str = "2.1.111";
+
 /// `claude --effort` takes `low, medium, high, xhigh, max`. The shared scale
-/// has no `xhigh`, so each level passes through under its own name.
-fn append_effort_flag(args: &mut Vec<String>, level: Option<ThinkingLevel>) {
-    if let Some(level) = level {
-        args.push("--effort".to_string());
-        args.push(level.as_str().to_string());
+/// has no `xhigh`, so each level passes through under its own name. An older
+/// CLI may reject the flag or a level, so it gets no flag and runs at its
+/// default effort instead of failing.
+fn append_effort_flag(args: &mut Vec<String>, level: Option<ThinkingLevel>, version: &str) {
+    let Some(level) = level else {
+        return;
+    };
+    if !coppice_connectors::version_at_least(version, EFFORT_MIN_VERSION) {
+        tracing::warn!(
+            version,
+            level = level.as_str(),
+            "Claude Code {version} is older than {EFFORT_MIN_VERSION}; running at its default effort"
+        );
+        return;
     }
+    args.push("--effort".to_string());
+    args.push(level.as_str().to_string());
 }
 
 fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
@@ -162,7 +180,7 @@ impl AgentProvider for ClaudeCodeProvider {
         }
 
         append_model_flag(&mut args, input.model.as_deref());
-        append_effort_flag(&mut args, input.thinking_level);
+        append_effort_flag(&mut args, input.thinking_level, &version);
 
         // Resume a previous claude-code session if we have its session_id.
         if let Some(sid) = &input.resume_session_id {
@@ -896,7 +914,7 @@ mod tests {
     #[test]
     fn thinking_level_sets_effort_flag() {
         let mut args = Vec::new();
-        append_effort_flag(&mut args, None);
+        append_effort_flag(&mut args, None, "2.1.318");
         assert!(args.is_empty(), "no level leaves the CLI default: {args:?}");
         for (level, value) in [
             (ThinkingLevel::Low, "low"),
@@ -904,9 +922,20 @@ mod tests {
             (ThinkingLevel::High, "high"),
             (ThinkingLevel::Max, "max"),
         ] {
+            for version in ["2.1.111", "2.1.318", "3.0.0"] {
+                let mut args = Vec::new();
+                append_effort_flag(&mut args, Some(level), version);
+                assert_eq!(args, ["--effort", value], "version {version}");
+            }
+        }
+    }
+
+    #[test]
+    fn older_cli_runs_at_default_effort() {
+        for version in ["2.0.0", "2.1.72", "2.1.110"] {
             let mut args = Vec::new();
-            append_effort_flag(&mut args, Some(level));
-            assert_eq!(args, ["--effort", value]);
+            append_effort_flag(&mut args, Some(ThinkingLevel::Max), version);
+            assert!(args.is_empty(), "version {version} launched {args:?}");
         }
     }
 

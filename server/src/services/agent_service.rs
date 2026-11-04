@@ -121,9 +121,9 @@ impl<'a> AgentService<'a> {
             }
         }
 
-        let thinking_level = parse_thinking_level(thinking_level)?;
         let preset = self.get_preset(preset_id).await?;
         let connector = resolve_new_connector(connector)?;
+        let thinking_level = for_connector(connector, parse_thinking_level(thinking_level)?);
         let agent = self
             .insert_agent(
                 name,
@@ -177,8 +177,8 @@ impl<'a> AgentService<'a> {
             }
         }
 
-        let thinking_level = parse_thinking_level(thinking_level)?;
         let connector = resolve_new_connector(connector)?;
+        let thinking_level = for_connector(connector, parse_thinking_level(thinking_level)?);
         self.insert_agent(
             name,
             role,
@@ -223,6 +223,9 @@ impl<'a> AgentService<'a> {
             None => current.thinking_level,
             Some(value) => parse_thinking_level(value)?,
         };
+        // Moving to a connector without the capability drops the level, so
+        // no hidden level comes back if the agent later moves back.
+        let thinking_level = for_connector(connector, thinking_level);
         let enabled = enabled.unwrap_or(current.enabled);
 
         let row = sqlx::query(
@@ -360,6 +363,14 @@ fn parse_thinking_level(value: Option<&str>) -> Result<Option<ThinkingLevel>, Ag
     }
 }
 
+/// A level is stored only for a connector that maps it to a flag. Elsewhere it
+/// would do nothing and the form could not show or clear it.
+fn for_connector(connector: &str, level: Option<ThinkingLevel>) -> Option<ThinkingLevel> {
+    level.filter(|_| {
+        coppice_connectors::get(connector).is_some_and(|descriptor| descriptor.caps.thinking_level)
+    })
+}
+
 /// Dev/test builds default a missing connector to mock. Release builds refuse
 /// it: the mock provider is not compiled in, so it must not be stored either.
 /// Absent field keeps `current`. A present blank or null clears it.
@@ -462,7 +473,8 @@ mod tests {
             .await
             .expect("create");
         assert_eq!(created.model.as_deref(), Some("auto"));
-        assert_eq!(created.thinking_level, Some(ThinkingLevel::High));
+        // Cursor has no thinking level capability, so the level is not stored.
+        assert!(created.thinking_level.is_none());
         assert_eq!(created.model_provider.as_deref(), Some("cursor"));
 
         let cleared = service
@@ -568,7 +580,14 @@ mod tests {
 
         let set = service
             .update(
-                created.id, None, None, None, None, None, None, None,
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 Some(Some("low")),
                 None,
             )
@@ -580,7 +599,14 @@ mod tests {
             .update(
                 created.id,
                 Some("Renamed"),
-                None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await
             .expect("keep");
@@ -588,7 +614,14 @@ mod tests {
 
         let rejected = service
             .update(
-                created.id, None, None, None, None, None, None, None,
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 Some(Some("ultra")),
                 None,
             )
@@ -596,5 +629,40 @@ mod tests {
         assert!(matches!(rejected, Err(AgentError::Validation(_))));
         let after = service.get(created.id).await.expect("get");
         assert_eq!(after.thinking_level, Some(ThinkingLevel::Low));
+
+        // A connector without the capability drops the level, even one sent
+        // in the same request, and it stays gone after moving back.
+        let moved = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                Some(coppice_connectors::CODEX),
+                None,
+                None,
+                Some(Some("max")),
+                None,
+            )
+            .await
+            .expect("move to codex");
+        assert!(moved.thinking_level.is_none());
+        let back = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                Some(coppice_connectors::CLAUDE_CODE),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("move back");
+        assert!(back.thinking_level.is_none());
     }
 }

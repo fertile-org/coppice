@@ -459,6 +459,21 @@ describe('AgentForm thinking level', () => {
     );
     expect(screen.getByRole('combobox', { name: 'Thinking level' })).toHaveTextContent('Max');
   });
+
+  it('clears a hidden level on submit', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <Harness
+        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help', thinkingLevel: 'max' })}
+        onSubmit={onSubmit}
+        connectorOptions={[claudeCode, { id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].thinkingLevel).toBe('');
+  });
 });
 
 describe('AgentForm plugins picker', () => {

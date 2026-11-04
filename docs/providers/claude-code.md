@@ -50,7 +50,7 @@ coppice connector doctor claude-code
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **claude-code**.
 3. Leave the model on Claude Code's default, or pick a model from the list (sonnet, opus, haiku, and fable are headings). Refresh models loads that list again.
-4. Optionally pick a **Thinking level** (Low, Medium, High, Max). It becomes `claude --effort <level>`; Claude's `xhigh` is not on the shared scale. Leaving it on the default passes no `--effort`.
+4. Optionally pick a **Thinking level** (Low, Medium, High, Max). It becomes `claude --effort <level>`; Claude's `xhigh` is not on the shared scale. Leaving it on the default passes no `--effort`. Claude Code older than 2.1.111 gets no `--effort` either and runs at its default, because older builds lack the flag or some levels. From 2.1.111 the CLI picks the closest level a model supports, so any level works with any model (checked on 2.1.318: `haiku` at `max` runs).
 5. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):

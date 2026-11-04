@@ -346,7 +346,10 @@ export function AgentForm({
     const pluginIds = plugins
       ? values.pluginIds.filter((id) => assignableIds.has(id))
       : values.pluginIds;
-    await onSubmit({ ...values, pluginIds });
+    // A hidden level would be saved without the user seeing it (the server
+    // drops it too). Keep it while the connector list is still loading.
+    const thinkingLevel = selectedConnector && !showThinkingLevel ? '' : values.thinkingLevel;
+    await onSubmit({ ...values, pluginIds, thinkingLevel });
   }
 
   const displayError = error ?? localError;
