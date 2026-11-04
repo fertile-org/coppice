@@ -16,6 +16,8 @@ Coppice keeps its settings in one file, `config.toml`:
 
 On Linux, if `XDG_CONFIG_HOME` is set, the file is at `$XDG_CONFIG_HOME/Coppice/config.toml`.
 
+A folder setting can be relative, like `./worktrees`. It then starts at the folder that holds `config.toml`. A path that starts with `~/` starts at your home folder.
+
 ## Edit it in the app
 Open **Settings** in the sidebar. It lists every setting below, grouped like this page, with a search box.
 

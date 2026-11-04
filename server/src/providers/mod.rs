@@ -523,11 +523,10 @@ pub fn fixtures_root_from(env: Option<&str>) -> PathBuf {
 /// Resolve the ticket worktree directory from `.agent/context.md` and return an
 /// absolute path.
 ///
-/// Config often uses relative `worktrees_path` (e.g. `./data/worktrees`). Providers
-/// that both `current_dir(worktree)` and pass that same relative path as a CLI
-/// flag (`--workspace`, `-C`, …) make the child resolve the flag against the new
-/// cwd and look for a duplicated path. Canonicalizing once here keeps every
-/// connector safe.
+/// Loading config already makes `worktrees_path` absolute. Canonicalizing
+/// here still checks the folder exists and resolves symlinks, so a CLI that
+/// both runs in the worktree and gets its path as a flag (`--workspace`,
+/// `-C`, …) sees one real path.
 pub fn worktree_dir_from_context(context_path: &str) -> Result<PathBuf, ProviderError> {
     let context_path = PathBuf::from(context_path);
     let worktree = context_path

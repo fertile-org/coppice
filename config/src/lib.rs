@@ -38,7 +38,39 @@ pub struct AppConfig {
     /// Shortcut overrides. Empty keeps the built-in keys.
     #[serde(default)]
     pub keybindings: keybindings::Keybindings,
+    /// Path settings as the config spelled them, before [`resolve_paths`]
+    /// made them absolute. [`AppConfig::as_written`] puts them back.
+    #[serde(skip)]
+    written_paths: Vec<WrittenPath>,
 }
+
+/// One path setting before and after loading made it absolute.
+#[derive(Debug, Clone, PartialEq)]
+struct WrittenPath {
+    key: &'static str,
+    written: String,
+    resolved: String,
+}
+
+type PathField = fn(&mut AppConfig) -> &mut String;
+
+/// Every setting that names a folder. Loading makes each one absolute, so no
+/// caller resolves it against its own working directory: git runs inside each
+/// repo and connectors run inside a worktree, where a relative path means
+/// something else.
+const PATH_SETTINGS: &[(&str, PathField)] = &[
+    ("storage.artifacts_dir", |c| &mut c.storage.artifacts_dir),
+    ("agent.worktrees_path", |c| &mut c.agent.worktrees_path),
+    ("web.static_dir", |c| &mut c.web.static_dir),
+    ("mcp.builtin_plugins_dir", |c| {
+        &mut c.mcp.builtin_plugins_dir
+    }),
+    ("plugins.dir", |c| &mut c.plugins.dir),
+    ("plugins.marketplaces_dir", |c| {
+        &mut c.plugins.marketplaces_dir
+    }),
+    ("logs.dir", |c| &mut c.logs.dir),
+];
 
 /// Non-desktop log directory. Ignored when the desktop app passes `--logs-dir`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -794,8 +826,9 @@ pub struct AgentConfig {
         skip_serializing
     )]
     ignored_default_connector: Option<String>,
-    /// Absolute after loading. Git runs inside each repo, so a relative path
-    /// would land in that repo instead of where the server looks for it.
+    /// Absolute after loading (see [`PATH_SETTINGS`]). Git runs inside each
+    /// repo, so a relative path would land in that repo instead of where the
+    /// server looks for it.
     pub worktrees_path: String,
     #[serde(default = "default_worker_count")]
     pub worker_count: u32,
@@ -1371,20 +1404,74 @@ impl Default for CursorConnectorConfig {
     }
 }
 
-/// `path` against the current directory, without `.` segments. Unchanged when
-/// it is already absolute, empty, or the current directory cannot be read.
-fn absolute_from_cwd(path: &str) -> String {
-    if path.is_empty() || Path::new(path).is_absolute() {
-        return path.to_string();
+/// A path setting made absolute. `~` and `~/…` start at the home folder. A
+/// relative path starts at `base` (the folder of the config file that set it)
+/// or, for defaults and environment variables, the current directory. An
+/// absolute or empty path is unchanged.
+fn resolve_path(written: &str, base: Option<&Path>) -> Result<String, String> {
+    if written.is_empty() {
+        return Ok(String::new());
     }
-    match std::path::absolute(path) {
-        Ok(absolute) => absolute
-            .components()
-            .collect::<PathBuf>()
-            .display()
-            .to_string(),
-        Err(_) => path.to_string(),
+    let path = expand_home(written)?;
+    if path.is_absolute() {
+        return Ok(path.display().to_string());
     }
+    let joined = match base {
+        Some(dir) => dir.join(&path),
+        None => path,
+    };
+    // Drops `.` segments; keeps `..` because a symlink may sit before it.
+    std::path::absolute(&joined)
+        .map(|absolute| absolute.display().to_string())
+        .map_err(|err| format!("couldn't read the current directory: {err}"))
+}
+
+/// `~` or `~/rest` under the home folder. `~user` is not expanded.
+fn expand_home(path: &str) -> Result<PathBuf, String> {
+    let rest = if path == "~" {
+        ""
+    } else if let Some(rest) = path
+        .strip_prefix("~/")
+        .or_else(|| path.strip_prefix(&format!("~{}", std::path::MAIN_SEPARATOR)))
+    {
+        rest
+    } else {
+        return Ok(PathBuf::from(path));
+    };
+    let home = directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .ok_or_else(|| "couldn't find the home folder for `~`".to_string())?;
+    Ok(if rest.is_empty() {
+        home
+    } else {
+        home.join(rest)
+    })
+}
+
+/// Makes every [`PATH_SETTINGS`] entry absolute, each against the folder of
+/// the config file that set it, and records what was written.
+fn resolve_paths(config: &mut AppConfig, figment: &Figment) -> Result<(), String> {
+    config.written_paths.clear();
+    for &(key, field) in PATH_SETTINGS {
+        let base = figment
+            .find_metadata(key)
+            .and_then(|meta| meta.source.as_ref())
+            .and_then(|source| source.file_path())
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        let written = field(config).clone();
+        let resolved = resolve_path(&written, base.as_deref())
+            .map_err(|err| format!("{key} = \"{written}\": {err}"))?;
+        *field(config) = resolved.clone();
+        if resolved != written {
+            config.written_paths.push(WrittenPath {
+                key,
+                written,
+                resolved,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl AppConfig {
@@ -1480,6 +1567,24 @@ impl AppConfig {
             .unwrap_or_else(|| self.server_url())
     }
 
+    /// This config with each path setting as the config file spelled it, for
+    /// writing config back out: a backup or a listed default should not carry
+    /// this machine's folders. A path changed after loading is kept as is.
+    pub fn as_written(&self) -> Self {
+        let mut config = self.clone();
+        for written in &self.written_paths {
+            let Some(&(_, field)) = PATH_SETTINGS.iter().find(|(key, _)| *key == written.key)
+            else {
+                continue;
+            };
+            let value = field(&mut config);
+            if *value == written.resolved {
+                *value = written.written.clone();
+            }
+        }
+        config
+    }
+
     fn load_figment(figment: Figment) -> Result<Self, Box<figment::Error>> {
         let mut config: Self = figment.extract().map_err(Box::new)?;
         if config.agent.ignored_default_connector.take().is_some() {
@@ -1494,7 +1599,8 @@ impl AppConfig {
             .knowledge
             .validate()
             .map_err(|message| Box::new(figment::Error::from(message)))?;
-        config.agent.worktrees_path = absolute_from_cwd(&config.agent.worktrees_path);
+        resolve_paths(&mut config, &figment)
+            .map_err(|message| Box::new(figment::Error::from(message)))?;
         Ok(config)
     }
 
@@ -1639,6 +1745,7 @@ impl AppConfig {
             plugins: PluginsConfig::default(),
             logs: LogsConfig::default(),
             keybindings: keybindings::Keybindings::default(),
+            written_paths: Vec::new(),
         }
     }
 }
@@ -1683,7 +1790,15 @@ mod tests {
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 5000);
-        assert_eq!(cfg.logs.dir, "./data/logs");
+        assert_eq!(cfg.as_written().logs.dir, "./data/logs");
+        assert_eq!(
+            cfg.logs.dir,
+            std::env::current_dir()
+                .unwrap()
+                .join("data/logs")
+                .display()
+                .to_string()
+        );
         assert_eq!(cfg.logs.retention_days, 14);
         assert_eq!(cfg.logs.effective_retention_days(), 14);
     }
@@ -1732,37 +1847,91 @@ mod tests {
         assert_eq!(cfg.web.port, 5001);
     }
 
-    #[test]
-    fn relative_worktrees_path_loads_absolute_against_the_cwd() {
+    fn file_config(text: &str) -> (tempfile::TempDir, AppConfig) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[agent]\nworktrees_path = \"./data/worktrees\"\n").expect("write");
-
+        std::fs::write(&path, text).expect("write");
         let cfg = AppConfig::load_file_only(&path).expect("config should load");
+        (dir, cfg)
+    }
 
-        let expected = std::env::current_dir()
+    #[test]
+    fn relative_path_settings_start_at_the_config_files_folder() {
+        let (dir, cfg) = file_config(
+            "[agent]\nworktrees_path = \"./data/worktrees\"\n\
+             [storage]\nartifacts_dir = \"data/artifacts\"\n\
+             [plugins]\ndir = \"../plugins\"\n",
+        );
+        let expected = |rel: &str| dir.path().join(rel).display().to_string();
+        assert_eq!(cfg.agent.worktrees_path, expected("data/worktrees"));
+        assert_eq!(cfg.storage.artifacts_dir, expected("data/artifacts"));
+        // `..` is kept: a symlinked folder may sit before it.
+        assert_eq!(cfg.plugins.dir, expected("../plugins"));
+    }
+
+    #[test]
+    fn default_path_settings_start_at_the_current_directory() {
+        let (_dir, mut cfg) = file_config("");
+        let cwd = std::env::current_dir().unwrap();
+        for &(key, field) in PATH_SETTINGS {
+            let value = field(&mut cfg).clone();
+            assert!(Path::new(&value).is_absolute(), "{key} = {value}");
+            assert!(Path::new(&value).starts_with(&cwd), "{key} = {value}");
+        }
+        assert_eq!(
+            cfg.agent.worktrees_path,
+            cwd.join("data/worktrees").display().to_string()
+        );
+    }
+
+    #[test]
+    fn absolute_and_empty_paths_are_kept() {
+        assert_eq!(
+            resolve_path("/srv/worktrees", None).unwrap(),
+            "/srv/worktrees"
+        );
+        assert_eq!(
+            resolve_path("/srv/worktrees", Some(Path::new("/etc"))).unwrap(),
+            "/srv/worktrees"
+        );
+        assert_eq!(resolve_path("", Some(Path::new("/etc"))).unwrap(), "");
+    }
+
+    #[test]
+    fn tilde_paths_start_at_the_home_folder() {
+        let home = directories::BaseDirs::new()
             .unwrap()
-            .join("data")
-            .join("worktrees");
-        assert_eq!(cfg.agent.worktrees_path, expected.display().to_string());
+            .home_dir()
+            .to_path_buf();
+        let at = |rel: &str| home.join(rel).display().to_string();
+        assert_eq!(
+            resolve_path("~/coppice/worktrees", Some(Path::new("/etc"))).unwrap(),
+            at("coppice/worktrees")
+        );
+        assert_eq!(resolve_path("~", None).unwrap(), home.display().to_string());
+        // `~user` and a `~` later in the path are plain names.
+        assert_eq!(
+            resolve_path("~other/wt", Some(Path::new("/srv"))).unwrap(),
+            "/srv/~other/wt"
+        );
+        let (_dir, cfg) = file_config("[agent]\nworktrees_path = \"~/coppice-worktrees\"\n");
+        assert_eq!(cfg.agent.worktrees_path, at("coppice-worktrees"));
     }
 
     #[test]
-    fn default_worktrees_path_is_absolute() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "").expect("write");
-
-        let cfg = AppConfig::load_file_only(&path).expect("config should load");
-
+    fn as_written_restores_the_spelling_from_the_file() {
+        let (_dir, mut cfg) = file_config(
+            "[agent]\nworktrees_path = \"./data/worktrees\"\n[storage]\nartifacts_dir = \"/srv/a\"\n",
+        );
         assert!(Path::new(&cfg.agent.worktrees_path).is_absolute());
-        assert!(cfg.agent.worktrees_path.ends_with("data/worktrees"));
-    }
+        let written = cfg.as_written();
+        assert_eq!(written.agent.worktrees_path, "./data/worktrees");
+        assert_eq!(written.storage.artifacts_dir, "/srv/a");
+        assert_eq!(written.web.static_dir, "./web/dist");
 
-    #[test]
-    fn absolute_worktrees_path_is_kept() {
-        assert_eq!(absolute_from_cwd("/srv/worktrees"), "/srv/worktrees");
-        assert_eq!(absolute_from_cwd(""), "");
+        // A path changed after loading is what the config now uses.
+        cfg.agent.worktrees_path = "/tmp/elsewhere".into();
+        assert_eq!(cfg.as_written().agent.worktrees_path, "/tmp/elsewhere");
     }
 
     #[test]

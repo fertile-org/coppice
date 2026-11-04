@@ -539,7 +539,10 @@ pub fn catalog(desktop: bool) -> Vec<SettingSpec> {
 }
 
 fn default_values(desktop: bool) -> Value {
-    let mut config = AppConfig::load_defaults().unwrap_or_else(|_| AppConfig::default_values());
+    // Paths as spelled, so a default does not name this machine's folders.
+    let mut config = AppConfig::load_defaults()
+        .map(|config| config.as_written())
+        .unwrap_or_else(|_| AppConfig::default_values());
     if desktop {
         config.git.push_enabled = true;
     }
@@ -740,7 +743,8 @@ mod tests {
                 );
                 continue;
             }
-            let read = Value::try_from(&parsed).unwrap();
+            // Paths load absolute; compare them as written.
+            let read = Value::try_from(&parsed.as_written()).unwrap();
             assert_eq!(
                 lookup(&read, &spec.path),
                 Some(&value),
