@@ -794,6 +794,8 @@ pub struct AgentConfig {
         skip_serializing
     )]
     ignored_default_connector: Option<String>,
+    /// Absolute after loading. Git runs inside each repo, so a relative path
+    /// would land in that repo instead of where the server looks for it.
     pub worktrees_path: String,
     #[serde(default = "default_worker_count")]
     pub worker_count: u32,
@@ -1369,6 +1371,22 @@ impl Default for CursorConnectorConfig {
     }
 }
 
+/// `path` against the current directory, without `.` segments. Unchanged when
+/// it is already absolute, empty, or the current directory cannot be read.
+fn absolute_from_cwd(path: &str) -> String {
+    if path.is_empty() || Path::new(path).is_absolute() {
+        return path.to_string();
+    }
+    match std::path::absolute(path) {
+        Ok(absolute) => absolute
+            .components()
+            .collect::<PathBuf>()
+            .display()
+            .to_string(),
+        Err(_) => path.to_string(),
+    }
+}
+
 impl AppConfig {
     /// Load config: defaults → `~/.config/coppice/config.toml` → `./config.toml` →
     /// `COPPICE_CONFIG` file → environment variables (last wins).
@@ -1476,6 +1494,7 @@ impl AppConfig {
             .knowledge
             .validate()
             .map_err(|message| Box::new(figment::Error::from(message)))?;
+        config.agent.worktrees_path = absolute_from_cwd(&config.agent.worktrees_path);
         Ok(config)
     }
 
@@ -1711,6 +1730,39 @@ mod tests {
 
         assert_eq!(cfg.server.port, 4321);
         assert_eq!(cfg.web.port, 5001);
+    }
+
+    #[test]
+    fn relative_worktrees_path_loads_absolute_against_the_cwd() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[agent]\nworktrees_path = \"./data/worktrees\"\n").expect("write");
+
+        let cfg = AppConfig::load_file_only(&path).expect("config should load");
+
+        let expected = std::env::current_dir()
+            .unwrap()
+            .join("data")
+            .join("worktrees");
+        assert_eq!(cfg.agent.worktrees_path, expected.display().to_string());
+    }
+
+    #[test]
+    fn default_worktrees_path_is_absolute() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "").expect("write");
+
+        let cfg = AppConfig::load_file_only(&path).expect("config should load");
+
+        assert!(Path::new(&cfg.agent.worktrees_path).is_absolute());
+        assert!(cfg.agent.worktrees_path.ends_with("data/worktrees"));
+    }
+
+    #[test]
+    fn absolute_worktrees_path_is_kept() {
+        assert_eq!(absolute_from_cwd("/srv/worktrees"), "/srv/worktrees");
+        assert_eq!(absolute_from_cwd(""), "");
     }
 
     #[test]
