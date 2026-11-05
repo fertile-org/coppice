@@ -113,6 +113,11 @@ function PlanQuestionsForm({
   );
 }
 
+const primaryButton =
+  'rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50';
+const secondaryButton =
+  'rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50';
+
 export function PlanReviewActions({
   ticketId,
   boardId,
@@ -128,7 +133,7 @@ export function PlanReviewActions({
   boardId: string;
   /** False while there is no plan yet: Approve and Ask for changes stay hidden. */
   hasPlan?: boolean;
-  /** The plan to review, shown right above Approve and Ask for changes. */
+  /** The plan to review, shown above the feedback box. */
   plan?: string | null;
   revision?: number;
   changeRequests?: string[];
@@ -170,6 +175,7 @@ export function PlanReviewActions({
   });
 
   const busy = approve.isPending || ask.isPending;
+  const notePending = comment.trim().length > 0;
 
   const waiting = Boolean(planQuestions?.waiting);
 
@@ -178,7 +184,7 @@ export function PlanReviewActions({
     () => {
       approve.mutate();
     },
-    !busy && hasPlan && !waiting && !planRunActive,
+    !busy && hasPlan && !waiting && !planRunActive && !notePending,
   );
 
   if (waiting && planQuestions) {
@@ -223,20 +229,6 @@ export function PlanReviewActions({
           </p>
         </>
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => approve.mutate()}
-          disabled={busy || planRunActive}
-          title={planRunActive ? PLAN_COPY.approveWhileRewriting : undefined}
-          className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {approve.isPending ? PLAN_COPY.approving : PLAN_COPY.approvePlan}
-        </button>
-        {designOutOfDate && (
-          <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
-        )}
-      </div>
       <form
         className="flex flex-col gap-2"
         onSubmit={(event) => {
@@ -254,13 +246,34 @@ export function PlanReviewActions({
           rows={3}
           className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary"
         />
-        <button
-          type="submit"
-          disabled={busy || comment.trim().length === 0}
-          className="self-start rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {ask.isPending ? PLAN_COPY.sending : PLAN_COPY.askForChanges}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="submit"
+            disabled={busy || !notePending}
+            className={notePending ? primaryButton : secondaryButton}
+          >
+            {ask.isPending ? PLAN_COPY.sending : PLAN_COPY.askForChanges}
+          </button>
+          {notePending && (
+            <p className="font-body text-xs text-text-secondary">
+              {PLAN_COPY.approveNeedsEmptyNote}
+            </p>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {designOutOfDate && (
+              <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
+            )}
+            <button
+              type="button"
+              onClick={() => approve.mutate()}
+              disabled={busy || planRunActive || notePending}
+              title={planRunActive ? PLAN_COPY.approveWhileRewriting : undefined}
+              className={notePending ? secondaryButton : primaryButton}
+            >
+              {approve.isPending ? PLAN_COPY.approving : PLAN_COPY.approvePlan}
+            </button>
+          </div>
+        </div>
       </form>
       {error && <p className="font-body text-sm text-danger">{error}</p>}
     </section>

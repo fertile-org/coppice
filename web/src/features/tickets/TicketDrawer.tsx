@@ -33,7 +33,6 @@ import { parseApiErrorMessage } from '../../lib/api';
 import { AcceptTicketDialog } from './AcceptTicketDialog';
 import {
   useArchiveTicket,
-  useFinalApprove,
   ticketQueryKey,
   useTicket,
   useUnarchiveTicket,
@@ -146,7 +145,6 @@ function TicketDrawerPanel({
   const { data: connectors } = useConnectors();
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
-  const finalApprove = useFinalApprove(ticketId);
   const archiveTicket = useArchiveTicket(ticketId);
   const unarchiveTicket = useUnarchiveTicket(ticketId);
   const [tab, setTab] = useState<DrawerTab>('detail');
@@ -257,15 +255,6 @@ function TicketDrawerPanel({
     }
   }
 
-  async function handleFinalApprove() {
-    setActionError(null);
-    try {
-      await finalApprove.mutateAsync();
-    } catch {
-      setActionError('Unable to accept ticket.');
-    }
-  }
-
   async function handleArchive() {
     setActionError(null);
     try {
@@ -292,7 +281,6 @@ function TicketDrawerPanel({
     !detailLoaded ||
     runAgent.isPending ||
     stopRun.isPending ||
-    finalApprove.isPending ||
     archiveTicket.isPending ||
     unarchiveTicket.isPending;
   const archiveDisabledReason = ticket?.hasActiveRun
@@ -360,11 +348,11 @@ function TicketDrawerPanel({
               {ticket.status === 'wait_for_final_review' && !isArchived && (
                 <Button
                   type="button"
-                  onClick={() => void handleFinalApprove()}
+                  onClick={() => setAcceptOpen(true)}
                   disabled={headerBusy}
                   className="px-3 py-1.5"
                 >
-                  {finalApprove.isPending ? 'Accepting…' : 'Accept'}
+                  Accept
                 </Button>
               )}
 
