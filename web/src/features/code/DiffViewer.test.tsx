@@ -1,4 +1,7 @@
 import '@testing-library/jest-dom/vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DiffViewer } from './DiffViewer';
@@ -89,5 +92,15 @@ describe('DiffViewer tokens', () => {
     const { container } = renderDiff('src/app.ts');
     expect(container.querySelectorAll('.diff-hunk')).toHaveLength(100);
     expect(container.querySelector('.diff-code-insert .diff-code-edit')).toHaveTextContent('new');
+  });
+
+  it('paints an edited token with the mark text colour', () => {
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../index.css'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /\.code-review-diff \.diff-code-edit \[class\*="hljs-"\]\s*\{\s*color:\s*inherit;/,
+    );
   });
 });

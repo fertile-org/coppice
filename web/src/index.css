@@ -300,4 +300,9 @@
   .code-review-diff .hljs-variable {
     color: var(--color-accent);
   }
+
+  /* Syntax colours fail contrast on the edit wash. The mark's text colour does not. */
+  .code-review-diff .diff-code-edit [class*="hljs-"] {
+    color: inherit;
+  }
 }
