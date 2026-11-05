@@ -24,6 +24,11 @@ const published = makeDesignSet({
   choice: { mode: 'save_only', planOutOfDate: false },
 });
 
+const PREVIEW_CSP =
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' data:; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'";
+const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+const PNG_DATA = 'data:image/png;base64,AQ==';
+
 const blobs: Blob[] = [];
 
 function readBlob(blob: Blob | undefined): Promise<string> {
@@ -113,22 +118,39 @@ describe('DesignCard', () => {
     expect(frame.getAttribute('src')).toMatch(/^blob:/);
   });
 
-  it('rewrites relative css and images onto blob urls', async () => {
+  it('inlines a linked stylesheet and rewrites images to data urls', async () => {
     apiFetch.mockImplementation((path: string) => {
       const file = String(path);
       if (file.endsWith('/a/index.html')) {
         return Promise.resolve(
           new Response(
-            '<link rel="stylesheet" href="app.css"><img src="shot.png"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">',
+            '<link rel="stylesheet" href="https://cdn.example/x.css"><link rel="stylesheet" href="app.css"><img src="shot.png"><img src="icon.svg"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">',
             { status: 200 },
           ),
         );
       }
       if (file.endsWith('/a/app.css')) {
-        return Promise.resolve(new Response('body{background:url("bg.png")}', { status: 200 }));
+        return Promise.resolve(
+          new Response(
+            '@import url("extra.css");body{background:url("bg.png");src:url("f.woff");src:url("f.woff2")}',
+            { status: 200 },
+          ),
+        );
+      }
+      if (file.endsWith('/a/extra.css')) {
+        return Promise.resolve(new Response('h1{color:blue}', { status: 200 }));
       }
       if (file.endsWith('/a/shot.png') || file.endsWith('/a/bg.png')) {
         return Promise.resolve(new Response(new Uint8Array([1]), { status: 200 }));
+      }
+      if (file.endsWith('/a/icon.svg')) {
+        return Promise.resolve(new Response(new Uint8Array([2]), { status: 200 }));
+      }
+      if (file.endsWith('/a/f.woff')) {
+        return Promise.resolve(new Response(new Uint8Array([3]), { status: 200 }));
+      }
+      if (file.endsWith('/a/f.woff2')) {
+        return Promise.resolve(new Response(new Uint8Array([4]), { status: 200 }));
       }
       return Promise.resolve(new Response('missing', { status: 404 }));
     });
@@ -136,13 +158,71 @@ describe('DesignCard', () => {
     const page = await rewriteDesignHtml(published.id, 'a/index.html');
     const html = blobs.at(-1);
     expect(html?.type).toBe('text/html');
+    expect(blobs).toHaveLength(1);
     expect(await readBlob(html)).toBe(
-      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'"><link rel="stylesheet" href="blob:asset-2"><img src="blob:asset-3"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">`,
+      `${CSP_META}<link rel="stylesheet" href="https://cdn.example/x.css"><style>@import url("data:text/css;base64,${btoa('h1{color:blue}')}");body{background:url("${PNG_DATA}");src:url("data:font/woff;base64,Aw==");src:url("data:font/woff2;base64,BA==")}</style><img src="${PNG_DATA}"><img src="data:image/svg+xml;base64,Ag=="><img src="https://cdn.example/x.png"><img src="data:image/png;base64,qq">`,
     );
-    const css = blobs.find((blob) => blob.type === 'text/css');
-    expect(await readBlob(css)).toBe('body{background:url("blob:asset-1")}');
-    expect(page.url).toBe('blob:asset-4');
+    expect(page.url).toBe('blob:asset-1');
     page.revoke();
+  });
+
+  it('inlines one shared stylesheet into each option that links it', async () => {
+    apiFetch.mockImplementation((path: string) => {
+      const file = String(path);
+      if (file.endsWith('/a.html')) {
+        return Promise.resolve(
+          new Response('<link rel="stylesheet" href="shared.css"><p>A</p>', { status: 200 }),
+        );
+      }
+      if (file.endsWith('/b.html')) {
+        return Promise.resolve(
+          new Response(`<link href='shared.css' rel='stylesheet'><p>B</p>`, { status: 200 }),
+        );
+      }
+      if (file.endsWith('/shared.css')) {
+        return Promise.resolve(new Response('body{color:red}', { status: 200 }));
+      }
+      return Promise.resolve(new Response('missing', { status: 404 }));
+    });
+
+    await rewriteDesignHtml(published.id, 'a.html');
+    await rewriteDesignHtml(published.id, 'b.html');
+    expect(await readBlob(blobs[0])).toContain('<style>body{color:red}</style>');
+    expect(await readBlob(blobs[1])).toContain('<style>body{color:red}</style>');
+    expect(blobs.every((blob) => blob.type === 'text/html')).toBe(true);
+  });
+
+  it('leaves a missing stylesheet link in place', async () => {
+    apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/a/index.html')) {
+        return Promise.resolve(
+          new Response('<link rel="stylesheet" href="nope.css"><p>Hi</p>', { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response('missing', { status: 404 }));
+    });
+
+    await rewriteDesignHtml(published.id, 'a/index.html');
+    expect(await readBlob(blobs[0])).toContain('<link rel="stylesheet" href="nope.css">');
+  });
+
+  it('places the preview CSP after head and keeps the doctype first', async () => {
+    apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/a/index.html')) {
+        return Promise.resolve(
+          new Response('<!doctype html><html><head><title>T</title></head><body></body></html>', {
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response('missing', { status: 404 }));
+    });
+
+    await rewriteDesignHtml(published.id, 'a/index.html');
+    const html = await readBlob(blobs[0]);
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html.indexOf('<head>')).toBeLessThan(html.indexOf(CSP_META));
+    expect(html.indexOf(CSP_META)).toBeLessThan(html.indexOf('<title>'));
   });
 
   it('adds the preview CSP to a nested html file', async () => {
@@ -158,12 +238,17 @@ describe('DesignCard', () => {
     });
 
     await rewriteDesignHtml(published.id, 'a/index.html');
-    expect(await readBlob(blobs[0])).toBe(
-      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'"><p>Nested</p>`,
+    const html = await readBlob(blobs[0]);
+    const href = /href="([^"]+)"/.exec(html)?.[1] ?? '';
+    const payload = new TextDecoder().decode(
+      Uint8Array.from(atob(href.split(',')[1] ?? ''), (char) => char.charCodeAt(0)),
     );
+    expect(href.startsWith('data:text/html;base64,')).toBe(true);
+    expect(payload).toBe(`${CSP_META}<p>Nested</p>`);
+    expect(blobs).toHaveLength(1);
   });
 
-  it('revokes blob urls when a later file aborts', async () => {
+  it('revokes nothing when a later file aborts before the page blob exists', async () => {
     const revoked: string[] = [];
     Object.defineProperty(URL, 'revokeObjectURL', {
       configurable: true,
@@ -186,6 +271,7 @@ describe('DesignCard', () => {
     });
 
     await expect(rewriteDesignHtml(published.id, 'a/index.html')).rejects.toThrow(/aborted/);
-    expect(revoked).toEqual(['blob:asset-1']);
+    expect(revoked).toEqual([]);
+    expect(blobs).toHaveLength(0);
   });
 });
