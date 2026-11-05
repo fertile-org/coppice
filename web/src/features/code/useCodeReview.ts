@@ -3,11 +3,13 @@ import { apiFetch } from '../../lib/api';
 import {
   branchesResponseSchema,
   diffSummarySchema,
+  fileContentSchema,
   filePatchSchema,
   submitReviewResponseSchema,
   worktreesListSchema,
   type BranchesResponse,
   type DiffSummary,
+  type FileContent,
   type FilePatch,
   type SubmitReviewInput,
   type SubmitReviewResponse,
@@ -28,8 +30,16 @@ export function repoDiffQueryKey(
   worktreePath: string,
   baseBranch: string,
   ticketId?: string,
+  ignoreWhitespace = false,
 ) {
-  return ['repo-diff', repoId, worktreePath, baseBranch, ticketId ?? ''] as const;
+  return [
+    'repo-diff',
+    repoId,
+    worktreePath,
+    baseBranch,
+    ticketId ?? '',
+    ignoreWhitespace,
+  ] as const;
 }
 
 export function filePatchQueryKey(
@@ -37,8 +47,19 @@ export function filePatchQueryKey(
   worktreePath: string,
   baseBranch: string,
   path: string,
+  ignoreWhitespace = false,
 ) {
-  return ['file-patch', repoId, worktreePath, baseBranch, path] as const;
+  return ['file-patch', repoId, worktreePath, baseBranch, path, ignoreWhitespace] as const;
+}
+
+export function fileContentQueryKey(
+  repoId: string,
+  worktreePath: string,
+  baseBranch: string,
+  path: string,
+  side: 'head' | 'base',
+) {
+  return ['file-content', repoId, worktreePath, baseBranch, path, side] as const;
 }
 
 async function fetchRepoWorktrees(repoId: string): Promise<WorktreeSummary[]> {
@@ -57,9 +78,11 @@ async function fetchRepoDiff(
   worktreePath: string,
   baseBranch: string,
   ticketId?: string,
+  ignoreWhitespace = false,
 ): Promise<DiffSummary> {
   const params = new URLSearchParams({ worktreePath, baseBranch });
   if (ticketId) params.set('ticketId', ticketId);
+  if (ignoreWhitespace) params.set('ignoreWhitespace', 'true');
   const res = await apiFetch(`/api/repos/${repoId}/diff?${params}`);
   return diffSummarySchema.parse(await res.json());
 }
@@ -69,10 +92,24 @@ async function fetchFilePatch(
   worktreePath: string,
   baseBranch: string,
   path: string,
+  ignoreWhitespace = false,
 ): Promise<FilePatch> {
   const params = new URLSearchParams({ worktreePath, baseBranch, path });
+  if (ignoreWhitespace) params.set('ignoreWhitespace', 'true');
   const res = await apiFetch(`/api/repos/${repoId}/diff/file?${params}`);
   return filePatchSchema.parse(await res.json());
+}
+
+async function fetchFileContent(
+  repoId: string,
+  worktreePath: string,
+  baseBranch: string,
+  path: string,
+  side: 'head' | 'base',
+): Promise<FileContent> {
+  const params = new URLSearchParams({ worktreePath, baseBranch, path, side });
+  const res = await apiFetch(`/api/repos/${repoId}/diff/file-content?${params}`);
+  return fileContentSchema.parse(await res.json());
 }
 
 async function postSubmitCodeReview(
@@ -107,6 +144,7 @@ export function useRepoDiff(
   worktreePath: string | undefined,
   baseBranch: string | undefined,
   ticketId?: string,
+  ignoreWhitespace = false,
 ) {
   return useQuery({
     queryKey: repoDiffQueryKey(
@@ -114,8 +152,10 @@ export function useRepoDiff(
       worktreePath ?? '',
       baseBranch ?? '',
       ticketId,
+      ignoreWhitespace,
     ),
-    queryFn: () => fetchRepoDiff(repoId!, worktreePath!, baseBranch!, ticketId),
+    queryFn: () =>
+      fetchRepoDiff(repoId!, worktreePath!, baseBranch!, ticketId, ignoreWhitespace),
     enabled: Boolean(repoId && worktreePath && baseBranch),
   });
 }
@@ -125,6 +165,7 @@ export function useFilePatch(
   worktreePath: string | undefined,
   baseBranch: string | undefined,
   path: string | undefined,
+  ignoreWhitespace = false,
 ) {
   return useQuery({
     queryKey: filePatchQueryKey(
@@ -132,8 +173,31 @@ export function useFilePatch(
       worktreePath ?? '',
       baseBranch ?? '',
       path ?? '',
+      ignoreWhitespace,
     ),
-    queryFn: () => fetchFilePatch(repoId!, worktreePath!, baseBranch!, path!),
+    queryFn: () =>
+      fetchFilePatch(repoId!, worktreePath!, baseBranch!, path!, ignoreWhitespace),
+    enabled: Boolean(repoId && worktreePath && baseBranch && path),
+  });
+}
+
+export function useFileContent(
+  repoId: string | undefined,
+  worktreePath: string | undefined,
+  baseBranch: string | undefined,
+  path: string | undefined,
+  side: 'head' | 'base',
+) {
+  return useQuery({
+    queryKey: fileContentQueryKey(
+      repoId ?? '',
+      worktreePath ?? '',
+      baseBranch ?? '',
+      path ?? '',
+      side,
+    ),
+    queryFn: () =>
+      fetchFileContent(repoId!, worktreePath!, baseBranch!, path!, side),
     enabled: Boolean(repoId && worktreePath && baseBranch && path),
   });
 }

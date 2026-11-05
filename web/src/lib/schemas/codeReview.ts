@@ -48,6 +48,14 @@ export const filePatchSchema = z.object({
 
 export type FilePatch = z.infer<typeof filePatchSchema>;
 
+export const fileContentSchema = z.object({
+  path: z.string(),
+  side: z.enum(['head', 'base']),
+  content: z.string(),
+});
+
+export type FileContent = z.infer<typeof fileContentSchema>;
+
 export const inlineCommentSchema = z.object({
   path: z.string(),
   line: z.number(),

@@ -58,6 +58,7 @@ export function CodeReviewPage() {
 
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
   const [viewType, setViewType] = useState<'split' | 'unified'>(readViewType);
+  const [hideWhitespace, setHideWhitespace] = useState(false);
   const chooseViewType = (next: 'split' | 'unified') => {
     setViewType(next);
     storeViewType(next);
@@ -89,6 +90,7 @@ export function CodeReviewPage() {
     selectedWorktreePath,
     baseBranch,
     reviewTicketId,
+    hideWhitespace,
   );
 
   const syncParams = useCallback(
@@ -258,6 +260,16 @@ export function CodeReviewPage() {
                 Unified
               </button>
             </div>
+
+            <label className="flex items-center gap-1.5 font-body text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={hideWhitespace}
+                onChange={(event) => setHideWhitespace(event.target.checked)}
+              />
+              Hide whitespace
+            </label>
           </div>
 
           <div className="ml-auto flex items-center gap-3">
@@ -336,6 +348,7 @@ export function CodeReviewPage() {
                 baseBranch={baseBranch}
                 filePath={selectedFile}
                 viewType={viewType}
+                ignoreWhitespace={hideWhitespace}
                 inlineComments={inlineComments}
                 onInlineCommentsChange={setInlineComments}
               />

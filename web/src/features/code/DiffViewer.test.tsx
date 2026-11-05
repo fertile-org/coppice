@@ -2,11 +2,11 @@ import '@testing-library/jest-dom/vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { render } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DiffViewer } from './DiffViewer';
 
-const patchState = vi.hoisted(() => ({ patch: '' }));
+const patchState = vi.hoisted(() => ({ patch: '', base: '' }));
 
 vi.mock('./useCodeReview', () => ({
   useFilePatch: () => ({
@@ -14,6 +14,11 @@ vi.mock('./useCodeReview', () => ({
     isLoading: false,
     isError: false,
     error: null,
+  }),
+  useFileContent: () => ({
+    data: { path: 'file', side: 'base' as const, content: patchState.base },
+    isLoading: false,
+    isError: false,
   }),
 }));
 
@@ -29,7 +34,10 @@ function patch(path: string, before: string, after: string) {
   ].join('\n');
 }
 
-function renderDiff(path: string) {
+function renderDiff(
+  path: string,
+  onInlineCommentsChange: (comments: unknown) => void = () => {},
+) {
   return render(
     <DiffViewer
       repoId="repo"
@@ -37,13 +45,55 @@ function renderDiff(path: string) {
       baseBranch="main"
       filePath={path}
       viewType="split"
+      ignoreWhitespace={false}
       inlineComments={[]}
-      onInlineCommentsChange={() => {}}
+      onInlineCommentsChange={onInlineCommentsChange}
     />,
   );
 }
 
 describe('DiffViewer tokens', () => {
+  beforeEach(() => {
+    patchState.patch = '';
+    patchState.base = '';
+  });
+
+  it('expands hidden lines and comments on the file line number', () => {
+    patchState.base = 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n';
+    patchState.patch = [
+      'diff --git a/notes.txt b/notes.txt',
+      'index 1111111..2222222 100644',
+      '--- a/notes.txt',
+      '+++ b/notes.txt',
+      '@@ -4,3 +4,3 @@',
+      ' delta',
+      '-epsilon',
+      '+EPSILON',
+      ' zeta',
+    ].join('\n');
+    const onInlineCommentsChange = vi.fn();
+    renderDiff('notes.txt', onInlineCommentsChange);
+
+    expect(screen.queryByText('alpha')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand 3 lines above' }));
+    const alpha = screen.getAllByText('alpha')[0];
+    expect(alpha).toBeInTheDocument();
+
+    fireEvent.click(alpha);
+    fireEvent.change(screen.getByPlaceholderText('Leave a comment…'), {
+      target: { value: 'check the context' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add comment' }));
+
+    expect(onInlineCommentsChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: 'notes.txt',
+        line: 1,
+        body: 'check the context',
+      }),
+    ]);
+  });
+
   it('marks only the edited word on a changed line', () => {
     patchState.patch = patch('src/app.ts', 'const value = "old";', 'const value = "new";');
     const { container } = renderDiff('src/app.ts');

@@ -161,6 +161,39 @@ pub struct FilePatch {
     pub patch: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileSide {
+    Head,
+    Base,
+}
+
+impl FileSide {
+    pub fn parse(raw: &str) -> Result<Self, CodeReviewError> {
+        match raw {
+            "head" => Ok(Self::Head),
+            "base" => Ok(Self::Base),
+            _ => Err(CodeReviewError::Validation(
+                "side must be head or base".into(),
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Head => "head",
+            Self::Base => "base",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    pub path: String,
+    pub side: String,
+    pub content: String,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTicketInput {
@@ -310,13 +343,24 @@ impl<'a> CodeReviewService<'a> {
         repo_id: Uuid,
         worktree_path: &str,
         base_branch: &str,
+        ignore_whitespace: bool,
     ) -> Result<DiffSummary, CodeReviewError> {
         let ctx = self
             .resolve_worktree_repo(repo_id, worktree_path, base_branch)
             .await?;
         let range = format!("{}...HEAD", ctx.base_branch);
-        let name_status = git_in(&ctx.worktree, &["diff", "--name-status", &range]).await?;
-        let numstat = git_in(&ctx.worktree, &["diff", "--numstat", &range]).await?;
+        let name_status = git_diff(
+            &ctx.worktree,
+            ignore_whitespace,
+            &["--name-status", "--find-renames", &range],
+        )
+        .await?;
+        let numstat = git_diff(
+            &ctx.worktree,
+            ignore_whitespace,
+            &["--numstat", "--find-renames", &range],
+        )
+        .await?;
         let files = parse_diff_files(&name_status, &numstat);
         Ok(DiffSummary {
             base_branch: ctx.base_branch,
@@ -333,19 +377,80 @@ impl<'a> CodeReviewService<'a> {
         worktree_path: &str,
         base_branch: &str,
         path: &str,
+        ignore_whitespace: bool,
     ) -> Result<FilePatch, CodeReviewError> {
         validate_diff_file_path(path)?;
         let ctx = self
             .resolve_worktree_repo(repo_id, worktree_path, base_branch)
             .await?;
         let range = format!("{}...HEAD", ctx.base_branch);
-        let patch = git_in(&ctx.worktree, &["diff", &range, "--", path]).await?;
+        // A path-limited diff does not see the pre-rename path, so git prints the
+        // new file as a whole-file add. Pass both paths when this is a rename.
+        let name_status = git_in(
+            &ctx.worktree,
+            &["diff", "--name-status", "--find-renames", &range],
+        )
+        .await?;
+        let patch = if let Some(old) = old_path_for_rename(&name_status, path) {
+            git_diff(
+                &ctx.worktree,
+                ignore_whitespace,
+                &["--find-renames", &range, "--", old.as_str(), path],
+            )
+            .await?
+        } else {
+            git_diff(
+                &ctx.worktree,
+                ignore_whitespace,
+                &[&range, "--", path],
+            )
+            .await?
+        };
         if patch.len() > MAX_PATCH_BYTES {
             return Err(CodeReviewError::PatchTooLarge);
         }
         Ok(FilePatch {
             path: path.to_string(),
             patch,
+        })
+    }
+
+    pub async fn file_content(
+        &self,
+        repo_id: Uuid,
+        worktree_path: &str,
+        base_branch: &str,
+        path: &str,
+        side: &str,
+    ) -> Result<FileContent, CodeReviewError> {
+        let side = FileSide::parse(side)?;
+        let ctx = self
+            .resolve_worktree_repo(repo_id, worktree_path, base_branch)
+            .await?;
+        path_stays_in_worktree(&ctx.worktree, path)?;
+        let range = format!("{}...HEAD", ctx.base_branch);
+        let blob_path = if side == FileSide::Base {
+            let name_status = git_in(
+                &ctx.worktree,
+                &["diff", "--name-status", "--find-renames", &range],
+            )
+            .await?;
+            old_path_for_rename(&name_status, path).unwrap_or_else(|| path.to_string())
+        } else {
+            path.to_string()
+        };
+        let rev = match side {
+            FileSide::Head => ctx.head_sha,
+            // Diffs are three-dot, so context lines come from the merge base.
+            FileSide::Base => {
+                git_in(&ctx.worktree, &["merge-base", &ctx.base_branch, "HEAD"]).await?
+            }
+        };
+        let content = show_text_blob(&ctx.worktree, &rev, &blob_path).await?;
+        Ok(FileContent {
+            path: path.to_string(),
+            side: side.as_str().to_string(),
+            content,
         })
     }
 
@@ -557,7 +662,7 @@ fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         if let Some(path) = parts.next() {
-            stats.insert(path.to_string(), (additions, deletions));
+            stats.insert(numstat_new_path(path), (additions, deletions));
         }
     }
 
@@ -594,6 +699,112 @@ fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
         });
     }
     files
+}
+
+fn diff_args(ignore_whitespace: bool, rest: &[&str]) -> Vec<String> {
+    let mut args = Vec::with_capacity(rest.len() + 2);
+    args.push("diff".to_string());
+    if ignore_whitespace {
+        args.push("-w".to_string());
+    }
+    args.extend(rest.iter().map(|arg| (*arg).to_string()));
+    args
+}
+
+async fn git_diff(
+    worktree: &Path,
+    ignore_whitespace: bool,
+    rest: &[&str],
+) -> Result<String, CodeReviewError> {
+    let args = diff_args(ignore_whitespace, rest);
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    git_in(worktree, &refs).await
+}
+
+/// `git diff --numstat` prints renames as `old => new` or `dir/{old => new}`.
+fn numstat_new_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(open) = raw.find('{') {
+        if let Some(close) = raw.find('}') {
+            let inside = &raw[open + 1..close];
+            if let Some((_, new)) = inside.split_once(" => ") {
+                return format!("{}{}{}", &raw[..open], new.trim(), &raw[close + 1..]);
+            }
+        }
+    }
+    match raw.rsplit_once(" => ") {
+        Some((_, new)) => new.trim().to_string(),
+        None => raw.to_string(),
+    }
+}
+
+fn old_path_for_rename(name_status: &str, new_path: &str) -> Option<String> {
+    for line in name_status.lines() {
+        let mut parts = line.split('\t');
+        let status = parts.next().unwrap_or("");
+        if !status.starts_with('R') {
+            continue;
+        }
+        let old = parts.next().unwrap_or("");
+        let new = parts.next().unwrap_or("");
+        if new == new_path && !old.is_empty() {
+            return Some(old.to_string());
+        }
+    }
+    None
+}
+
+/// Rejects `..`, absolute paths, and symlinks whose target leaves the worktree.
+fn path_stays_in_worktree(root: &Path, rel: &str) -> Result<(), CodeReviewError> {
+    validate_diff_file_path(rel)?;
+    let root = root
+        .canonicalize()
+        .map_err(|_| CodeReviewError::InvalidWorktreePath)?;
+    let mut current = root.clone();
+    for segment in rel.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        current.push(segment);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let target = std::fs::canonicalize(&current)
+                    .map_err(|_| CodeReviewError::InvalidFilePath)?;
+                if !target.starts_with(&root) {
+                    return Err(CodeReviewError::InvalidFilePath);
+                }
+                current = target;
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(CodeReviewError::InvalidFilePath),
+        }
+    }
+    if !current.starts_with(&root) {
+        return Err(CodeReviewError::InvalidFilePath);
+    }
+    Ok(())
+}
+
+fn blob_is_missing(stderr: &str) -> bool {
+    stderr.contains("does not exist") || stderr.contains("exists on disk, but not in")
+}
+
+async fn show_text_blob(dir: &Path, rev: &str, path: &str) -> Result<String, CodeReviewError> {
+    let spec = format!("{rev}:{path}");
+    let output = crate::services::git_cmd::output(Some(dir), &["show", spec.as_str()]).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if blob_is_missing(&stderr) {
+            return Ok(String::new());
+        }
+        return Err(CodeReviewError::Git(stderr.trim().to_string()));
+    }
+    if output.stdout.len() > MAX_PATCH_BYTES {
+        return Err(CodeReviewError::PatchTooLarge);
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| CodeReviewError::Validation("file is not valid text".into()))
 }
 
 async fn git_in(worktree: &Path, args: &[&str]) -> Result<String, CodeReviewError> {
@@ -658,6 +869,54 @@ mod tests {
         assert_eq!(files[0].path, "src/a.ts");
         assert_eq!(files[0].status, "modified");
         assert_eq!(files[0].additions, 3);
+    }
+
+    #[test]
+    fn parse_diff_files_counts_a_rename() {
+        let files = parse_diff_files(
+            "R050\told_name.txt\tnew_name.txt",
+            "1\t1\told_name.txt => new_name.txt",
+        );
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "new_name.txt");
+        assert_eq!(files[0].status, "renamed");
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 1);
+    }
+
+    #[test]
+    fn numstat_new_path_unwraps_renames() {
+        assert_eq!(numstat_new_path("src/a.ts"), "src/a.ts");
+        assert_eq!(
+            numstat_new_path("old_name.txt => new_name.txt"),
+            "new_name.txt"
+        );
+        assert_eq!(numstat_new_path("src/{a.rs => b.rs}"), "src/b.rs");
+        assert_eq!(
+            numstat_new_path("src/{old => new}/file.rs"),
+            "src/new/file.rs"
+        );
+    }
+
+    #[test]
+    fn old_path_for_rename_reads_the_new_path() {
+        let status = "M\tsrc/a.ts\nR050\told_name.txt\tnew_name.txt\n";
+        assert_eq!(
+            old_path_for_rename(status, "new_name.txt").as_deref(),
+            Some("old_name.txt")
+        );
+        assert_eq!(old_path_for_rename(status, "src/a.ts"), None);
+    }
+
+    #[test]
+    fn path_stays_in_worktree_rejects_symlink_escape() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("leak.txt")).unwrap();
+        assert!(path_stays_in_worktree(root.path(), "leak.txt").is_err());
+        assert!(path_stays_in_worktree(root.path(), "../secret").is_err());
+        fs::write(root.path().join("ok.txt"), "hi").unwrap();
+        assert!(path_stays_in_worktree(root.path(), "ok.txt").is_ok());
     }
 
     #[test]
