@@ -1,15 +1,28 @@
 import { apiFetch } from '../../lib/api';
 
 // ponytail: quoted src/href plus url() only — srcset and unquoted attrs if a design needs them.
+// shortcut: a stylesheet that contains </style> closes the inlined tag early, escape it if a design ships that.
 
 const ATTR_REF = /\b(src|href)\s*=\s*(["'])([^"']+)\2/gi;
 const CSS_URL_REF = /url\(\s*(["']?)([^"')]+)\1\s*\)/gi;
+const LINK_TAG = /<link\b[^>]*>/gi;
 
 const PREVIEW_CSP =
-  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob: data:; img-src blob: data:; font-src blob: data:; connect-src 'none'; frame-src 'none'";
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' data:; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'";
 
 function withPreviewCsp(html: string): string {
-  return `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">${html}`;
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+  const head = /<head\b[^>]*>/i.exec(html);
+  if (head?.index !== undefined) {
+    const at = head.index + head[0].length;
+    return html.slice(0, at) + meta + html.slice(at);
+  }
+  const doctype = /^\s*<!doctype\b[^>]*>/i.exec(html);
+  if (doctype?.index !== undefined) {
+    const at = doctype.index + doctype[0].length;
+    return html.slice(0, at) + meta + html.slice(at);
+  }
+  return meta + html;
 }
 
 function aborted(err: unknown, signal?: AbortSignal): boolean {
@@ -70,9 +83,26 @@ function mime(path: string): string {
       return 'image/gif';
     case 'webp':
       return 'image/webp';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'woff':
+      return 'font/woff';
+    case 'woff2':
+      return 'font/woff2';
     default:
       return 'application/octet-stream';
   }
+}
+
+function quotedAttr(tag: string, name: string): string | null {
+  const match = new RegExp(`\\b${name}\\s*=\\s*(["'])([^"']*)\\1`, 'i').exec(tag);
+  return match ? (match[2] ?? null) : null;
+}
+
+function stylesheetHref(tag: string): string | null {
+  const rel = quotedAttr(tag, 'rel');
+  if (!rel?.toLowerCase().split(/\s+/).includes('stylesheet')) return null;
+  return quotedAttr(tag, 'href');
 }
 
 function applyRewrites(text: string, urls: Map<string, string>): string {
@@ -103,34 +133,113 @@ async function fetchDesignFile(
   return res.arrayBuffer();
 }
 
-async function loadAsset(
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('read'));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('read'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function rewriteRefsToData(
   setId: string,
-  filePath: string,
-  track: (blob: Blob) => string,
-  rewriteCss: boolean,
-  signal?: AbortSignal,
-): Promise<Blob> {
-  const bytes = await fetchDesignFile(setId, filePath, signal);
-  if (filePath.toLowerCase().endsWith('.html')) {
-    return new Blob([withPreviewCsp(new TextDecoder().decode(bytes))], { type: 'text/html' });
-  }
-  if (!rewriteCss || !filePath.toLowerCase().endsWith('.css')) {
-    return new Blob([bytes], { type: mime(filePath) });
-  }
-  const css = new TextDecoder().decode(bytes);
+  fromFile: string,
+  text: string,
+  signal: AbortSignal | undefined,
+  stack: string[],
+): Promise<string> {
   const urls = new Map<string, string>();
-  for (const ref of collectRefs(css)) {
-    const resolved = resolveDesignRef(filePath, ref);
+  for (const ref of collectRefs(text)) {
+    const resolved = resolveDesignRef(fromFile, ref);
     if (!resolved) continue;
     try {
-      const asset = await loadAsset(setId, resolved, track, false, signal);
-      urls.set(ref, track(asset));
+      urls.set(ref, await loadDataUrl(setId, resolved, signal, stack));
     } catch (err) {
       if (aborted(err, signal)) throw err;
-      // A missing image leaves the authored url(); the page still opens.
+      // A missing image leaves the authored url; the page still opens.
     }
   }
-  return new Blob([applyRewrites(css, urls)], { type: 'text/css' });
+  return applyRewrites(text, urls);
+}
+
+async function loadDataUrl(
+  setId: string,
+  filePath: string,
+  signal: AbortSignal | undefined,
+  stack: string[],
+): Promise<string> {
+  if (stack.includes(filePath)) throw new Error('cycle');
+  const bytes = new Uint8Array(await fetchDesignFile(setId, filePath, signal));
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.css')) {
+    const css = await rewriteRefsToData(
+      setId,
+      filePath,
+      new TextDecoder().decode(bytes),
+      signal,
+      [...stack, filePath],
+    );
+    return blobToDataUrl(new Blob([css], { type: 'text/css' }));
+  }
+  if (lower.endsWith('.html')) {
+    return blobToDataUrl(
+      new Blob([withPreviewCsp(new TextDecoder().decode(bytes))], { type: 'text/html' }),
+    );
+  }
+  return blobToDataUrl(new Blob([bytes], { type: mime(filePath) }));
+}
+
+async function loadCssText(
+  setId: string,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const bytes = await fetchDesignFile(setId, filePath, signal);
+  return rewriteRefsToData(
+    setId,
+    filePath,
+    new TextDecoder().decode(bytes),
+    signal,
+    [filePath],
+  );
+}
+
+async function inlineStylesheets(
+  setId: string,
+  entry: string,
+  html: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const matches = [...html.matchAll(fresh(LINK_TAG))];
+  if (matches.length === 0) return html;
+  let out = '';
+  let cursor = 0;
+  for (const match of matches) {
+    const tag = match[0];
+    const index = match.index ?? 0;
+    out += html.slice(cursor, index);
+    cursor = index + tag.length;
+    const href = stylesheetHref(tag);
+    const resolved = href ? resolveDesignRef(entry, href) : null;
+    if (!resolved?.toLowerCase().endsWith('.css')) {
+      out += tag;
+      continue;
+    }
+    try {
+      out += `<style>${await loadCssText(setId, resolved, signal)}</style>`;
+    } catch (err) {
+      if (aborted(err, signal)) throw err;
+      out += tag;
+    }
+  }
+  return out + html.slice(cursor);
 }
 
 export async function rewriteDesignHtml(
@@ -139,31 +248,17 @@ export async function rewriteDesignHtml(
   signal?: AbortSignal,
 ): Promise<{ url: string; revoke: () => void }> {
   if (!entry) throw new Error('missing');
-  const created: string[] = [];
+  let url: string | null = null;
   const revoke = () => {
-    if (typeof URL.revokeObjectURL !== 'function') return;
-    for (const blobUrl of created) URL.revokeObjectURL(blobUrl);
-  };
-  const track = (blob: Blob) => {
-    const url = URL.createObjectURL(blob);
-    created.push(url);
-    return url;
+    if (!url || typeof URL.revokeObjectURL !== 'function') return;
+    URL.revokeObjectURL(url);
   };
   try {
     const html = new TextDecoder().decode(await fetchDesignFile(setId, entry, signal));
-    const urls = new Map<string, string>();
-    for (const ref of collectRefs(html)) {
-      const resolved = resolveDesignRef(entry, ref);
-      if (!resolved) continue;
-      try {
-        urls.set(ref, track(await loadAsset(setId, resolved, track, true, signal)));
-      } catch (err) {
-        if (aborted(err, signal)) throw err;
-        // Missing stylesheet or image: leave the relative url and still show the page.
-      }
-    }
-    const url = track(
-      new Blob([withPreviewCsp(applyRewrites(html, urls))], { type: 'text/html' }),
+    const inlined = await inlineStylesheets(setId, entry, html, signal);
+    const rewritten = await rewriteRefsToData(setId, entry, inlined, signal, []);
+    url = URL.createObjectURL(
+      new Blob([withPreviewCsp(rewritten)], { type: 'text/html' }),
     );
     return { url, revoke };
   } catch (err) {

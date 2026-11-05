@@ -391,6 +391,9 @@ async function attachPlan(ticketId, agentId) {
   const dir = `designs/${setId}`;
   for (const option of DESIGN_OPTIONS) {
     await writeDesignFile(`${dir}/${option.entry}`, option.html);
+    for (const file of option.files ?? []) {
+      await writeDesignFile(`${dir}/${file.path}`, file.content);
+    }
   }
   const options = DESIGN_OPTIONS.map(({ id, title, entry }) => ({ id, title, entry }));
   await psql(`
@@ -1846,10 +1849,14 @@ async function record(scene) {
     const designDialog = page.getByRole('dialog', { name: 'Design options' });
     const showOption = async (label, heading) => {
       await designDialog.getByRole('tab', { name: new RegExp(`^${label}: `) }).click();
-      await page
-        .frameLocator(`iframe[title^="${label}: "]`)
-        .getByText(heading, { exact: true })
-        .waitFor({ timeout: 15_000 });
+      const frame = page.frameLocator(`iframe[title^="${label}: "]`);
+      await frame.getByText(heading, { exact: true }).waitFor({ timeout: 15_000 });
+      const background = await frame
+        .locator('body')
+        .evaluate((body) => getComputedStyle(body).backgroundColor);
+      if (background !== 'rgb(246, 241, 233)') {
+        fail(`design option ${label} is unstyled: body background is ${background}`);
+      }
     };
     await cutScene(MARKERS[3], async () => {
       await fadeCaption(CAPTIONS[2]);

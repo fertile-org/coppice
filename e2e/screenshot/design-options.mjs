@@ -19,13 +19,13 @@ const STYLE = `
   .value { color: #57534e; }
 `;
 
-function page(title, body, extraStyle = '') {
+function shell(title, body, head) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>${title}</title>
-<style>${STYLE}${extraStyle}</style>
+${head}
 </head>
 <body>
 <main>
@@ -38,6 +38,10 @@ ${body}
 `;
 }
 
+function page(title, body, extraStyle = '') {
+  return shell(title, body, `<style>${STYLE}${extraStyle}</style>`);
+}
+
 const OTHER_ROWS = `
   <div class="row">
     <div><div class="name">Language</div><div class="hint">Used for dates and labels.</div></div>
@@ -48,16 +52,21 @@ const OTHER_ROWS = `
     <div class="value">Dashboard</div>
   </div>`;
 
-const SWITCH = page(
-  'Switch in the Settings row',
-  `<section class="panel">
+const SWITCH_BODY = `<section class="panel">
   <div class="row">
     <div><div class="name">Dark mode</div><div class="hint">Use the dark theme on this machine.</div></div>
     <div class="switch" role="img" aria-label="Dark mode on"></div>
   </div>${OTHER_ROWS}
-</section>`,
-  `.switch { position: relative; width: 52px; height: 30px; border-radius: 15px; background: #2f6b4f; }
-   .switch::after { content: ""; position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; }`,
+</section>`;
+
+const SWITCH_CSS = `${STYLE}
+.switch { position: relative; width: 52px; height: 30px; border-radius: 15px; background: #2f6b4f; }
+   .switch::after { content: ""; position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; }`;
+
+const SWITCH = shell(
+  'Switch in the Settings row',
+  SWITCH_BODY,
+  `<link rel="stylesheet" href="style.css">`,
 );
 
 const SEGMENTED = page(
@@ -109,7 +118,13 @@ export const DESIGN_SET_TITLE = 'Dark mode toggle on Settings';
 export const RECOMMENDED_OPTION_ID = 'option-a';
 
 export const DESIGN_OPTIONS = [
-  { id: 'option-a', title: 'Switch in the Settings row', entry: 'option-a/index.html', html: SWITCH },
+  {
+    id: 'option-a',
+    title: 'Switch in the Settings row',
+    entry: 'option-a/index.html',
+    html: SWITCH,
+    files: [{ path: 'option-a/style.css', content: SWITCH_CSS }],
+  },
   { id: 'option-b', title: 'Light, Dark and System buttons', entry: 'option-b/index.html', html: SEGMENTED },
   { id: 'option-c', title: 'Theme preview cards', entry: 'option-c/index.html', html: CARDS },
 ];
