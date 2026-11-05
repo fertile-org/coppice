@@ -274,6 +274,15 @@ async fn submit_review_move_to_in_progress() {
     let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _board_id) =
         setup_repo_ticket_and_worktree().await;
     let head_sha = fetch_diff_head_sha(&app, &repo_id, &worktree_path, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
 
     let before = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(before["status"], "backlog");
@@ -291,7 +300,8 @@ async fn submit_review_move_to_in_progress() {
                 "ticketId": ticket_id,
                 "summary": "Approved with minor notes.",
                 "inlineComments": [],
-                "workflowAction": "move_to_in_progress"
+                "workflowAction": "move_to_in_progress",
+                "reassignAgentId": engineer_id
             })
             .to_string(),
             &cookie,
@@ -303,6 +313,378 @@ async fn submit_review_move_to_in_progress() {
 
     let after = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(after["status"], "in_progress");
+    assert_eq!(after["assigneeAgentId"], engineer_id);
+}
+
+struct QuietReview {
+    _git_dir: tempfile::TempDir,
+    _worktrees: tempfile::TempDir,
+    app: axum::Router,
+    cookie: String,
+    csrf: String,
+    repo_id: String,
+    ticket_id: String,
+    worktree_path: String,
+}
+
+async fn setup_quiet_review(auto_start: bool) -> QuietReview {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let worktrees_path = worktrees.path().to_string_lossy().into_owned();
+    let (_state, app, cookie, csrf) =
+        common::bootstrap_and_login_with_state_config(move |config| {
+            config.workflow.auto_start_runs = auto_start;
+            config.agent.worktrees_path = worktrees_path;
+        })
+        .await;
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let worktree_path =
+        common::setup_worktree_with_commit(&local_path, worktrees.path(), "test-repo", &ticket_id);
+    QuietReview {
+        _git_dir: git_dir,
+        _worktrees: worktrees,
+        app,
+        cookie,
+        csrf,
+        repo_id,
+        ticket_id,
+        worktree_path: worktree_path.display().to_string(),
+    }
+}
+
+async fn patch_ticket_status(fx: &QuietReview, body: &str) {
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{}/status", fx.ticket_id),
+            body,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    let status = res.status();
+    let payload: serde_json::Value = common::json_body(res).await;
+    assert_eq!(status, StatusCode::OK, "{payload}");
+}
+
+async fn post_review(
+    fx: &QuietReview,
+    head_sha: &str,
+    extra: serde_json::Value,
+) -> axum::response::Response {
+    let mut body = serde_json::json!({
+        "repoId": fx.repo_id,
+        "worktreePath": fx.worktree_path,
+        "baseBranch": "main",
+        "headSha": head_sha,
+        "ticketId": fx.ticket_id,
+        "summary": "Send this back.",
+        "inlineComments": []
+    });
+    for (key, value) in extra.as_object().unwrap() {
+        body[key] = value.clone();
+    }
+    fx.app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/code-reviews/submit",
+            &body.to_string(),
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap()
+}
+
+async fn ticket_runs(fx: &QuietReview) -> Vec<serde_json::Value> {
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{}/runs", fx.ticket_id),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    body["runs"].as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn move_to_in_progress_clears_waiting_and_assigns_engineer() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_quiet_review(false).await;
+    let head_sha =
+        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ada",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    patch_ticket_status(
+        &fx,
+        &format!(
+            r#"{{"status":"wait_for_final_review","substatus":"waiting_for_agent","substatusMetadata":{{"agentId":"{engineer_id}"}}}}"#
+        ),
+    )
+    .await;
+    let before = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(before["status"], "wait_for_final_review");
+    assert_eq!(before["substatus"], "waiting_for_agent");
+    assert!(before["assigneeAgentId"].is_null());
+
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({
+            "workflowAction": "move_to_in_progress",
+            "reassignAgentId": engineer_id
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let after = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(after["status"], "in_progress");
+    assert_eq!(after["assigneeAgentId"], engineer_id);
+    assert!(after["substatus"].is_null());
+    assert!(after["substatusMetadata"].is_null());
+}
+
+#[tokio::test]
+async fn move_to_in_progress_starts_a_work_run_when_auto_start_is_on() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_quiet_review(true).await;
+    let head_sha =
+        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ada",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    patch_ticket_status(
+        &fx,
+        &format!(
+            r#"{{"status":"wait_for_final_review","substatus":"waiting_for_agent","substatusMetadata":{{"agentId":"{engineer_id}"}}}}"#
+        ),
+    )
+    .await;
+
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({
+            "workflowAction": "move_to_in_progress",
+            "reassignAgentId": engineer_id
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let runs = ticket_runs(&fx).await;
+    assert!(
+        runs.iter().any(|run| {
+            run["jobType"] == "work_on_ticket"
+                && run["agentId"] == engineer_id
+                && matches!(run["status"].as_str(), Some("queued" | "running"))
+        }),
+        "{runs:?}"
+    );
+}
+
+#[tokio::test]
+async fn move_to_in_progress_without_engineer_leaves_the_ticket_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_quiet_review(true).await;
+    let head_sha =
+        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ada",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    patch_ticket_status(
+        &fx,
+        &format!(
+            r#"{{"status":"wait_for_final_review","substatus":"waiting_for_agent","substatusMetadata":{{"agentId":"{engineer_id}"}}}}"#
+        ),
+    )
+    .await;
+    let before = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({ "workflowAction": "move_to_in_progress" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["error"],
+        "Pick an engineer before moving this ticket to In Progress."
+    );
+
+    let after = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(after["status"], before["status"]);
+    assert_eq!(after["substatus"], before["substatus"]);
+    assert_eq!(after["assigneeAgentId"], before["assigneeAgentId"]);
+    assert!(ticket_runs(&fx).await.is_empty());
+}
+
+#[tokio::test]
+async fn reassign_starts_a_run_only_outside_review_columns() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_quiet_review(true).await;
+    let head_sha =
+        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ada",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+
+    patch_ticket_status(&fx, r#"{"status":"in_progress"}"#).await;
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({
+            "workflowAction": "reassign_engineer",
+            "reassignAgentId": engineer_id
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let after = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(after["status"], "in_progress");
+    assert_eq!(after["assigneeAgentId"], engineer_id);
+    let runs = ticket_runs(&fx).await;
+    assert!(
+        runs.iter().any(|run| {
+            run["jobType"] == "work_on_ticket"
+                && run["agentId"] == engineer_id
+                && matches!(run["status"].as_str(), Some("queued" | "running"))
+        }),
+        "{runs:?}"
+    );
+
+    patch_ticket_status(
+        &fx,
+        &format!(
+            r#"{{"status":"wait_for_final_review","substatus":"waiting_for_agent","substatusMetadata":{{"agentId":"{engineer_id}"}}}}"#
+        ),
+    )
+    .await;
+    let other_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ben",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let runs_before = ticket_runs(&fx).await.len();
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({
+            "summary": "Reassign while it waits for review.",
+            "workflowAction": "reassign_engineer",
+            "reassignAgentId": other_id
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let waiting = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(waiting["status"], "wait_for_final_review");
+    assert_eq!(waiting["assigneeAgentId"], other_id);
+    let runs_after = ticket_runs(&fx).await;
+    assert_eq!(runs_after.len(), runs_before);
+    assert!(runs_after.iter().all(|run| run["agentId"] != other_id));
+}
+
+#[tokio::test]
+async fn move_to_in_progress_returns_the_plan_gate_message() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_quiet_review(true).await;
+    let head_sha =
+        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Ada",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let before = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(before["status"], "backlog");
+
+    let res = post_review(
+        &fx,
+        &head_sha,
+        serde_json::json!({
+            "workflowAction": "move_to_in_progress",
+            "reassignAgentId": engineer_id
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["error"], coppice_server::copy::plan::PLAN_REQUIRED);
+
+    let after = common::get_ticket(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(after["status"], "backlog");
+    assert!(after["substatus"].is_null());
+    assert!(after["assigneeAgentId"].is_null());
+    assert!(ticket_runs(&fx).await.is_empty());
 }
 
 #[tokio::test]
