@@ -465,12 +465,13 @@ async fn drive_plan_run(
         return Err(JobCancelled.into());
     }
 
-    let (summary, questions) = match &result {
+    let (summary, questions, no_visible_change) = match &result {
         AgentRunResult::Done {
             summary,
             plan_questions,
+            no_visible_change,
             ..
-        } => (summary.clone(), plan_questions.clone()),
+        } => (summary.clone(), plan_questions.clone(), *no_visible_change),
         _ => anyhow::bail!(PLAN_MUST_FINISH),
     };
     result_contract::validate_for_profile(&result, run.context_profile, &run.job_type)
@@ -546,7 +547,13 @@ async fn drive_plan_run(
             .context("move the parent to Human Review")?;
     } else if questions.is_empty() {
         PlanningService::new(pool)
-            .insert_plan(ticket_id, run.agent_id, &summary, Some(run.id))
+            .insert_plan(
+                ticket_id,
+                run.agent_id,
+                &summary,
+                Some(run.id),
+                no_visible_change,
+            )
             .await
             .context("insert plan")?;
         PlanningService::new(pool)
@@ -633,6 +640,7 @@ mod tests {
         assert!(has_design_skill(&[skill("coppice-git"), skill(DESIGN_SKILL_ID)]));
         assert!(!has_design_skill(&[skill("coppice-git")]));
         assert!(PLAN_DESIGN_INSTRUCTION.contains(DESIGN_SKILL_ID));
+        assert!(PLAN_DESIGN_INSTRUCTION.contains("noVisibleChange"));
     }
 
     #[test]

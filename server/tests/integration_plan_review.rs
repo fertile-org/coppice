@@ -285,7 +285,7 @@ async fn post_plan(
     let planning = PlanningService::new(pool);
     let ticket = Uuid::parse_str(ticket_id).unwrap();
     planning
-        .insert_plan(ticket, agent_id, CANONICAL_PLAN, None)
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, None, false)
         .await
         .expect("insert plan");
     planning
@@ -947,7 +947,7 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
 
     let second_plan = "### Changes requested\n- Use Postgres: switched the store.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n";
     planning
-        .insert_plan(ticket, pm, second_plan, None)
+        .insert_plan(ticket, pm, second_plan, None, false)
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1431,7 +1431,7 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     assert_eq!(context.requests, vec!["Use Postgres.".to_string()]);
 
     planning
-        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nPostgres.\n", None)
+        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nPostgres.\n", None, false)
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1448,7 +1448,7 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     );
 
     planning
-        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nSplit store and API.\n", None)
+        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nSplit store and API.\n", None, false)
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1677,10 +1677,92 @@ async fn inserted_plan_records_the_selected_design() {
         .expect("publish");
 
     planning
-        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id))
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false)
         .await
         .expect("insert plan");
     let plan = planning.latest_plan(ticket).await.unwrap().expect("plan");
     assert_eq!(plan.design_set_id, Some(created.id));
     assert_eq!(plan.design_option_id.as_deref(), Some("b"));
+}
+
+#[tokio::test]
+async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    ask_for_changes(&app, &ticket_id, "Show me options.", &cookie, &csrf).await;
+    let (run_id, agent_id) = queued_plan_run(pool, ticket).await;
+
+    let svc = DesignService::new(pool, PathBuf::from(&state.config.storage.artifacts_dir));
+    let created = svc
+        .create(
+            "Home",
+            CreateScope {
+                ticket_id: Some(ticket),
+                chat_session_id: None,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    for entry in ["a/index.html", "b/index.html"] {
+        svc.write(
+            created.id,
+            run_id,
+            entry,
+            b"<!doctype html><title>x</title>",
+        )
+        .await
+        .expect("write");
+    }
+    let options = ["a", "b"]
+        .map(|id| DesignOption {
+            id: id.into(),
+            title: id.to_uppercase(),
+            entry: format!("{id}/index.html"),
+        })
+        .to_vec();
+    svc.publish(created.id, run_id, options, "b")
+        .await
+        .expect("publish");
+    planning
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false)
+        .await
+        .expect("plan with design");
+
+    planning
+        .insert_plan(
+            ticket,
+            agent_id,
+            "## Plan\n\n### Approach\nKeep the options.\n",
+            None,
+            false,
+        )
+        .await
+        .expect("revision without the flag");
+    let revised = planning
+        .latest_plan(ticket)
+        .await
+        .unwrap()
+        .expect("revised");
+    assert_eq!(revised.design_set_id, Some(created.id));
+    assert_eq!(revised.design_option_id.as_deref(), Some("b"));
+    let still_live: bool =
+        sqlx::query_scalar("SELECT retired_at IS NULL FROM design_sets WHERE id = $1")
+            .bind(created.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(still_live);
 }

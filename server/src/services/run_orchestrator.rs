@@ -1277,6 +1277,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         }
     }
@@ -1314,6 +1315,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         }
     }
@@ -1344,6 +1346,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         }
     }
@@ -1476,6 +1479,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
 
@@ -1968,6 +1972,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let apply = ApplyResult {
@@ -3502,6 +3507,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let workflow = WorkflowConfig {
@@ -3750,6 +3756,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let mut malicious_apply =
@@ -4395,6 +4402,7 @@ mod tests {
                     look_here_first: None,
                     criteria_results: Vec::new(),
                     plan_questions: Vec::new(),
+                    no_visible_change: false,
                     actions: None,
                 },
                 ApplyResult {

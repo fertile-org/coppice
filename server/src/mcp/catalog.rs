@@ -304,6 +304,10 @@ fn result_submit_properties() -> Value {
                 "required": ["criterion", "status"],
             },
         },
+        "noVisibleChange": {
+            "type": "boolean",
+            "description": "Planning runs only. Set true when the plan has no visible change, including after a change request drops the UI work. Retires the ticket's live plan-run design options.",
+        },
         "planQuestions": {
             "type": "array",
             "description": "Planning runs only. 1 to 3 short questions to ask before writing the plan, when the answers would change it. Leave summary empty when you ask.",
@@ -470,6 +474,15 @@ mod tests {
         }
         assert!(!CoreTool::CommentPost.definition().read_only);
         assert!(CoreTool::TicketGet.definition().read_only);
+    }
+
+    #[test]
+    fn result_submit_schema_includes_no_visible_change() {
+        let schema = CoreTool::ResultSubmit.definition().input_schema;
+        let prop = &schema["properties"]["noVisibleChange"];
+        assert_eq!(prop["type"], "boolean");
+        let required = schema["required"].as_array().expect("required");
+        assert!(!required.iter().any(|item| item == "noVisibleChange"));
     }
 
     #[test]

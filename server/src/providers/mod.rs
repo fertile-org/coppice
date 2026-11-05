@@ -266,6 +266,8 @@ pub fn chat_unavailable_message(connector: &str) -> Option<String> {
     ))
 }
 
+// Done was already the large variant. `no_visible_change` crosses clippy's size gap.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AgentRunResult {
@@ -319,6 +321,13 @@ pub enum AgentRunResult {
             skip_serializing_if = "Vec::is_empty"
         )]
         plan_questions: Vec<PlanQuestion>,
+        /// Planning runs only. Retires the ticket's live plan-run design sets.
+        #[serde(
+            default,
+            rename = "noVisibleChange",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        no_visible_change: bool,
         /// Agent-chat turns only: proposed ticket/knowledge items for the human to confirm.
         /// Kept raw so validation can report the specific `parse_chat_actions` error.
         #[serde(default, rename = "actions", skip_serializing_if = "Option::is_none")]

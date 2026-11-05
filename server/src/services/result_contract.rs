@@ -227,6 +227,7 @@ pub fn validate_for_profile(
     if job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT {
         return validate_verify_result(result);
     }
+    reject_no_visible_change(result)?;
     match profile {
         ContextProfile::Full if job_type == "respond_to_mention" => {
             apply_consultation_result(result).map(|_| ())
@@ -325,8 +326,28 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
     }
 }
 
+fn no_visible_change(result: &AgentRunResult) -> bool {
+    matches!(
+        result,
+        AgentRunResult::Done {
+            no_visible_change: true,
+            ..
+        }
+    )
+}
+
+fn reject_no_visible_change(result: &AgentRunResult) -> Result<(), String> {
+    if no_visible_change(result) {
+        Err(crate::copy::plan::NO_VISIBLE_CHANGE_PLAN_ONLY.into())
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_verify_result(result: &AgentRunResult) -> Result<(), String> {
     use crate::copy::plan::VERIFY_FORMAT_INSTRUCTION;
+    // Parent verification is a plan-shaped run, and it does not write a plan.
+    reject_no_visible_change(result)?;
     match result {
         AgentRunResult::Done {
             summary,
@@ -766,6 +787,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -798,6 +820,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
 
@@ -837,6 +860,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
 
@@ -874,6 +898,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
 
@@ -950,6 +975,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -979,6 +1005,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1008,6 +1035,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1048,6 +1076,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1096,6 +1125,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            no_visible_change: false,
             actions: None,
         }
     }
@@ -1219,6 +1249,70 @@ mod tests {
             .expect_err("only done accepted");
             assert!(err.contains("done"), "{err}");
         }
+    }
+
+    fn with_no_visible_change(mut result: AgentRunResult) -> AgentRunResult {
+        if let AgentRunResult::Done {
+            no_visible_change, ..
+        } = &mut result
+        {
+            *no_visible_change = true;
+        }
+        result
+    }
+
+    #[test]
+    fn no_visible_change_is_only_for_planning_runs() {
+        let flagged = with_no_visible_change(done_result());
+        for (profile, job) in [
+            (ContextProfile::Full, "work_on_ticket"),
+            (ContextProfile::Conversation, "chat_turn"),
+            (ContextProfile::HumanChat, "chat_turn"),
+            (ContextProfile::KnowledgeCompaction, "compact_knowledge"),
+            (ContextProfile::ConnectorCheck, "connector_check"),
+            (ContextProfile::HumanAgent, "work_on_ticket"),
+            (
+                ContextProfile::Full,
+                crate::domain::workflow::JOB_TYPE_VERIFY_PARENT,
+            ),
+        ] {
+            let err = validate_for_profile(&flagged, profile, job).expect_err(job);
+            assert!(err.contains("noVisibleChange"), "{job}: {err}");
+        }
+        assert!(validate_for_profile(
+            &flagged,
+            ContextProfile::Full,
+            crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+        )
+        .is_ok());
+        assert!(validate_for_profile(&done_result(), ContextProfile::Full, "work_on_ticket").is_ok());
+    }
+
+    #[test]
+    fn no_visible_change_roundtrips_and_defaults_false() {
+        let missing: AgentRunResult =
+            serde_json::from_str(r#"{"status":"done","summary":"s"}"#).expect("missing field");
+        assert!(matches!(
+            missing,
+            AgentRunResult::Done {
+                no_visible_change: false,
+                ..
+            }
+        ));
+        let present: AgentRunResult =
+            serde_json::from_str(r#"{"status":"done","summary":"s","noVisibleChange":true}"#)
+                .expect("present field");
+        assert!(matches!(
+            present,
+            AgentRunResult::Done {
+                no_visible_change: true,
+                ..
+            }
+        ));
+        let stored = serde_json::to_value(&present).expect("serialize");
+        assert_eq!(stored["noVisibleChange"], true);
+        let omitted = serde_json::to_value(&done_result()).expect("serialize default");
+        assert!(omitted.get("noVisibleChange").is_none());
     }
 
     #[test]

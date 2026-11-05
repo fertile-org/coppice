@@ -18,9 +18,21 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         .map_err(|e| ToolError::InvalidArgs(format!("invalid result: {e}")))?;
     validate_for_profile(&result, ctx.scope.profile, &ctx.scope.job_type)
         .map_err(ToolError::InvalidArgs)?;
-    if let AgentRunResult::Done { plan_questions, .. } = &result {
+    if let AgentRunResult::Done {
+        plan_questions,
+        no_visible_change,
+        ..
+    } = &result
+    {
         if !plan_questions.is_empty() {
             questions_allowed(ctx).await?;
+        }
+        if *no_visible_change
+            && ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+        {
+            return Err(ToolError::InvalidArgs(
+                crate::copy::plan::NO_VISIBLE_CHANGE_PLAN_ONLY.into(),
+            ));
         }
     }
 
