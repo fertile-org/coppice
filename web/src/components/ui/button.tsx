@@ -5,14 +5,14 @@ import type * as React from 'react';
 import { cn } from '../../lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md font-body text-sm font-medium transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center gap-2 rounded-md font-body text-sm font-medium transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted disabled:cursor-not-allowed',
   {
     variants: {
       variant: {
         default:
-          'bg-accent px-4 py-2 text-accent-foreground hover:bg-accent-hover',
+          'bg-btn-primary px-4 py-2 text-btn-primary-fg hover:bg-btn-primary-hover',
         secondary:
-          'border border-border bg-surface-raised px-3 py-1.5 text-text-secondary hover:text-text-primary',
+          'border border-btn-secondary-border bg-btn-secondary px-3 py-1.5 text-btn-secondary-fg hover:bg-btn-secondary-hover hover:text-text-primary',
         destructive:
           'border border-danger px-3 py-1.5 text-danger hover:bg-danger-muted/40',
         ghost: 'px-3 py-1.5 text-text-secondary hover:text-text-primary',
@@ -44,13 +44,18 @@ function Button({
     loading?: boolean;
   }) {
   const Comp = asChild ? Slot : 'button';
+  // Loading keeps the enabled fill. A hollow disabled style would hide the spinner.
+  const showDisabled = !asChild && Boolean(disabled) && !loading;
+  const classes = cn(
+    buttonVariants({ variant, size }),
+    showDisabled &&
+      'cursor-not-allowed border border-dashed border-btn-disabled-border bg-transparent text-btn-disabled-fg hover:border-btn-disabled-border hover:bg-transparent hover:text-btn-disabled-fg',
+    className,
+  );
 
   if (asChild) {
     return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
-        {...props}
-      >
+      <Comp className={classes} {...props}>
         {children}
       </Comp>
     );
@@ -58,7 +63,7 @@ function Button({
 
   return (
     <Comp
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...props}

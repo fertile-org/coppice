@@ -41,6 +41,23 @@ export default {
           muted: 'var(--color-accent-muted)',
           foreground: 'var(--color-accent-foreground)',
         },
+        btn: {
+          primary: {
+            DEFAULT: 'var(--color-btn-primary)',
+            hover: 'var(--color-btn-primary-hover)',
+            fg: 'var(--color-btn-primary-fg)',
+          },
+          secondary: {
+            DEFAULT: 'var(--color-btn-secondary)',
+            hover: 'var(--color-btn-secondary-hover)',
+            border: 'var(--color-btn-secondary-border)',
+            fg: 'var(--color-btn-secondary-fg)',
+          },
+          disabled: {
+            border: 'var(--color-btn-disabled-border)',
+            fg: 'var(--color-btn-disabled-fg)',
+          },
+        },
         bark: {
           50: 'var(--color-bark-50)',
           100: 'var(--color-bark-100)',

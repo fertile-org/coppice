@@ -17,6 +17,7 @@ import {
   useStopRun,
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
+import { Button } from '../../components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '../../components/ui/sheet';
 import { acceptShortcutEnabled } from '../board/ticketShortcutRules';
 import {
@@ -335,68 +336,64 @@ function TicketDrawerPanel({
         <div className="flex shrink-0 items-center gap-2">
           {ticket && (
             <>
-              <button
+              <Button
                 type="button"
                 onClick={() => void handleRunAgent()}
                 disabled={!canRunAgent || hasActiveRun || headerBusy}
                 title={runAgentDisabledReason ?? undefined}
-                className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                className="px-3 py-1.5"
               >
                 {runAgent.isPending ? 'Starting…' : 'Run Agent'}
-              </button>
+              </Button>
 
               {activeRun && (
-                <button
+                <Button
                   type="button"
+                  variant="destructive"
                   onClick={() => void handleStopRun()}
                   disabled={headerBusy}
-                  className="rounded-md border border-danger px-3 py-1.5 font-body text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-muted/40 disabled:opacity-50"
                 >
                   {stopRun.isPending ? 'Stopping…' : 'Stop'}
-                </button>
+                </Button>
               )}
 
               {ticket.status === 'wait_for_final_review' && !isArchived && (
-                <button
+                <Button
                   type="button"
                   onClick={() => void handleFinalApprove()}
                   disabled={headerBusy}
-                  className="rounded-md bg-moss-600 px-3 py-1.5 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="px-3 py-1.5"
                 >
                   {finalApprove.isPending ? 'Accepting…' : 'Accept'}
-                </button>
+                </Button>
               )}
 
               {isArchived ? (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={() => void handleUnarchive()}
                   disabled={headerBusy}
-                  className="rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {unarchiveTicket.isPending ? 'Unarchiving…' : 'Unarchive'}
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={() => void handleArchive()}
                   disabled={headerBusy || Boolean(ticket.hasActiveRun)}
                   title={archiveDisabledReason ?? undefined}
-                  className="rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-secondary transition-colors duration-fast hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {archiveTicket.isPending ? 'Archiving…' : 'Archive'}
-                </button>
+                </Button>
               )}
             </>
           )}
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
-          >
+          <Button type="button" variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </header>
 
