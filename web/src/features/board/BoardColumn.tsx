@@ -34,6 +34,8 @@ interface BoardColumnProps {
   onOpenTicket: (ticketId: string) => void;
   onRunPlan?: (ticketId: string) => void;
   planRunTicketId?: string | null;
+  onAssignSuggested?: (ticketId: string, agentId: string) => void;
+  assignSuggestedTicketId?: string | null;
   columnIndex?: number;
   /** Board keyboard focus is active (roving tabindex on). */
   hasBoardFocus?: boolean;
@@ -63,6 +65,8 @@ export const BoardColumn = memo(function BoardColumn({
   onOpenTicket,
   onRunPlan,
   planRunTicketId = null,
+  onAssignSuggested,
+  assignSuggestedTicketId = null,
   columnIndex = 0,
   hasBoardFocus = false,
   focusedTicketId = null,
@@ -187,6 +191,8 @@ export const BoardColumn = memo(function BoardColumn({
                 )}
                 onRunPlan={onRunPlan}
                 planRunPending={planRunTicketId === ticket.id}
+                onAssignSuggested={onAssignSuggested}
+                assignSuggestedPending={assignSuggestedTicketId === ticket.id}
                 tabIndex={hasBoardFocus ? (selected ? 0 : -1) : 0}
                 boardFocusId={hasBoardFocus ? focusId : undefined}
                 boardTabStop={selected}

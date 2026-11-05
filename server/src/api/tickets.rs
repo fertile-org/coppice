@@ -5,6 +5,7 @@ use crate::api::auth::{pool_from_state, AuthUser};
 use crate::copy::conflict::DONE_COLUMN_HOLDS;
 use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
 use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
+use crate::domain::agent::Agent;
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
@@ -18,7 +19,9 @@ use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::conflict_resolve::{self, ConflictResolveError, GitConflictHttp};
 use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
-use crate::services::planning_service::{PlanningService, StartOutcome};
+use crate::services::planning_service::{
+    planner_for_ticket, suggested_assignee, PlanningService, StartOutcome, SuggestedAssignee,
+};
 use crate::services::restart_service::{RestartError, RestartService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
@@ -148,6 +151,9 @@ pub(crate) struct TicketResponse {
     substatus_metadata: Option<Value>,
     priority: Option<String>,
     assignee_agent_id: Option<Uuid>,
+    /// PM to offer on an unassigned Backlog ticket. Absent once anyone is assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_assignee: Option<SuggestedAssignee>,
     owner_user_id: Option<Uuid>,
     branch_name: Option<String>,
     created_by: String,
@@ -304,6 +310,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         substatus_metadata: ticket.substatus_metadata,
         priority: ticket.priority.map(|p| p.to_string_snake()),
         assignee_agent_id: ticket.assignee_agent_id,
+        suggested_assignee: None,
         owner_user_id: ticket.owner_user_id,
         branch_name: ticket.branch_name,
         created_by: ticket.created_by,
@@ -746,6 +753,21 @@ fn parse_priority(priority: &str) -> Result<TicketPriority, TicketError> {
     priority_from_str(priority).ok_or(TicketError::InvalidPriority)
 }
 
+async fn load_suggested_planner(pool: &sqlx::PgPool) -> Result<Option<Agent>, StatusCode> {
+    let agents = AgentService::new(pool).list_agents().await.map_err(|err| {
+        tracing::warn!(error = %err, "could not load agents for assignee suggestion");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(planner_for_ticket(&agents).cloned())
+}
+
+fn respond_with_suggestion(item: TicketWithDisplay, planner: Option<&Agent>) -> TicketResponse {
+    let suggested = suggested_assignee(&item.ticket, planner);
+    let mut response = ticket_to_response(item);
+    response.suggested_assignee = suggested;
+    response
+}
+
 fn build_filters(query: ListTicketsQuery) -> Result<TicketFilters, TicketError> {
     let status = match query.status {
         Some(s) => Some(parse_status(&s)?),
@@ -771,12 +793,14 @@ async fn list_tickets(
         .list_by_board(board_id, &filters)
         .await
         .map_err(map_error)?;
+    let planner = load_suggested_planner(pool).await?;
     Ok(Json(
         tickets
             .into_iter()
-            .map(|ticket| TicketResponse {
-                description: None,
-                ..ticket_to_response(ticket)
+            .map(|item| {
+                let mut response = respond_with_suggestion(item, planner.as_ref());
+                response.description = None;
+                response
             })
             .collect(),
     ))
@@ -808,7 +832,8 @@ async fn create_ticket(
         .map_err(map_error)?;
     let ticket =
         store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
-    let mut response = ticket_to_response(ticket);
+    let planner = load_suggested_planner(pool).await?;
+    let mut response = respond_with_suggestion(ticket, planner.as_ref());
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -823,11 +848,13 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
-    Ok(Json(
-        with_approved_plan(&state, pool, ticket)
-            .await
-            .map_err(map_error)?,
-    ))
+    let planner = load_suggested_planner(pool).await?;
+    let suggested = suggested_assignee(&ticket.ticket, planner.as_ref());
+    let mut response = with_approved_plan(&state, pool, ticket)
+        .await
+        .map_err(map_error)?;
+    response.suggested_assignee = suggested;
+    Ok(Json(response))
 }
 
 async fn archive_ticket(
@@ -918,7 +945,8 @@ async fn update_ticket(
     let ticket =
         store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
     crate::events::publish_ticket_updated(&state.event_bus, &ticket);
-    let mut response = ticket_to_response(ticket);
+    let planner = load_suggested_planner(pool).await?;
+    let mut response = respond_with_suggestion(ticket, planner.as_ref());
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1004,7 +1032,10 @@ async fn update_status(
             .await
             .map_err(map_update_status_error)?;
     }
-    Ok(Json(ticket_to_response(ticket)))
+    let planner = load_suggested_planner(pool)
+        .await
+        .map_err(UpdateStatusError::Status)?;
+    Ok(Json(respond_with_suggestion(ticket, planner.as_ref())))
 }
 
 #[derive(Deserialize)]
@@ -1305,7 +1336,8 @@ async fn assign_agent(
         }
     }
 
-    Ok(Json(ticket_to_response(ticket)))
+    let planner = load_suggested_planner(pool).await?;
+    Ok(Json(respond_with_suggestion(ticket, planner.as_ref())))
 }
 
 async fn run_agent(

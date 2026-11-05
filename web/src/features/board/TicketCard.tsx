@@ -49,6 +49,9 @@ interface TicketCardProps {
   /** Starts the PM planning run. Omit on the drag overlay. */
   onRunPlan?: (ticketId: string) => void;
   planRunPending?: boolean;
+  /** Assigns the suggested PM. Omit on the drag overlay. */
+  onAssignSuggested?: (ticketId: string, agentId: string) => void;
+  assignSuggestedPending?: boolean;
   /** Roving tabindex. Defaults to 0 so a card stays keyboard-activatable alone. */
   tabIndex?: number;
   boardFocusId?: string;
@@ -65,6 +68,8 @@ export const TicketCard = memo(function TicketCard({
   assigneeName,
   onRunPlan,
   planRunPending = false,
+  onAssignSuggested,
+  assignSuggestedPending = false,
   tabIndex = 0,
   boardFocusId,
   boardTabStop = false,
@@ -94,6 +99,7 @@ export const TicketCard = memo(function TicketCard({
             : null;
 
   const showMerge = showsAcceptedNotMerged(ticket);
+  const suggested = ticket.suggestedAssignee;
 
   return (
     <div
@@ -207,7 +213,21 @@ export const TicketCard = memo(function TicketCard({
           <p className="font-body text-xs leading-tight text-text-secondary">
             {planLabel}
           </p>
-          {planState === 'needs-run' && onRunPlan && (
+          {planState === 'needs-run' && suggested && onAssignSuggested && (
+              <button
+                type="button"
+                disabled={assignSuggestedPending}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAssignSuggested(ticket.id, suggested.id);
+                }}
+                className="mt-1.5 rounded-md bg-accent px-2 py-1 font-body text-xs font-medium text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
+              >
+                {PLAN_COPY.assignPm}
+              </button>
+            )}
+          {planState === 'needs-run' && !suggested && onRunPlan && (
             <button
               type="button"
               disabled={planRunPending}

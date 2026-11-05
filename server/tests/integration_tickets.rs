@@ -398,3 +398,215 @@ async fn existing_ticket_without_priority_still_returns_null() {
     let ticket = common::get_ticket(&app, &ticket_id.to_string(), &cookie, &csrf).await;
     assert!(ticket["priority"].is_null());
 }
+
+fn suggested_id(ticket: &serde_json::Value) -> Option<&str> {
+    ticket
+        .get("suggestedAssignee")
+        .and_then(|value| value.get("id"))
+        .and_then(|id| id.as_str())
+}
+
+#[tokio::test]
+async fn unassigned_backlog_ticket_suggests_the_pm() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"Needs a plan","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let ticket_id = created["id"].as_str().unwrap().to_string();
+    let pm_id = suggested_id(&created)
+        .expect("new ticket suggests a PM")
+        .to_string();
+
+    let agents_res = app
+        .clone()
+        .oneshot(common::json_request("GET", "/api/agents", "", &cookie, &csrf))
+        .await
+        .unwrap();
+    assert_eq!(agents_res.status(), StatusCode::OK);
+    let agents: serde_json::Value = common::json_body(agents_res).await;
+    let suggested_agent = agents["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["id"].as_str() == Some(pm_id.as_str()))
+        .expect("suggested id is an agent");
+    assert_eq!(suggested_agent["enabled"], true);
+    let preset = suggested_agent["presetSource"].as_str().unwrap_or("");
+    let role = suggested_agent["role"].as_str().unwrap_or("");
+    assert!(
+        preset.eq_ignore_ascii_case("pm")
+            || role.eq_ignore_ascii_case("pm")
+            || role.to_ascii_lowercase().contains("product manager"),
+        "suggested {preset}/{role}"
+    );
+    assert!(!created["suggestedAssignee"]["name"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty());
+
+    let listed = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/boards/{board_id}/tickets"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let listed: serde_json::Value = common::json_body(listed).await;
+    let from_list = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|ticket| ticket["id"].as_str() == Some(ticket_id.as_str()))
+        .unwrap();
+    assert_eq!(suggested_id(from_list), Some(pm_id.as_str()));
+
+    let renamed = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            r#"{"title":"Renamed"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let renamed: serde_json::Value = common::json_body(renamed).await;
+    assert_eq!(renamed["title"], "Renamed");
+    assert_eq!(suggested_id(&renamed), Some(pm_id.as_str()));
+
+    let skipped = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            r#"{"skipPlanning":true}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let skipped: serde_json::Value = common::json_body(skipped).await;
+    assert!(suggested_id(&skipped).is_none());
+
+    let planning = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            r#"{"skipPlanning":false}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let planning: serde_json::Value = common::json_body(planning).await;
+    assert_eq!(suggested_id(&planning), Some(pm_id.as_str()));
+
+    let blocked = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"blocked"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), StatusCode::OK);
+    let blocked: serde_json::Value = common::json_body(blocked).await;
+    assert!(suggested_id(&blocked).is_none());
+
+    let backlog = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"backlog"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let backlog: serde_json::Value = common::json_body(backlog).await;
+    assert_eq!(suggested_id(&backlog), Some(pm_id.as_str()));
+
+    let archived = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/archive"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(archived.status(), StatusCode::OK);
+    let fetched = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(suggested_id(&fetched).is_none());
+
+    let second = create_repo_less_ticket(
+        &app,
+        &board_id,
+        r#"{"title":"Assign me","description":""}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let second_id = second["id"].as_str().unwrap();
+    assert_eq!(suggested_id(&second), Some(pm_id.as_str()));
+
+    let assigned = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{second_id}/assign"),
+            &format!(r#"{{"agentId":"{pm_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(assigned.status(), StatusCode::OK);
+    let assigned: serde_json::Value = common::json_body(assigned).await;
+    assert!(suggested_id(&assigned).is_none());
+
+    let unassigned = app
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{second_id}/assign"),
+            r#"{"agentId":null}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let unassigned: serde_json::Value = common::json_body(unassigned).await;
+    assert_eq!(suggested_id(&unassigned), Some(pm_id.as_str()));
+}

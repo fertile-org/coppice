@@ -76,6 +76,8 @@ export interface Ticket {
   substatusMetadata?: Record<string, unknown>;
   priority?: string;
   assigneeAgentId?: string;
+  /** PM offered on an unassigned Backlog ticket. Absent once anyone is assigned. */
+  suggestedAssignee?: { id: string; name: string } | null;
   ownerUserId?: string;
   branchName?: string;
   createdBy: string;

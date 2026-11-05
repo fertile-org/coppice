@@ -18,10 +18,11 @@ import { codeReviewHref } from '../code/codeReviewHref';
 import { openCodeReview } from '../code/openCodeReview';
 import { useKeyboardEnvironment, useKeyboardLayer } from '../keyboard/useKeyboard';
 import { approveTicketPlan } from '../plan/approvePlan';
+import { PLAN_COPY } from '../plan/copy';
 import { useRepos } from '../repos/useRepos';
 import { AcceptTicketDialog } from '../tickets/AcceptTicketDialog';
 import { TicketDrawer } from '../tickets/TicketDrawer';
-import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
+import { commentsQueryKey, ticketQueryKey, useAssignSuggested } from '../tickets/useTicket';
 import { setLastBoardId, useBoards } from '../boards/useBoards';
 import {
   BoardFilterButton,
@@ -115,6 +116,7 @@ export function BoardPage() {
   const createTicket = useCreateTicket(boardId ?? '');
   const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
   const startPlan = useStartPlanRun(boardId ?? '');
+  const assignSuggested = useAssignSuggested(boardId ?? '');
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [focusState, setFocusState] = useState<BoardFocus | null>(null);
@@ -420,6 +422,19 @@ export function BoardPage() {
     });
   });
 
+  const handleAssignSuggested = useStableCallback((ticketId: string, agentId: string) => {
+    void assignSuggested
+      .mutateAsync({ ticketId, agentId })
+      .then(() => {
+        toast.success(PLAN_COPY.assignedToPm);
+      })
+      .catch((err: unknown) => {
+        toast.error(
+          apiErrorToastMessage(parseApiErrorMessage(err, PLAN_COPY.assignPmFailed)),
+        );
+      });
+  });
+
   if (!boardId) {
     return (
       <p className="font-body text-sm text-danger">Missing board id.</p>
@@ -497,6 +512,12 @@ export function BoardPage() {
                   onRunPlan={handleRunPlan}
                   planRunTicketId={
                     startPlan.isPending ? (startPlan.variables ?? null) : null
+                  }
+                  onAssignSuggested={handleAssignSuggested}
+                  assignSuggestedTicketId={
+                    assignSuggested.isPending
+                      ? (assignSuggested.variables?.ticketId ?? null)
+                      : null
                   }
                   hasBoardFocus
                   focusedTicketId={

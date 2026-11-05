@@ -106,6 +106,13 @@ export const ticketSchema = z.object({
   substatusMetadata: z.record(z.unknown()).optional(),
   priority: ticketPrioritySchema.optional(),
   assigneeAgentId: z.string().uuid().optional(),
+  suggestedAssignee: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string(),
+    })
+    .nullable()
+    .optional(),
   ownerUserId: z.string().uuid().optional(),
   branchName: z.string().optional(),
   createdBy: z.string(),

@@ -358,6 +358,17 @@ export function useComments(ticketId: string | undefined) {
   });
 }
 
+function cacheAssignedTicket(queryClient: QueryClient, ticket: Ticket) {
+  queryClient.setQueryData(ticketQueryKey(ticket.id), ticket);
+  void queryClient.invalidateQueries({
+    queryKey: ['tickets', ticket.boardId],
+  });
+  // Auto-start may have queued a run; the drawer's Stop reads this list.
+  void queryClient.invalidateQueries({
+    queryKey: agentRunsQueryKey(ticket.id),
+  });
+}
+
 export function useAssignAgent(ticketId: string) {
   const queryClient = useQueryClient();
 
@@ -365,13 +376,23 @@ export function useAssignAgent(ticketId: string) {
     mutationFn: (agentId: string | null) =>
       assignTicketAgent(ticketId, agentId),
     onSuccess: (ticket) => {
-      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      cacheAssignedTicket(queryClient, ticket);
+    },
+  });
+}
+
+/** One board-level assign, so a card can assign without a per-ticket hook. */
+export function useAssignSuggested(boardId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ ticketId, agentId }: { ticketId: string; agentId: string }) =>
+      assignTicketAgent(ticketId, agentId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticket.id), ticket);
+      void queryClient.invalidateQueries({ queryKey: ['tickets', boardId] });
       void queryClient.invalidateQueries({
-        queryKey: ['tickets', ticket.boardId],
-      });
-      // Auto-start may have queued a run; the drawer's Stop reads this list.
-      void queryClient.invalidateQueries({
-        queryKey: agentRunsQueryKey(ticketId),
+        queryKey: agentRunsQueryKey(ticket.id),
       });
     },
   });

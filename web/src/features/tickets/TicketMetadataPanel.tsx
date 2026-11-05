@@ -227,6 +227,21 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   useRegisterShortcut('review.openCode', handleOpenCodeReview, codeReviewReady);
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
+  async function assignSuggestedPm() {
+    const suggested = ticket.suggestedAssignee;
+    if (!suggested) return;
+    setAssignError(null);
+    try {
+      const updated = await assignAgent.mutateAsync(suggested.id);
+      setAssigneeId(updated.assigneeAgentId ?? suggested.id);
+      toast.success(PLAN_COPY.assignedToPm);
+    } catch (err) {
+      const message = parseApiErrorMessage(err, PLAN_COPY.assignPmFailed);
+      setAssignError(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
   return (
     <div className="space-y-5">
       {isArchived && (
@@ -258,6 +273,25 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
           <p className="font-body text-xs text-text-muted">
             Assigned to {assignedAgent.name}
           </p>
+        )}
+        {ticket.suggestedAssignee && !assigneeId && (
+          <div className="flex items-center gap-2 font-body text-sm text-text-secondary">
+            <span>
+              {PLAN_COPY.suggestedPm}{' '}
+              <span className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 font-medium text-text-primary">
+                {PLAN_COPY.suggestedPmRole}
+              </span>
+            </span>
+            <button
+              type="button"
+              aria-label={PLAN_COPY.assignPm}
+              disabled={formDisabled}
+              onClick={() => void assignSuggestedPm()}
+              className="rounded-md bg-accent px-2 py-1 font-body text-xs font-medium text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
+            >
+              {PLAN_COPY.assignSuggested}
+            </button>
+          </div>
         )}
         {ticket.pendingAssignRecommendation && (
           <p className="font-body text-sm text-text-muted">
