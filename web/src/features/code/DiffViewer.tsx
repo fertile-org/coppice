@@ -17,6 +17,7 @@ import {
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import type { InlineComment } from '../../lib/schemas/codeReview';
+import { diffTokens } from './diffHighlight';
 import { useFilePatch } from './useCodeReview';
 import 'react-diff-view/style/index.css';
 
@@ -334,6 +335,11 @@ export function DiffViewer({
     [handleLineClick],
   );
 
+  const tokens = useMemo(() => {
+    if (!parsedFile) return null;
+    return diffTokens(parsedFile.hunks.slice(0, shownHunks), filePath);
+  }, [filePath, parsedFile, shownHunks]);
+
   if (!filePath) {
     return (
       <div className="flex h-full items-center justify-center bg-background p-8">
@@ -381,6 +387,7 @@ export function DiffViewer({
           viewType={viewType}
           diffType={parsedFile.type}
           hunks={parsedFile.hunks}
+          tokens={tokens}
           widgets={widgets}
           gutterType="default"
           gutterEvents={lineEvents}
