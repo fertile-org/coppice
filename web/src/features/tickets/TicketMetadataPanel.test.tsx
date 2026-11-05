@@ -5,9 +5,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Ticket } from '../board/useTickets';
+import { PLAN_COPY } from '../plan/copy';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 
 const approveSplits = vi.fn();
+const assignAgent = vi.fn();
 
 vi.mock('./TicketGitActions', () => ({
   TicketGitActions: () => null,
@@ -28,7 +30,7 @@ vi.mock('./useAgentRuns', () => ({
 vi.mock('./useTicket', () => ({
   useAgents: () => ({ data: [] }),
   useApproveSplits: () => ({ mutateAsync: approveSplits, isPending: false }),
-  useAssignAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useAssignAgent: () => ({ mutateAsync: assignAgent, isPending: false }),
   useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useTicketGitInfo: () => ({ data: undefined }),
   useUpdateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -70,6 +72,40 @@ function renderPanel(ticket: Ticket = makeTicket()) {
     </MemoryRouter>,
   );
 }
+
+const PM_ID = '00000000-0000-0000-0000-000000000010';
+
+describe('TicketMetadataPanel suggested PM', () => {
+  beforeEach(() => {
+    assignAgent.mockReset();
+  });
+
+  it('assigns the suggested PM without Save', async () => {
+    assignAgent.mockResolvedValue(
+      makeTicket({
+        status: 'backlog',
+        assigneeAgentId: PM_ID,
+        suggestedAssignee: null,
+        pendingSplitRecommendation: null,
+      }),
+    );
+    renderPanel(
+      makeTicket({
+        status: 'backlog',
+        pendingSplitRecommendation: null,
+        suggestedAssignee: { id: PM_ID, name: 'PM' },
+      }),
+    );
+
+    expect(screen.getByText(PLAN_COPY.suggestedPm)).toBeVisible();
+    expect(screen.getByText(PLAN_COPY.suggestedPmRole)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: PLAN_COPY.assignPm }));
+
+    await waitFor(() => expect(assignAgent).toHaveBeenCalledWith(PM_ID));
+    expect(screen.queryByRole('button', { name: PLAN_COPY.assignPm })).toBeNull();
+    expect(await screen.findByText(PLAN_COPY.assignedToPm)).toBeVisible();
+  });
+});
 
 describe('TicketMetadataPanel split confirm', () => {
   beforeEach(() => {

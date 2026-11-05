@@ -33,4 +33,10 @@ export const PLAN_COPY = {
   verifyDefaultAgent: 'PM (default)',
   planNeedsRun: 'Plan needs a run',
   runAgent: 'Run agent',
+  assignPm: 'Assign PM',
+  suggestedPm: 'Suggested:',
+  suggestedPmRole: 'PM',
+  assignSuggested: 'Assign',
+  assignedToPm: 'Assigned to PM · planning started',
+  assignPmFailed: "Couldn't assign the PM. Try again.",
 } as const;

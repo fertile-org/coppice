@@ -19,6 +19,7 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::substatus::TicketStatus;
+use crate::domain::ticket::Ticket;
 use crate::domain::workflow::{is_pm_identity, is_tech_lead_identity, JOB_TYPE_PLAN_TICKET};
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentService;
@@ -27,6 +28,7 @@ use crate::services::result_contract::upsert_markdown_section;
 use crate::services::review_capacity::{ReviewCapacityError, ReviewCapacityService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
+use serde::Serialize;
 use sqlx::PgPool;
 use sqlx::Row;
 use sqlx::{Postgres, Transaction};
@@ -1142,6 +1144,30 @@ pub fn status_after_planning_run(current: TicketStatus) -> Option<TicketStatus> 
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedAssignee {
+    pub id: Uuid,
+    pub name: String,
+}
+
+/// PM offered as the assignee. Only an unassigned, unarchived Backlog ticket
+/// that still needs a plan, and only when `planner` is an enabled PM.
+pub fn suggested_assignee(ticket: &Ticket, planner: Option<&Agent>) -> Option<SuggestedAssignee> {
+    let planner = planner.filter(|agent| agent.enabled && is_pm_agent(agent))?;
+    if ticket.assignee_agent_id.is_some()
+        || ticket.archived_at.is_some()
+        || ticket.status != TicketStatus::Backlog
+        || ticket.skip_planning
+    {
+        return None;
+    }
+    Some(SuggestedAssignee {
+        id: planner.id,
+        name: planner.name.clone(),
+    })
+}
+
 /// The enabled PM who writes the plan. The earliest PM wins when several exist.
 pub fn planner_for_ticket(agents: &[Agent]) -> Option<&Agent> {
     agents
@@ -1229,6 +1255,96 @@ mod tests {
     fn planner_is_none_when_the_pm_is_disabled() {
         let disabled = agent(1, "PM", "pm", false, 1);
         assert!(planner_for_ticket(&[disabled]).is_none());
+    }
+
+    fn backlog_ticket() -> Ticket {
+        let now = OffsetDateTime::from_unix_timestamp(1).unwrap();
+        Ticket {
+            id: Uuid::from_u128(9),
+            board_id: Uuid::from_u128(8),
+            repo_id: None,
+            title: "New ticket".into(),
+            description: String::new(),
+            attachment_ids: vec![],
+            status: TicketStatus::Backlog,
+            substatus: None,
+            substatus_metadata: None,
+            priority: None,
+            assignee_agent_id: None,
+            owner_user_id: None,
+            branch_name: None,
+            pending_assign_recommendation: None,
+            parent_ticket_id: None,
+            pending_split_recommendation: None,
+            clarification_round: 0,
+            skip_planning: false,
+            content_version: 1,
+            approved_plan_id: None,
+            approved_plan_content_version: None,
+            created_by: "user".into(),
+            created_by_id: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        }
+    }
+
+    #[test]
+    fn suggested_assignee_is_the_enabled_pm_on_an_unassigned_backlog_ticket() {
+        let pm = agent(1, "PM", "pm", true, 1);
+        let suggestion = suggested_assignee(&backlog_ticket(), Some(&pm));
+        assert_eq!(
+            suggestion,
+            Some(SuggestedAssignee {
+                id: pm.id,
+                name: pm.name,
+            })
+        );
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_when_the_ticket_is_assigned() {
+        let pm = agent(1, "PM", "pm", true, 1);
+        let mut ticket = backlog_ticket();
+        ticket.assignee_agent_id = Some(Uuid::from_u128(2));
+        assert!(suggested_assignee(&ticket, Some(&pm)).is_none());
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_when_the_ticket_is_archived() {
+        let pm = agent(1, "PM", "pm", true, 1);
+        let mut ticket = backlog_ticket();
+        ticket.archived_at = Some(ticket.created_at);
+        assert!(suggested_assignee(&ticket, Some(&pm)).is_none());
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_outside_backlog() {
+        let pm = agent(1, "PM", "pm", true, 1);
+        let mut ticket = backlog_ticket();
+        ticket.status = TicketStatus::Ready;
+        assert!(suggested_assignee(&ticket, Some(&pm)).is_none());
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_when_planning_is_skipped() {
+        let pm = agent(1, "PM", "pm", true, 1);
+        let mut ticket = backlog_ticket();
+        ticket.skip_planning = true;
+        assert!(suggested_assignee(&ticket, Some(&pm)).is_none());
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_without_a_pm() {
+        let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 1);
+        assert!(suggested_assignee(&backlog_ticket(), None).is_none());
+        assert!(suggested_assignee(&backlog_ticket(), Some(&engineer)).is_none());
+    }
+
+    #[test]
+    fn suggested_assignee_is_none_when_the_pm_is_disabled() {
+        let disabled = agent(1, "PM", "pm", false, 1);
+        assert!(suggested_assignee(&backlog_ticket(), Some(&disabled)).is_none());
     }
 
     #[test]

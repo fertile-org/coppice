@@ -241,6 +241,38 @@ describe('TicketCard plan labels', () => {
     );
     expect(screen.getByText(PLAN_COPY.waitingForApproval)).toBeVisible();
   });
+
+  it('assigns the suggested PM without opening the card', () => {
+    const onOpen = vi.fn();
+    const onAssignSuggested = vi.fn();
+    render(
+      <DndContext>
+        <TicketCard
+          ticket={{
+            ...ticket,
+            status: 'backlog',
+            suggestedAssignee: {
+              id: '00000000-0000-0000-0000-000000000010',
+              name: 'PM',
+            },
+          }}
+          onOpen={onOpen}
+          onRunPlan={vi.fn()}
+          onAssignSuggested={onAssignSuggested}
+        />
+      </DndContext>,
+    );
+
+    const button = screen.getByRole('button', { name: PLAN_COPY.assignPm });
+    expect(screen.queryByRole('button', { name: PLAN_COPY.runAgent })).toBeNull();
+    fireEvent.pointerDown(button);
+    fireEvent.click(button);
+    expect(onAssignSuggested).toHaveBeenCalledWith(
+      ticket.id,
+      '00000000-0000-0000-0000-000000000010',
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+  });
 });
 
 describe('TicketCard archived affordance', () => {
