@@ -1,4 +1,5 @@
-use crate::plugins::capability::MARKETPLACE_JSON;
+use crate::plugins::builtin::BUILTIN_PLUGIN;
+use crate::plugins::capability::{MARKETPLACE_JSON, PLUGIN_JSON};
 use crate::plugins::manifest::{is_plugin_dir_root, is_plugin_root, parse_plugin, PluginManifest};
 use crate::plugins::marketplace::expand_marketplace;
 use std::collections::HashSet;
@@ -33,6 +34,15 @@ pub fn discover(dir: &Path) -> std::io::Result<Vec<Discovered>> {
             continue;
         };
         if folder.starts_with('.') || !path.is_dir() || !is_plugin_root(&path) {
+            continue;
+        }
+        // Built-in skills live under `<builtin_plugins_dir>/coppice/skills` with
+        // no plugin manifest. Skip that tree so it is not listed as an invalid
+        // reserved-name plugin; a real manifest still reports "reserved".
+        if folder == BUILTIN_PLUGIN
+            && !path.join(PLUGIN_JSON).is_file()
+            && !path.join(MARKETPLACE_JSON).is_file()
+        {
             continue;
         }
         if path.join(MARKETPLACE_JSON).is_file() {
@@ -213,5 +223,38 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "broken");
         assert!(found[0].result.is_err());
+    }
+
+    #[test]
+    fn discover_skips_skills_only_builtin_coppice_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("coppice/skills/hello/SKILL.md"),
+            "---\nname: hello\ndescription: H\n---\nbody",
+        );
+        write(
+            &dir.path().join("design/.claude-plugin/plugin.json"),
+            r#"{"name":"design"}"#,
+        );
+        let found = discover(dir.path()).unwrap();
+        let rel: Vec<_> = found.iter().map(|d| d.rel_path.as_str()).collect();
+        assert_eq!(rel, ["design"]);
+    }
+
+    #[test]
+    fn discover_lists_coppice_with_manifest_as_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("coppice/.claude-plugin/plugin.json"),
+            r#"{"name":"coppice"}"#,
+        );
+        let found = discover(dir.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rel_path, "coppice");
+        assert_eq!(found[0].name, "coppice");
+        assert_eq!(
+            found[0].result.as_ref().unwrap_err(),
+            "plugin name `coppice` is reserved"
+        );
     }
 }

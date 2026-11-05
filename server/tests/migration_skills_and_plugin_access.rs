@@ -290,3 +290,48 @@ async fn migration_keeps_per_agent_plugin_enables_as_an_explicit_list() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn migration_deletes_stale_invalid_coppice_plugin_row() {
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let db = MigrationDb::create().await.expect("fresh database");
+    db.apply_before(66).await.expect("migrations before 066");
+
+    let dir_id = uuid::Uuid::new_v4();
+    let invalid = uuid::Uuid::new_v4();
+    let keep = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO plugin_dirs (id, path, position) VALUES ($1, $2, 0)")
+        .bind(dir_id)
+        .bind(format!("/tmp/{dir_id}"))
+        .execute(&db.pool)
+        .await
+        .expect("plugin dir");
+    sqlx::query(
+        r#"
+        INSERT INTO plugins (id, plugin_dir_id, rel_path, name, status, error, manifest)
+        VALUES
+            ($1, $3, 'coppice', 'coppice', 'invalid', 'plugin name `coppice` is reserved', '{}'),
+            ($2, $3, 'design', 'design', 'ok', NULL, '{}')
+        "#,
+    )
+    .bind(invalid)
+    .bind(keep)
+    .bind(dir_id)
+    .execute(&db.pool)
+    .await
+    .expect("plugins");
+
+    db.apply_version(66).await.expect("migration 066");
+
+    let remaining: Vec<(uuid::Uuid, String)> =
+        sqlx::query_as("SELECT id, name FROM plugins ORDER BY name")
+            .fetch_all(&db.pool)
+            .await
+            .expect("plugins after");
+    assert_eq!(remaining, vec![(keep, "design".to_string())]);
+
+    db.close().await;
+}

@@ -177,6 +177,29 @@ async fn create_write_publish_choose_roundtrip() {
 }
 
 #[tokio::test]
+async fn init_plugins_skips_builtin_coppice_skills_folder() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().expect("db pool");
+    let coppice_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM plugins WHERE name = 'coppice'")
+            .fetch_one(&pool)
+            .await
+            .expect("coppice count");
+    assert_eq!(coppice_rows, 0);
+
+    let (enabled, agent_access): (bool, String) =
+        sqlx::query_as("SELECT enabled, agent_access FROM plugins WHERE name = 'design'")
+            .fetch_one(&pool)
+            .await
+            .expect("design plugin");
+    assert!(enabled);
+    assert_eq!(agent_access, "all");
+}
+
+#[tokio::test]
 async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
