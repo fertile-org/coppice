@@ -4,6 +4,7 @@ export const PLAN_COPY = {
   approvePlan: 'Approve plan',
   approving: 'Approving…',
   approveWhileRewriting: 'The plan is being rewritten. Approve once it is ready.',
+  approveNeedsEmptyNote: 'Send or clear your note to approve.',
   askForChanges: 'Ask for changes',
   sending: 'Sending…',
   askPlaceholder: 'What should change?',

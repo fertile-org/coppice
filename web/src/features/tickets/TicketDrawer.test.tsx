@@ -314,7 +314,7 @@ describe('TicketDrawer', () => {
     ).toBeVisible();
   });
 
-  it('shows Accept only when status is wait_for_final_review', () => {
+  it('shows Accept only when status is wait_for_final_review', async () => {
     ticketState.ticket = { ...ticketState.ticket, status: 'backlog' };
     const { unmount } = renderDrawer();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
@@ -329,7 +329,15 @@ describe('TicketDrawer', () => {
       },
     };
     renderDrawer();
-    expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+    const headerAccept = screen.getByRole('button', { name: 'Accept' });
+    expect(headerAccept).toBeEnabled();
+    fireEvent.click(headerAccept);
+    expect(finalApprove).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Accept this ticket?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }));
+    });
+    expect(finalApprove).toHaveBeenCalledTimes(1);
   });
 
   it('archives an active ticket from the drawer header', async () => {
