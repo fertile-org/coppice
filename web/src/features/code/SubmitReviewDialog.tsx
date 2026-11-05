@@ -13,7 +13,7 @@ import { Label } from '../../components/ui/label';
 import { Combobox } from '../../components/ui/combobox';
 import { Textarea } from '../../components/ui/textarea';
 import type { InlineComment } from '../../lib/schemas/codeReview';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
 import { useBoards } from '../boards/useBoards';
 import { useTicket } from '../tickets/useTicket';
@@ -40,6 +40,20 @@ function engineerAgents(agents: ReturnType<typeof useAgents>['data']) {
   return (agents ?? []).filter(
     (agent) => agent.enabled && agent.role.toLowerCase().includes('engineer'),
   );
+}
+
+function prefilledEngineerId(
+  assigneeId: string | null | undefined,
+  engineers: { id: string }[],
+) {
+  if (assigneeId && engineers.some((agent) => agent.id === assigneeId)) {
+    return assigneeId;
+  }
+  return engineers[0]?.id ?? '';
+}
+
+function needsEngineer(action: WorkflowAction) {
+  return action === 'move_to_in_progress' || action === 'reassign_engineer';
 }
 
 export function SubmitReviewDialog({
@@ -80,7 +94,7 @@ export function SubmitReviewDialog({
     setTitle('');
     setDescription('');
     setWorkflowAction('none');
-    setReassignAgentId(ticket?.assigneeAgentId ?? engineers[0]?.id ?? '');
+    setReassignAgentId(prefilledEngineerId(ticket?.assigneeAgentId, engineers));
     setError(null);
   }, [open, boards, ticket?.assigneeAgentId, engineers]);
 
@@ -135,8 +149,12 @@ export function SubmitReviewDialog({
       }
     }
 
-    if (workflowAction === 'reassign_engineer' && !reassignAgentId) {
-      setError('Select an engineer to reassign.');
+    if (needsEngineer(workflowAction) && !reassignAgentId) {
+      setError(
+        workflowAction === 'reassign_engineer'
+          ? 'Select an engineer to reassign.'
+          : 'Select an engineer.',
+      );
       return;
     }
 
@@ -160,9 +178,7 @@ export function SubmitReviewDialog({
         inlineComments,
         workflowAction: ticketId ? workflowAction : undefined,
         reassignAgentId:
-          ticketId && workflowAction === 'reassign_engineer'
-            ? reassignAgentId
-            : undefined,
+          ticketId && needsEngineer(workflowAction) ? reassignAgentId : undefined,
       });
 
       onSubmitted();
@@ -175,9 +191,13 @@ export function SubmitReviewDialog({
           `/boards/${resolvedBoardId}?ticket=${result.ticketId}`,
         );
       }
-    } catch {
-      setError('Unable to submit review. Refresh the diff and try again.');
-      toast.error('Unable to submit review');
+    } catch (err) {
+      const message = parseApiErrorMessage(
+        err,
+        'Unable to submit review. Refresh the diff and try again.',
+      );
+      setError(message);
+      toast.error(message);
     }
   }
 
@@ -273,7 +293,7 @@ export function SubmitReviewDialog({
               </div>
             )}
 
-            {ticketId && workflowAction === 'reassign_engineer' && (
+            {ticketId && needsEngineer(workflowAction) && (
               <div className="space-y-2">
                 <Label htmlFor="review-engineer">Engineer</Label>
                 <Combobox

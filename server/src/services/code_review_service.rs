@@ -190,7 +190,12 @@ pub struct SubmitReviewResponse {
     pub ticket_id: Uuid,
     pub comment_id: Uuid,
     pub ticket_created: bool,
+    /// Set when the submit changed status or assignee, so the API can start a run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_action: Option<String>,
 }
+
+const PICK_ENGINEER: &str = "Pick an engineer before moving this ticket to In Progress.";
 
 struct WorktreeRepoContext {
     worktree: PathBuf,
@@ -377,13 +382,18 @@ impl<'a> CodeReviewService<'a> {
 
         let ticket_service = TicketService::new(self.pool);
         let mut ticket_created = false;
-        let ticket_id = if let Some(ticket_id) = input.ticket_id {
+        let (ticket_id, current_assignee) = if let Some(ticket_id) = input.ticket_id {
             let ticket = ticket_service.get(ticket_id).await?;
             if ticket.ticket.repo_id != Some(input.repo_id) {
                 return Err(CodeReviewError::TicketRepoMismatch);
             }
-            ticket_id
+            (ticket_id, ticket.ticket.assignee_agent_id)
         } else {
+            if input.workflow_action.as_deref() == Some("move_to_in_progress")
+                && input.reassign_agent_id.is_none()
+            {
+                return Err(CodeReviewError::Validation(PICK_ENGINEER.into()));
+            }
             let new_ticket = input.new_ticket.ok_or_else(|| {
                 CodeReviewError::Validation(
                     "new_ticket is required when ticket_id is omitted".into(),
@@ -404,8 +414,15 @@ impl<'a> CodeReviewService<'a> {
                 )
                 .await?;
             ticket_created = true;
-            created.ticket.id
+            (created.ticket.id, None)
         };
+
+        // Before the review comment: a missing engineer must not write anything.
+        let engineer_id = input.reassign_agent_id.or(current_assignee);
+        if input.workflow_action.as_deref() == Some("move_to_in_progress") && engineer_id.is_none()
+        {
+            return Err(CodeReviewError::Validation(PICK_ENGINEER.into()));
+        }
 
         let body = format_review_comment(
             &repo.name,
@@ -429,26 +446,37 @@ impl<'a> CodeReviewService<'a> {
             )
             .await?;
 
-        match input.workflow_action.as_deref() {
+        let workflow_action = match input.workflow_action.as_deref() {
             Some("move_to_in_progress") => {
+                let engineer_id = engineer_id
+                    .ok_or_else(|| CodeReviewError::Validation(PICK_ENGINEER.into()))?;
+                // Some(None) clears the stale waiting_for_agent label. None would keep it.
                 ticket_service
-                    .update_status(ticket_id, TicketStatus::InProgress, None, None)
+                    .update_status(ticket_id, TicketStatus::InProgress, Some(None), Some(None))
                     .await?;
+                ticket_service
+                    .assign_agent(ticket_id, Some(engineer_id))
+                    .await?;
+                Some("move_to_in_progress".to_string())
             }
             Some("reassign_engineer") => {
                 if let Some(agent_id) = input.reassign_agent_id {
                     ticket_service
                         .assign_agent(ticket_id, Some(agent_id))
                         .await?;
+                    Some("reassign_engineer".to_string())
+                } else {
+                    None
                 }
             }
-            _ => {}
-        }
+            _ => None,
+        };
 
         Ok(SubmitReviewResponse {
             ticket_id,
             comment_id: comment.id,
             ticket_created,
+            workflow_action,
         })
     }
 
