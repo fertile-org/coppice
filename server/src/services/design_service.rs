@@ -496,7 +496,7 @@ impl<'a> DesignService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT id, title, run_id, dir, options, chosen_option_id, recommended_option_id,
-                   superseded_by IS NOT NULL AS superseded,
+                   (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
                        WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
@@ -522,7 +522,7 @@ impl<'a> DesignService<'a> {
             r#"
             SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
                    recommended_option_id,
-                   superseded_by IS NOT NULL AS superseded,
+                   (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
                        WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'

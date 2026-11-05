@@ -293,6 +293,7 @@ impl<'a> PlanningService<'a> {
         agent_id: Uuid,
         summary: &str,
         run_id: Option<Uuid>,
+        no_visible_change: bool,
     ) -> Result<TicketPlan, PlanError> {
         self.insert_plan_body(
             ticket_id,
@@ -300,6 +301,7 @@ impl<'a> PlanningService<'a> {
             run_id,
             &format_plan(summary),
             None,
+            no_visible_change,
         )
         .await
     }
@@ -311,6 +313,7 @@ impl<'a> PlanningService<'a> {
         run_id: Option<Uuid>,
         body: &str,
         revision: Option<i32>,
+        no_visible_change: bool,
     ) -> Result<TicketPlan, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -330,30 +333,54 @@ impl<'a> PlanningService<'a> {
                 next
             }
         };
-        // The newest live plan-run design set and the option picked (or
-        // recommended) in it. Picks are refused during a plan run, so reading
-        // here also covers options the run itself published.
-        let design: Option<(Uuid, Option<String>)> = sqlx::query_as(
-            r#"
-            SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
-            FROM design_sets d
-            WHERE d.ticket_id = $1
-              AND d.published_at IS NOT NULL
-              AND d.superseded_by IS NULL
-              AND EXISTS (
-                  SELECT 1 FROM agent_runs r
-                  WHERE r.id = d.run_id AND r.job_type = 'plan_ticket'
-              )
-            ORDER BY d.created_at DESC, d.id DESC
-            LIMIT 1
-            "#,
-        )
-        .bind(ticket_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let (design_set_id, design_option_id) = match design {
-            Some((set, option)) => (Some(set), option),
-            None => (None, None),
+        // A plan with no visible change drops the old options instead of
+        // linking them. The flag is the agent's final word, so a set this
+        // same run published is retired too.
+        let (design_set_id, design_option_id) = if no_visible_change {
+            sqlx::query(
+                r#"
+                UPDATE design_sets
+                SET retired_at = now()
+                WHERE ticket_id = $1
+                  AND published_at IS NOT NULL
+                  AND superseded_by IS NULL
+                  AND retired_at IS NULL
+                  AND run_id IN (
+                      SELECT id FROM agent_runs WHERE job_type = 'plan_ticket'
+                  )
+                "#,
+            )
+            .bind(ticket_id)
+            .execute(&mut *tx)
+            .await?;
+            (None, None)
+        } else {
+            // The newest live plan-run design set and the option picked (or
+            // recommended) in it. Picks are refused during a plan run, so reading
+            // here also covers options the run itself published.
+            let design: Option<(Uuid, Option<String>)> = sqlx::query_as(
+                r#"
+                SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
+                FROM design_sets d
+                WHERE d.ticket_id = $1
+                  AND d.published_at IS NOT NULL
+                  AND d.superseded_by IS NULL
+                  AND d.retired_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM agent_runs r
+                      WHERE r.id = d.run_id AND r.job_type = 'plan_ticket'
+                  )
+                ORDER BY d.created_at DESC, d.id DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(ticket_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            match design {
+                Some((set, option)) => (Some(set), option),
+                None => (None, None),
+            }
         };
         let id = Uuid::new_v4();
         let row = sqlx::query(
@@ -543,7 +570,7 @@ impl<'a> PlanningService<'a> {
             spec.acceptance_criteria.as_deref(),
         );
         let child_plan = self
-            .insert_plan_body(child_id, Some(recommended_by), None, &body, Some(1))
+            .insert_plan_body(child_id, Some(recommended_by), None, &body, Some(1), false)
             .await?;
         sqlx::query(
             r#"

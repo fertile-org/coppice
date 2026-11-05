@@ -8,6 +8,8 @@ use coppice_server::copy::plan::{
 };
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
+use coppice_server::mcp::tools::result::take_submitted_result;
+use coppice_server::providers::AgentRunResult;
 use coppice_server::services::design_service::{
     CreateScope, DesignError, DesignOption, DesignService,
 };
@@ -1486,7 +1488,7 @@ async fn plan_review_with_set() -> (TicketHttp, Uuid) {
     let fx = unplanned_with_pm().await;
     let plans = planning(&fx);
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
         .await
         .expect("first plan");
     plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
@@ -1497,7 +1499,7 @@ async fn plan_review_with_set() -> (TicketHttp, Uuid) {
     let run_id = active_plan_run(&fx).await;
     let set_id = publish_plan_options(&fx, run_id, fx.agent_id).await;
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
         .await
         .expect("plan with design");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -1614,7 +1616,7 @@ async fn picking_back_to_the_earlier_option_starts_another_run() {
     assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
     let run_id = active_plan_run(&fx).await;
     planning(&fx)
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
         .await
         .expect("rewritten plan");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -1856,7 +1858,7 @@ async fn pick_with_no_plan_saves_and_starts_no_run() {
     assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
     assert_eq!(plan_runs(&fx).await, runs);
     let plan = planning(&fx)
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
         .await
         .expect("next plan");
     assert_eq!(plan.design_option_id.as_deref(), Some("b"));
@@ -2474,7 +2476,7 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     let fx = unplanned_with_pm().await;
     let plans = planning(&fx);
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
         .await
         .expect("first plan");
     plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
@@ -2517,7 +2519,7 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
         .await
         .expect("publish");
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id))
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
         .await
         .expect("plan with design");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -2540,4 +2542,157 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     assert_eq!(set["chosen"]["label"], "B");
     assert_eq!(set["chosen"]["displayTitle"], "Full-width button with Show all");
     assert_eq!(set["selected"]["label"], "B");
+}
+
+/// Plan v1 published options. Plan v2 says nothing visible changed, so the
+/// Detail card (live sets only) and `selectedDesign` both go away. The old
+/// sets stay on the ticket as read-only history.
+#[tokio::test]
+async fn no_visible_change_retires_plan_designs() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, first_set) = plan_review_with_set().await;
+    let plans = planning(&fx);
+    plans
+        .ask_for_changes(fx.ticket_id, "Drop the UI.")
+        .await
+        .expect("change request");
+    let run_id = active_plan_run(&fx).await;
+    let second_set = publish_plan_options(&fx, run_id, fx.agent_id).await;
+    sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+        .bind(run_id)
+        .execute(&fx.pool)
+        .await
+        .expect("mark running");
+
+    let design_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("design plugin");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![design_id],
+    )
+    .await;
+    let url = mcp_url(fx.app.clone()).await;
+    let submitted = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({
+                "name": "result_submit",
+                "arguments": {
+                    "status": "done",
+                    "summary": "### Approach\nNo visible change.\n",
+                    "noVisibleChange": true
+                }
+            }),
+        )
+        .await,
+    );
+    assert_eq!(submitted["accepted"], true);
+
+    let result = take_submitted_result(&fx.pool, run_id)
+        .await
+        .expect("read submission")
+        .expect("submitted result");
+    let AgentRunResult::Done {
+        summary,
+        no_visible_change,
+        ..
+    } = result
+    else {
+        panic!("planning result must be done");
+    };
+    assert!(no_visible_change);
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &summary,
+            Some(run_id),
+            no_visible_change,
+        )
+        .await
+        .expect("plan with no visible change");
+
+    let plan = plans
+        .latest_plan(fx.ticket_id)
+        .await
+        .expect("latest")
+        .expect("plan");
+    assert!(plan.design_set_id.is_none());
+    assert!(plan.design_option_id.is_none());
+
+    let (retired, superseded_by): (bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT retired_at IS NOT NULL, superseded_by FROM design_sets WHERE id = $1",
+    )
+    .bind(second_set)
+    .fetch_one(&fx.pool)
+    .await
+    .expect("second set");
+    assert!(retired, "the set this run published is retired too");
+    assert_eq!(superseded_by, None);
+
+    let listed = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{}/designs", fx.ticket_id),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("list designs");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let sets = common::json_body(listed).await;
+    let sets = sets.as_array().expect("design list");
+    assert!(
+        sets.iter().all(|set| set["superseded"] == true),
+        "no live set, so the Detail card stays hidden: {sets:?}"
+    );
+    assert!(sets.iter().any(|set| set["id"] == first_set.to_string()));
+    let second = sets
+        .iter()
+        .find(|set| set["id"] == second_set.to_string())
+        .expect("retired set stays in the list");
+    assert_eq!(second["choice"]["mode"], "read_only");
+
+    let ticket = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"ticket_get","arguments":{}}),
+        )
+        .await,
+    );
+    assert!(ticket["selectedDesign"].is_null(), "{ticket}");
+
+    let designs = tool_json(
+        &rpc(
+            &url,
+            &token,
+            "tools/call",
+            json!({"name":"design__list","arguments":{}}),
+        )
+        .await,
+    );
+    assert!(designs["selectedDesign"].is_null(), "{designs}");
+    let listed_sets = designs["sets"].as_array().expect("sets");
+    assert!(listed_sets
+        .iter()
+        .any(|set| { set["id"] == first_set.to_string() && set["superseded"] == true }));
+    assert!(listed_sets
+        .iter()
+        .any(|set| { set["id"] == second_set.to_string() && set["superseded"] == true }));
+
+    assert_refused(&fx, second_set, "b", DESIGN_SUPERSEDED).await;
 }

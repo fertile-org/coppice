@@ -93,7 +93,7 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 
 /// Added when the agent has the design skill. Guidance only: Plan Review does
 /// not wait for a choice, and a person can ask for plan changes after picking.
-pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. Skip this when the ticket has no visible change.";
+pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. When the plan has no visible change, including after a change request drops the UI work, call `result_submit` with `noVisibleChange` set to true and do not publish options.";
 
 /// Added to work runs when the agent has the design skill.
 pub const WORK_DESIGN_INSTRUCTION: &str = "If `ticket_get` returns `selectedDesign`, build that option. Read the HTML at its `path` for the layout when you can; otherwise follow its title and the plan.";
@@ -122,6 +122,8 @@ pub fn plan_too_long(words: usize) -> String {
 pub const CHANGES_REQUESTED_HEADING: &str = "## Changes requested";
 
 pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a planning run.";
+
+pub const NO_VISIBLE_CHANGE_PLAN_ONLY: &str = "noVisibleChange is only for planning runs.";
 pub const PLAN_DESCRIPTION_REJECTED: &str = "updatedDescription is not allowed on a planning run.";
 pub const PLAN_ASSIGN_REJECTED: &str = "assignTo is not allowed on a planning run.";
 pub const PLAN_SPLIT_REJECTED: &str = "splitTickets is not allowed on a planning run.";
