@@ -18,6 +18,24 @@ import {
   useRepoWorktrees,
 } from './useCodeReview';
 
+const VIEW_TYPE_KEY = 'coppice.codeReview.viewType';
+
+function readViewType(): 'split' | 'unified' {
+  try {
+    return localStorage.getItem(VIEW_TYPE_KEY) === 'unified' ? 'unified' : 'split';
+  } catch {
+    return 'split';
+  }
+}
+
+function storeViewType(viewType: 'split' | 'unified') {
+  try {
+    localStorage.setItem(VIEW_TYPE_KEY, viewType);
+  } catch {
+    /* private mode or quota */
+  }
+}
+
 function worktreeLabel(path: string, branch: string, ticketTitle?: string | null) {
   const shortPath = path.split('/').pop() ?? path;
   if (ticketTitle) return `${shortPath} · ${branch} · ${ticketTitle}`;
@@ -39,7 +57,11 @@ export function CodeReviewPage() {
   const { data: branchesData } = useRepoBranches(repoId);
 
   const [selectedFile, setSelectedFile] = useState<string | undefined>();
-  const [viewType, setViewType] = useState<'split' | 'unified'>('split');
+  const [viewType, setViewType] = useState<'split' | 'unified'>(readViewType);
+  const chooseViewType = (next: 'split' | 'unified') => {
+    setViewType(next);
+    storeViewType(next);
+  };
   const [inlineComments, setInlineComments] = useState<InlineCommentDraft[]>(
     [],
   );
@@ -213,7 +235,7 @@ export function CodeReviewPage() {
             <div className="flex rounded-md border border-border bg-surface-raised p-0.5">
               <button
                 type="button"
-                onClick={() => setViewType('split')}
+                onClick={() => chooseViewType('split')}
                 className={[
                   'rounded px-2.5 py-1 font-body text-xs transition-colors duration-fast',
                   viewType === 'split'
@@ -225,7 +247,7 @@ export function CodeReviewPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setViewType('unified')}
+                onClick={() => chooseViewType('unified')}
                 className={[
                   'rounded px-2.5 py-1 font-body text-xs transition-colors duration-fast',
                   viewType === 'unified'

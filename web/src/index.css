@@ -243,28 +243,39 @@
     color: var(--color-text-secondary);
   }
 
-  /* Repo file previews: highlight.js tokens mapped to theme tokens (light and dark). */
+  /* highlight.js tokens mapped to theme tokens (light and dark). */
   .file-preview .hljs-comment,
-  .file-preview .hljs-quote {
+  .file-preview .hljs-quote,
+  .code-review-diff .hljs-comment,
+  .code-review-diff .hljs-quote {
     color: var(--color-text-muted);
     font-style: italic;
   }
 
   .file-preview .hljs-keyword,
   .file-preview .hljs-selector-tag,
-  .file-preview .hljs-meta {
+  .file-preview .hljs-meta,
+  .code-review-diff .hljs-keyword,
+  .code-review-diff .hljs-selector-tag,
+  .code-review-diff .hljs-meta {
     color: var(--color-danger);
   }
 
   .file-preview .hljs-string,
   .file-preview .hljs-regexp,
-  .file-preview .hljs-addition {
+  .file-preview .hljs-addition,
+  .code-review-diff .hljs-string,
+  .code-review-diff .hljs-regexp,
+  .code-review-diff .hljs-addition {
     color: var(--color-success);
   }
 
   .file-preview .hljs-number,
   .file-preview .hljs-literal,
-  .file-preview .hljs-symbol {
+  .file-preview .hljs-symbol,
+  .code-review-diff .hljs-number,
+  .code-review-diff .hljs-literal,
+  .code-review-diff .hljs-symbol {
     color: var(--color-warning);
   }
 
@@ -272,13 +283,21 @@
   .file-preview .hljs-section,
   .file-preview .hljs-name,
   .file-preview .hljs-type,
-  .file-preview .hljs-built_in {
+  .file-preview .hljs-built_in,
+  .code-review-diff .hljs-title,
+  .code-review-diff .hljs-section,
+  .code-review-diff .hljs-name,
+  .code-review-diff .hljs-type,
+  .code-review-diff .hljs-built_in {
     color: var(--color-info);
   }
 
   .file-preview .hljs-attr,
   .file-preview .hljs-attribute,
-  .file-preview .hljs-variable {
+  .file-preview .hljs-variable,
+  .code-review-diff .hljs-attr,
+  .code-review-diff .hljs-attribute,
+  .code-review-diff .hljs-variable {
     color: var(--color-accent);
   }
 }
