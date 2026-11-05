@@ -79,6 +79,17 @@
   --color-accent-muted: var(--color-moss-100);
   --color-accent-foreground: var(--color-paper-50);
 
+  /* Buttons. Light values match the previous accent / raised-surface look. */
+  --color-btn-primary: var(--color-accent);
+  --color-btn-primary-hover: var(--color-accent-hover);
+  --color-btn-primary-fg: var(--color-accent-foreground);
+  --color-btn-secondary: var(--color-surface-raised);
+  --color-btn-secondary-hover: var(--color-surface-raised);
+  --color-btn-secondary-border: var(--color-border);
+  --color-btn-secondary-fg: var(--color-text-secondary);
+  --color-btn-disabled-border: var(--color-border);
+  --color-btn-disabled-fg: var(--color-text-muted);
+
   --color-danger: #9b3d3d;
   --color-danger-muted: #f5e6e6;
   --color-warning: #b8860b;
@@ -262,6 +273,17 @@
   --color-accent-hover: #8fb89a;
   --color-accent-muted: #16241c;
   --color-accent-foreground: #fafafa;
+
+  /* Literal hex: moss-* is remapped in this block, so var(--color-moss-600) is not #4a7c59. */
+  --color-btn-primary: #4a7c59;
+  --color-btn-primary-hover: #3d6b4f;
+  --color-btn-primary-fg: #ffffff;
+  --color-btn-secondary: #27272a;
+  --color-btn-secondary-hover: #3f3f46;
+  --color-btn-secondary-border: #3f3f46;
+  --color-btn-secondary-fg: #ffffff;
+  --color-btn-disabled-border: #27272a;
+  --color-btn-disabled-fg: #52525b;
 
   --color-danger: #f87171;
   --color-danger-muted: #3f1d1d;

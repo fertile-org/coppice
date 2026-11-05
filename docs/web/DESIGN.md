@@ -131,6 +131,10 @@ Column headers use accent color for the status dot; cards sit on `--color-surfac
 
 All tokens live in `web/src/styles/tokens.css`. Tailwind extends theme colors to reference these CSS variables — never hardcode hex in components.
 
+### Button states
+
+`Button` reads `--color-btn-*`, not the global accent. Light primary and secondary match the previous accent and raised-surface controls. In dark mode, primary is white text on `#4a7c59` (hover `#3d6b4f`) and secondary is a `#27272a` fill with a `#3f3f46` border and white text, so it sits above the `#18181b` panel. Disabled buttons have no fill, a dashed `--color-btn-disabled-border`, and dim `--color-btn-disabled-fg` text. They stay pointer-hoverable so a `title` tooltip still explains why the control is off. A loading button keeps its enabled fill and shows the spinner.
+
 ```css
 /* Example usage */
 background: var(--color-surface);
