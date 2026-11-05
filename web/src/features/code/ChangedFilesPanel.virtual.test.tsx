@@ -36,6 +36,6 @@ describe('ChangedFilesPanel', () => {
     const rows = screen.getAllByRole('button').length;
     expect(rows).toBeGreaterThan(0);
     expect(rows).toBeLessThan(60);
-    expect(screen.getByText('3000 files')).toBeInTheDocument();
+    expect(screen.getByText('0 of 3000 viewed')).toBeInTheDocument();
   });
 });

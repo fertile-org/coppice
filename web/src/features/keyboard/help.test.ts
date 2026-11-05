@@ -51,6 +51,9 @@ describe('shortcut help rows', () => {
       ['Accept…', 'Ctrl+Shift+Enter'],
       ['Merge…', 'R then M'],
       ['Open code review', 'D'],
+      ['Next file', 'J'],
+      ['Previous file', 'K'],
+      ['Mark viewed', 'V'],
     ]);
   });
 

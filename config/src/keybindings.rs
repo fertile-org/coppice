@@ -57,6 +57,9 @@ const COMMAND_ORDER: &[&str] = &[
     "review.accept",
     "review.merge",
     "review.openCode",
+    "diff.nextFile",
+    "diff.previousFile",
+    "diff.markViewed",
 ];
 
 /// One binding stored for the client. Field names match the web registry.
@@ -212,6 +215,9 @@ fn command_label(id: &str) -> Option<&'static str> {
         "review.accept" => "Accept…",
         "review.merge" => "Merge…",
         "review.openCode" => "Open code review",
+        "diff.nextFile" => "Next file",
+        "diff.previousFile" => "Previous file",
+        "diff.markViewed" => "Mark viewed",
         _ => return None,
     })
 }
@@ -267,10 +273,27 @@ impl World {
     }
 
     fn owner_except(&self, key: &str, id: &str) -> Option<String> {
-        self.owners
-            .get(key)
-            .filter(|owner| owner.as_str() != id)
-            .cloned()
+        let shared_default = self.defaults_include(id, key);
+        self.bindings.iter().find_map(|(other, list)| {
+            if other == id {
+                return None;
+            }
+            let holds = list.iter().any(|binding| canonical(binding) == key);
+            if !holds {
+                return None;
+            }
+            // Next/previous card and next/previous file share J and K on purpose.
+            if shared_default && self.defaults_include(other, key) {
+                return None;
+            }
+            Some(other.clone())
+        })
+    }
+
+    fn defaults_include(&self, id: &str, key: &str) -> bool {
+        self.defaults
+            .get(id)
+            .is_some_and(|list| list.iter().any(|binding| canonical(binding) == key))
     }
 
     fn first_sequence_owner(&self, leader: &str, except: &str) -> Option<String> {
@@ -333,10 +356,18 @@ impl World {
         let defaults = self.defaults.get(id).cloned().unwrap_or_default();
         for binding in &defaults {
             let key = canonical(binding);
-            if let Some(other) = self.owners.get(&key).cloned() {
-                if other != id {
-                    self.remove_binding(&other, &key);
-                }
+            let steal: Vec<String> = self
+                .bindings
+                .iter()
+                .filter(|(other, list)| {
+                    other.as_str() != id
+                        && list.iter().any(|item| canonical(item) == key)
+                        && !self.defaults_include(other, &key)
+                })
+                .map(|(other, _)| other.clone())
+                .collect();
+            for other in steal {
+                self.remove_binding(&other, &key);
             }
             self.owners.insert(key, id.to_string());
         }
@@ -797,6 +828,30 @@ mod tests {
                     if chord.key == key && chord.mod_key && !chord.alt && !chord.shift
             )
         })
+    }
+
+    #[test]
+    fn file_shortcuts_share_j_and_k_without_stripping_the_board() {
+        let stolen = api("\
+[keybindings]
+\"ticket.create\" = \"J\"
+");
+        assert!(stolen.overrides.get("ticket.create").is_none());
+        assert!(stolen
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Next card")));
+
+        let broken = api("\
+[keybindings]
+\"board.nextCard\" = \"nope\"
+");
+        assert!(broken
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Couldn't read")));
+        assert!(!broken.overrides.contains_key("diff.nextFile"));
+        assert!(!broken.overrides.contains_key("diff.previousFile"));
     }
 
     #[test]

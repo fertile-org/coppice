@@ -227,6 +227,27 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     bindings: [chord('d')],
     scopes: ['board', 'ticket'],
   },
+  {
+    id: 'diff.nextFile',
+    label: 'Next file',
+    group: 'Review',
+    bindings: [chord('j')],
+    scopes: ['diff'],
+  },
+  {
+    id: 'diff.previousFile',
+    label: 'Previous file',
+    group: 'Review',
+    bindings: [chord('k')],
+    scopes: ['diff'],
+  },
+  {
+    id: 'diff.markViewed',
+    label: 'Mark viewed',
+    group: 'Review',
+    bindings: [chord('v')],
+    scopes: ['diff'],
+  },
 ];
 
 const ACTIONS_BY_ID = new Map(SHORTCUT_ACTIONS.map((action) => [action.id, action]));

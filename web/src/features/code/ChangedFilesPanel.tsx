@@ -3,7 +3,37 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Badge } from '../../components/ui/badge';
 import type { DiffFileSummary } from '../../lib/schemas/codeReview';
 import { cn } from '../../lib/utils';
+import { splitFilePath } from './reviewNavigation';
 import { REVIEWER_BRIEF_COPY } from './reviewerBriefCopy';
+
+function ViewedProgress({
+  files,
+  viewedPaths,
+}: {
+  files: DiffFileSummary[];
+  viewedPaths: ReadonlySet<string> | undefined;
+}) {
+  const viewedCount = files.filter((file) => viewedPaths?.has(file.path)).length;
+  const label = `${viewedCount} of ${files.length} viewed`;
+  return (
+    <div className="mt-2">
+      <p className="font-body text-xs text-text-muted">{label}</p>
+      <div
+        className="mt-1 h-1 overflow-hidden rounded-full bg-border"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={files.length}
+        aria-valuenow={viewedCount}
+        aria-label={label}
+      >
+        <div
+          className="h-full bg-accent"
+          style={{ width: `${(viewedCount / files.length) * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function statusLabel(status: string): string {
   switch (status.toLowerCase()) {
@@ -39,6 +69,7 @@ interface ChangedFilesPanelProps {
   selectedPath: string | undefined;
   onSelect: (path: string) => void;
   isLoading?: boolean;
+  viewedPaths?: ReadonlySet<string>;
 }
 
 /** File lists longer than this mount only the rows in view. */
@@ -114,6 +145,7 @@ export function ChangedFilesPanel({
   selectedPath,
   onSelect,
   isLoading,
+  viewedPaths,
 }: ChangedFilesPanelProps) {
   if (isLoading) {
     return (
@@ -151,18 +183,19 @@ export function ChangedFilesPanel({
         <h2 className="font-body text-sm font-medium text-text-primary">
           Changed files
         </h2>
-        <p className="mt-0.5 font-body text-xs text-text-muted">
-          {files.length} file{files.length === 1 ? '' : 's'}
-        </p>
+        <ViewedProgress files={files} viewedPaths={viewedPaths} />
       </div>
       <FileList
         files={files}
         selectedPath={selectedPath}
         renderFile={(file) => {
           const selected = file.path === selectedPath;
+          const viewed = viewedPaths?.has(file.path) ?? false;
+          const { dir, name } = splitFilePath(file.path);
           return (
             <button
               type="button"
+              title={file.path}
               onClick={() => onSelect(file.path)}
               className={cn(
                 'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-fast',
@@ -171,6 +204,12 @@ export function ChangedFilesPanel({
                   : 'text-text-secondary hover:bg-paper-100 hover:text-text-primary',
               )}
             >
+              <span
+                className="mt-0.5 w-3 shrink-0 text-center font-mono text-xs text-success"
+                aria-hidden="true"
+              >
+                {viewed ? '✓' : ''}
+              </span>
               <Badge
                 variant="outline"
                 className={cn('mt-0.5 shrink-0 font-mono', statusClass(file.status))}
@@ -179,18 +218,28 @@ export function ChangedFilesPanel({
               </Badge>
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-1">
-                  <span className="truncate font-mono text-xs">{file.path}</span>
+                  <span
+                    className={cn(
+                      'truncate font-mono text-xs font-medium',
+                      viewed && 'text-text-muted line-through decoration-border',
+                    )}
+                  >
+                    {name}
+                  </span>
                   {file.notInPlan && (
                     <span className="shrink-0 rounded border border-border px-1 py-px font-body text-[10px] leading-4 text-text-muted">
                       {REVIEWER_BRIEF_COPY.notInPlan}
                     </span>
                   )}
                 </span>
-                <span className="mt-0.5 block font-body text-xs text-text-muted">
-                  <span className="text-success">+{file.additions}</span>
-                  {' · '}
-                  <span className="text-danger">−{file.deletions}</span>
+                <span className="mt-0.5 block min-h-[1.1em] overflow-hidden text-ellipsis whitespace-nowrap text-left font-mono text-[11px] text-text-muted [direction:rtl]">
+                  <span className="[unicode-bidi:plaintext]">{dir || '\u00a0'}</span>
                 </span>
+              </span>
+              <span className="shrink-0 font-mono text-[11px]">
+                <span className="text-success">+{file.additions}</span>
+                {' '}
+                <span className="text-danger">−{file.deletions}</span>
               </span>
             </button>
           );

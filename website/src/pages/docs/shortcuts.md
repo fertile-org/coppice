@@ -78,6 +78,11 @@ Shortcuts don't fire while you're typing in a field, and the terminal keeps its 
 | Accept… | `review.accept` | `Mod+Shift+Enter` | The ticket is in Wait for Human Review and is not archived |
 | Merge… | `review.merge` | `R then M` | **Merge…** is already shown |
 | Open code review | `review.openCode` | `D` | **Open code review** is enabled |
+| Next file | `diff.nextFile` | `J` | Code review is open, and focus is not in a text field |
+| Previous file | `diff.previousFile` | `K` | Code review is open, and focus is not in a text field |
+| Mark viewed | `diff.markViewed` | `V` | Code review is open, and focus is not in a text field |
+
+On the code review page, `J` and `K` move between files. On the board they still move between cards. `V` marks the open file viewed and jumps to the next file that is not viewed.
 
 **Accept…** opens the **Accept this ticket?** dialog with **Cancel** focused. Choose **Accept** to finish.
 

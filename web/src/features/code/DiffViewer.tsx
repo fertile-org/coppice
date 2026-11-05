@@ -342,7 +342,7 @@ export function DiffViewer({
 
   if (!filePath) {
     return (
-      <div className="flex h-full items-center justify-center bg-background p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-background p-8">
         <p className="font-body text-sm text-text-secondary">
           Select a file to view its diff.
         </p>
@@ -352,7 +352,7 @@ export function DiffViewer({
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center bg-background p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-background p-8">
         <p className="font-body text-sm text-text-secondary">Loading diff…</p>
       </div>
     );
@@ -364,7 +364,7 @@ export function DiffViewer({
         ? 'File too large to diff inline.'
         : 'Unable to load diff for this file.';
     return (
-      <div className="flex h-full items-center justify-center bg-background p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-background p-8">
         <p className="font-body text-sm text-text-secondary">{message}</p>
       </div>
     );
@@ -372,7 +372,7 @@ export function DiffViewer({
 
   if (!parsedFile || parsedFile.hunks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-background p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-background p-8">
         <p className="font-body text-sm text-text-secondary">
           No diff content for this file.
         </p>
