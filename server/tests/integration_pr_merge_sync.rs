@@ -265,8 +265,14 @@ impl Workspace {
     async fn accept_ticket(&self) -> TicketFx {
         let ticket_id =
             common::create_test_ticket(&self.app, &self.board_id, &self.cookie, &self.csrf).await;
-        common::set_ticket_repo(&self.app, &ticket_id, &self.repo_id, &self.cookie, &self.csrf)
-            .await;
+        common::set_ticket_repo(
+            &self.app,
+            &ticket_id,
+            &self.repo_id,
+            &self.cookie,
+            &self.csrf,
+        )
+        .await;
         let worktree = common::setup_worktree_with_commit(
             &self.local_path,
             self.env.worktrees.path(),
@@ -438,7 +444,10 @@ async fn first_sweep_records_a_ticket_already_stuck() {
     let api = spawn_github(merged_github(&ticket.accepted_sha)).await;
     let outcome = ws.sweep(&api).await;
     assert_eq!(outcome.recorded, 1);
-    assert_eq!(ws.get_ticket(ticket.id).await["humanReview"]["merged"], true);
+    assert_eq!(
+        ws.get_ticket(ticket.id).await["humanReview"]["merged"],
+        true
+    );
 }
 
 #[tokio::test]
@@ -462,7 +471,10 @@ async fn descendant_head_counts_as_merged() {
     let api = spawn_github(gh).await;
     let outcome = ws.sweep(&api).await;
     assert_eq!(outcome.recorded, 1);
-    assert_eq!(ws.get_ticket(ticket.id).await["humanReview"]["merged"], true);
+    assert_eq!(
+        ws.get_ticket(ticket.id).await["humanReview"]["merged"],
+        true
+    );
 }
 
 #[tokio::test]
@@ -538,7 +550,10 @@ async fn open_unmerged_or_non_default_base_changes_nothing() {
         gh.inner.lock().expect("gh lock").pulls = vec![pull];
         let api = spawn_github(gh).await;
         assert_eq!(ws.sweep(&api).await.recorded, 0);
-        assert_eq!(ws.get_ticket(ticket.id).await["humanReview"]["merged"], false);
+        assert_eq!(
+            ws.get_ticket(ticket.id).await["humanReview"]["merged"],
+            false
+        );
         assert!(ticket.worktree.exists());
     }
 }
@@ -582,7 +597,10 @@ async fn leftover_local_commits_mark_acceptance_stale() {
             }
         }
     }
-    assert!(saw_ticket, "missing ticket.updated after leftover local commits");
+    assert!(
+        saw_ticket,
+        "missing ticket.updated after leftover local commits"
+    );
 }
 
 #[tokio::test]
@@ -601,9 +619,18 @@ async fn github_error_skips_ticket_and_rate_limit_stops_sweep() {
     let outcome = ws.sweep(&api).await;
     assert_eq!(outcome.recorded, 0);
     assert!(!outcome.stopped_for_rate_limit);
-    assert!(error.recorded().len() >= 2, "500 should continue to next ticket");
-    assert_eq!(ws.get_ticket(first.id).await["humanReview"]["merged"], false);
-    assert_eq!(ws.get_ticket(second.id).await["humanReview"]["merged"], false);
+    assert!(
+        error.recorded().len() >= 2,
+        "500 should continue to next ticket"
+    );
+    assert_eq!(
+        ws.get_ticket(first.id).await["humanReview"]["merged"],
+        false
+    );
+    assert_eq!(
+        ws.get_ticket(second.id).await["humanReview"]["merged"],
+        false
+    );
 
     let limited = GhState::default();
     limited.inner.lock().expect("gh lock").pulls_status = Some(429);
@@ -611,7 +638,11 @@ async fn github_error_skips_ticket_and_rate_limit_stops_sweep() {
     let outcome = ws.sweep(&api).await;
     assert_eq!(outcome.recorded, 0);
     assert!(outcome.stopped_for_rate_limit);
-    assert_eq!(limited.recorded().len(), 1, "429 must stop the current sweep");
+    assert_eq!(
+        limited.recorded().len(),
+        1,
+        "429 must stop the current sweep"
+    );
 
     let forbidden = GhState::default();
     forbidden.inner.lock().expect("gh lock").pulls_status = Some(403);
@@ -659,7 +690,10 @@ async fn missing_token_and_enterprise_host_never_call_github() {
         assert_eq!(outcome.listed, 0, "{remote} token={token}");
         assert_eq!(outcome.recorded, 0);
         assert!(gh.recorded().is_empty(), "{remote} leaked a request");
-        assert_eq!(ws.get_ticket(ticket.id).await["humanReview"]["merged"], false);
+        assert_eq!(
+            ws.get_ticket(ticket.id).await["humanReview"]["merged"],
+            false
+        );
     }
 }
 
@@ -675,18 +709,23 @@ async fn conditional_write_ignores_stale_or_already_merged() {
     let reviews = HumanReviewService::new(&pool);
 
     assert!(reviews
-        .record_remote_merge_if_current(ticket.id, &ticket.accepted_sha, "cccccccccccccccccccccccccccccccccccccccc")
+        .record_remote_merge_if_current(
+            ticket.id,
+            &ticket.accepted_sha,
+            "cccccccccccccccccccccccccccccccccccccccc"
+        )
         .await
         .unwrap());
     assert!(!reviews
-        .record_remote_merge_if_current(ticket.id, &ticket.accepted_sha, "dddddddddddddddddddddddddddddddddddddddd")
+        .record_remote_merge_if_current(
+            ticket.id,
+            &ticket.accepted_sha,
+            "dddddddddddddddddddddddddddddddddddddddd"
+        )
         .await
         .unwrap());
     let review = reviews.get(ticket.id).await.unwrap().unwrap();
-    assert_eq!(
-        review.merged_at.is_some(),
-        true
-    );
+    assert_eq!(review.merged_at.is_some(), true);
     assert_eq!(
         review.head_sha.to_ascii_lowercase(),
         ticket.accepted_sha.to_ascii_lowercase()
@@ -699,17 +738,37 @@ async fn conditional_write_ignores_stale_or_already_merged() {
         .await
         .unwrap();
     assert!(!reviews
-        .record_remote_merge_if_current(other.id, &other.accepted_sha, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+        .record_remote_merge_if_current(
+            other.id,
+            &other.accepted_sha,
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        )
         .await
         .unwrap());
-    assert!(reviews.get(other.id).await.unwrap().unwrap().merged_at.is_none());
+    assert!(reviews
+        .get(other.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .merged_at
+        .is_none());
 
     let raced = ws.accept_ticket().await;
     assert!(!reviews
-        .record_remote_merge_if_current(raced.id, "ffffffffffffffffffffffffffffffffffffffff", &raced.accepted_sha)
+        .record_remote_merge_if_current(
+            raced.id,
+            "ffffffffffffffffffffffffffffffffffffffff",
+            &raced.accepted_sha
+        )
         .await
         .unwrap());
-    assert!(reviews.get(raced.id).await.unwrap().unwrap().merged_at.is_none());
+    assert!(reviews
+        .get(raced.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .merged_at
+        .is_none());
 }
 
 #[tokio::test]
@@ -759,5 +818,90 @@ async fn later_merged_pr_on_the_branch_is_still_found() {
     ];
     let api = spawn_github(gh).await;
     assert_eq!(ws.sweep(&api).await.recorded, 1);
-    assert_eq!(ws.get_ticket(ticket.id).await["humanReview"]["merged"], true);
+    assert_eq!(
+        ws.get_ticket(ticket.id).await["humanReview"]["merged"],
+        true
+    );
+}
+
+#[tokio::test]
+async fn sweep_merge_of_a_split_child_starts_the_next() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let ws = Workspace::new("https://github.com/acme/coppice.git", true).await;
+    let ticket = ws.accept_ticket().await;
+    let pool = ws.state.db.clone().unwrap();
+    let parent = Uuid::new_v4();
+    let sibling = Uuid::new_v4();
+    let plan = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, created_by)
+        SELECT $1, board_id, 'Parent', '', 'in_progress', 'user' FROM tickets WHERE id = $2
+        "#,
+    )
+    .bind(parent)
+    .bind(ticket.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, parent_ticket_id, created_by)
+        SELECT $1, board_id, 'Next', 'next step', 'backlog', $2, 'user' FROM tickets WHERE id = $3
+        "#,
+    )
+    .bind(sibling)
+    .bind(parent)
+    .bind(ticket.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tickets SET parent_ticket_id = $2 WHERE id = $1")
+        .bind(ticket.id)
+        .bind(parent)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_plans (id, ticket_id, revision, body, content_version)
+        VALUES ($1, $2, 1, '## Plan', 1)
+        "#,
+    )
+    .bind(plan)
+    .bind(sibling)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE tickets
+        SET approved_plan_id = $2, approved_plan_content_version = content_version
+        WHERE id = $1
+        "#,
+    )
+    .bind(sibling)
+    .bind(plan)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_plan_splits (parent_ticket_id, child_order, auto_start)
+        VALUES ($1, $2, true)
+        "#,
+    )
+    .bind(parent)
+    .bind(vec![ticket.id, sibling])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let gh = merged_github(&ticket.accepted_sha);
+    let api = spawn_github(gh).await;
+    assert_eq!(ws.sweep(&api).await.recorded, 1);
+    assert_eq!(ws.get_ticket(sibling).await["status"], "ready");
 }

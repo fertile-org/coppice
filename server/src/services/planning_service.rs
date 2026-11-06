@@ -605,17 +605,24 @@ impl<'a> PlanningService<'a> {
         TicketService::new(self.pool)
             .clear_pending_split_recommendation(parent.id)
             .await?;
+        let child_ids: Vec<Uuid> = children.iter().map(|child| child.id).collect();
         sqlx::query(
             r#"
-            INSERT INTO ticket_plan_splits (parent_ticket_id, plan_id)
-            VALUES ($1, $2)
-            ON CONFLICT (parent_ticket_id) DO UPDATE SET plan_id = EXCLUDED.plan_id
+            INSERT INTO ticket_plan_splits (parent_ticket_id, plan_id, child_order)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (parent_ticket_id) DO UPDATE
+                SET plan_id = EXCLUDED.plan_id,
+                    child_order = EXCLUDED.child_order
             "#,
         )
         .bind(parent.id)
         .bind(plan_id)
+        .bind(&child_ids)
         .execute(self.pool)
         .await?;
+        crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+            .on_split_approved(parent.id)
+            .await?;
         Ok(children.len())
     }
 

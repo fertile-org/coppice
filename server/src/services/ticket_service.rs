@@ -829,7 +829,13 @@ impl<'a> TicketService<'a> {
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
             WHERE parent_ticket_id = $1
-            ORDER BY created_at ASC
+            ORDER BY
+                array_position(
+                    (SELECT child_order FROM ticket_plan_splits WHERE parent_ticket_id = $1),
+                    id
+                ) NULLS LAST,
+                created_at ASC,
+                id ASC
             "#,
         )
         .bind(parent_ticket_id)
