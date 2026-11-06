@@ -24,6 +24,7 @@ use crate::services::planning_service::{
 };
 use crate::services::restart_service::{RestartError, RestartService};
 use crate::services::run_service::{RunError, RunService};
+use crate::services::split_autopilot::SplitAutopilot;
 use crate::services::split_service::{SplitError, SplitService};
 use crate::services::stage_owner_service::StageOwnerService;
 use crate::services::ticket_git_service::{
@@ -74,6 +75,16 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/tickets/{ticket_id}/verify-parent",
             post(verify_parent),
+        )
+        .route("/api/tickets/{ticket_id}/split/pause", post(split_pause))
+        .route("/api/tickets/{ticket_id}/split/resume", post(split_resume))
+        .route(
+            "/api/tickets/{ticket_id}/split/start-next",
+            post(split_start_next),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/split/merged-elsewhere",
+            post(split_merged_elsewhere),
         )
         .route("/api/tickets/{ticket_id}/plan-runs", post(start_plan_run))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
@@ -188,6 +199,10 @@ pub(crate) struct TicketResponse {
     has_plan: bool,
     /// Split into sub-tickets at Plan Review.
     split_parent: bool,
+    /// Ordered sub-tickets for this split. On the parent and each child, so
+    /// the board can group the lane by `parentTicketId`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    split_progress: Option<crate::services::split_autopilot::SplitProgress>,
     /// Verify parent ticket can run now.
     verify_available: bool,
     has_active_run: bool,
@@ -331,6 +346,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         plan_questions: item.plan_questions,
         has_plan: item.has_plan,
         split_parent: item.split_parent,
+        split_progress: None,
         verify_available: item.verify_available,
         has_active_run: item.has_active_run,
         archived_at: ticket
@@ -794,16 +810,18 @@ async fn list_tickets(
         .await
         .map_err(map_error)?;
     let planner = load_suggested_planner(pool).await?;
-    Ok(Json(
-        tickets
-            .into_iter()
-            .map(|item| {
-                let mut response = respond_with_suggestion(item, planner.as_ref());
-                response.description = None;
-                response
-            })
-            .collect(),
-    ))
+    let mut responses: Vec<TicketResponse> = tickets
+        .into_iter()
+        .map(|item| {
+            let mut response = respond_with_suggestion(item, planner.as_ref());
+            response.description = None;
+            response
+        })
+        .collect();
+    attach_split_progress(pool, &mut responses)
+        .await
+        .map_err(map_error)?;
+    Ok(Json(responses))
 }
 
 async fn create_ticket(
@@ -854,6 +872,9 @@ async fn get_ticket(
         .await
         .map_err(map_error)?;
     response.suggested_assignee = suggested;
+    attach_split_progress(pool, std::slice::from_mut(&mut response))
+        .await
+        .map_err(map_error)?;
     Ok(Json(response))
 }
 
@@ -1143,6 +1164,104 @@ async fn send_plan_answers(
 struct VerifyParentBody {
     #[serde(default)]
     agent_id: Option<Uuid>,
+}
+
+async fn attach_split_progress(
+    pool: &sqlx::PgPool,
+    tickets: &mut [TicketResponse],
+) -> Result<(), TicketError> {
+    if tickets.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
+    let progress = SplitAutopilot::new(pool)
+        .progress_for(&ids)
+        .await
+        .map_err(|err| match err {
+            crate::services::planning_service::PlanError::Database(err) => {
+                TicketError::Database(err)
+            }
+            crate::services::planning_service::PlanError::Validation(message) => {
+                TicketError::Validation(message)
+            }
+        })?;
+    for ticket in tickets {
+        if let Some(progress) = progress.get(&ticket.id) {
+            ticket.split_progress = Some(progress.clone());
+        }
+    }
+    Ok(())
+}
+
+async fn split_control_response(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    let mut response = with_approved_plan(state, pool, ticket)
+        .await
+        .map_err(map_update_status_error)?;
+    attach_split_progress(pool, std::slice::from_mut(&mut response))
+        .await
+        .map_err(map_update_status_error)?;
+    publish_ticket_state(state, pool, ticket_id).await;
+    Ok(Json(response))
+}
+
+async fn split_pause(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    SplitAutopilot::new(pool)
+        .pause(ticket_id)
+        .await
+        .map_err(map_plan_error)?;
+    split_control_response(&state, pool, ticket_id).await
+}
+
+async fn split_resume(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    SplitAutopilot::new(pool)
+        .resume(ticket_id)
+        .await
+        .map_err(map_plan_error)?;
+    split_control_response(&state, pool, ticket_id).await
+}
+
+async fn split_start_next(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    SplitAutopilot::new(pool)
+        .start_next(ticket_id)
+        .await
+        .map_err(map_plan_error)?;
+    split_control_response(&state, pool, ticket_id).await
+}
+
+async fn split_merged_elsewhere(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    SplitAutopilot::new(pool)
+        .merged_elsewhere(ticket_id)
+        .await
+        .map_err(map_plan_error)?;
+    split_control_response(&state, pool, ticket_id).await
 }
 
 async fn verify_parent(

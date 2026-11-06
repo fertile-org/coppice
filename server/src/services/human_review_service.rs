@@ -137,6 +137,7 @@ impl<'a> HumanReviewService<'a> {
         .bind(&merged_sha)
         .fetch_one(self.pool)
         .await?;
+        self.advance_split_after_merge(ticket_id).await;
         Ok(())
     }
 
@@ -177,7 +178,19 @@ impl<'a> HumanReviewService<'a> {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        self.advance_split_after_merge(ticket_id).await;
         Ok(true)
+    }
+
+    /// Both merge writers land here: the Merge button and the GitHub sweep.
+    /// A failed advance does not undo the merge that was just recorded.
+    async fn advance_split_after_merge(&self, ticket_id: Uuid) {
+        if let Err(err) = crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+            .on_child_merged(ticket_id)
+            .await
+        {
+            tracing::warn!(%ticket_id, error = %err, "split autopilot did not advance");
+        }
     }
 
     /// Keep the acceptance row and mark it stale. Does not change ticket status,

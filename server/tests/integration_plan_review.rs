@@ -1211,7 +1211,7 @@ async fn a_split_at_plan_review_then_verify_parent() {
     assert_eq!(approved.status(), StatusCode::OK);
 
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "ready");
+    assert_eq!(ticket["status"], "in_progress");
     assert_eq!(ticket["splitParent"], true);
     assert_eq!(ticket["verifyAvailable"], false);
     assert!(ticket["pendingSplitRecommendation"].is_null());
@@ -1223,8 +1223,12 @@ async fn a_split_at_plan_review_then_verify_parent() {
     .await
     .unwrap();
     assert_eq!(children.len(), 2);
-    for (child_id, _, status) in &children {
-        assert_eq!(status, "backlog");
+    // Order API sorts first by title and stays queued. Order store is child 1.
+    assert_eq!(children[0].1, "Order API");
+    assert_eq!(children[0].2, "backlog");
+    assert_eq!(children[1].1, "Order store");
+    assert_eq!(children[1].2, "ready");
+    for (child_id, _, _) in &children {
         let child = common::get_ticket(&app, &child_id.to_string(), &cookie, &csrf).await;
         assert_eq!(child["planApproved"], true, "{child}");
     }
