@@ -347,7 +347,9 @@ impl<'a> UsageService<'a> {
     pub async fn ticket_usage(&self, ticket_id: Uuid) -> Result<TicketUsage, sqlx::Error> {
         let rows = sqlx::query(
             r#"
-            SELECT ar.id, ar.agent_id, ar.job_type, a.connector,
+            SELECT ar.id, ar.agent_id, ar.job_type,
+                   COALESCE(ar.session_connector, a.connector) AS connector,
+                   (u.run_id IS NOT NULL) AS has_usage,
                    u.status AS usage_status, u.input_tokens, u.cache_read_tokens,
                    u.cache_write_tokens, u.output_tokens, u.reasoning_tokens,
                    u.request_count, u.subagent_count
@@ -365,14 +367,18 @@ impl<'a> UsageService<'a> {
         let mut runs = Vec::with_capacity(rows.len());
         for row in &rows {
             let connector: Option<String> = row.try_get("connector")?;
+            let has_usage: bool = row.try_get("has_usage")?;
             runs.push(TicketRunUsage {
                 run_id: row.try_get("id")?,
                 agent_id: row.try_get("agent_id")?,
                 job_type: row.try_get("job_type")?,
-                tracked: connector
-                    .as_deref()
-                    .and_then(coppice_connectors::get)
-                    .is_some_and(|d| d.reports_usage()),
+                // A usage row proves the run was tracked, whatever connector the
+                // agent uses now. Plan runs leave `session_connector` NULL.
+                tracked: has_usage
+                    || connector
+                        .as_deref()
+                        .and_then(coppice_connectors::get)
+                        .is_some_and(|d| d.reports_usage()),
                 usage: run_usage_from_row(row, "usage_status")?,
             });
         }
@@ -490,7 +496,11 @@ fn run_usage_from_row(
 /// Writes the run's usage as the connector reports it, so a running row shows
 /// it before the process exits. Holds no stream handle: it ends when the
 /// handle is dropped.
-pub fn spawn_usage_writer(pool: PgPool, run_id: Uuid, stream: &RunStreamHandle) {
+pub fn spawn_usage_writer(
+    pool: PgPool,
+    run_id: Uuid,
+    stream: &RunStreamHandle,
+) -> tokio::task::JoinHandle<()> {
     let mut rx = stream.subscribe_usage();
     tokio::spawn(async move {
         while rx.changed().await.is_ok() {
@@ -499,7 +509,7 @@ pub fn spawn_usage_writer(pool: PgPool, run_id: Uuid, stream: &RunStreamHandle) 
                 save_or_warn(&pool, run_id, &snapshot).await;
             }
         }
-    });
+    })
 }
 
 /// Persist the latest usage. Safe to call more than once and alongside the writer.
@@ -770,5 +780,35 @@ mod tests {
         assert_eq!(usage.own.runs, 1);
         assert_eq!(usage.own.runs_with_usage, 0);
         assert_eq!(usage.own.tokens.total(), None);
+    }
+
+    #[tokio::test]
+    async fn writers_end_when_the_handle_is_dropped_with_nothing_reported() {
+        use crate::sessions::run_registry::RunStreamRegistry;
+        use std::time::Duration;
+
+        // Lazy: nothing is written, so the pool never connects.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://nobody:secret@127.0.0.1:1/unreachable")
+            .unwrap();
+        let registry = RunStreamRegistry::new();
+        let run_id = Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let writers = [
+            crate::services::run_service::spawn_reported_model_writer(
+                pool.clone(),
+                run_id,
+                &handle,
+            ),
+            spawn_usage_writer(pool, run_id, &handle),
+        ];
+        registry.remove(run_id);
+        drop(handle);
+        for writer in writers {
+            tokio::time::timeout(Duration::from_secs(1), writer)
+                .await
+                .expect("writer ends once the handle is gone")
+                .unwrap();
+        }
     }
 }

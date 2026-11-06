@@ -9,6 +9,16 @@
 //! - Subagent requests are not streamed. `system/task_started` names the
 //!   subagent; its totals arrive in the Agent tool result
 //!   (`tool_use_result.usage`) and `system/task_notification`.
+//! - Only `task_type == "local_agent"` tasks are subagents. Background Bash
+//!   tasks emit the same `task_started` / `task_notification` events with
+//!   another `task_type`; they get no row, and a notification for an id that
+//!   never started as a subagent is dropped.
+//! - The Agent tool result's `usage` covers only the subagent's *last* request
+//!   (checked on a two-request subagent: its cache writes were 2432 there and
+//!   19968 in `modelUsage`). It is not kept as a breakdown, so a partial sum
+//!   cannot count it as the subagent's usage; the subagent keeps
+//!   `total_tokens` only. An async launch (`status: async_launched`) carries
+//!   no usage and does not set the status.
 //! - `result`: `modelUsage` is the run total with subagents; `usage` is the
 //!   main thread only. A session with several results also carries
 //!   `model_usage_since_last_result`, which is summed.
@@ -28,6 +38,8 @@ pub struct ClaudeStreamJsonReader {
     streamed: HashSet<String>,
     /// Sum of `model_usage_since_last_result` across results.
     since_last: Option<RunTotalUsage>,
+    /// `tool_use_id`s whose `task_started` was a `local_agent` task.
+    subagent_tasks: HashSet<String>,
 }
 
 impl UsageReader for ClaudeStreamJsonReader {
@@ -36,7 +48,7 @@ impl UsageReader for ClaudeStreamJsonReader {
         match event.get("type").and_then(Value::as_str) {
             Some("stream_event") if main_thread => self.stream_event(event),
             Some("assistant") if main_thread => self.assistant(event),
-            Some("system") => system(event),
+            Some("system") => self.system(event),
             Some("user") => subagent_result(event).into_iter().collect(),
             Some("result") => self.result(event),
             _ => Vec::new(),
@@ -91,6 +103,51 @@ impl ClaudeStreamJsonReader {
         vec![request(id, str_field(message, "model"), api_usage(usage))]
     }
 
+    /// `task_started` opens a subagent row for `local_agent` tasks only;
+    /// `task_notification` adds the total of a task that was opened.
+    fn system(&mut self, event: &Value) -> Vec<UsageEvent> {
+        let Some(id) = str_field(event, "tool_use_id") else {
+            return Vec::new();
+        };
+        let subagent = match event.get("subtype").and_then(Value::as_str) {
+            Some("task_started") => {
+                if str_field(event, "task_type").as_deref() != Some("local_agent") {
+                    return Vec::new();
+                }
+                self.subagent_tasks.insert(id.clone());
+                SubagentUsage {
+                    id,
+                    agent_type: str_field(event, "subagent_type"),
+                    description: str_field(event, "description"),
+                    status: Some("running".into()),
+                    ..SubagentUsage::default()
+                }
+            }
+            Some("task_notification") => {
+                if !self.subagent_tasks.contains(&id) {
+                    return Vec::new();
+                }
+                let usage = event.get("usage");
+                SubagentUsage {
+                    id,
+                    status: str_field(event, "status"),
+                    total_tokens: usage
+                        .and_then(|u| u.get("total_tokens"))
+                        .and_then(Value::as_i64),
+                    tool_uses: usage
+                        .and_then(|u| u.get("tool_uses"))
+                        .and_then(Value::as_i64),
+                    duration_ms: usage
+                        .and_then(|u| u.get("duration_ms"))
+                        .and_then(Value::as_i64),
+                    ..SubagentUsage::default()
+                }
+            }
+            _ => return Vec::new(),
+        };
+        vec![UsageEvent::Subagent(subagent)]
+    }
+
     fn result(&mut self, event: &Value) -> Vec<UsageEvent> {
         if let Some(delta) = event.get("model_usage_since_last_result") {
             let delta = model_usage(delta);
@@ -122,41 +179,6 @@ fn request(id: String, model: Option<String>, tokens: TokenCounts) -> UsageEvent
     })
 }
 
-/// `task_started` opens a subagent row; `task_notification` adds its total.
-fn system(event: &Value) -> Vec<UsageEvent> {
-    let Some(id) = str_field(event, "tool_use_id") else {
-        return Vec::new();
-    };
-    let subagent = match event.get("subtype").and_then(Value::as_str) {
-        Some("task_started") => SubagentUsage {
-            id,
-            agent_type: str_field(event, "subagent_type"),
-            description: str_field(event, "description"),
-            status: Some("running".into()),
-            ..SubagentUsage::default()
-        },
-        Some("task_notification") => {
-            let usage = event.get("usage");
-            SubagentUsage {
-                id,
-                status: str_field(event, "status"),
-                total_tokens: usage
-                    .and_then(|u| u.get("total_tokens"))
-                    .and_then(Value::as_i64),
-                tool_uses: usage
-                    .and_then(|u| u.get("tool_uses"))
-                    .and_then(Value::as_i64),
-                duration_ms: usage
-                    .and_then(|u| u.get("duration_ms"))
-                    .and_then(Value::as_i64),
-                ..SubagentUsage::default()
-            }
-        }
-        _ => return Vec::new(),
-    };
-    vec![UsageEvent::Subagent(subagent)]
-}
-
 /// The Agent tool's result: `tool_use_result` with `agentId` and `usage`.
 fn subagent_result(event: &Value) -> Option<UsageEvent> {
     let result = event.get("tool_use_result")?;
@@ -171,8 +193,8 @@ fn subagent_result(event: &Value) -> Option<UsageEvent> {
         agent_type: str_field(result, "agentType"),
         description: None,
         model: str_field(result, "resolvedModel"),
-        status: str_field(result, "status"),
-        tokens: result.get("usage").map(api_usage).unwrap_or_default(),
+        status: str_field(result, "status").filter(|status| status != "async_launched"),
+        tokens: TokenCounts::default(),
         total_tokens: result.get("totalTokens").and_then(Value::as_i64),
         tool_uses: result.get("totalToolUseCount").and_then(Value::as_i64),
         duration_ms: result.get("totalDurationMs").and_then(Value::as_i64),
@@ -281,8 +303,7 @@ mod tests {
         assert_eq!(sub.description.as_deref(), Some("Reply with number 4"));
         assert_eq!(sub.model.as_deref(), Some("claude-haiku-5-5"));
         assert_eq!(sub.status.as_deref(), Some("completed"));
-        assert_eq!(sub.tokens.output, Some(67));
-        assert_eq!(sub.tokens.cache_write, Some(12778));
+        assert!(sub.tokens.is_empty());
         assert_eq!(sub.total_tokens, Some(12847));
         assert_eq!(sub.total(), Some(12847));
         // modelUsage: main thread plus subagent.
@@ -294,6 +315,53 @@ mod tests {
         assert_eq!(totals.tokens.reasoning, Some(137));
         assert_eq!(totals.cost_usd, Some(0.00401926));
         assert_eq!(totals.subagent_count, 1);
+    }
+
+    #[test]
+    fn background_bash_task_is_not_a_subagent() {
+        let snap = track(&fixture("claude-code-2.1.318-usage-bg-task.jsonl"));
+        // The capture has a `local_bash` task and a `local_agent` task.
+        assert_eq!(snap.subagents.len(), 1);
+        assert_eq!(snap.totals.subagent_count, 1);
+        let sub = &snap.subagents[0];
+        assert_eq!(sub.id, "toolu_01AwBcR53NG3e8pJxHz96nWm");
+        assert_eq!(sub.agent_type.as_deref(), Some("general-purpose"));
+        assert_eq!(sub.status.as_deref(), Some("completed"));
+        assert_eq!(sub.total_tokens, Some(18594));
+        assert_eq!(sub.tool_uses, Some(2));
+        assert!(sub.tokens.is_empty());
+        assert_eq!(snap.totals.status, UsageStatus::Reported);
+    }
+
+    #[test]
+    fn notification_for_an_unknown_task_is_dropped() {
+        let mut reader = ClaudeStreamJsonReader::default();
+        let started = |task_type: &str| {
+            json!({ "type": "system", "subtype": "task_started", "tool_use_id": "t1",
+                "task_type": task_type })
+        };
+        let done = json!({ "type": "system", "subtype": "task_notification",
+            "tool_use_id": "t1", "status": "completed" });
+        assert!(reader.read(&started("local_bash")).is_empty());
+        assert!(reader.read(&done).is_empty());
+        assert_eq!(reader.read(&started("local_agent")).len(), 1);
+        assert_eq!(reader.read(&done).len(), 1);
+    }
+
+    #[test]
+    fn subagent_result_usage_is_not_a_breakdown() {
+        // Two requests; `tool_use_result.usage` is only the second one.
+        let snap = track(&fixture(
+            "claude-code-2.1.318-usage-subagent-requests.jsonl",
+        ));
+        assert_eq!(snap.subagents.len(), 1);
+        let sub = &snap.subagents[0];
+        assert_eq!(sub.tool_uses, Some(2));
+        assert!(sub.tokens.is_empty());
+        assert!(sub.total_tokens.is_some());
+        assert_eq!(sub.model.as_deref(), Some("claude-haiku-5-5"));
+        // The run total still includes everything the subagent used.
+        assert_eq!(snap.totals.tokens.cache_write, Some(33005));
     }
 
     #[test]

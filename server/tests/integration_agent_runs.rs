@@ -746,3 +746,117 @@ async fn run_without_usage_reports_none() {
     assert!(ticket["own"]["tokens"]["output"].is_null());
     assert!(ticket["runs"][0]["usage"].is_null());
 }
+
+/// `tracked` follows the connector that ran, not the agent's current one, and
+/// a stored usage row always proves the run was tracked.
+#[tokio::test]
+async fn usage_tracked_flag_survives_an_agent_connector_switch() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Usage Tracked Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+
+    let insert_run = |session_connector: Option<&'static str>, with_usage: bool| async move {
+        let run_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs
+                (id, ticket_id, agent_id, job_type, status, sandbox_profile_id, session_connector)
+            VALUES ($1, $2, $3, 'work_on_ticket', 'succeeded', 'permissive', $4)
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_uuid)
+        .bind(agent_uuid)
+        .bind(session_connector)
+        .execute(pool)
+        .await
+        .unwrap();
+        if with_usage {
+            sqlx::query(
+                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, 'reported', 1, 5)",
+            )
+            .bind(run_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        run_id
+    };
+    // (a) plan-run shape: usage row, no session connector.
+    let plan_shaped = insert_run(None, true).await;
+    // (b) a Claude session run with no usage row.
+    let claude_session = insert_run(Some("claude-code"), false).await;
+    // (c) a Codex session run.
+    let codex_session = insert_run(Some("codex"), false).await;
+
+    let tracked = |ticket: &serde_json::Value, run_id: uuid::Uuid| -> bool {
+        ticket["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["runId"] == run_id.to_string().as_str())
+            .unwrap()["tracked"]
+            .as_bool()
+            .unwrap()
+    };
+
+    // The agent switches to Codex: a and b stay tracked, c stays untracked.
+    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
+        .bind(agent_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(tracked(&ticket, plan_shaped), "usage row, agent on codex");
+    assert!(
+        tracked(&ticket, claude_session),
+        "claude session, agent on codex"
+    );
+    assert!(
+        !tracked(&ticket, codex_session),
+        "codex session, agent on codex"
+    );
+
+    // And back to Claude: c is still a Codex run.
+    sqlx::query("UPDATE agents SET connector = 'claude-code' WHERE id = $1")
+        .bind(agent_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert!(tracked(&ticket, plan_shaped));
+    assert!(tracked(&ticket, claude_session));
+    assert!(
+        !tracked(&ticket, codex_session),
+        "codex session, agent on claude"
+    );
+}

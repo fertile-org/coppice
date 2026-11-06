@@ -340,7 +340,7 @@ async fn execute_job(
     // left a window where wait_for_run_stream polled an empty registry; short
     // runs finished and unregistered before a client could attach.
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
     crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
 
@@ -1101,7 +1101,7 @@ async fn execute_chat_turn(
     let cwd_str = cwd.to_string_lossy().into_owned();
 
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
     crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
 

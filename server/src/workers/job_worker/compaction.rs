@@ -82,7 +82,7 @@ pub(super) async fn execute_compaction(
     let context_path = cwd.join(".agent").join("context.md");
 
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
     crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
     run_svc

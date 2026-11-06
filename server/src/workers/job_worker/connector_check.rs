@@ -126,7 +126,7 @@ async fn run_check(
     std::fs::create_dir_all(scratch).context("create connector check scratch directory")?;
 
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
     crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     run_svc
         .mark_running(run.id)

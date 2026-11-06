@@ -1306,10 +1306,12 @@ impl<'a> RunService<'a> {
 pub fn spawn_reported_model_writer(
     pool: PgPool,
     run_id: Uuid,
-    stream: std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
-) {
+    stream: &crate::sessions::run_registry::RunStreamHandle,
+) -> tokio::task::JoinHandle<()> {
+    // Move only the receiver: holding the handle would keep it alive forever
+    // when no model is ever reported, and park the usage writer with it.
+    let mut rx = stream.subscribe_reported_model();
     tokio::spawn(async move {
-        let mut rx = stream.subscribe_reported_model();
         loop {
             let model = rx.borrow().clone();
             if !model.is_empty() {
@@ -1322,7 +1324,7 @@ pub fn spawn_reported_model_writer(
                 break;
             }
         }
-    });
+    })
 }
 
 /// Persist whatever the stream has already captured. Safe to call more than once.

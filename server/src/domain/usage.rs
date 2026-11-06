@@ -235,6 +235,11 @@ impl UsageTracker {
     }
 
     pub fn apply(&mut self, event: UsageEvent) {
+        // An all-empty run total (e.g. `modelUsage: {}`) reports nothing. Taking
+        // it as "reported" would hide the per-request sum behind null counts.
+        if matches!(&event, UsageEvent::RunTotal(total) if total.tokens.is_empty()) {
+            return;
+        }
         self.version += 1;
         match event {
             UsageEvent::Request(request) => self.apply_request(request),
@@ -421,6 +426,22 @@ mod tests {
         assert_eq!(totals.tokens, counts(100, 100));
         assert_eq!(totals.cost_usd, Some(0.5));
         assert_eq!(totals.request_count, 1);
+    }
+
+    #[test]
+    fn empty_run_total_is_ignored() {
+        let mut tracker = UsageTracker::new();
+        tracker.apply(request(Some("m1"), counts(10, 10)));
+        tracker.apply(request(Some("m2"), counts(1, 2)));
+        tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
+            tokens: TokenCounts::default(),
+            cost_usd: Some(0.5),
+        }));
+        let snap = tracker.snapshot().unwrap();
+        assert_eq!(snap.totals.status, UsageStatus::Partial);
+        assert_eq!(snap.totals.tokens, counts(11, 12));
+        assert_eq!(snap.totals.cost_usd, None);
+        assert_eq!(snap.version, 2);
     }
 
     #[test]
