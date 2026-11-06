@@ -45,6 +45,7 @@ import {
   type BoardFocus,
 } from './boardFocus';
 import { BoardColumn } from './BoardColumn';
+import { SplitLaneRow } from './SplitLaneRow';
 import { useBoardKeyboard } from './useBoardKeyboard';
 import { useTicketShortcuts } from './useTicketShortcuts';
 import {
@@ -61,6 +62,7 @@ import {
 } from './doneColumn';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import { buildTicketHierarchyIndex } from './ticketHierarchy';
+import { columnTicketIds, splitLanes, statusFromLaneDropId } from './swimlanes';
 import {
   ticketsQueryKey,
   useCreateTicket,
@@ -76,6 +78,8 @@ function resolveDropStatus(
 ): TicketStatus | null {
   const id = String(overId);
   if (isTicketStatus(id)) return id;
+  const laneStatus = statusFromLaneDropId(id);
+  if (laneStatus) return laneStatus;
   const ticket = ticketsById.get(id);
   return ticket?.status ?? null;
 }
@@ -124,6 +128,9 @@ export function BoardPage() {
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
   const [doneLimit, setDoneLimit] = useState(DONE_COLUMN_PAGE_SIZE);
+  const [collapsedLaneIds, setCollapsedLaneIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [limitBoardId, setLimitBoardId] = useState(boardId);
   if (boardId !== limitBoardId) {
     setLimitBoardId(boardId);
@@ -181,6 +188,10 @@ export function BoardPage() {
     () => filterTickets(tickets ?? [], filters),
     [tickets, filters],
   );
+  const { lanes, rest: ungroupedTickets } = useMemo(
+    () => splitLanes(filteredTickets, tickets ?? []),
+    [filteredTickets, tickets],
+  );
 
   const ticketsById = useMemo(
     () => new Map((tickets ?? []).map((t) => [t.id, t])),
@@ -196,14 +207,14 @@ export function BoardPage() {
     const grouped = new Map<TicketStatus, Ticket[]>(
       BOARD_COLUMNS.map((c) => [c.status, []]),
     );
-    for (const ticket of filteredTickets) {
+    for (const ticket of ungroupedTickets) {
       const list = grouped.get(ticket.status);
       if (list) list.push(ticket);
     }
     const done = grouped.get('done');
     if (done) grouped.set('done', sortDoneTickets(done));
     return grouped;
-  }, [filteredTickets]);
+  }, [ungroupedTickets]);
 
   const focusedDoneIndex = useMemo(() => {
     if (focusState?.type !== 'card') return -1;
@@ -221,12 +232,24 @@ export function BoardPage() {
   const columnSnapshots = useMemo<BoardColumnSnapshot[]>(
     () =>
       BOARD_COLUMNS.map((column) => ({
-        ticketIds: (visibleTicketsByStatus.get(column.status) ?? []).map(
-          (ticket) => ticket.id,
+        ticketIds: columnTicketIds(
+          lanes,
+          collapsedLaneIds,
+          column.status,
+          visibleTicketsByStatus.get(column.status) ?? [],
         ),
       })),
-    [visibleTicketsByStatus],
+    [collapsedLaneIds, lanes, visibleTicketsByStatus],
   );
+
+  const toggleLane = useCallback((parentId: string) => {
+    setCollapsedLaneIds((current) => {
+      const next = new Set(current);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  }, []);
   const boardFocus = useMemo(
     () => reconcileBoardFocus(columnSnapshots, focusState),
     [columnSnapshots, focusState],
@@ -494,7 +517,37 @@ export function BoardPage() {
             {moveAnnouncement}
           </div>
           <div id="board" className="-mx-8 overflow-x-auto px-8 pb-4">
-            <div className="flex min-w-max gap-4">
+            <div className="flex min-w-max flex-col gap-3">
+              {lanes.map((lane) => (
+                <SplitLaneRow
+                  key={lane.parentId}
+                  lane={lane}
+                  collapsed={collapsedLaneIds.has(lane.parentId)}
+                  onToggle={toggleLane}
+                  hierarchyIndex={hierarchyIndex}
+                  agentsById={agentsById}
+                  onOpenTicket={openTicket}
+                  onRunPlan={handleRunPlan}
+                  planRunTicketId={
+                    startPlan.isPending ? (startPlan.variables ?? null) : null
+                  }
+                  onAssignSuggested={handleAssignSuggested}
+                  assignSuggestedTicketId={
+                    assignSuggested.isPending
+                      ? (assignSuggested.variables?.ticketId ?? null)
+                      : null
+                  }
+                  hasBoardFocus
+                  focusedTicketId={
+                    boardFocus.type === 'card' &&
+                    lane.tickets.some((ticket) => ticket.id === boardFocus.ticketId)
+                      ? boardFocus.ticketId
+                      : null
+                  }
+                  onCardFocus={focusCard}
+                />
+              ))}
+              <div className="flex gap-4">
               {BOARD_COLUMNS.map((column, columnIndex) => (
                 <BoardColumn
                   key={column.status}
@@ -522,7 +575,9 @@ export function BoardPage() {
                   hasBoardFocus
                   focusedTicketId={
                     boardFocus.type === 'card' &&
-                    columnSnapshots[columnIndex]?.ticketIds.includes(boardFocus.ticketId)
+                    (visibleTicketsByStatus.get(column.status) ?? []).some(
+                      (ticket) => ticket.id === boardFocus.ticketId,
+                    )
                       ? boardFocus.ticketId
                       : null
                   }
@@ -533,6 +588,7 @@ export function BoardPage() {
                   onHeadingFocus={focusHeading}
                 />
               ))}
+              </div>
             </div>
           </div>
 

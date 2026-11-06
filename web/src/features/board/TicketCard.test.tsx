@@ -111,6 +111,35 @@ describe('TicketCard hierarchy cues', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
 
+  it('names a split child by position and parent', () => {
+    renderCard(
+      {
+        parent: { id: 'parent-1', title: 'Ship the gate' },
+        parentUnavailable: false,
+        directChildCount: 1,
+        doneChildCount: 0,
+      },
+      {
+        splitProgress: {
+          parentTicketId: 'parent-1',
+          parentTitle: 'Ship the gate',
+          position: 2,
+          count: 3,
+          mergedCount: 1,
+          autoStart: true,
+          nextActor: 'agent',
+          children: [],
+        },
+      },
+    );
+
+    const label = screen.getByText('↳ 2/3 · Ship the gate');
+    expect(label).toBeVisible();
+    expect(label).toHaveAttribute('title', 'Ship the gate');
+    expect(screen.queryByText('Child of Ship the gate')).toBeNull();
+    expect(screen.queryByText(/^Parent ·/)).toBeNull();
+  });
+
   it('renders the fallback for an unresolved parent', () => {
     renderCard({
       parent: null,
