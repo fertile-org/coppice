@@ -544,3 +544,120 @@ describe('BoardPage Done column limit', () => {
     expect(within(done).queryByText('Hide 00')).toBeNull();
   });
 });
+
+describe('BoardPage split swimlanes', () => {
+  const family = {
+    parentTicketId: 'parent',
+    parentTitle: 'Ship the gate',
+    count: 3,
+    mergedCount: 1,
+    autoStart: true,
+    activeChildId: 'child-ready',
+    nextActor: 'you' as const,
+    children: [],
+  };
+
+  beforeEach(() => {
+    ticketsState.lastIncludeArchived = false;
+    ticketsState.archived = [];
+    ticketsState.active = [
+      makeTicket({
+        id: 'plain',
+        title: 'Plain ticket',
+        status: 'backlog',
+      }),
+      makeTicket({
+        id: 'parent',
+        title: 'Ship the gate',
+        status: 'in_progress',
+        splitProgress: family,
+      }),
+      makeTicket({
+        id: 'child-ready',
+        title: 'Open the gate',
+        status: 'ready',
+        parentTicketId: 'parent',
+        splitProgress: { ...family, position: 1 },
+      }),
+      makeTicket({
+        id: 'child-backlog',
+        title: 'Write the notice',
+        status: 'backlog',
+        parentTicketId: 'parent',
+        splitProgress: { ...family, position: 2 },
+      }),
+      makeTicket({
+        id: 'child-done',
+        title: 'Survey the site',
+        status: 'done',
+        parentTicketId: 'parent',
+        splitProgress: { ...family, position: 3 },
+      }),
+    ];
+  });
+
+  it('renders the parent and its children in one row, under their own columns', () => {
+    renderBoard();
+
+    const lane = screen.getByRole('region', { name: 'Ship the gate' });
+    expect(within(lane).getByText('1/3 merged')).toBeVisible();
+    expect(within(lane).getByText('Needs review')).toBeVisible();
+
+    const row = within(lane).getByTestId('swimlane-row');
+    expect(within(row).getByTestId('swimlane-cell-in_progress')).toHaveTextContent(
+      'Ship the gate',
+    );
+    expect(within(row).getByTestId('swimlane-cell-ready')).toHaveTextContent(
+      'Open the gate',
+    );
+    expect(within(row).getByTestId('swimlane-cell-backlog')).toHaveTextContent(
+      'Write the notice',
+    );
+    expect(within(row).getByTestId('swimlane-cell-done')).toHaveTextContent(
+      'Survey the site',
+    );
+    expect(within(row).getByText('↳ 2/3 · Ship the gate')).toBeVisible();
+    expect(within(row).getByText('↳ 1/3 · Ship the gate')).toBeVisible();
+    expect(within(row).getByText('↳ 3/3 · Ship the gate')).toBeVisible();
+
+    const backlog = screen.getByRole('region', { name: 'Backlog' });
+    expect(within(backlog).getByText('Plain ticket')).toBeVisible();
+    expect(within(backlog).queryByText('Write the notice')).toBeNull();
+    expect(within(backlog).getByText('1')).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Done' })).queryByText('Survey the site'),
+    ).toBeNull();
+  });
+
+  it('collapses and expands the lane without moving an ordinary ticket', () => {
+    renderBoard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Ship the gate' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Expand Ship the gate' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('swimlane-row')).toBeNull();
+    expect(screen.queryByText('Open the gate')).toBeNull();
+    expect(screen.getByText('Plain ticket')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Ship the gate' }));
+
+    expect(screen.getByTestId('swimlane-row')).toBeVisible();
+    expect(screen.getByText('Open the gate')).toBeVisible();
+    expect(screen.getByText('Plain ticket')).toBeVisible();
+  });
+
+  it('omits the needs-review badge when an agent acts next', () => {
+    ticketsState.active = ticketsState.active.map((ticket) =>
+      ticket.splitProgress
+        ? { ...ticket, splitProgress: { ...ticket.splitProgress, nextActor: 'agent' } }
+        : ticket,
+    );
+
+    renderBoard();
+
+    expect(screen.getByText('1/3 merged')).toBeVisible();
+    expect(screen.queryByText('Needs review')).toBeNull();
+  });
+});

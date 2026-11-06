@@ -8,6 +8,7 @@ import { CreatePrButton } from '../tickets/TicketGitActions';
 import { useTicketGitInfo } from '../tickets/useTicket';
 import { AcceptedNotMerged } from './AcceptedNotMerged';
 import { showsAcceptedNotMerged } from './showsAcceptedNotMerged';
+import { splitChildLabel } from './swimlanes';
 import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
@@ -100,6 +101,8 @@ export const TicketCard = memo(function TicketCard({
 
   const showMerge = showsAcceptedNotMerged(ticket);
   const suggested = ticket.suggestedAssignee;
+  const splitLabel = splitChildLabel(ticket.splitProgress);
+  const showHierarchy = !ticket.splitProgress;
 
   return (
     <div
@@ -131,7 +134,18 @@ export const TicketCard = memo(function TicketCard({
         }}
         className="keyboard-focus rounded-sm"
       >
-      {(hierarchy?.parent || hierarchy?.parentUnavailable) && (
+      {splitLabel && (
+        <div className="mb-2 flex min-w-0 items-center font-body text-xs leading-tight text-text-secondary">
+          <span
+            className="min-w-0 truncate"
+            title={ticket.splitProgress?.parentTitle}
+          >
+            {splitLabel}
+          </span>
+        </div>
+      )}
+
+      {showHierarchy && (hierarchy?.parent || hierarchy?.parentUnavailable) && (
         <div className="mb-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
           <GitBranch
             className="h-3.5 w-3.5 shrink-0"
@@ -244,7 +258,7 @@ export const TicketCard = memo(function TicketCard({
         </div>
       )}
 
-      {hierarchy && hierarchy.directChildCount > 0 && (
+      {showHierarchy && hierarchy && hierarchy.directChildCount > 0 && (
         <div className="mt-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
           <Network className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate">

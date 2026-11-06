@@ -64,6 +64,28 @@ export interface PlanQuestions {
   waiting: boolean;
 }
 
+export interface SplitChildProgress {
+  id: string;
+  title: string;
+  status: string;
+  position: number;
+  archived: boolean;
+  merged: boolean;
+}
+
+/** Shared by the parent card and each sub-ticket. `position` is omitted on the parent. */
+export interface SplitProgress {
+  parentTicketId: string;
+  parentTitle: string;
+  position?: number | null;
+  count: number;
+  mergedCount: number;
+  autoStart: boolean;
+  activeChildId?: string | null;
+  nextActor: string;
+  children: SplitChildProgress[];
+}
+
 export interface Ticket {
   id: string;
   boardId: string;
@@ -102,6 +124,8 @@ export interface Ticket {
   hasPlan?: boolean;
   /** Split into sub-tickets at Plan Review. */
   splitParent?: boolean;
+  /** Present on a plan-review split parent and each of its sub-tickets. */
+  splitProgress?: SplitProgress | null;
   /** Every sub-ticket is Done and merged. */
   verifyAvailable?: boolean;
   archivedAt?: string | null;
