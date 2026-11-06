@@ -37,3 +37,6 @@
 "review.accept" = ["Mod+Shift+Enter"]
 "review.merge" = ["R then M"]
 "review.openCode" = ["D"]
+"diff.nextFile" = ["J"]
+"diff.previousFile" = ["K"]
+"diff.markViewed" = ["V"]

@@ -4,11 +4,15 @@ import { BrandLogo } from '../../components/BrandLogo';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
 import { useRepos } from '../repos/useRepos';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { CodeReviewBackButton } from './CodeReviewBackButton';
 import { DiffViewer, type InlineCommentDraft } from './DiffViewer';
+import { FileReviewHeader } from './FileReviewHeader';
+import { nextUnviewed, stepFile, viewedStorageKey } from './reviewNavigation';
+import { useViewedFiles } from './useViewedFiles';
 import { briefMatchesReviewedCommit } from './briefCommit';
 import { ReviewerBriefBar } from './ReviewerBriefBar';
 import { SubmitReviewDialog } from './SubmitReviewDialog';
@@ -142,6 +146,41 @@ export function CodeReviewPage() {
   const headBranch =
     diffSummary?.headBranch ?? selectedWorktree?.branch ?? 'HEAD';
   const headSha = diffSummary?.headSha ?? selectedWorktree?.headSha ?? '';
+  const reviewFiles = diffSummary?.files ?? [];
+  const viewedKey =
+    repoId && selectedWorktreePath && headSha
+      ? viewedStorageKey(repoId, selectedWorktreePath, headSha)
+      : null;
+  const { viewed, setViewedPath, toggleViewed } = useViewedFiles(viewedKey);
+  const canMoveFiles = reviewFiles.length > 0;
+  const paths = reviewFiles.map((file) => file.path);
+
+  useRegisterShortcut(
+    'diff.nextFile',
+    () => {
+      const next = stepFile(paths, selectedFile, 1);
+      if (next) setSelectedFile(next);
+    },
+    canMoveFiles,
+  );
+  useRegisterShortcut(
+    'diff.previousFile',
+    () => {
+      const next = stepFile(paths, selectedFile, -1);
+      if (next) setSelectedFile(next);
+    },
+    canMoveFiles,
+  );
+  useRegisterShortcut(
+    'diff.markViewed',
+    () => {
+      if (!selectedFile) return;
+      const nextViewed = toggleViewed(selectedFile);
+      const jump = nextUnviewed(paths, nextViewed, selectedFile);
+      if (jump && jump !== selectedFile) setSelectedFile(jump);
+    },
+    canMoveFiles,
+  );
 
   const ticketBoardHref = ticket
     ? `/boards/${ticket.boardId}?ticket=${ticket.id}`
@@ -176,6 +215,12 @@ export function CodeReviewPage() {
       </PageShell>
     );
   }
+
+  const selectedIndex = selectedFile
+    ? reviewFiles.findIndex((file) => file.path === selectedFile)
+    : -1;
+  const selectedReviewFile =
+    selectedIndex >= 0 ? reviewFiles[selectedIndex] : undefined;
 
   return (
     <div className="coppice-grain flex h-screen flex-col bg-background">
@@ -317,10 +362,11 @@ export function CodeReviewPage() {
             <PlanChecklist plan={ticket.approvedPlan} />
           )}
           <ChangedFilesPanel
-            files={diffSummary?.files ?? []}
+            files={reviewFiles}
             selectedPath={selectedFile}
             onSelect={setSelectedFile}
             isLoading={diffLoading}
+            viewedPaths={viewed}
           />
           {repoId && selectedWorktreePath && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -330,6 +376,35 @@ export function CodeReviewPage() {
                   ticket.reviewerBrief.commitSha,
                   headSha,
                 ) && <ReviewerBriefBar brief={ticket.reviewerBrief} />}
+              {selectedReviewFile && (
+                <FileReviewHeader
+                  path={selectedReviewFile.path}
+                  additions={selectedReviewFile.additions}
+                  deletions={selectedReviewFile.deletions}
+                  index={selectedIndex + 1}
+                  total={reviewFiles.length}
+                  viewed={viewed.has(selectedReviewFile.path)}
+                  onViewedChange={(on) => setViewedPath(selectedReviewFile.path, on)}
+                  onPrevious={() => {
+                    const next = stepFile(
+                      reviewFiles.map((file) => file.path),
+                      selectedReviewFile.path,
+                      -1,
+                    );
+                    if (next) setSelectedFile(next);
+                  }}
+                  onNext={() => {
+                    const next = stepFile(
+                      reviewFiles.map((file) => file.path),
+                      selectedReviewFile.path,
+                      1,
+                    );
+                    if (next) setSelectedFile(next);
+                  }}
+                  canPrevious={selectedIndex > 0}
+                  canNext={selectedIndex < reviewFiles.length - 1}
+                />
+              )}
               <DiffViewer
                 repoId={repoId}
                 worktreePath={selectedWorktreePath}

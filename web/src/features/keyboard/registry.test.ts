@@ -46,7 +46,15 @@ const TICKET_LABELS = [
   'Post comment',
 ];
 
-const REVIEW_LABELS = ['Approve plan', 'Accept…', 'Merge…', 'Open code review'];
+const REVIEW_LABELS = [
+  'Approve plan',
+  'Accept…',
+  'Merge…',
+  'Open code review',
+  'Next file',
+  'Previous file',
+  'Mark viewed',
+];
 
 function eventForChord(chord: Chord, platform: Platform): KeyEventLike {
   const key =

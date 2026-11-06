@@ -23,7 +23,30 @@ describe('ChangedFilesPanel', () => {
     );
 
     expect(screen.getAllByText('Not in the plan')).toHaveLength(1);
-    expect(screen.getByText('src/planned.rs')).toBeVisible();
-    expect(screen.getByText('src/extra.rs')).toBeVisible();
+    expect(screen.getByText('planned.rs')).toBeVisible();
+    expect(screen.getByText('extra.rs')).toBeVisible();
+  });
+
+  it('keeps the filename when the folder is long, and dims a viewed file', () => {
+    const path = 'web/src/features/settings/appearance/ThemeToggle.tsx';
+    render(
+      <ChangedFilesPanel
+        files={[{ path, status: 'added', additions: 48, deletions: 0 }]}
+        selectedPath={path}
+        onSelect={() => {}}
+        viewedPaths={new Set([path])}
+      />,
+    );
+
+    const row = screen.getByRole('button', { name: /ThemeToggle\.tsx/ });
+    expect(row).toHaveAttribute('title', path);
+    expect(row.querySelector('.line-through')).toHaveTextContent('ThemeToggle.tsx');
+    expect(row).toHaveTextContent('web/src/features/settings/appearance/');
+    expect(row.querySelector('[class*="direction:rtl"]')).toHaveTextContent(
+      'web/src/features/settings/appearance/',
+    );
+    expect(screen.getByText('✓')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    expect(screen.getByText('1 of 1 viewed')).toBeVisible();
   });
 });
