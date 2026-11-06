@@ -23,7 +23,7 @@ function Total({ label, tokens }: { label: string; tokens: TokenCounts }) {
     <div className="flex flex-wrap items-baseline gap-x-2" title={tokenDetail(tokens)}>
       <dt className="font-body text-xs text-text-muted">{label}</dt>
       <dd className="font-body text-sm font-medium text-text-primary">
-        {total == null ? '—' : formatTokens(total)}
+        {total == null ? 'not reported' : formatTokens(total)}
       </dd>
       {tokenSummary(tokens) && (
         <dd className="font-body text-xs text-text-secondary">{tokenSummary(tokens)}</dd>
@@ -38,6 +38,9 @@ function AgentRow({ group, name }: { group: UsageGroup; name: string }) {
     <li className="flex flex-wrap items-center gap-2 font-body text-xs" title={tokenDetail(group.tokens)}>
       <span className="font-medium text-text-primary">{name}</span>
       <span className="text-text-muted">×{group.runs}</span>
+      {group.runsWithUsage < group.runs && (
+        <span className="text-text-muted">({group.runsWithUsage} reported)</span>
+      )}
       <span className="ml-auto text-text-secondary">
         {total == null ? 'not reported' : formatTokens(total)}
       </span>

@@ -83,6 +83,13 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['designs', 'ticket', 'ticket-789'],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
+    // The final usage snapshot is written before the finish is published.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['ticket-usage', 'ticket-789'],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-run-usage', 'run-2'],
+    });
   });
 
   it('refetches only the event-driven families on resync', async () => {

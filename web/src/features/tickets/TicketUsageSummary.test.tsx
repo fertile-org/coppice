@@ -41,6 +41,7 @@ describe('TicketUsageSummary', () => {
     const agents = within(section.getByRole('list', { name: 'Tokens by agent' }));
     expect(agents.getByText('Worker')).toBeVisible();
     expect(agents.getByText('×2')).toBeVisible();
+    expect(agents.getByText('(1 reported)')).toBeVisible();
     expect(agents.getByText('110k')).toBeVisible();
     expect(section.queryByText(/Including/)).not.toBeInTheDocument();
   });
@@ -54,6 +55,20 @@ describe('TicketUsageSummary', () => {
     );
     expect(screen.getByText('Including 2 subtickets')).toBeVisible();
     expect(screen.getByText('200k')).toBeVisible();
+  });
+
+  it('says not reported when a total has no tokens', () => {
+    render(
+      <TicketUsageSummary
+        usage={usage({
+          own: { key: 'ticket', runs: 2, runsWithUsage: 1, tokens: out(null) },
+          subtickets: { ticketCount: 1, runsWithUsage: 1, tokens: out(50_000) },
+        })}
+        agentName={(id) => names[id]}
+      />,
+    );
+    expect(screen.getByText('not reported')).toBeVisible();
+    expect(screen.queryByText('—')).not.toBeInTheDocument();
   });
 
   it('renders nothing when no run reported usage', () => {

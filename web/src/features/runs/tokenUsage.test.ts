@@ -19,6 +19,13 @@ describe('formatTokens', () => {
     expect(formatTokens(3_450_000)).toBe('3.5M');
     expect(formatTokens(12_000_000)).toBe('12M');
   });
+
+  it('rounds before choosing the unit', () => {
+    expect(formatTokens(999_500)).toBe('1M');
+    expect(formatTokens(999_499)).toBe('999k');
+    expect(formatTokens(9_950)).toBe('10k');
+    expect(formatTokens(-999_500)).toBe('-1M');
+  });
 });
 
 describe('tokenSummary', () => {

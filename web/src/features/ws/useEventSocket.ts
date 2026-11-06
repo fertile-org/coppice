@@ -7,6 +7,8 @@ import type { RunStatus } from '../../lib/schemas/agentRun';
 import { designsQueryKey } from '../designs/useDesigns';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
+import { runUsageQueryKey } from '../runs/useRunUsage';
+import { ticketUsageQueryKey } from '../tickets/useTicketUsage';
 import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
@@ -87,6 +89,13 @@ function dispatchMessage(raw: string) {
       queryKey: designsQueryKey(payload.ticket_id),
     });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    // The server writes the final usage snapshot before it publishes the finish.
+    void queryClient.invalidateQueries({
+      queryKey: ticketUsageQueryKey(payload.ticket_id),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: runUsageQueryKey(payload.run_id),
+    });
     for (const listener of listeners) {
       listener.onRunFinished?.(payload);
     }

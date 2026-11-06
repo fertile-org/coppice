@@ -6,13 +6,20 @@ export const USAGE_COPY = {
   noUsage: 'No token usage recorded for this run.',
 } as const;
 
-/** `950`, `1.2k`, `182k`, `3.4M`. */
+/** One decimal below 10, none above. Rounds on integers: `toFixed` misrounds 9.95. */
+function scaled(abs: number, scale: number): number {
+  const tenths = Math.round((abs * 10) / scale);
+  return tenths < 100 ? tenths / 10 : Math.round(abs / scale);
+}
+
+/** `950`, `1.2k`, `182k`, `3.5M`. Switches to M after rounding, so 999,500 is `1M`. */
 export function formatTokens(n: number): string {
   const abs = Math.abs(n);
   if (abs < 1000) return String(n);
-  const [value, unit] = abs < 1_000_000 ? [n / 1000, 'k'] : [n / 1_000_000, 'M'];
-  const digits = Math.abs(value) < 10 ? 1 : 0;
-  return `${value.toFixed(digits).replace(/\.0$/, '')}${unit}`;
+  const sign = n < 0 ? '-' : '';
+  const thousands = scaled(abs, 1000);
+  if (thousands < 1000) return `${sign}${thousands}k`;
+  return `${sign}${scaled(abs, 1_000_000)}M`;
 }
 
 function sum(...parts: (number | null)[]): number | null {
