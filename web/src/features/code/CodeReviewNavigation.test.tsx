@@ -81,6 +81,11 @@ vi.mock('./useCodeReview', () => ({
     isError: false,
     error: null,
   }),
+  useFileContent: () => ({
+    data: undefined,
+    isLoading: true,
+    isError: false,
+  }),
 }));
 
 function renderPage() {
