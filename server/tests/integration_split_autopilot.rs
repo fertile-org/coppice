@@ -231,6 +231,22 @@ async fn approving_a_split_plan_starts_child_one_and_reports_progress() {
         child_card["splitProgress"]["activeChildId"],
         split.children[0].to_string()
     );
+
+    // A fetch of one child must still see every sibling, or position and
+    // count collapse to 1 of 1.
+    let second = common::get_ticket(
+        &split.app,
+        &split.children[1].to_string(),
+        &split.cookie,
+        &split.csrf,
+    )
+    .await;
+    let second_progress = &second["splitProgress"];
+    assert_eq!(second_progress["position"], 2);
+    assert_eq!(second_progress["count"], 2);
+    assert_eq!(second_progress["children"][0]["position"], 1);
+    assert_eq!(second_progress["children"][1]["id"], split.children[1].to_string());
+    assert_eq!(second_progress["children"][1]["position"], 2);
 }
 
 #[tokio::test]

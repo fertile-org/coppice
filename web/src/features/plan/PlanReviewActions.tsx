@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey, type PlanQuestions } from '../board/useTickets';
+import type { SplitTicketSpec } from '../../lib/schemas/ticket';
 import { agentRunsQueryKey } from '../tickets/useAgentRuns';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
 import { DESIGN_COPY } from '../designs/designCopy';
@@ -113,6 +114,64 @@ function PlanQuestionsForm({
   );
 }
 
+function listLines(text: string | undefined): string[] {
+  if (!text) return [];
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^\s*[-*]\s+/, '').trim())
+    .filter((line) => line.length > 0);
+}
+
+function ProposedSubTickets({ splits }: { splits: SplitTicketSpec[] }) {
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <h4 className="font-display text-sm font-semibold text-text-primary">
+        {PLAN_COPY.proposedSubTickets}
+      </h4>
+      <ol aria-label={PLAN_COPY.proposedSubTickets} className="mt-2 space-y-3">
+        {splits.map((split, index) => {
+          const steps = split.steps ?? [];
+          const criteria = listLines(split.acceptanceCriteria);
+          return (
+            <li key={`${split.title}-${index}`} className="font-body text-sm text-text-primary">
+              <p className="font-medium">
+                <span className="mr-2 text-text-secondary">{index + 1}</span>
+                {split.title}
+                {split.assignTo && (
+                  <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-xs font-normal text-text-secondary">
+                    {split.assignTo}
+                  </span>
+                )}
+              </p>
+              <p className="mt-2 text-xs font-medium text-text-secondary">{PLAN_COPY.steps}</p>
+              {steps.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {steps.map((step, stepIndex) => (
+                    <li key={`${stepIndex}-${step}`}>{step}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-text-muted">{PLAN_COPY.noSteps}</p>
+              )}
+              <p className="mt-2 text-xs font-medium text-text-secondary">{PLAN_COPY.criteria}</p>
+              {criteria.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {criteria.map((criterion, criterionIndex) => (
+                    <li key={`${criterionIndex}-${criterion}`}>{criterion}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-text-muted">{PLAN_COPY.noCriteria}</p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-3 text-xs text-text-secondary">{PLAN_COPY.proposedSubTicketNote}</p>
+    </div>
+  );
+}
+
 const primaryButton =
   'rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryButton =
@@ -123,6 +182,7 @@ export function PlanReviewActions({
   boardId,
   hasPlan = true,
   plan,
+  proposedSplits = [],
   revision,
   changeRequests = [],
   planQuestions,
@@ -135,6 +195,8 @@ export function PlanReviewActions({
   hasPlan?: boolean;
   /** The plan to review, shown above the feedback box. */
   plan?: string | null;
+  /** Sub-tickets this approval would create and start, in order. */
+  proposedSplits?: SplitTicketSpec[];
   revision?: number;
   changeRequests?: string[];
   planQuestions?: PlanQuestions | null;
@@ -176,6 +238,12 @@ export function PlanReviewActions({
 
   const busy = approve.isPending || ask.isPending;
   const notePending = comment.trim().length > 0;
+  const splitCount = proposedSplits.length;
+  const approveLabel = approve.isPending
+    ? PLAN_COPY.approving
+    : splitCount > 0
+      ? PLAN_COPY.approvePlanAndStart(splitCount)
+      : PLAN_COPY.approvePlan;
 
   const waiting = Boolean(planQuestions?.waiting);
 
@@ -196,7 +264,7 @@ export function PlanReviewActions({
 
   return (
     <section className="space-y-3 border-t border-border pt-6" aria-label={PLAN_COPY.proposedPlan}>
-      {plan?.trim() && (
+      {(plan?.trim() || splitCount > 0) && (
         <>
           <div className="flex flex-wrap items-baseline gap-2">
             <h3 className="font-display text-base font-semibold tracking-tight text-text-primary">
@@ -210,7 +278,8 @@ export function PlanReviewActions({
             data-testid="pending-plan"
             className="rounded-md border border-accent/40 bg-surface px-4 py-3"
           >
-            <TicketMarkdown>{plan}</TicketMarkdown>
+            {plan?.trim() && <TicketMarkdown>{plan}</TicketMarkdown>}
+            {splitCount > 0 && <ProposedSubTickets splits={proposedSplits} />}
           </div>
           {changeRequests.length > 0 && (
             <details className="rounded-md border border-border bg-surface px-3 py-2">
@@ -270,7 +339,7 @@ export function PlanReviewActions({
               title={planRunActive ? PLAN_COPY.approveWhileRewriting : undefined}
               className={notePending ? secondaryButton : primaryButton}
             >
-              {approve.isPending ? PLAN_COPY.approving : PLAN_COPY.approvePlan}
+              {approveLabel}
             </button>
           </div>
         </div>

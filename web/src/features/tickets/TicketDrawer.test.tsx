@@ -8,6 +8,7 @@ import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { useKeyboardEnvironment } from '../keyboard/useKeyboard';
 import { ApiError } from '../../lib/api';
+import { PLAN_COPY } from '../plan/copy';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
@@ -237,6 +238,8 @@ describe('TicketDrawer', () => {
       parentTicketId: undefined,
       archivedAt: null,
       hasActiveRun: false,
+      splitParent: false,
+      splitProgress: undefined,
     };
   });
 
@@ -615,6 +618,90 @@ describe('TicketDrawer', () => {
     expect(screen.getByText('Live console')).toBeInTheDocument();
   });
 
+  it('links a sub-ticket back to its parent with its place in the order', () => {
+    const parent = {
+      id: '00000000-0000-0000-0000-000000000020',
+      title: 'Re-design the subticket UIUX',
+    };
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      parentTicketId: parent.id,
+      splitProgress: {
+        parentTicketId: parent.id,
+        parentTitle: parent.title,
+        position: 2,
+        count: 3,
+        mergedCount: 1,
+        autoStart: true,
+        nextActor: 'agent',
+        children: [],
+      },
+    };
+
+    renderDrawer(parent);
+
+    const parentButton = screen.getByRole('button', {
+      name: PLAN_COPY.splitChildLink(2, 3, parent.title),
+    });
+    expect(parentButton).toHaveAttribute('title', parent.title);
+    fireEvent.click(parentButton);
+    expect(screen.getByTestId('location-search')).toHaveTextContent(
+      `?ticket=${parent.id}`,
+    );
+  });
+
+  it('shows the sub-ticket stepper and hides Run agent on a split parent', () => {
+    const reviewId = '00000000-0000-0000-0000-000000000021';
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_progress',
+      splitParent: true,
+      repoId: '00000000-0000-0000-0000-000000000011',
+      assigneeAgentId: '00000000-0000-0000-0000-000000000010',
+      splitProgress: {
+        parentTicketId: ticketState.ticket.id,
+        parentTitle: ticketState.ticket.title,
+        count: 2,
+        mergedCount: 0,
+        autoStart: false,
+        activeChildId: reviewId,
+        nextActor: 'you',
+        children: [
+          {
+            id: reviewId,
+            title: 'Plan Review shows proposed sub-tickets',
+            status: 'wait_for_final_review',
+            position: 2,
+            archived: false,
+            merged: false,
+          },
+          {
+            id: '00000000-0000-0000-0000-000000000022',
+            title: 'Parent tracker panel',
+            status: 'backlog',
+            position: 3,
+            archived: false,
+            merged: false,
+          },
+        ],
+      },
+    };
+
+    renderDrawer();
+
+    expect(screen.queryByRole('button', { name: 'Run Agent' })).toBeNull();
+    expect(screen.getByText(PLAN_COPY.yourTurnReview(2))).toBeVisible();
+    expect(screen.getByRole('link', { name: PLAN_COPY.reviewCode })).toHaveAttribute(
+      'href',
+      expect.stringContaining(`ticketId=${reviewId}`),
+    );
+    expect(screen.getByText('Plan Review shows proposed sub-tickets')).toBeVisible();
+    expect(screen.getByText('Parent tracker panel')).toBeVisible();
+    expect(screen.getByRole('button', { name: PLAN_COPY.splitResume })).toBeVisible();
+    expect(screen.getByRole('button', { name: PLAN_COPY.splitStartNext })).toBeVisible();
+    expect(screen.getByRole('button', { name: PLAN_COPY.splitMergedElsewhere })).toBeVisible();
+  });
+
   it('opens a child ticket parent in the same drawer route', () => {
     const parent = {
       id: '00000000-0000-0000-0000-000000000020',
@@ -700,6 +787,8 @@ describe('TicketDrawer keyboard sections', () => {
       assigneeAgentId: undefined,
       repoId: undefined,
       hasActiveRun: false,
+      splitParent: false,
+      splitProgress: undefined,
     };
   });
 

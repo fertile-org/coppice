@@ -212,6 +212,43 @@ describe('PlanReviewActions', () => {
     );
   });
 
+  it('lists every proposed sub-ticket with its steps and criteria, and names the count on Approve', () => {
+    wrap(
+      <PlanReviewActions
+        ticketId="t1"
+        boardId="b1"
+        plan={'## Plan\n\n### Approach\nRun them in order.'}
+        proposedSplits={[
+          {
+            title: 'Server: run sub-tickets in order',
+            description: 'Start the next after a merge.',
+            assignTo: 'backend_engineer',
+            steps: ['Record child order', 'Start child 1 on approve'],
+            acceptanceCriteria: '- Approving starts sub-ticket 1\n- Merging one starts the next',
+          },
+          {
+            title: 'Plan Review shows proposed sub-tickets',
+            description: 'Show the split inside the plan.',
+            steps: ['Render the pending split', 'Name the count on Approve'],
+            acceptanceCriteria: '- Every sub-ticket is visible before approval',
+          },
+        ]}
+      />,
+    );
+    const plan = screen.getByTestId('pending-plan');
+    expect(plan).toHaveTextContent('Server: run sub-tickets in order');
+    expect(plan).toHaveTextContent('Plan Review shows proposed sub-tickets');
+    expect(plan).toHaveTextContent('Record child order');
+    expect(plan).toHaveTextContent('Start child 1 on approve');
+    expect(plan).toHaveTextContent('Render the pending split');
+    expect(plan).toHaveTextContent('Name the count on Approve');
+    expect(plan).toHaveTextContent('Approving starts sub-ticket 1');
+    expect(plan).toHaveTextContent('Merging one starts the next');
+    expect(plan).toHaveTextContent('Every sub-ticket is visible before approval');
+    const approve = screen.getByRole('button', { name: PLAN_COPY.approvePlanAndStart(2) });
+    expect(plan.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows the revision and a collapsed list of requested changes', () => {
     wrap(
       <PlanReviewActions

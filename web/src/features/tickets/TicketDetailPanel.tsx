@@ -17,9 +17,11 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { DesignPlanCard } from '../designs/DesignPlanCard';
 import { planCardDesign, useDesigns } from '../designs/useDesigns';
+import { PLAN_COPY } from '../plan/copy';
 import { PlanChecklist } from '../plan/PlanChecklist';
-import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
+import { SplitParentTracker } from '../plan/SplitParentTracker';
+import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
 import { TicketStatusBadge } from './TicketStatusBadge';
@@ -206,6 +208,15 @@ export function TicketDetailPanel({
           </div>
         </div>
 
+        {ticket.splitProgress && ticket.splitProgress.position == null && (
+          <SplitParentTracker
+            ticketId={ticket.id}
+            boardId={ticket.boardId}
+            repoId={ticket.repoId}
+            progress={ticket.splitProgress}
+          />
+        )}
+
         {error && (
           <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
             {error}
@@ -265,6 +276,11 @@ export function TicketDetailPanel({
           boardId={ticket.boardId}
           hasPlan={ticket.hasPlan ?? true}
           plan={ticket.pendingPlan?.markdown}
+          proposedSplits={
+            ticket.pendingSplitRecommendation?.fromPlan
+              ? ticket.pendingSplitRecommendation.splits
+              : []
+          }
           revision={ticket.pendingPlan?.revision}
           changeRequests={ticket.pendingPlan?.changeRequests}
           planQuestions={ticket.planQuestions}
@@ -281,29 +297,60 @@ export function TicketDetailPanel({
         <PlanChecklist plan={ticket.approvedPlan} />
       )}
 
-      {parentTicket && ticket.parentTicketId === parentTicket.id && (
+      {ticket.splitProgress?.position != null ? (
         <section className="border-t border-border pt-6">
-          <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
-            Parent ticket
-          </h3>
           <button
             type="button"
-            aria-label={`Open parent ticket: ${parentTicket.title}`}
-            onClick={() => setSearchParams({ ticket: parentTicket.id })}
+            aria-label={PLAN_COPY.splitChildLink(
+              ticket.splitProgress.position,
+              ticket.splitProgress.count,
+              ticket.splitProgress.parentTitle,
+            )}
+            title={ticket.splitProgress.parentTitle}
+            onClick={() =>
+              setSearchParams({ ticket: ticket.splitProgress?.parentTicketId ?? '' })
+            }
             className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
           >
             <GitBranch
               className="h-4 w-4 shrink-0 text-text-secondary"
               aria-hidden="true"
             />
-            <span
-              className="min-w-0 truncate font-body text-sm font-medium text-text-primary"
-              title={parentTicket.title}
-            >
-              {parentTicket.title}
+            <span className="min-w-0 truncate font-body text-sm font-medium text-text-primary">
+              {PLAN_COPY.splitChildLink(
+                ticket.splitProgress.position,
+                ticket.splitProgress.count,
+                ticket.splitProgress.parentTitle,
+              )}
             </span>
           </button>
         </section>
+      ) : (
+        parentTicket &&
+        ticket.parentTicketId === parentTicket.id && (
+          <section className="border-t border-border pt-6">
+            <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
+              Parent ticket
+            </h3>
+            <button
+              type="button"
+              aria-label={`Open parent ticket: ${parentTicket.title}`}
+              onClick={() => setSearchParams({ ticket: parentTicket.id })}
+              className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            >
+              <GitBranch
+                className="h-4 w-4 shrink-0 text-text-secondary"
+                aria-hidden="true"
+              />
+              <span
+                className="min-w-0 truncate font-body text-sm font-medium text-text-primary"
+                title={parentTicket.title}
+              >
+                {parentTicket.title}
+              </span>
+            </button>
+          </section>
+        )
       )}
 
       {children && children.length > 0 && (
