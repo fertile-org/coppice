@@ -361,7 +361,7 @@ impl<'a> CodeReviewService<'a> {
             &["--numstat", "--find-renames", &range],
         )
         .await?;
-        let files = parse_diff_files(&name_status, &numstat);
+        let files = parse_diff_files(&name_status, &numstat, ignore_whitespace);
         Ok(DiffSummary {
             base_branch: ctx.base_branch,
             base_sha: ctx.base_sha,
@@ -645,7 +645,15 @@ async fn resolve_git_common_dir(git_dir: &Path) -> Result<PathBuf, CodeReviewErr
         .map_err(|_| CodeReviewError::InvalidWorktreePath)
 }
 
-fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
+/// With `ignore_whitespace`, a file missing from `numstat` changed only whitespace and is
+/// dropped. Older git (2.39, 2.51; macOS ships 2.39) still lists such files in
+/// `--name-status -w`; `--numstat -w`
+/// leaves them out but keeps binary, empty, mode-only and renamed files.
+fn parse_diff_files(
+    name_status: &str,
+    numstat: &str,
+    ignore_whitespace: bool,
+) -> Vec<DiffFileSummary> {
     let mut stats: std::collections::HashMap<String, (u32, u32)> = std::collections::HashMap::new();
     for line in numstat.lines() {
         let line = line.trim();
@@ -689,7 +697,12 @@ fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
         if path.is_empty() {
             continue;
         }
-        let (additions, deletions) = stats.get(&path).copied().unwrap_or((0, 0));
+        let Some((additions, deletions)) = stats.get(&path).copied().or_else(|| {
+            // Without -w, numstat lists every file; keep the old 0/0 fallback there.
+            (!ignore_whitespace).then_some((0, 0))
+        }) else {
+            continue;
+        };
         files.push(DiffFileSummary {
             path,
             status: status.to_string(),
@@ -864,6 +877,7 @@ mod tests {
         let files = parse_diff_files(
             "M\tsrc/a.ts\nA\tsrc/b.ts",
             "3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts",
+            false,
         );
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].path, "src/a.ts");
@@ -876,12 +890,31 @@ mod tests {
         let files = parse_diff_files(
             "R050\told_name.txt\tnew_name.txt",
             "1\t1\told_name.txt => new_name.txt",
+            false,
         );
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "new_name.txt");
         assert_eq!(files[0].status, "renamed");
         assert_eq!(files[0].additions, 1);
         assert_eq!(files[0].deletions, 1);
+    }
+
+    #[test]
+    fn parse_diff_files_drops_whitespace_only_files_when_ignoring_whitespace() {
+        // `git diff -w` output from git 2.51: name-status still lists `ws`, numstat does not.
+        let name_status = "M\tbin\nA\tempty\nM\tmode\nA\treal\nR100\told\trenamed\nM\tws";
+        let numstat = "-\t-\tbin\n0\t0\tempty\n0\t0\tmode\n1\t0\treal\n0\t0\told => renamed";
+        let paths = |files: Vec<DiffFileSummary>| -> Vec<String> {
+            files.into_iter().map(|file| file.path).collect()
+        };
+        assert_eq!(
+            paths(parse_diff_files(name_status, numstat, true)),
+            ["bin", "empty", "mode", "real", "renamed"]
+        );
+        assert_eq!(
+            paths(parse_diff_files(name_status, numstat, false)),
+            ["bin", "empty", "mode", "real", "renamed", "ws"]
+        );
     }
 
     #[test]
