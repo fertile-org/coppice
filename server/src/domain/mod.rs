@@ -19,5 +19,6 @@ pub mod run;
 pub mod session;
 pub mod substatus;
 pub mod ticket;
+pub mod usage;
 pub mod user;
 pub mod workflow;

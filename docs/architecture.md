@@ -122,6 +122,7 @@ Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_conn
 6. If `caps.read_only_tools` is true, add it to `READ_ONLY_CAPABLE_CONNECTORS` (`providers/mod.rs`; a test checks it matches the descriptors).
 7. CLI arms in `cli/src/commands/connector/`: `enable.rs` (connectors that get a default `command`), `install.rs`, and `setup.rs` (per-id install and setup steps).
 8. A doc in `docs/providers/` and a row in its README.
+9. Token usage: set the descriptor's `usage` format (`UsageFormat::None` until a reader exists). With a reader, call `stream.track_usage(descriptor.usage)` once and `stream.observe_usage(&event)` per output event; see [providers § Token usage](providers/README.md#token-usage).
 
 The connector-id literal scan in `providers/registry.rs` derives its ids from `coppice_connectors::all()`, so it needs no edit.
 

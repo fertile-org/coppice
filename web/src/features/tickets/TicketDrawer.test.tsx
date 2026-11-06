@@ -154,6 +154,7 @@ vi.mock('./useAgentRuns', () => ({
   useRunAgent: () => ({ mutateAsync: runMocks.runAgent, isPending: false }),
   useStopRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
   isActiveRunStatus: (status: string) => status === 'running' || status === 'queued',
+  agentRunsRefetchInterval: () => false,
   shouldPollRunForReconciliation: (run: AgentRun) =>
     run.status === 'running' || run.status === 'queued' || run.endedAt == null,
 }));

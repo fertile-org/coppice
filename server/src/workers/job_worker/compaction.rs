@@ -83,6 +83,7 @@ pub(super) async fn execute_compaction(
 
     let stream = state.run_streams.register(run.id);
     crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
     run_svc
         .mark_running(run.id)
@@ -141,6 +142,7 @@ pub(super) async fn execute_compaction(
         })
         .await;
     crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
+    crate::services::usage_service::record_usage(pool, run.id, &stream).await;
     grant.revoke().await;
     let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 

@@ -24,6 +24,7 @@ mod ticket_files;
 mod tickets;
 mod tool_connectors;
 mod tools;
+mod usage;
 mod users;
 mod ws;
 
@@ -52,6 +53,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(agents::routes())
         .merge(connectors::routes())
         .merge(agent_runs::routes())
+        .merge(usage::routes())
         .merge(chat::routes())
         .merge(jobs::routes())
         .merge(knowledge::routes())

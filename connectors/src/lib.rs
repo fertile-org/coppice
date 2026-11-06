@@ -63,6 +63,8 @@ pub struct ConnectorDescriptor {
     pub mcp_wiring: McpWiring,
     pub mcp_tool_names: ToolNameStyle,
     pub console: ConsoleKind,
+    /// Format the connector's token usage arrives in.
+    pub usage: UsageFormat,
     pub caps: Capabilities,
     /// Pinned flags, permission mode, and the minimum CLI version each flag needs.
     pub run_contract: RunContract,
@@ -74,6 +76,11 @@ impl ConnectorDescriptor {
     /// The connector maps the agent's thinking level to a CLI flag.
     pub fn takes_thinking_level(&self) -> bool {
         self.run_contract.thinking_level.is_some()
+    }
+
+    /// Coppice can read token usage from this connector's output.
+    pub fn reports_usage(&self) -> bool {
+        self.usage != UsageFormat::None
     }
 }
 
@@ -219,6 +226,19 @@ pub enum ConsoleKind {
     Plain,
 }
 
+/// Where a connector's output reports token usage. This names a wire format,
+/// not a connector: connectors that speak the same protocol share one reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageFormat {
+    /// Claude Code `--output-format stream-json` with `--include-partial-messages`.
+    ClaudeStreamJson,
+    /// Events already in Coppice's own usage shape (MockProvider fixtures).
+    Normalized,
+    /// No reader yet. Runs record no usage.
+    None,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
@@ -252,6 +272,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::MockHttp,
         mcp_tool_names: ToolNameStyle::None,
         console: ConsoleKind::Plain,
+        usage: UsageFormat::Normalized,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -278,6 +299,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::CursorHome,
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
             // write a per-run deny for Shell(*) and Write(**) and overlay
@@ -311,6 +333,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::ClaudeJson,
         mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::ClaudeStreamJson,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -340,6 +363,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::CodexFlags,
         mcp_tool_names: ToolNameStyle::ServerToolFields,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -367,6 +391,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         // Unverified (no live CLI); follows its OpenCode fork. Only affects console labels.
         mcp_tool_names: ToolNameStyle::Underscore,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: false,
             // `kilo run --session <id>` continues that session and still takes
@@ -398,6 +423,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::OpenCodeJson,
         mcp_tool_names: ToolNameStyle::Underscore,
         console: ConsoleKind::OpenCodeSession,
+        usage: UsageFormat::None,
         caps: Capabilities {
             // Chat denies `edit`, `write`, and `bash` in the per-run config
             // and sets OPENCODE_DISABLE_PROJECT_CONFIG. Verified with OpenCode
@@ -432,6 +458,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::AcpSession,
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -458,6 +485,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::AcpSession,
         mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -484,6 +512,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::AcpSession,
         mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -510,6 +539,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::AcpSession,
         mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
         console: ConsoleKind::Structured,
+        usage: UsageFormat::None,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -613,6 +643,19 @@ mod tests {
             d.takes_thinking_level(),
             id == CLAUDE_CODE,
             "{id} thinking level"
+        );
+        // Only Claude Code has a usage reader so far; the mock replays
+        // normalized events.
+        let usage = match id {
+            CLAUDE_CODE => UsageFormat::ClaudeStreamJson,
+            MOCK => UsageFormat::Normalized,
+            _ => UsageFormat::None,
+        };
+        assert_eq!(d.usage, usage, "{id} usage");
+        assert_eq!(
+            d.reports_usage(),
+            usage != UsageFormat::None,
+            "{id} reports usage"
         );
     }
 

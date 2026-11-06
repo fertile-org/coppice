@@ -10,7 +10,7 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 
 | Connector | id | Command | How Coppice runs it | Sign-in check | Guide |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
+| Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --include-partial-messages --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
 | Codex | `codex` | `codex` | Subprocess: `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` (`--no-daemon` when the CLI is ≥ 0.156) | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
 | Cursor | `cursor` | `cursor-agent` | Subprocess in the worktree: `cursor-agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
 | OpenCode | `opencode` | `opencode` | 2.x: `opencode acp` per run over the Agent Client Protocol, with the structured console; a model ACP doesn't offer (such as `opencode-go/*`) runs with `opencode run --standalone --format json` instead. 1.x: a fresh `opencode serve --hostname … --port …` per run over HTTP/SSE, with a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
@@ -112,6 +112,25 @@ When a ticket has a selected design, the work run is given the absolute path of 
 | `kilo-code` | Not yet | `kilo run` stopped with `PAID_MODEL_AUTH_REQUIRED` (not signed in) |
 
 A connector that cannot read the file still gets the option's title and the plan text.
+
+## Token usage
+
+Coppice records the tokens a run used: one row per LLM request, one row per subagent the CLI spawned, and a run total. A count the CLI did not report is stored as NULL and shown as "not reported", never 0. Money is not shown; a cost the CLI reports is stored only.
+
+| Connector | Usage format | What is recorded |
+|-----------|--------------|------------------|
+| Claude Code | `claudeStreamJson` | Each request's final usage (`stream_event` `message_delta`, from `--include-partial-messages`), each subagent's totals (Agent tool result), and the run total from `result.modelUsage` (subagents included). Captures: `fixtures/claude-code/claude-code-2.1.318-usage-*.jsonl`. |
+| Mock | `normalized` | The fixture's `usage` array, replayed through the same path. |
+| Others | `none` | Nothing yet; their runs show no usage. |
+
+How it fits together, so a new connector needs no storage, API, or UI change:
+
+1. The descriptor's `usage: UsageFormat` (`connectors/src/lib.rs`) names the wire format the connector's output uses. Connectors that share a protocol share a format.
+2. `server/src/providers/usage/` has one `UsageReader` per format. A reader turns one output event into normalized `UsageEvent`s (`server/src/domain/usage.rs`): `request`, `subagent`, or `runTotal`. Events with the same id update one row.
+3. The adapter calls `stream.track_usage(descriptor.usage)` once and `stream.observe_usage(&event)` for every output event. The run stream handle folds events into a snapshot; the worker writes it as it changes and once more when the run ends (`services/usage_service.rs`).
+4. `GET /api/agent-runs/{id}/usage` and `GET /api/tickets/{id}/usage` serve it. A ticket's total covers its own runs; split children are reported separately. Runs without a ticket (knowledge compaction, connector checks) are in no ticket's total.
+
+To add a connector: capture a small real run (a shell call and a subagent where the CLI has them) into `fixtures/<connector>/`, add a `UsageFormat` variant and a reader tested against the capture (or reuse an existing format), set the descriptor's `usage`, and add the two calls in the adapter.
 
 ## Diagnostics (System → Connectors)
 

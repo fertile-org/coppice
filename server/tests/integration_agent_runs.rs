@@ -586,3 +586,163 @@ async fn ten_mock_runs_do_not_grow_server_rss_or_leave_streams() {
         );
     }
 }
+
+async fn get_json(
+    app: &axum::Router,
+    uri: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request("GET", uri, "", cookie, csrf))
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json = if body.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&body).unwrap()
+    };
+    (status, json)
+}
+
+#[tokio::test]
+async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["totals"]["status"], "reported");
+    assert_eq!(run["totals"]["tokens"]["output"], 120);
+    assert_eq!(run["totals"]["tokens"]["cacheRead"], 2200);
+    assert_eq!(run["totals"]["requestCount"], 2);
+    assert_eq!(run["totals"]["subagentCount"], 1);
+    assert!(run["totals"].get("costUsd").is_none(), "cost is not served");
+    let requests = run["requests"].as_array().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["id"], "req-1");
+    assert_eq!(requests[0]["granularity"], "request");
+    assert_eq!(requests[1]["tokens"]["reasoning"], 10);
+    // Two events for one subagent are merged into one row.
+    let subagents = run["subagents"].as_array().unwrap();
+    assert_eq!(subagents.len(), 1);
+    assert_eq!(subagents[0]["agentType"], "explore");
+    assert_eq!(subagents[0]["status"], "completed");
+    assert_eq!(subagents[0]["tokens"]["output"], 40);
+    assert_eq!(subagents[0]["toolUses"], 2);
+
+    let (status, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runsWithUsage"], 1);
+    assert_eq!(ticket["own"]["tokens"]["output"], 120);
+    assert!(ticket["subtickets"].is_null());
+    assert_eq!(ticket["runs"][0]["runId"], run_id.as_str());
+    assert_eq!(ticket["runs"][0]["tracked"], true);
+    assert_eq!(ticket["byAgent"][0]["key"], agent_id.as_str());
+    assert_eq!(ticket["byJobType"][0]["key"], "work_on_ticket");
+
+    let missing = uuid::Uuid::new_v4();
+    let (status, _) = get_json(
+        &app,
+        &format!("/api/agent-runs/{missing}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = get_json(
+        &app,
+        &format!("/api/tickets/{missing}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn run_without_usage_reports_none() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(run["totals"].is_null());
+    assert_eq!(run["requests"].as_array().unwrap().len(), 0);
+
+    let (_, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runsWithUsage"], 0);
+    assert!(ticket["own"]["tokens"]["output"].is_null());
+    assert!(ticket["runs"][0]["usage"].is_null());
+}

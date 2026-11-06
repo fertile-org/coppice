@@ -28,7 +28,8 @@ const billedRun: AgentRun = {
   billedOutsidePlan: true,
 };
 
-vi.mock('./useAgentRuns', () => ({
+vi.mock('./useAgentRuns', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useAgentRuns')>()),
   useAgentRuns: () => ({ data: [billedRun], isLoading: false, isError: false }),
 }));
 

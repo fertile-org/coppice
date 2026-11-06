@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 import { MODEL_NOT_REPORTED, NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
+import { USAGE_COPY } from '../runs/tokenUsage';
 import { TicketRunsTab } from './TicketRunsTab';
 
 const session = vi.hoisted(() => ({ role: 'admin' }));
@@ -28,21 +29,45 @@ const failedRun: AgentRun = {
   createdAt: '2026-06-08T00:00:00.000Z',
 };
 
-vi.mock('./useAgentRuns', () => ({
+vi.mock('./useAgentRuns', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useAgentRuns')>()),
   useAgentRuns: () => ({ data: [failedRun], isLoading: false, isError: false }),
 }));
 
-const { useRunToolCalls, useKnowledgeUsed } = vi.hoisted(() => ({
+const { useRunToolCalls, useKnowledgeUsed, useRunUsage, useTicketUsage } = vi.hoisted(() => ({
   useRunToolCalls: vi.fn(() => ({
     data: { items: [], skillsUsed: [] },
     isLoading: false,
     isError: false,
   })),
   useKnowledgeUsed: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
+  useRunUsage: vi.fn(() => ({
+    data: { totals: null, requests: [], subagents: [] },
+    isLoading: false,
+    isError: false,
+  })),
+  useTicketUsage: vi.fn((): { data: unknown } => ({ data: undefined })),
 }));
 
 vi.mock('../runs/useRunToolCalls', () => ({ useRunToolCalls }));
 vi.mock('../knowledge/useKnowledge', () => ({ useKnowledgeUsed }));
+vi.mock('../runs/useRunUsage', () => ({ useRunUsage }));
+vi.mock('./useTicketUsage', () => ({ useTicketUsage }));
+
+function ticketUsage(tracked: boolean, output: number | null) {
+  const tokens = { input: null, cacheRead: null, cacheWrite: null, output, reasoning: null };
+  const usage =
+    output == null ? null : { status: 'reported', tokens, requestCount: 1, subagentCount: 0 };
+  return {
+    data: {
+      runs: [{ runId: failedRun.id, agentId: failedRun.agentId, jobType: 'work_on_ticket', tracked, usage }],
+      own: { key: 'ticket', runs: 1, runsWithUsage: usage ? 1 : 0, tokens },
+      subtickets: null,
+      byAgent: [],
+      byJobType: [],
+    },
+  };
+}
 
 vi.mock('../agents/useAgents', () => ({
   useAgents: () => ({
@@ -64,6 +89,27 @@ function renderRuns() {
 describe('TicketRunsTab', () => {
   beforeEach(() => {
     session.role = 'admin';
+    useTicketUsage.mockReturnValue({ data: undefined });
+  });
+
+  it('shows each run’s tokens and the ticket total', () => {
+    useTicketUsage.mockReturnValue(ticketUsage(true, 9_100));
+    renderRuns();
+    expect(screen.getByText('Tokens: 9.1k out')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Token usage' })).toBeVisible();
+  });
+
+  it('says when a tracked run reported no tokens', () => {
+    useTicketUsage.mockReturnValue(ticketUsage(true, null));
+    renderRuns();
+    expect(screen.getByText(USAGE_COPY.notReported)).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Token usage' })).toBeNull();
+  });
+
+  it('stays quiet for a connector Coppice cannot read yet', () => {
+    useTicketUsage.mockReturnValue(ticketUsage(false, null));
+    renderRuns();
+    expect(screen.queryByText(USAGE_COPY.notReported)).toBeNull();
   });
 
   it('links an admin to that run’s logs', () => {
@@ -114,5 +160,13 @@ describe('TicketRunsTab', () => {
     expect(screen.queryByText('No tool calls recorded.')).toBeNull();
     expect(useKnowledgeUsed).toHaveBeenLastCalledWith(failedRun.id, true);
     expect(useRunToolCalls).toHaveBeenLastCalledWith(failedRun.id, false);
+
+    const tokens = screen.getByRole('tab', { name: 'Tokens' });
+    fireEvent.click(tokens);
+    expect(tokens).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: 'Tokens' })).toBeVisible();
+    expect(screen.getByText(USAGE_COPY.noUsage)).toBeVisible();
+    // A finished run is not polled.
+    expect(useRunUsage).toHaveBeenLastCalledWith(failedRun.id, true, false);
   });
 });

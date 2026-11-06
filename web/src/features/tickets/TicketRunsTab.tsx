@@ -5,13 +5,18 @@ import { useSession } from '../auth/useSession';
 import { LOGS_COPY } from '../logs/copy';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
+import { RunTokenUsage } from '../runs/RunTokenUsage';
+import { tokenDetail, tokenSummary, USAGE_COPY } from '../runs/tokenUsage';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
 import type { DesignSet } from '../../lib/schemas/design';
+import type { TicketRunUsage } from '../../lib/schemas/usage';
 import { DesignCard } from '../designs/DesignCard';
 import { useDesigns } from '../designs/useDesigns';
 import { NOT_COVERED_BY_PLAN, reportedModelLabel } from '../runs/reportedModel';
 import { useOpenTicket } from './useOpenTicket';
-import { useAgentRuns } from './useAgentRuns';
+import { agentRunsRefetchInterval, isActiveRunStatus, useAgentRuns } from './useAgentRuns';
+import { TicketUsageSummary } from './TicketUsageSummary';
+import { useTicketUsage } from './useTicketUsage';
 
 interface TicketRunsTabProps {
   ticketId: string;
@@ -74,16 +79,36 @@ function agentName(
   return agents?.find((agent) => agent.id === agentId)?.name ?? 'Unknown agent';
 }
 
+/** Tokens line for a run. Nothing for connectors Coppice cannot read yet. */
+function RunTokensLine({ run, usage }: { run: AgentRun; usage: TicketRunUsage | undefined }) {
+  if (!usage?.tracked) return null;
+  const summary = usage.usage ? tokenSummary(usage.usage.tokens) : null;
+  if (summary && usage.usage) {
+    return (
+      <p
+        className="font-body text-xs text-text-muted"
+        title={tokenDetail(usage.usage.tokens)}
+      >
+        Tokens: {summary}
+      </p>
+    );
+  }
+  if (isActiveRunStatus(run.status)) return null;
+  return <p className="font-body text-xs text-text-muted">{USAGE_COPY.notReported}</p>;
+}
+
 function RunRow({
   run,
   agents,
   ticketId,
   designs,
+  usage,
 }: {
   run: AgentRun;
   agents: { id: string; name: string }[] | undefined;
   ticketId: string;
   designs: DesignSet[] | undefined;
+  usage: TicketRunUsage | undefined;
 }) {
   const [errorExpanded, setErrorExpanded] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
@@ -110,6 +135,7 @@ function RunRow({
           {run.billedOutsidePlan && (
             <p className="font-body text-xs text-text-muted">{NOT_COVERED_BY_PLAN}</p>
           )}
+          <RunTokensLine run={run} usage={usage} />
         </div>
         <time
           dateTime={run.createdAt}
@@ -179,7 +205,11 @@ function RunRow({
         </button>
       </div>
       {detailsExpanded && (
-        <RunDetailsTabs runId={run.id} onOpenTicket={openTicket} />
+        <RunDetailsTabs
+          runId={run.id}
+          live={isActiveRunStatus(run.status)}
+          onOpenTicket={openTicket}
+        />
       )}
       {designs
         ?.filter((set) => set.runId === run.id)
@@ -192,18 +222,21 @@ function RunRow({
   );
 }
 
-type RunDetailsTab = 'tools' | 'knowledge';
+type RunDetailsTab = 'tools' | 'knowledge' | 'tokens';
 
 const RUN_DETAILS_TABS: { key: RunDetailsTab; label: string }[] = [
   { key: 'tools', label: 'Tools & Skills' },
   { key: 'knowledge', label: 'Knowledge Used' },
+  { key: 'tokens', label: 'Tokens' },
 ];
 
 function RunDetailsTabs({
   runId,
+  live,
   onOpenTicket,
 }: {
   runId: string;
+  live: boolean;
   onOpenTicket: (ticketId: string) => void | Promise<void>;
 }) {
   const [tab, setTab] = useState<RunDetailsTab>('tools');
@@ -259,6 +292,15 @@ function RunDetailsTabs({
           onOpenTicket={onOpenTicket}
         />
       </div>
+      <div
+        id={panelId('tokens')}
+        role="tabpanel"
+        aria-labelledby={tabId('tokens')}
+        hidden={tab !== 'tokens'}
+        className="pt-3"
+      >
+        <RunTokenUsage runId={runId} enabled={tab === 'tokens'} live={live} />
+      </div>
     </div>
   );
 }
@@ -267,6 +309,7 @@ export function TicketRunsTab({ ticketId }: TicketRunsTabProps) {
   const { data: runs, isLoading, isError } = useAgentRuns(ticketId);
   const { data: agents } = useAgents();
   const { data: designs } = useDesigns(ticketId);
+  const { data: usage } = useTicketUsage(ticketId, agentRunsRefetchInterval(runs));
 
   if (isLoading) {
     return (
@@ -288,8 +331,16 @@ export function TicketRunsTab({ ticketId }: TicketRunsTabProps) {
     );
   }
 
+  const usageByRun = new Map(usage?.runs.map((item) => [item.runId, item]));
+
   return (
     <div className="space-y-3">
+      {usage && (
+        <TicketUsageSummary
+          usage={usage}
+          agentName={(agentId) => agentName(agentId, agents)}
+        />
+      )}
       {runs?.map((run) => (
         <RunRow
           key={run.id}
@@ -297,6 +348,7 @@ export function TicketRunsTab({ ticketId }: TicketRunsTabProps) {
           agents={agents}
           ticketId={ticketId}
           designs={designs}
+          usage={usageByRun.get(run.id)}
         />
       ))}
     </div>
