@@ -2,23 +2,28 @@ import {
   useCallback,
   useMemo,
   useState,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import {
+  Decoration,
   Diff,
   Hunk,
+  expandFromRawCode,
   getChangeKey,
+  getCollapsedLinesCountBetween,
   isDelete,
   isInsert,
   parseDiff,
   type ChangeData,
   type ChangeEventArgs,
+  type HunkData,
 } from 'react-diff-view';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import type { InlineComment } from '../../lib/schemas/codeReview';
 import { diffTokens } from './diffHighlight';
-import { useFilePatch } from './useCodeReview';
+import { useFileContent, useFilePatch } from './useCodeReview';
 import 'react-diff-view/style/index.css';
 
 export interface InlineCommentDraft extends InlineComment {
@@ -31,6 +36,7 @@ interface DiffViewerProps {
   baseBranch: string;
   filePath: string | undefined;
   viewType: 'split' | 'unified';
+  ignoreWhitespace: boolean;
   inlineComments: InlineCommentDraft[];
   onInlineCommentsChange: (comments: InlineCommentDraft[]) => void;
 }
@@ -136,12 +142,91 @@ function PendingCommentBubble({
 /** Hunks mounted at once for one file. */
 export const HUNK_WINDOW = 100;
 
+function sourceLineCount(source: string): number {
+  if (source.length === 0) return 0;
+  const newlineCount = source.split('\n').length - 1;
+  return source.endsWith('\n') ? newlineCount : newlineCount + 1;
+}
+
+function ExpandRow({
+  count,
+  where,
+  onClick,
+}: {
+  count: number;
+  where: 'above' | 'between' | 'below';
+  onClick: () => void;
+}) {
+  const lines = count === 1 ? 'line' : 'lines';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full px-3 py-1 text-left font-body text-xs text-text-secondary hover:text-text-primary"
+    >
+      Expand {count} {lines} {where}
+    </button>
+  );
+}
+
+function hunkRows(
+  hunks: HunkData[],
+  oldSource: string | undefined,
+  showBelow: boolean,
+  onExpand: (start: number, end: number) => void,
+): ReactElement[] {
+  const rows: ReactElement[] = [];
+  if (hunks.length === 0) return rows;
+
+  const pushExpand = (
+    key: string,
+    count: number,
+    where: 'above' | 'between' | 'below',
+    start: number,
+    end: number,
+  ) => {
+    if (!oldSource || count <= 0) return;
+    rows.push(
+      <Decoration key={key}>
+        <ExpandRow count={count} where={where} onClick={() => onExpand(start, end)} />
+      </Decoration>,
+    );
+  };
+
+  const first = hunks[0];
+  pushExpand('above', first.oldStart - 1, 'above', 1, first.oldStart);
+
+  hunks.forEach((hunk, index) => {
+    rows.push(<Hunk key={`${hunk.oldStart}-${hunk.newStart}-${index}`} hunk={hunk} />);
+    const next = hunks[index + 1];
+    if (!next) return;
+    const start = hunk.oldStart + hunk.oldLines;
+    pushExpand(
+      `between-${start}`,
+      getCollapsedLinesCountBetween(hunk, next),
+      'between',
+      start,
+      next.oldStart,
+    );
+  });
+
+  if (showBelow) {
+    const last = hunks[hunks.length - 1];
+    const start = last.oldStart + last.oldLines;
+    const below = sourceLineCount(oldSource ?? '') - (start - 1);
+    pushExpand('below', below, 'below', start, start + Math.max(below, 0));
+  }
+
+  return rows;
+}
+
 export function DiffViewer({
   repoId,
   worktreePath,
   baseBranch,
   filePath,
   viewType,
+  ignoreWhitespace,
   inlineComments,
   onInlineCommentsChange,
 }: DiffViewerProps) {
@@ -163,6 +248,14 @@ export function DiffViewer({
     worktreePath,
     baseBranch,
     filePath,
+    ignoreWhitespace,
+  );
+  const baseContent = useFileContent(
+    repoId,
+    worktreePath,
+    baseBranch,
+    filePath,
+    'base',
   );
 
   const parsedFile = useMemo(() => {
@@ -170,6 +263,32 @@ export function DiffViewer({
     const files = parseDiff(data.patch);
     return files[0] ?? null;
   }, [data?.patch]);
+
+  const expansionKey = `${filePath ?? ''}\0${data?.patch ?? ''}`;
+  const [expansion, setExpansion] = useState<{
+    key: string;
+    ranges: Array<[number, number]>;
+  }>({ key: '', ranges: [] });
+  const ranges = expansion.key === expansionKey ? expansion.ranges : [];
+  const expandRange = useCallback(
+    (start: number, end: number) => {
+      setExpansion((current) => {
+        const currentRanges = current.key === expansionKey ? current.ranges : [];
+        return { key: expansionKey, ranges: [...currentRanges, [start, end]] };
+      });
+    },
+    [expansionKey],
+  );
+
+  const oldSource = baseContent.data?.content;
+  const renderingHunks = useMemo(() => {
+    const hunks = parsedFile?.hunks ?? [];
+    if (!oldSource || ranges.length === 0) return hunks;
+    return ranges.reduce(
+      (current, [start, end]) => expandFromRawCode(current, oldSource, start, end),
+      hunks,
+    );
+  }, [oldSource, parsedFile, ranges]);
 
   const fileComments = useMemo(
     () => inlineComments.filter((c) => c.path === filePath),
@@ -240,16 +359,16 @@ export function DiffViewer({
   // Built once per file, so compose and edit state changes don't walk every line.
   const changesByKey = useMemo(() => {
     const map = new Map<string, ChangeData>();
-    for (const hunk of parsedFile?.hunks ?? []) {
+    for (const hunk of renderingHunks) {
       for (const change of hunk.changes) {
         map.set(getChangeKey(change), change);
       }
     }
     return map;
-  }, [parsedFile]);
+  }, [renderingHunks]);
 
   const widgets = useMemo(() => {
-    if (!parsedFile || !filePath) return {};
+    if (renderingHunks.length === 0 || !filePath) return {};
 
     const result: Record<string, ReactNode> = {};
     // Only lines with a comment or an open composer get a widget.
@@ -323,8 +442,8 @@ export function DiffViewer({
     composingSide,
     editingChangeKey,
     filePath,
-    parsedFile,
     removeComment,
+    renderingHunks,
     upsertComment,
   ]);
 
@@ -335,10 +454,12 @@ export function DiffViewer({
     [handleLineClick],
   );
 
+  const visibleHunks = renderingHunks.slice(0, shownHunks);
   const tokens = useMemo(() => {
-    if (!parsedFile) return null;
-    return diffTokens(parsedFile.hunks.slice(0, shownHunks), filePath);
-  }, [filePath, parsedFile, shownHunks]);
+    const visible = renderingHunks.slice(0, shownHunks);
+    if (visible.length === 0) return null;
+    return diffTokens(visible, filePath);
+  }, [filePath, renderingHunks, shownHunks]);
 
   if (!filePath) {
     return (
@@ -386,7 +507,7 @@ export function DiffViewer({
         <Diff
           viewType={viewType}
           diffType={parsedFile.type}
-          hunks={parsedFile.hunks}
+          hunks={visibleHunks}
           tokens={tokens}
           widgets={widgets}
           gutterType="default"
@@ -396,19 +517,22 @@ export function DiffViewer({
           className="!text-sm"
         >
           {(hunks) =>
-            hunks
-              .slice(0, shownHunks)
-              .map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)
+            hunkRows(
+              hunks,
+              oldSource,
+              hunks.length === renderingHunks.length,
+              expandRange,
+            )
           }
         </Diff>
       </div>
-      {parsedFile.hunks.length > shownHunks && (
+      {renderingHunks.length > shownHunks && (
         <button
           type="button"
           onClick={() => setShownHunks((count) => count + HUNK_WINDOW)}
           className="mt-3 font-body text-xs text-text-secondary underline"
         >
-          Show more changes ({parsedFile.hunks.length - shownHunks} hunks)
+          Show more changes ({renderingHunks.length - shownHunks} hunks)
         </button>
       )}
       <p className="mt-3 font-body text-xs text-text-muted">

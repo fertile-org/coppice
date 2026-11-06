@@ -15,6 +15,23 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
+fn git_ok(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@localhost")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@localhost")
+        .output()
+        .expect("git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 async fn setup_repo_ticket_and_worktree(
 ) -> (
     tempfile::TempDir,
@@ -27,7 +44,24 @@ async fn setup_repo_ticket_and_worktree(
     String,
     String,
 ) {
+    setup_review_repo(|_| {}).await
+}
+
+async fn setup_review_repo(
+    prepare_main: impl FnOnce(&std::path::Path),
+) -> (
+    tempfile::TempDir,
+    common::AgentTestEnv,
+    axum::Router,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+) {
     let (git_dir, local_path) = common::create_temp_git_checkout();
+    prepare_main(&local_path);
     let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     assert_eq!(
@@ -725,4 +759,253 @@ async fn reject_invalid_worktree_path() {
         .await
         .unwrap();
     assert_eq!(submit_res.status(), StatusCode::BAD_REQUEST);
+}
+
+fn changed_diff_lines(patch: &str) -> Vec<&str> {
+    patch
+        .lines()
+        .filter(|line| {
+            (line.starts_with('+') && !line.starts_with("+++"))
+                || (line.starts_with('-') && !line.starts_with("---"))
+        })
+        .collect()
+}
+
+async fn get_json(
+    app: &axum::Router,
+    path: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request("GET", path, "", cookie, csrf))
+        .await
+        .unwrap();
+    let status = res.status();
+    if status == StatusCode::PAYLOAD_TOO_LARGE || status == StatusCode::BAD_REQUEST {
+        return (status, serde_json::Value::Null);
+    }
+    let body = common::json_body(res).await;
+    (status, body)
+}
+
+#[tokio::test]
+async fn file_content_rejects_traversal_and_paths_outside_the_worktree() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (git_dir, _env, app, cookie, csrf, repo_id, _ticket_id, worktree_path, _board_id) =
+        setup_repo_ticket_and_worktree().await;
+    let encoded_path = percent_encode(&worktree_path);
+    let worktree = std::path::Path::new(&worktree_path);
+
+    let (status, body) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path=feature.txt&side=head"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], "new feature\n");
+    assert_eq!(body["side"], "head");
+
+    let (status, body) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path=README.md&side=base"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["content"], "# test\n");
+
+    let (status, _) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path={}",
+            percent_encode("../README.md")
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let outside = tempfile::NamedTempFile::new().expect("outside file");
+    std::fs::write(outside.path(), b"secret\n").expect("write outside");
+    std::os::unix::fs::symlink(outside.path(), worktree.join("leak.txt")).expect("symlink");
+    let (status, _) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path=leak.txt"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let outside_worktree = percent_encode(&git_dir.path().display().to_string());
+    let (status, _) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={outside_worktree}&baseBranch=main&path=README.md"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let big = vec![b'a'; coppice_server::services::code_review_service::MAX_PATCH_BYTES + 1];
+    std::fs::write(worktree.join("big.txt"), &big).expect("write big");
+    git_ok(worktree, &["add", "big.txt"]);
+    git_ok(worktree, &["commit", "-m", "big file"]);
+    let (status, _) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path=big.txt&side=head"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn hide_whitespace_drops_indentation_only_lines() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, _env, app, cookie, csrf, repo_id, _ticket_id, worktree_path, _board_id) =
+        setup_review_repo(|repo| {
+            std::fs::write(repo.join("indent.txt"), "fn foo() {\n    return 1;\n}\n").unwrap();
+            git_ok(repo, &["add", "indent.txt"]);
+            git_ok(repo, &["commit", "-m", "indent base"]);
+        })
+        .await;
+    let worktree = std::path::Path::new(&worktree_path);
+    std::fs::write(worktree.join("indent.txt"), "fn foo() {\n        return 1;\n}\n").unwrap();
+    git_ok(worktree, &["add", "indent.txt"]);
+    git_ok(worktree, &["commit", "-m", "reindent"]);
+
+    let encoded_path = percent_encode(&worktree_path);
+    let (status, shown) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file?worktreePath={encoded_path}&baseBranch=main&path=indent.txt"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!changed_diff_lines(shown["patch"].as_str().unwrap()).is_empty());
+
+    let (status, hidden) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file?worktreePath={encoded_path}&baseBranch=main&path=indent.txt&ignoreWhitespace=true"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(changed_diff_lines(hidden["patch"].as_str().unwrap()).is_empty());
+
+    let (status, summary) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main&ignoreWhitespace=true"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let files = summary["files"].as_array().unwrap();
+    assert!(files.iter().all(|file| file["path"] != "indent.txt"));
+    assert!(files.iter().any(|file| file["path"] == "feature.txt"));
+}
+
+#[tokio::test]
+async fn renamed_file_patch_shows_only_real_edits() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, _env, app, cookie, csrf, repo_id, _ticket_id, worktree_path, _board_id) =
+        setup_review_repo(|repo| {
+            std::fs::write(repo.join("old_name.txt"), "keep\nchange me\nkeep\n").unwrap();
+            git_ok(repo, &["add", "old_name.txt"]);
+            git_ok(repo, &["commit", "-m", "old name"]);
+        })
+        .await;
+    let worktree = std::path::Path::new(&worktree_path);
+    git_ok(worktree, &["mv", "old_name.txt", "new_name.txt"]);
+    std::fs::write(worktree.join("new_name.txt"), "keep\nchanged\nkeep\n").unwrap();
+    git_ok(worktree, &["add", "new_name.txt"]);
+    git_ok(worktree, &["commit", "-m", "rename"]);
+
+    let encoded_path = percent_encode(&worktree_path);
+    let (status, summary) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let renamed = summary["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["path"] == "new_name.txt")
+        .expect("renamed file");
+    assert_eq!(renamed["status"], "renamed");
+    assert_eq!(renamed["additions"], 1);
+    assert_eq!(renamed["deletions"], 1);
+
+    let (status, patch) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file?worktreePath={encoded_path}&baseBranch=main&path=new_name.txt"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = patch["patch"].as_str().unwrap();
+    assert!(!text.contains("/dev/null"), "{text}");
+    assert!(text.contains("-change me"), "{text}");
+    assert!(text.contains("+changed"), "{text}");
+    assert!(!text.lines().any(|line| line == "+keep"), "{text}");
+
+    let (status, base) = get_json(
+        &app,
+        &format!(
+            "/api/repos/{repo_id}/diff/file-content?worktreePath={encoded_path}&baseBranch=main&path=new_name.txt&side=base"
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(base["content"], "keep\nchange me\nkeep\n");
 }
