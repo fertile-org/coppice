@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BrandLogo } from '../../components/BrandLogo';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
 import { useRepos } from '../repos/useRepos';
@@ -226,59 +225,75 @@ export function CodeReviewPage() {
 
   return (
     <div className="coppice-grain flex h-screen flex-col bg-background">
-      <header className="shrink-0 border-b border-border bg-surface px-6 py-3">
-        <div className="flex flex-wrap items-center gap-4">
-          <CodeReviewBackButton fallbackHref={backFallbackHref} />
-          <Link to="/settings/repositories" className="flex items-center gap-2">
-            <BrandLogo size={28} className="h-7 w-7 shrink-0" />
-            <span className="font-display text-lg font-semibold text-text-primary">
-              Code review
-            </span>
-          </Link>
-
-          <div className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <div className="font-body text-sm text-text-secondary">
-              <span className="text-text-muted">Repo</span>{' '}
-              <span className="font-medium text-text-primary">
-                {repo?.name ?? '…'}
-              </span>
+      <header className="shrink-0 border-b border-border bg-surface px-5 pt-3">
+        <div className="flex flex-nowrap items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <CodeReviewBackButton fallbackHref={backFallbackHref} />
+              <span className="font-body text-xs text-text-muted">Code review</span>
             </div>
-
-            <Combobox
-              aria-label="Worktree"
-              value={selectedWorktreePath ?? ''}
-              onValueChange={(value) => syncParams({ worktree: value })}
-              disabled={!worktrees?.length}
-              placeholder="Select worktree…"
-              searchPlaceholder="Search worktrees…"
-              className="w-[min(100vw-3rem,20rem)]"
-              options={(worktrees ?? []).map((worktree) => ({
-                value: worktree.path,
-                label: worktreeLabel(
-                  worktree.path,
-                  worktree.branch,
-                  worktree.ticketTitle,
-                ),
-              }))}
+            <CodeReviewHeading
+              ticketId={ticketId}
+              title={ticket?.title}
+              href={ticketBoardHref}
             />
+            {diffSummary && (
+              <MergeLine
+                repoName={repo?.name ?? '…'}
+                headBranch={headBranch}
+                headSha={headSha}
+                baseBranch={diffSummary.baseBranch}
+                baseSha={diffSummary.baseSha}
+              />
+            )}
+          </div>
+          <Button
+            type="button"
+            className="mt-5 shrink-0"
+            disabled={!selectedWorktreePath || !headSha}
+            onClick={() => setSubmitOpen(true)}
+          >
+            Submit review
+          </Button>
+        </div>
 
-            <Combobox
-              aria-label="Base branch"
-              value={baseBranch}
-              onValueChange={(value) => syncParams({ baseBranch: value })}
-              disabled={!branchesData?.branches.length}
-              placeholder="Base branch"
-              searchPlaceholder="Search branches…"
-              className="w-40"
-              contentClassName="min-w-[14rem]"
-              options={(branchesData?.branches ?? [defaultBranch]).map((branch) => ({
-                value: branch,
-                label: branch,
-              }))}
-            />
+        <div className="mt-2.5 flex h-12 flex-nowrap items-center gap-3 border-t border-border">
+          <span className="shrink-0 font-body text-xs text-text-muted">Worktree</span>
+          <Combobox
+            aria-label="Worktree"
+            value={selectedWorktreePath ?? ''}
+            onValueChange={(value) => syncParams({ worktree: value })}
+            disabled={!worktrees?.length}
+            placeholder="Select worktree…"
+            searchPlaceholder="Search worktrees…"
+            className="w-72 min-w-0 shrink"
+            options={(worktrees ?? []).map((worktree) => ({
+              value: worktree.path,
+              label: worktreeLabel(
+                worktree.path,
+                worktree.branch,
+                worktree.ticketTitle,
+              ),
+            }))}
+          />
 
+          <span className="shrink-0 font-body text-xs text-text-muted">Base</span>
+          <Combobox
+            aria-label="Base branch"
+            value={baseBranch}
+            onValueChange={(value) => syncParams({ baseBranch: value })}
+            disabled={!branchesData?.branches.length}
+            placeholder="Base branch"
+            searchPlaceholder="Search branches…"
+            className="w-40 shrink-0"
+            contentClassName="min-w-[14rem]"
+            options={(branchesData?.branches ?? [defaultBranch]).map((branch) => ({
+              value: branch,
+              label: branch,
+            }))}
+          />
+
+          <div className="ml-auto flex shrink-0 items-center gap-3">
             <div className="flex rounded-md border border-border bg-surface-raised p-0.5">
               <button
                 type="button"
@@ -306,7 +321,7 @@ export function CodeReviewPage() {
               </button>
             </div>
 
-            <label className="flex items-center gap-1.5 font-body text-xs text-text-secondary">
+            <label className="flex items-center gap-1.5 whitespace-nowrap font-body text-xs text-text-secondary">
               <input
                 type="checkbox"
                 className="accent-accent"
@@ -316,43 +331,7 @@ export function CodeReviewPage() {
               Hide whitespace
             </label>
           </div>
-
-          <div className="ml-auto flex items-center gap-3">
-            {ticketId ? (
-              ticketBoardHref ? (
-                <Link
-                  to={ticketBoardHref}
-                  className="max-w-xs truncate font-body text-sm text-accent hover:underline"
-                >
-                  Ticket: {ticket?.title ?? ticketId}
-                </Link>
-              ) : (
-                <span className="font-body text-sm text-text-secondary">
-                  Loading ticket…
-                </span>
-              )
-            ) : (
-              <span className="font-body text-sm text-text-muted">
-                No ticket — will create on submit
-              </span>
-            )}
-
-            <Button
-              type="button"
-              disabled={!selectedWorktreePath || !headSha}
-              onClick={() => setSubmitOpen(true)}
-            >
-              Submit review
-            </Button>
-          </div>
         </div>
-
-        {diffSummary && (
-          <p className="mt-2 font-body text-xs text-text-muted">
-            Compare {diffSummary.baseBranch} ({diffSummary.baseSha.slice(0, 7)})
-            → {headBranch} ({headSha.slice(0, 7)})
-          </p>
-        )}
       </header>
 
       {!worktreesLoading && worktrees?.length === 0 ? (
@@ -462,24 +441,99 @@ function PageShell({
 }) {
   return (
     <div className="coppice-grain flex h-screen flex-col bg-background">
-      <header className="border-b border-border bg-surface px-6 py-3">
-        <div className="flex items-center gap-3">
-          <CodeReviewBackButton fallbackHref={fallbackHref} />
-          <Link to="/settings/repositories" className="flex items-center gap-2">
-            <BrandLogo size={28} className="h-7 w-7" />
-            <span className="font-display text-lg font-semibold text-text-primary">
-              Code review
-            </span>
-          </Link>
-          {repoName && (
-            <span className="font-body text-sm text-text-secondary">
-              {repoName}
-            </span>
-          )}
+      <header className="border-b border-border bg-surface px-5 pt-3 pb-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <CodeReviewBackButton fallbackHref={fallbackHref} />
+            {repoName && (
+              <span className="font-body text-xs text-text-muted">Code review</span>
+            )}
+          </div>
+          <h1
+            className="mt-1 truncate font-display text-xl font-semibold text-text-primary"
+            title={repoName}
+          >
+            {repoName ?? 'Code review'}
+          </h1>
         </div>
       </header>
       <div className="flex flex-1 items-center justify-center p-8">{children}</div>
     </div>
+  );
+}
+
+function CodeReviewHeading({
+  ticketId,
+  title,
+  href,
+}: {
+  ticketId?: string;
+  title?: string;
+  href?: string;
+}) {
+  if (href && title) {
+    return (
+      <h1 className="mt-1 min-w-0">
+        <Link
+          to={href}
+          title={title}
+          className="block truncate font-display text-xl font-semibold text-text-primary hover:underline"
+        >
+          {title}
+        </Link>
+      </h1>
+    );
+  }
+
+  return (
+    <h1 className="mt-1 truncate font-display text-xl font-semibold text-text-muted">
+      {ticketId ? 'Loading ticket…' : 'New review — ticket created on submit'}
+    </h1>
+  );
+}
+
+function BranchChip({ name }: { name: string }) {
+  return (
+    <code
+      title={name}
+      className="inline-block max-w-[12rem] min-w-0 shrink truncate rounded bg-accent-muted px-1.5 py-px font-mono text-xs text-accent"
+    >
+      {name}
+    </code>
+  );
+}
+
+function MergeLine({
+  repoName,
+  headBranch,
+  headSha,
+  baseBranch,
+  baseSha,
+}: {
+  repoName: string;
+  headBranch: string;
+  headSha: string;
+  baseBranch: string;
+  baseSha: string;
+}) {
+  return (
+    <p className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden font-body text-sm text-text-secondary">
+      <span className="max-w-[12rem] min-w-0 shrink truncate" title={repoName}>
+        {repoName}
+      </span>
+      <span className="shrink-0 text-text-muted" aria-hidden="true">
+        ·
+      </span>
+      <BranchChip name={headBranch} />
+      <span className="shrink-0 font-mono text-xs text-text-muted">
+        {headSha.slice(0, 7)}
+      </span>
+      <span className="shrink-0">into</span>
+      <BranchChip name={baseBranch} />
+      <span className="shrink-0 font-mono text-xs text-text-muted">
+        {baseSha.slice(0, 7)}
+      </span>
+    </p>
   );
 }
 
@@ -496,9 +550,9 @@ function EmptyState({
 }) {
   return (
     <div className="max-w-md text-center">
-      <h1 className="font-display text-xl font-semibold text-bark-900">
+      <h2 className="font-display text-xl font-semibold text-text-primary">
         {title}
-      </h1>
+      </h2>
       <p className="mt-2 font-body text-sm text-text-secondary">{description}</p>
       <Link
         to={actionHref}
