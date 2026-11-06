@@ -263,6 +263,8 @@ impl<'a> SplitAutopilot<'a> {
         Ok(families.pop())
     }
 
+    /// Every family that contains a requested id. A match on one child still
+    /// returns its siblings; dropping them would renumber that child as 1 of 1.
     async fn load_families(&self, ticket_ids: &[Uuid]) -> Result<Vec<Family>, PlanError> {
         let rows = sqlx::query(
             r#"
@@ -288,7 +290,12 @@ impl<'a> SplitAutopilot<'a> {
             JOIN tickets child ON child.parent_ticket_id = parent.id
             LEFT JOIN ticket_human_reviews review ON review.ticket_id = child.id
             WHERE split.parent_ticket_id = ANY($1)
-               OR child.id = ANY($1)
+               OR split.parent_ticket_id IN (
+                    SELECT requested.parent_ticket_id
+                    FROM tickets requested
+                    WHERE requested.id = ANY($1)
+                      AND requested.parent_ticket_id IS NOT NULL
+               )
             ORDER BY
                 parent.id,
                 array_position(split.child_order, child.id) NULLS LAST,

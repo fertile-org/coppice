@@ -2,6 +2,8 @@
 export const PLAN_COPY = {
   column: 'Plan Review',
   approvePlan: 'Approve plan',
+  approvePlanAndStart: (count: number) =>
+    `Approve plan · start sub-ticket 1 of ${count}`,
   approving: 'Approving…',
   approveWhileRewriting: 'The plan is being rewritten. Approve once it is ready.',
   approveNeedsEmptyNote: 'Send or clear your note to approve.',
@@ -28,6 +30,28 @@ export const PLAN_COPY = {
   answerPlaceholder: 'Your answer',
   questionsTitle: 'Questions before the plan',
   splitWithPlan: 'Approve plan creates these sub-tickets. Ask for changes to drop them.',
+  proposedSubTickets: 'Sub-tickets · run in this order',
+  proposedSubTicketNote:
+    'Each sub-ticket gets its own approved plan, its own branch, and its own review. The next starts after you merge the previous one.',
+  noCriteria: 'No acceptance criteria.',
+  subTickets: 'Sub-tickets',
+  mergedCount: (merged: number, count: number) => `${merged} of ${count} merged`,
+  yourTurnReview: (position: number) => `Your turn: review sub-ticket ${position}`,
+  reviewCode: 'Review code',
+  splitPause: 'Pause',
+  splitResume: 'Resume',
+  splitStartNext: 'Start next',
+  splitMergedElsewhere: 'Merged elsewhere → start next',
+  splitMergedElsewhereTitle: 'Mark this sub-ticket merged elsewhere?',
+  splitMergedElsewhereBody: (branch: string, pr: string) =>
+    `Branch ${branch}. Pull request ${pr}. This records the merge and starts the next sub-ticket.`,
+  splitUnknownBranch: 'unknown branch',
+  splitNoPullRequest: 'no pull request',
+  splitRecordMerge: 'Record merge',
+  splitParentDoesNotRun:
+    "This ticket doesn't run agents. Work happens on the sub-tickets.",
+  splitChildLink: (position: number, count: number, title: string) =>
+    `↳ ${position}/${count} · ${title}`,
   verifyParent: 'Verify parent ticket',
   verifying: 'Starting…',
   verifyAgent: 'Agent',

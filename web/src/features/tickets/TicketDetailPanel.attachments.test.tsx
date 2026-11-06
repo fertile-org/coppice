@@ -23,6 +23,9 @@ vi.mock('./useTicket', () => ({
   fetchOlderComments: vi.fn(),
   useComments: () => ({ data: [], isLoading: false, isError: false }),
   useCreateComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTicketGitInfo: () => ({ data: undefined, isLoading: false }),
+  ticketQueryKey: (ticketId: string) => ['ticket', ticketId],
+  commentsQueryKey: (ticketId: string) => ['comments', ticketId],
 }));
 
 const ticket: Ticket = {

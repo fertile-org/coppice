@@ -324,15 +324,17 @@ function TicketDrawerPanel({
         <div className="flex shrink-0 items-center gap-2">
           {ticket && (
             <>
-              <Button
-                type="button"
-                onClick={() => void handleRunAgent()}
-                disabled={!canRunAgent || hasActiveRun || headerBusy}
-                title={runAgentDisabledReason ?? undefined}
-                className="px-3 py-1.5"
-              >
-                {runAgent.isPending ? 'Starting…' : 'Run Agent'}
-              </Button>
+              {!ticket.splitParent && (
+                <Button
+                  type="button"
+                  onClick={() => void handleRunAgent()}
+                  disabled={!canRunAgent || hasActiveRun || headerBusy}
+                  title={runAgentDisabledReason ?? undefined}
+                  className="px-3 py-1.5"
+                >
+                  {runAgent.isPending ? 'Starting…' : 'Run Agent'}
+                </Button>
+              )}
 
               {activeRun && (
                 <Button
