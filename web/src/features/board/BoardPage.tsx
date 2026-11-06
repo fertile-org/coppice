@@ -189,8 +189,8 @@ export function BoardPage() {
     [tickets, filters],
   );
   const { lanes, rest: ungroupedTickets } = useMemo(
-    () => splitLanes(filteredTickets),
-    [filteredTickets],
+    () => splitLanes(filteredTickets, tickets ?? []),
+    [filteredTickets, tickets],
   );
 
   const ticketsById = useMemo(

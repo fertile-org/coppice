@@ -9,20 +9,25 @@ export interface SplitLane {
 }
 
 /**
- * Plan-review splits (`splitProgress`) share a lane.
+ * Plan-review splits (`splitProgress`) share a lane while the parent is not Done.
+ * A finished parent, looked up on the full board list, sends the family back to the columns.
  * Other parent links stay in the columns.
  */
-export function splitLanes(tickets: readonly Ticket[]): {
+export function splitLanes(
+  tickets: readonly Ticket[],
+  boardTickets: readonly Ticket[] = tickets,
+): {
   lanes: SplitLane[];
   rest: Ticket[];
 } {
+  const parentStatus = new Map(boardTickets.map((ticket) => [ticket.id, ticket.status]));
   const lanes: SplitLane[] = [];
   const byParent = new Map<string, SplitLane>();
   const rest: Ticket[] = [];
 
   for (const ticket of tickets) {
     const progress = ticket.splitProgress;
-    if (!progress) {
+    if (!progress || parentStatus.get(progress.parentTicketId) === 'done') {
       rest.push(ticket);
       continue;
     }

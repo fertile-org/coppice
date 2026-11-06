@@ -103,6 +103,53 @@ describe('splitLanes', () => {
     expect(ids('done')).toEqual(['child-done']);
     expect(ids('backlog', new Set(['parent']))).toEqual(['plain']);
   });
+
+  it('returns a finished split to the columns', () => {
+    const finishedParent = makeTicket({
+      id: 'parent',
+      title: 'Ship the gate',
+      status: 'done',
+      splitProgress: progress({ mergedCount: 3 }),
+    });
+    const merged = [1, 2, 3].map((position) =>
+      makeTicket({
+        id: `merged-${position}`,
+        title: `Merged ${position}`,
+        status: 'done',
+        parentTicketId: 'parent',
+        splitProgress: progress({ position, mergedCount: 3 }),
+      }),
+    );
+
+    const finished = splitLanes([finishedParent, ...merged]);
+
+    expect(finished.lanes).toEqual([]);
+    expect(finished.rest.map((ticket) => ticket.id)).toEqual([
+      'parent',
+      'merged-1',
+      'merged-2',
+      'merged-3',
+    ]);
+
+    const parentHidden = splitLanes(merged, [finishedParent, ...merged]);
+    expect(parentHidden.lanes).toEqual([]);
+    expect(parentHidden.rest.map((ticket) => ticket.id)).toEqual([
+      'merged-1',
+      'merged-2',
+      'merged-3',
+    ]);
+  });
+
+  it('keeps the lane when a filter hides the parent but the parent is still active', () => {
+    const visible = splitLanes([ready, backlog], [parent, ready, backlog]);
+
+    expect(visible.lanes).toHaveLength(1);
+    expect(visible.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
+      'child-ready',
+      'child-backlog',
+    ]);
+    expect(visible.rest).toEqual([]);
+  });
 });
 
 describe('split copy and lane drop ids', () => {
