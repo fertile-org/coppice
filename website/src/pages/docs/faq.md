@@ -17,16 +17,16 @@ No. Download the desktop app, open it, and work. No Docker, no server setup, no 
 No. Coppice is a board for driving coding agents, not a full company issue tracker.
 
 ## Is this a cloud coding agent?
-No. Agents run via CLIs on your machine, on your repos. Category contrast: cloud agent services hand off work to someone else’s computer; Coppice keeps the work local and gated by you.
+No. Agents run via CLIs on your machine, on your repos. A cloud agent service hands the work to someone else's computer. Coppice keeps the work on your machine. You start the work, and you accept every change.
 
 ## Will agents merge without me?
-No. Human Review is a first-class gate. You open the diff and decide.
+No. Human Review is the gate. You open the diff and decide.
 
 ## What happens if a ticket's changes conflict with main?
-Coppice stops before merging and leaves main untouched. It lists the files that conflict, and the ticket stays in Done until you choose **Ask [agent] to resolve**, which sends it back to In Progress. Then you accept it again in Human Review before it merges.
+Coppice stops before merging and leaves main untouched. It lists the files that conflict. The ticket stays in Done until you choose **Ask [agent] to resolve**, which sends it back to In Progress. You then accept it again in Human Review before it merges.
 
 ## What about “set and forget” autopilots?
-That is not Coppice’s product. Coppice is built for managing agents: you start the work, and you accept every change.
+That is not Coppice's product. Coppice is for managing agents: you start the work, and you accept every change.
 
 ## Windows?
 Windows 11 should be able to run the Linux x64 build through WSL, but we haven't tested it yet. See [Windows 11 (through WSL)](/docs/install#windows-11-through-wsl). If you try it, please [tell us how it went on GitHub](https://github.com/fertile-org/coppice/issues). A native Windows app isn't planned for this beta.

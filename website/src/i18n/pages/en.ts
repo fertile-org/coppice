@@ -5,7 +5,7 @@ export const pages = {
   home: {
     title: 'Coppice: AI Coding Agent Board, Local and Open Source',
     description:
-      'Coppice is an AI coding agent board on your own machine. Claude Code, Codex, Cursor and more plan, build and review in parallel, and you accept every diff.',
+      'Coppice is an AI coding agent board on your own machine. Claude Code, Codex, Cursor, and others plan, build, and review in parallel. You accept every diff.',
     worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
     lede: 'Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
@@ -23,7 +23,7 @@ export const pages = {
         'Nothing is done until you accept it.',
       ],
     },
-    support: 'Open source (Apache 2.0). Runs locally, no Coppice account needed.',
+    support: "Open source (Apache 2.0). It runs on your machine, and you don't need a Coppice account.",
     downloads: {
       mac: 'Download for macOS (Apple Silicon)',
       linux: 'Download for Linux (.deb)',
@@ -33,7 +33,7 @@ export const pages = {
     steps: [
       {
         title: 'Hand off the work.',
-        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan and shows you design options for UI changes. You approve before anyone writes code.',
+        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve before anyone writes code.',
       },
       {
         title: 'Let agents build.',
@@ -41,19 +41,19 @@ export const pages = {
       },
       {
         title: 'Human Review.',
-        body: 'Read the diff in the app, comment on any line, and nothing counts as done until you accept it.',
+        body: 'Read the diff in the app and comment on any line. Nothing counts as done until you accept it.',
       },
     ],
-    howClose: 'Download, open, work. Nothing to set up: no Docker, no Coppice account.',
+    howClose: "Download the app and open it. There's nothing to set up: no Docker and no Coppice account.",
     whyTitle: 'Why Coppice',
     reasons: [
       {
         title: 'The right model for each role.',
-        body: 'Every agent picks its own CLI and model. Plan and review with your strongest model, and code with a faster one, all on one board.',
+        body: 'Each agent uses its own CLI and model. You can plan and review with your strongest model, and code with a faster one, on the same board.',
       },
       {
         title: 'Stop tab-hopping between terminals.',
-        body: "Every agent's work is a card on one board. Blocked tickets and work waiting for your review stand out, so you know where you're needed.",
+        body: "Each agent's work is a card on one board. Blocked tickets, and work waiting for your review, stand out, so you can see where you're needed.",
       },
       {
         title: 'Catch mistakes before they land.',
@@ -61,7 +61,7 @@ export const pages = {
       },
       {
         title: 'No second subscription.',
-        body: 'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok.',
+        body: 'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code, and Grok.',
       },
     ],
     notTitle: 'What it is not',
@@ -75,8 +75,8 @@ export const pages = {
     title: 'Download Coppice',
     metaTitle: 'Download Coppice for macOS and Linux',
     description:
-      'Download Coppice, the free and open source AI coding agent board, for macOS (Apple Silicon or Intel) and Linux. Runs locally with no Coppice account.',
-    intro: 'Free, runs on your own machine, with no Coppice account.',
+      'Download Coppice, the free, open source AI coding agent board, for macOS (Apple Silicon or Intel) and Linux. It runs on your machine without a Coppice account.',
+    intro: "Coppice is free. It runs on your machine, and you don't need a Coppice account.",
     groups: [
       {
         note: 'Not sure which Mac you have? Open Apple menu → About This Mac. If it lists a Chip, choose Apple Silicon. If it lists a Processor, choose Intel.',

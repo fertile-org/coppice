@@ -36,7 +36,7 @@ expectOrder(
   download,
   [
     'Download Coppice',
-    'Free, runs on your own machine, with no Coppice account.',
+    'Coppice is free. It runs on your machine, and you don&#39;t need a Coppice account.',
     'data-os="mac"',
     'macOS (Apple Silicon)',
     'https://github.com/fertile-org/coppice/releases/latest/download/Coppice-mac-arm64.dmg',

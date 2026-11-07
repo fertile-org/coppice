@@ -7,7 +7,7 @@ description: "Coppice runs the agent CLIs you already use: Claude Code, Codex, C
 
 # Providers
 
-Tired of keeping a terminal open for every agent? Coppice runs the coding agent CLIs you already use and puts their work on one board. You keep your own subscriptions and sign-ins. No Coppice account.
+Coppice runs the coding agent CLIs you already use and puts their work on one board. You keep your own subscriptions and sign-ins. You don't need a Coppice account.
 
 ## Supported connectors
 
@@ -23,14 +23,14 @@ Tired of keeping a terminal open for every agent? Coppice runs the coding agent 
 | Kimi Code | `kimi` | [Install guide](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
 | Grok | `grok` | [Install guide](https://x.ai/cli) | 1.0.62 |
 
-Compatibility info will be updated over time as we test more CLI versions.
+We will update this list as we test more CLI versions.
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="The model picker on an agent, listing the models from the agent's CLI.">
 <figcaption>Pick a model, or leave it on the default.</figcaption>
 </figure>
 
-Pick a model for this agent, or leave it on the default. Installed a new model? Click Refresh models.
+Pick a model for this agent, or leave it on the default. If you installed a new model, click **Refresh models**.
 
 ## Connect your agent CLI
 
@@ -46,15 +46,17 @@ The agent form lists every connector with its status:
 | **Not on your PATH** | Coppice can't find the command. Install it, or check your PATH. |
 | **Installed** | Coppice found the command. For Kilo Code, GitHub Copilot, Qwen Code and Kimi Code it cannot check sign-in without using your plan. |
 
-Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed**. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." To see that one works, use **Test connection**: it runs a short chat, plan and ticket turn. Every CLI can chat. Claude Code and Kilo Code chats show "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." OpenCode, Codex, Cursor, GitHub Copilot, Qwen Code, Kimi Code and Grok chats have no banner: Coppice blocks their file writes and shell commands in chat and planning. A tool from your own MCP setup in that CLI can still change things.
+Kilo Code, GitHub Copilot, Qwen Code, and Kimi Code show **Installed**. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." To check one of these CLIs, use **Test connection**. It runs a short chat, plan, and ticket turn.
 
-You can save an agent before its CLI is ready. It starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
+Every CLI can chat. Claude Code and Kilo Code chats show "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." OpenCode, Codex, Cursor, GitHub Copilot, Qwen Code, Kimi Code, and Grok chats have no banner. Coppice blocks their file writes and shell commands in chat and planning. A tool from your own MCP setup in that CLI can still change things.
 
-A connector whose command Coppice finds is on, unless you aren't signed in. To turn one on or off, use its switch in **System → Connectors**.
+You can save an agent before its CLI is ready. The agent starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
+
+If Coppice finds the command, the connector is on, unless you aren't signed in. To turn one on or off, use its switch in **System → Connectors**.
 
 ## Use your own API key or another provider
 
-Want to use your own API key, or a model your CLI doesn't offer? Use OpenCode. It works with 75+ model providers and with local models. See [OpenCode's provider list](https://opencode.ai/docs/providers/).
+To use your own API key, or a model your CLI doesn't offer, use OpenCode. It works with 75+ model providers and with local models. See [OpenCode's provider list](https://opencode.ai/docs/providers/).
 
 1. Install OpenCode.
 2. Run `opencode` in your terminal, type `/connect`, pick your provider and paste your key. OpenCode keeps the key, and Coppice never asks for it. Not in the list? Follow OpenCode's [custom provider steps](https://opencode.ai/docs/providers/#custom-provider).

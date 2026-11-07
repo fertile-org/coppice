@@ -7,7 +7,7 @@ description: "Go from a fresh install to your first agent run in five steps: sig
 
 # Getting started
 
-Five steps take you from a fresh install to your first agent run. You need a local git checkout and one agent CLI. No Coppice account.
+Five steps take you from a fresh install to your first agent run. You need a local git checkout and one agent CLI. You don't need a Coppice account.
 
 On a fresh install, Coppice opens a short setup that adds your first repository, board, and starter team: PM, Technical Lead, Backend Engineer, Frontend Engineer, and QC. You can reopen it from **System → Connectors** with **Set up workspace**.
 
@@ -72,9 +72,9 @@ The ticket switches to **Live Console** so you can watch the agent work. Click *
 
 ## What happens next
 1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. The plan shows right under the description, with **Approve plan** and **Ask for changes** below it. Approving adds the plan to the description under **Approved plan**, after your own text.
-2. **Ready.** When you approve, the ticket moves to Ready. Your Technical Lead agent checks the plan against the code, corrects the approved plan only if it needs to, and picks who does the work. That agent starts right away. If nobody fits, the ticket stays unassigned with a comment that says why.
+2. **Ready.** When you approve, the ticket moves to Ready. Your Technical Lead agent checks the plan against the code, corrects the approved plan only if it needs to, and picks who does the work. That agent starts right away. If nobody fits, the ticket stays unassigned, with a comment that says why.
 3. **In Progress.** The assigned agent does the work in its own git worktree.
 4. **Wait for Human Review.** You read the diff. Click **Accept** in Human Review.
-5. **Done.** A Done card may show "Accepted, not merged". Open the ticket and choose **Merge…**, or **Create PR via API** if you'd rather review it as a pull request. If you merge that pull request on GitHub.com, Coppice records it on the next sweep (at startup and every 5 minutes) and the label clears. Repositories that are not github.com, or have no forge token, keep the label until you merge in Coppice.
+5. **Done.** A Done card may show "Accepted, not merged". Open the ticket and choose **Merge…**, or choose **Create PR via API** if you'd rather review it as a pull request. If you merge that pull request on GitHub.com, Coppice records the merge on the next sweep (at startup and every 5 minutes) and the label clears. Repositories that are not github.com, or that have no forge token, keep the label until you merge in Coppice.
 
 To skip the plan, check **Skip planning** on the ticket. It goes from Backlog straight to Ready.

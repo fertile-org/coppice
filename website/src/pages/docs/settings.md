@@ -21,7 +21,7 @@ A folder setting can be relative, like `./worktrees`. It then starts at the fold
 ## Edit it in the app
 Open **Settings** in the sidebar. It lists every setting below, grouped like this page, with a search box.
 
-- A setting your file doesn't have shows its default. Change it, and Coppice writes that one line to `config.toml`. It is then **Modified**, even if you picked the default value.
+- If your file doesn't include a setting, the page shows that setting's default. When you change it, Coppice writes that one line to `config.toml`. The setting is then **Modified**, even if you picked the default value.
 - **Reset** removes the line again, so the default applies.
 - Each change is saved right away and checked first. A bad value isn't saved, and the setting says why.
 
@@ -30,7 +30,7 @@ Turn on **Edit as TOML** to see the file as text instead. Your comments are kept
 - **Save** checks the file before writing it. A bad value isn't saved.
 - **Restore last good version** undoes a bad change.
 
-Settings remembers which mode you used last. Some changes apply right away. Others show "Saved. Restart Coppice to apply."
+The Settings page remembers which mode you used last. Some changes apply right away. Others show "Saved. Restart Coppice to apply."
 
 You can also edit the file in any text editor. Your edits survive upgrades.
 
@@ -200,4 +200,4 @@ Each key is a command id from [Keyboard shortcuts](/docs/shortcuts). Your keys r
 "board.nextCard" = ["J", "Down"]
 ```
 
-`Mod` is Cmd on macOS and Ctrl on Linux and WSL. A sequence is written `G then B`. Several keys for one command are separated with ` or `, or written as a list. Save applies the change without a restart. A shortcut Coppice can't read, an unknown command id, a key another command already has, or a key that belongs to the browser or the system is skipped. That command keeps its default, and Settings explains why.
+`Mod` is Cmd on macOS and Ctrl on Linux and WSL. A sequence is written `G then B`. Several keys for one command are separated with ` or `, or written as a list. **Save** applies the change without a restart. Coppice skips a shortcut it can't read, an unknown command id, a key another command already has, or a key that belongs to the browser or the system. That command keeps its default, and Settings explains why.

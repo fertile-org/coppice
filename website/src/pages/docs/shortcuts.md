@@ -9,11 +9,11 @@ description: "Use Coppice from the keyboard: move around the board, open and mov
 
 Press `?` anywhere to see every shortcut, or open **Help → Keyboard shortcuts** in the sidebar. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**. Change shortcuts in Settings.
 
-The command palette (`Mod+K`) searches pages, tickets, and agents. Board and ticket actions stay on the keyboard — they are not palette rows.
+The command palette (`Mod+K`) searches pages, tickets, and agents. Board and ticket actions stay on the keyboard. They are not rows in the command palette.
 
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. Sequences are shown as `G then B`.
 
-Shortcuts don't fire while you're typing in a field, and the terminal keeps its own keys. Press `Esc` to close whatever is open.
+Shortcuts don't run while you're typing in a field. The terminal keeps its own keys. Press `Esc` to close whatever is open.
 
 ## Navigate
 
