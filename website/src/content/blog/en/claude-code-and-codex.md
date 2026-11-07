@@ -32,7 +32,7 @@ Open **System**, then **Connectors**.
 
 The install links and the full connector list are on the [Providers](/docs/providers) page. Adding the checkout and the board is in [Getting started](/docs/getting-started): **Repositories** → **Add repository**, then a board from **Boards**. The repository row should show **Ready** before you run a ticket.
 
-> **TODO capture:** System → Connectors, with Claude Code and Codex both **Ready**. Demo data only. No token, email, home path, or real repository name. Alt: "Connectors list with Claude Code and Codex marked Ready." Caption: "Demo: both CLIs pass the local sign-in check."
+![Connectors page. Claude Code shows Ready with claude 2.1.0-demo, and Codex shows Ready with codex-cli 0.0.0-demo. The other rows say Not on your PATH.](/blog/claude-code-and-codex/connectors.png "Demo data. Those Ready lines are fixture versions, not a signed-in Claude Code or Codex run.")
 
 ## Pick the role, the connector, and the model
 
@@ -50,7 +50,7 @@ If that save turns the connector on, Coppice shows "Claude Code turned on." or "
 
 You need three roles for the handoff below: a **PM**, a **Technical Lead**, and one implementer (**Backend Engineer**, **Frontend Engineer**, or **Research**). Put Claude Code on one of them and Codex on another. The third role uses either connector. One way to split them is a PM on Claude Code, a Backend Engineer on Codex, and a Technical Lead on either CLI.
 
-> **TODO capture:** New agent form with Preset, read-only Role, Connector on Claude Code or Codex, and Model. Demo data. No other product names, tokens, or home paths. Alt: "New agent form with a role, Claude Code or Codex, and a model." Caption: "Demo: one agent, one connector. Pick the model for this role."
+![New agent form. Preset is pm — PM, Role is PM, Connector is Claude Code — Ready, and Model is Claude Code's default.](/blog/claude-code-and-codex/new-agent.png "Demo data. Claude Code — Ready on this form is the same fixture, not a signed-in session.")
 
 ## A ticket has one assignee
 
@@ -76,7 +76,7 @@ If the card says **Waiting for your answers**, the PM asked before writing the p
 
 When a plan is there, it is the **Proposed plan**, with **Approve plan** and **Ask for changes** under it. Approving adds the plan to the description under **Approved plan**, moves the ticket to **Ready**, assigns the earliest enabled Technical Lead, and starts that agent's run. You can also click **Ask for changes** and say what should change.
 
-> **TODO capture:** Ticket drawer for a demo ticket: one Assignee, Repository named Demo, **Skip planning** visible, and **Run Agent**. No marketing caption, email, home path, or real repository name. Alt: "Ticket with one assignee, a demo repository, Skip planning, and Run Agent." Caption: "Demo: one assignee. Run Agent starts the PM when Skip planning is off."
+![Ticket Note a setting in the demo checkout, in Backlog. Assignee is PM, repository is Demo, Skip planning is unchecked, and Run Agent is in the header.](/blog/claude-code-and-codex/ticket-drawer.png "Demo ticket. One assignee, repository Demo, and Run Agent. No run is shown.")
 
 ## What continues on its own
 
@@ -101,7 +101,7 @@ Accepting does not merge. A Done card can show **Accepted, not merged** and a **
 
 If that merge conflicts and Coppice can abort it cleanly, the message names the files and ends with "Nothing was changed." The ticket stays in **Done**. The button is **Ask {agent name} to resolve**, with that agent's name filled in. Choosing it moves the ticket to **In Progress** with that agent. The comment says you accept it again before it merges.
 
-> **TODO capture:** Done card on a demo board, showing **Accepted, not merged** and **Merge…** apart from **Accept**. No marketing caption, email, home path, or real repository name. Alt: "Done card marked Accepted, not merged, with a separate Merge button." Caption: "Demo: Accept and Merge are separate. Not a Claude Code or Codex result."
+![Demo board. The Done card for Note a setting in the demo checkout says Accepted, not merged, and has a Merge button.](/blog/claude-code-and-codex/done-card.png "Demo board. Accepted, not merged is separate from Merge. Not a Claude Code or Codex result.")
 
 ## When a run does not start
 
