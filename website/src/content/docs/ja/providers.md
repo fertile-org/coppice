@@ -6,7 +6,7 @@ description: "Coppice は手元のエージェント CLI を動かします：Cl
 
 # プロバイダー
 
-エージェントごとにターミナルを開いておくのに疲れていませんか？ Coppice は、あなたがすでに使っているコーディングエージェントの CLI を動かし、その作業を 1 つのボードにまとめます。サブスクリプションとサインインはあなたのものをそのまま使います。Coppice アカウントは要りません。
+Coppice は、あなたがすでに使っているコーディングエージェントの CLI を動かし、その作業を 1 つのボードにまとめます。サブスクリプションとサインインは、あなたのものをそのまま使います。Coppice アカウントは要りません。
 
 <a id="supported-connectors"></a>
 
@@ -31,7 +31,7 @@ description: "Coppice は手元のエージェント CLI を動かします：Cl
 <figcaption>モデルを選ぶか、既定のままにします。</figcaption>
 </figure>
 
-このエージェントのモデルを選ぶか、既定のままにします。新しいモデルを入れたら、Refresh models をクリックしてください。
+このエージェントのモデルを選ぶか、既定のままにします。新しいモデルを入れたら、**Refresh models** をクリックしてください。
 
 <a id="connect-your-agent-cli"></a>
 
@@ -49,9 +49,9 @@ description: "Coppice は手元のエージェント CLI を動かします：Cl
 | **Not on your PATH** | コマンドが見つかりません。インストールするか、PATH を確認してください。 |
 | **Installed** | コマンドは見つかりました。Kilo Code、GitHub Copilot、Qwen Code、Kimi Code の場合、プランを使わずにサインインを確認できません。 |
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." 使えるか確かめるには **Test connection** を使います。短いチャット、計画、チケットの実行を一度ずつ試します。どの CLI でもチャットできます。Claude Code、Codex、Kilo Code のチャットには "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode、GitHub Copilot、Qwen Code、Kimi Code、Grok のチャットにはバナーはありません。チャットと計画では、Coppice がファイルの書き込みと shell コマンドを止めます。その CLI に自分で設定した MCP ツールは、まだ変更を加えられます。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示されます。System → Connectors には、次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." 使えるか確かめるには、**Test connection** を使います。**Test connection** は、短いチャット、計画、チケットの実行を一度ずつ試します。どの CLI でもチャットできます。Claude Code、Codex、Kilo Code のチャットには、"Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode、GitHub Copilot、Qwen Code、Kimi Code、Grok のチャットにはバナーはありません。チャットと計画では、Coppice がファイルの書き込みと shell コマンドを止めます。その CLI に自分で設定した MCP ツールは、まだ変更を加えられます。
 
-CLI の準備ができる前でもエージェントは保存できます。CLI をインストールしてサインインすれば、チケットの作業を始めます。Coppice を開いたあとで CLI をインストールした場合は、新しいコマンドを見つけられるよう Coppice を終了して開き直してください。
+CLI の準備ができる前でも、エージェントは保存できます。CLI をインストールしてサインインすれば、そのエージェントがチケットの作業を始めます。Coppice を開いたあとで CLI をインストールした場合は、新しいコマンドを見つけられるよう Coppice を終了して開き直してください。
 
 Coppice がコマンドを見つけたコネクタは、サインインしていない場合を除いてオンです。オンとオフを切り替えるには、**System → Connectors** のスイッチを使います。
 

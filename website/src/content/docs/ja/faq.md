@@ -9,7 +9,7 @@ description: "Coppice は本番で使える？Docker やアカウントは必要
 <a id="is-coppice-production-ready"></a>
 
 ## Coppice は本番で使えますか？
-いいえ、まだです。Coppice は Beta 版で、本物の人間のゲートを備えたローカルのエージェントボードを試したい早期ユーザー向けです。エージェントはあなたのローカル権限で動きます。
+いいえ、まだです。Coppice は Beta 版で、人による確認のゲートを備えたローカルのエージェントボードを試したい早期ユーザー向けです。エージェントは、あなたのローカル権限で動きます。
 
 <a id="do-i-need-docker-or-an-account"></a>
 
@@ -24,7 +24,7 @@ description: "Coppice は本番で使える？Docker やアカウントは必要
 <a id="is-this-a-cloud-coding-agent"></a>
 
 ## クラウドのコーディングエージェントですか？
-いいえ。エージェントはあなたのマシン上の CLI を通して、あなたのリポジトリで動きます。違いを言うと、クラウドのエージェントサービスは作業を他人のコンピューターに任せます。Coppice は作業をローカルに置き、あなたのゲートを通します。
+いいえ。エージェントは、あなたのマシン上の CLI を通して、あなたのリポジトリで動きます。クラウドのエージェントサービスは、作業を他人のコンピューターに任せます。Coppice は作業をローカルに置き、あなたのゲートを通します。
 
 <a id="will-agents-merge-without-me"></a>
 
@@ -34,7 +34,7 @@ description: "Coppice は本番で使える？Docker やアカウントは必要
 <a id="what-happens-if-a-tickets-changes-conflict-with-main"></a>
 
 ## チケットの変更が main と競合したらどうなりますか？
-Coppice はマージの前で止まり、main には手を付けません。競合するファイルを一覧にして、チケットを In Progress に戻し、同じエージェントが解決に取りかかります。その後、マージの前に Human Review でもう一度承認します。
+Coppice はマージの前で止まり、main には手を付けません。Coppice は競合するファイルを一覧にし、チケットを In Progress に戻します。同じエージェントが解決に取りかかります。その後、マージの前に、Human Review でもう一度承認します。
 
 <a id="what-about-set-and-forget-autopilots"></a>
 

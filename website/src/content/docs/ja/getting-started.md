@@ -13,7 +13,7 @@ description: "インストール直後から最初のエージェント実行ま
 <a id="1-install-a-provider-and-sign-in"></a>
 
 ## 1. プロバイダーをインストールしてサインインする
-プロバイダーとは、Coppice があなたの代わりに動かすエージェント CLI のことです。Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok があります。Coppice は CLI をインストールしません。コンピューターにすでにある CLI を見つけます。
+プロバイダーとは、Coppice があなたの代わりに動かすエージェント CLI のことです。Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok があります。Coppice は CLI をインストールしません。Coppice は、コンピューターにすでにある CLI を見つけます。
 
 1. いつもどおりの方法で CLI をインストールし、ターミナルでサインインします。
 2. Coppice のサイドバーで **System** を開き、**Connectors** を開きます。
@@ -83,7 +83,7 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示�
 
 ## このあと起きること
 1. **Plan Review**。PM エージェントが計画を書き、チケットが Plan Review に移ります。計画は説明のすぐ下に表示され、その下に **Approve plan** と **Ask for changes** があります。承認すると、計画はあなたの文章の後ろに **Approved plan** として説明に追加されます。
-2. **Ready**。承認すると、チケットは Ready に移ります。Technical Lead エージェントがコードと照らして計画を確認し、必要なときだけ承認済みの計画を直して、担当者を選びます。その担当エージェントはすぐに動き始めます。適任者がいなければ担当者なしのままにして、理由をコメントします。
+2. **Ready**。承認すると、チケットは Ready に移ります。Technical Lead エージェントが、計画をコードと照らして確認します。必要なときだけ、承認済みの計画を直します。そのうえで担当者を選びます。その担当エージェントは、すぐに動き始めます。適任者がいなければ、Technical Lead エージェントはチケットを担当者なしのままにし、理由をコメントします。
 3. **In Progress**。割り当てられたエージェントが自分の git worktree で作業します。
 4. **Wait for Human Review**。あなたが diff を読みます。Human Review で **Accept** をクリックします。
 5. **Done**。Done のカードに "Accepted, not merged" と表示されることがあります。チケットを開いて **Merge…** を選ぶか、プルリクエストでレビューしたい場合は **Create PR via API** を選びます。
