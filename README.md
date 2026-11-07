@@ -50,7 +50,7 @@ Download the app and open it. There's nothing to set up: no Docker and no Coppic
 
 ## How it works
 
-1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve before anyone writes code, or turn on **Skip planning** to send the ticket straight to Ready.
+1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve the plan before coding starts, unless you choose **Skip planning**.
 2. **Let agents build.** Each ticket gets its own git worktree, so agents working in parallel never touch your main checkout. Follow any run live.
 3. **Human Review.** Read the diff in the app and comment on any line. Nothing counts as done until you accept it.
 
