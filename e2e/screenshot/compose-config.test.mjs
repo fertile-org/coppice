@@ -10,10 +10,7 @@ function runCheck() {
   return spawnSync('node', ['e2e/screenshot/check-compose.mjs'], {
     cwd: root,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `/tmp/docker-cli:${process.env.PATH ?? ''}`,
-    },
+    env: process.env,
   });
 }
 
