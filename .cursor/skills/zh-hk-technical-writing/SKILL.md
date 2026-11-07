@@ -7,7 +7,7 @@ description: 為 Coppice 撰寫或修訂香港繁體中文技術說明、操作�
 
 **研究範圍：已選定 30 篇實質原創文章，另有 4 篇合資格候補，不計入 30 篇。** 僅來自 3 位有外部專業／社群認可的作者、2 個網站，其中 22 篇由 Gordon Lau 撰寫、25 篇來自 Tecky。這不是香港整體用法的共識，也沒有讀者人數或受歡迎程度的量化證據。同一作者的系列文章可各算一篇，但不是多位作者的獨立佐證。HK17 只作口語對照，不計入篇數；HK62 仍有原創性疑問，不列為合資格候補；第四篇候補是 HK56，但只限未屬更換例子的工程說明。初次出版必須嚴格早於 2020-11-07，後續修訂另行披露，而非要求整頁從未改動。
 
-僅供 Coppice 儲存庫內 `.cursor/skills/zh-hk-technical-writing/` 使用，不供市場、執行環境或全域安裝。來源、修訂及限制見 [repo-references.md](repo-references.md)。這份檔案是儲存庫內的寫作指引。其他語系用各自的技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)。不要複製來源全文、仿寫單一作者，或把歷史文章的技術主張當作 Coppice 的功能規格。
+僅供 Coppice 儲存庫內 `.cursor/skills/zh-hk-technical-writing/` 使用，不供市場、執行環境或全域安裝。來源、修訂及限制見 [repo-references.md](repo-references.md)。這份檔案是儲存庫內的寫作指引。其他語系用各自的技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)、[ja-technical-writing](../ja-technical-writing/SKILL.md)。不要複製來源全文、仿寫單一作者，或把歷史文章的技術主張當作 Coppice 的功能規格。
 
 證據標記：**多作者觀察**只代表本語料中有不同作者的例子；**同作者傾向**可能受系列／網站文風影響；**正確性要求**是保留意思的要求；**專案選擇／外推**不是香港用語的普遍規律。
 

@@ -5,7 +5,7 @@ description: 為 Coppice 撰寫或修改台灣繁體中文的 README、網站與
 
 # Coppice 台灣繁體中文技術寫作
 
-> 這份指引放在本倉庫，供 Coppice 專案作者使用。不是全域技能，不登錄外掛市集，也不進入執行階段，也不宣告任何產品功能。來源已全文複核並完成保守替換；原創性、知名度與現行版本的證據仍有下列限度，不宣稱完整鑑定。其他語系用各自的技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)。
+> 這份指引放在本倉庫，供 Coppice 專案作者使用。不是全域技能，不登錄外掛市集，也不進入執行階段，也不宣告任何產品功能。來源已全文複核並完成保守替換；原創性、知名度與現行版本的證據仍有下列限度，不宣稱完整鑑定。其他語系用各自的技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)、[ja-technical-writing](../ja-technical-writing/SKILL.md)。
 
 ## 目標與優先順序
 

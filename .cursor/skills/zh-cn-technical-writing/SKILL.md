@@ -4,7 +4,7 @@ description: 为 Coppice 仓库撰写或改写简体中文 README、网站、教
 ---
 # Coppice 简体中文技术写作
 
-仅供本仓库内容创作。不是全局/共享技能、marketplace商品或运行时插件。研究已做独立第二轮审查；这是表达指导，不是技术事实或安全实现的认证。英文、越南文、台湾繁体与香港繁体各有独立技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)。
+仅供本仓库内容创作。不是全局/共享技能、marketplace商品或运行时插件。研究已做独立第二轮审查；这是表达指导，不是技术事实或安全实现的认证。英文、越南文、台湾繁体、香港繁体与日文各有独立技能：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)、[ja-technical-writing](../ja-technical-writing/SKILL.md)。
 
 ## 先固定事实，再改写
 
