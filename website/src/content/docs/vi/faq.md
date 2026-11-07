@@ -24,7 +24,7 @@ Không. Coppice là bảng để điều phối coding agent, không phải hệ
 <a id="is-this-a-cloud-coding-agent"></a>
 
 ## Đây có phải coding agent chạy trên đám mây không?
-Không. Agent chạy qua các CLI trên máy bạn, làm trên repo của bạn. Khác biệt nằm ở chỗ: dịch vụ agent trên đám mây đẩy việc sang máy của người khác, còn Coppice giữ việc trên máy bạn và mọi thứ phải qua tay bạn duyệt.
+Không. Agent chạy qua các CLI trên máy bạn, làm trên repo của bạn. Dịch vụ agent trên đám mây đẩy việc sang máy của người khác. Coppice giữ việc trên máy bạn, và mọi thứ phải qua bước bạn duyệt.
 
 <a id="will-agents-merge-without-me"></a>
 
@@ -34,7 +34,7 @@ Không. Human Review là bước duyệt bắt buộc. Bạn mở diff và tự 
 <a id="what-happens-if-a-tickets-changes-conflict-with-main"></a>
 
 ## Nếu thay đổi của ticket bị conflict với main thì sao?
-Coppice dừng lại trước khi merge và để nguyên main. Nó liệt kê các file bị conflict rồi đưa ticket về In Progress, để chính agent đó xử lý. Sau đó bạn chấp nhận lại ở Human Review rồi mới merge.
+Coppice dừng lại trước khi merge và để nguyên main. Coppice liệt kê các file bị conflict, rồi đưa ticket về In Progress để chính agent đó xử lý. Sau đó bạn chấp nhận lại ở Human Review, rồi mới merge.
 
 <a id="what-about-set-and-forget-autopilots"></a>
 
@@ -44,7 +44,7 @@ Coppice không làm theo hướng đó. Coppice sinh ra để bạn quản lý a
 <a id="windows"></a>
 
 ## Còn Windows thì sao?
-Windows 11 có thể chạy bản Linux x64 qua WSL, nhưng chúng tôi chưa thử. Xem [Windows 11 (qua WSL)](/docs/install#windows-11-through-wsl). Nếu bạn thử, hãy [kể lại cho chúng tôi trên GitHub](https://github.com/fertile-org/coppice/issues). Bản beta này chưa có kế hoạch làm ứng dụng Windows riêng.
+Windows 11 có thể chạy bản Linux x64 qua WSL, nhưng chúng tôi chưa thử. Xem [Windows 11 (qua WSL)](/docs/install#windows-11-through-wsl). Nếu bạn thử, [kể lại cho chúng tôi trên GitHub](https://github.com/fertile-org/coppice/issues). Bản beta này chưa có kế hoạch làm ứng dụng Windows riêng.
 
 <a id="where-do-contributors-look"></a>
 
