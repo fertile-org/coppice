@@ -42,3 +42,10 @@
 | Product principles & UX | [docs/philosophy/final_agent_workspace_product_design.md](docs/philosophy/final_agent_workspace_product_design.md) |
 | Stack choices | [docs/philosophy/final_agent_workspace_framework_selection.md](docs/philosophy/final_agent_workspace_framework_selection.md) |
 | Web visual design | [docs/web/DESIGN.md](docs/web/DESIGN.md) |
+| English prose in READMEs, the site, contributor docs, and UI copy | [.cursor/skills/english-technical-writing/SKILL.md](.cursor/skills/english-technical-writing/SKILL.md) |
+
+## English authoring
+
+When drafting, reviewing, or rewriting English in the root `README.md`, `website/`, contributor `docs/`, or UI strings, read [.cursor/skills/english-technical-writing/SKILL.md](.cursor/skills/english-technical-writing/SKILL.md) before editing. That skill is repository guidance for this checkout. It is not a Coppice built-in, marketplace, or end-user plugin skill, and it does not change running agents.
+
+Keep authoring skills under `.cursor/skills/`. Do not copy them into `.agents/skills/`, `.claude/skills/`, a root `skills/` directory, `server/builtin-plugins/`, or `server/marketplace/`. Those layouts are what the server discovers and can load into end-user agents. Other languages are separate research loops. Do not invent them from the English skill. A style pass leaves commands, configuration keys, URLs, permissions, and locked positioning as they are.
