@@ -26,6 +26,8 @@ Click **Run Agent** in the ticket header to start the first run. A Backlog card 
 
 In **Plan Review**, read **Proposed plan**, then click **Approve plan** or **Ask for changes**. Approving writes the plan into the description under **Approved plan**, posts “Plan approved.”, moves the ticket to **Ready**, and starts the Technical Lead. Planning does not change the ticket's code. If the plan run changed files, Coppice discards them.
 
+![Plan Review for the seeded ticket “Review the greeting change.” The proposed plan says to add docs/greeting.md. Approve plan is visible and has not been pressed. Skip planning is unchecked.](/blog/review-before-merging/plan-review.png "Seeded demo: read the proposed plan. Approve plan has not been clicked. Not a live CLI result.")
+
 If the ticket is unclear, the PM may ask 1 to 3 short questions first. The card shows “Waiting for your answers”. Answer in the ticket and click **Send answers** before you approve.
 
 **Skip planning**, under **Status**, is the exception. Checking it saves immediately and leaves the ticket in its current column. Set **Status** to **Ready** and click **Save metadata**, or drag the card to **Ready**. Entering **Ready** starts the Technical Lead when one is available and the repository is ready. Without an approved plan, and with the box off, Coppice refuses the move: “Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.” The Ready refusal is “Approve the plan before moving this ticket to Ready, or turn on Skip planning.” If no Technical Lead is available, the ticket stays in **Ready**, unassigned, and a comment says so.
@@ -39,6 +41,8 @@ On the usual path the ticket goes to **In Progress** on its own branch, then **I
 ## Check the diff before you accept
 
 Open the ticket and click **Review code**. The page says **Code review**. Use this pass before **Accept**. The labels in the sidebar are the agent's report. They are not your sign-off.
+
+![Code review of the seeded file docs/greeting.md. The diff adds the line “Hello from the review demo.” Submit review is visible, and Accept is not on this page.](/blog/review-before-merging/diff-before-accept.png "Seeded demo: the greeting diff before Accept. Accept was not clicked, and the ticket stayed in Wait for Human Review. Not a live CLI result.")
 
 1. **Compare the change with the approved plan.** While the ticket is in **Wait for Human Review**, **Approved plan** sits beside the diff. Read each acceptance criterion and any evidence under it, then find that behavior in the code. **Met**, **Not met**, and **Not checked** are the words Coppice shows. A **Met** line still needs you to look. The steps under the plan are a reading list. Their boxes stay unchecked.
 2. **Inspect files the plan did not name.** A changed file can be marked **Not in the plan**. Open those first. A lockfile, a migration, or a rename can belong with the work, or it can be scope the plan never asked for. When **Reviewer brief** is on the page, it matches this commit. **Changes from the plan** says what shifted, or **None**. **Look here first** names a file. The brief also says: “The agent wrote these notes when it finished. Coppice tags any file that wasn't in the plan you approved.”
@@ -58,13 +62,13 @@ Coppice records the tip of the ticket branch, moves the ticket to **Done**, and 
 
 A **Done** card with a current acceptance shows “Accepted, not merged” and **Merge…**. **Merge…** opens **Merge ticket branch**. Coppice merges the commit you accepted into the **Base branch** you pick. A different tip is refused: “Not merged. This isn't the commit you reviewed.”
 
+![Demo board with a Done card titled “Note a setting in the demo checkout.” The card reads Accepted, not merged and shows a separate Merge… button.](/blog/review-before-merging/done-card.png "Seeded demo from an earlier capture: Accept is already recorded, and Merge… is still separate. Not a live CLI result.")
+
+The board figure is from an earlier seeded demo. It was not recaptured with the plan and diff figures above.
+
 If files conflict, Coppice leaves the base branch untouched, names the files, and keeps the ticket in **Done** until you choose **Ask [agent] to resolve**. That returns the ticket to **In Progress**. When the conflicts are resolved, it comes back to **In Review**, and you accept it again before it merges.
 
 **Create PR via API** is the other path. It needs a GitHub remote and a forge token. A merge on GitHub.com is recorded by a sweep at startup and every 5 minutes. Other remotes keep “Accepted, not merged” until you merge in Coppice. [FAQ](/docs/faq) states the same gate.
-
-## Screenshots
-
-Figures for this note are not in the draft yet. Engineering is capturing them on the shared demo stack. This page does not claim those frames, and it does not claim a signed-in Claude Code or Codex run.
 
 ## Read next
 
