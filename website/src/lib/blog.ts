@@ -304,6 +304,18 @@ export function englishArticlePaths(posts: readonly BlogPost[]): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Translation files that belong in hreflang and the sitemap.
+ * A draft translation is omitted. A translation of a draft English article is omitted too.
+ */
+export function publishedTranslationSources(posts: readonly BlogPost[]): string[] {
+  const english = new Set(publicPosts(posts, 'en').map((post) => post.slug));
+  return posts
+    .filter((post) => post.locale !== 'en' && !post.draft && english.has(post.slug))
+    .map((post) => post.file)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** Locales with a real, non-draft article at this slug. English is included when that file is public. */
 export function blogLocalesForSlug(posts: readonly BlogPost[], slug: string): LocalePath[] {
   const have = new Set(posts.filter((post) => post.slug === slug && !post.draft).map((post) => post.locale));

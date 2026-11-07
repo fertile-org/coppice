@@ -49,7 +49,7 @@ keywords:
 | `author` | yes | The visible byline. There is no default name. 80 characters or fewer. |
 | `authorType` | no | `Person` (the default in the JSON-LD) or `Organization`. |
 | `image` | no | A site path starting with `/`, or an `https` URL. Used in `BlogPosting` JSON-LD. The social card stays the site card. |
-| `draft` | no | `true` keeps the file out of the index, the route, and the sitemap. |
+| `draft` | no | `true` keeps the file out of the index, the route, `hreflang`, and the sitemap. A draft English article has no public URL, and a draft translation is not listed as an alternate. |
 | `keywords` | no | Up to 8 strings. Omitted from the page when absent. |
 
 Unknown keys fail the build. A translation file with no English article at the same slug also fails the build.

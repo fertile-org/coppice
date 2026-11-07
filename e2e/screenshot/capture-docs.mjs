@@ -13,7 +13,7 @@
  *   node e2e/screenshot/capture-docs.mjs
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -178,11 +178,19 @@ async function serverSh(script, { user } = {}) {
   return run(composeArgs(args), { input: script });
 }
 
-function screenshotConfigPath() {
+async function screenshotConfigPath() {
   const file = process.env.COPPICE_SCREENSHOT_CONFIG;
   if (!file) {
-    fail('COPPICE_SCREENSHOT_CONFIG is unset. Run `make screenshot` so the capture uses the throwaway config.');
+    fail('COPPICE_SCREENSHOT_CONFIG is unset. Run `make screenshot` so the capture uses the private config.');
   }
+  let stat;
+  try {
+    stat = await lstat(file);
+  } catch (error) {
+    fail(`screenshot config is not readable (${file}): ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) fail(`refusing to edit symlink screenshot config: ${file}`);
+  if (!stat.isFile()) fail(`screenshot config is not a regular file: ${file}`);
   return file;
 }
 
@@ -191,7 +199,7 @@ async function enableCursorInConfig() {
   // rewrite cannot replace the bind-mounted file, so Cursor is turned on
   // here before the server starts. The example leaves it off. This edits the
   // throwaway screenshot config, not deploy/config/config.toml.
-  const file = screenshotConfigPath();
+  const file = await screenshotConfigPath();
   const text = await readFile(file, 'utf8');
   const next = text.replace(
     /(\[agent\.connectors\.cursor\]\r?\nenabled = )false\b/,
