@@ -4,7 +4,7 @@ metaTitle: Claude Code and Codex on one project
 description: "Create one Claude Code agent and one Codex agent. Configuring both does not make both run. Check the assignee. The Technical Lead decides who implements."
 answer: "Create one agent on Claude Code and another on Codex. Configuring both connectors does not make both run. A ticket has one assignee. Check which agent was assigned: the Technical Lead's handoff decides who implements, and that run continues on its own while auto_start_runs is on. You approve the plan unless you skip it, then accept the diff before a separate merge."
 published: "2026-11-07"
-draft: true
+draft: false
 author: Coppice
 authorType: Organization
 keywords:
