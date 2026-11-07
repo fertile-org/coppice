@@ -32,10 +32,10 @@ Toutes les versions sont aussi sur [GitHub Releases](https://github.com/fertile-
 
 ## Mises à jour
 
-Coppice cherche les nouvelles versions en arrière-plan. Pour désactiver ça, ouvrez **System → Updates** et désactivez **Automatic updates**. Vos tableaux et paramètres restent en place lors d’une mise à jour.
+Coppice cherche les nouvelles versions en arrière-plan. Pour désactiver cette recherche, ouvrez **System → Updates** et désactivez **Automatic updates**. Vos tableaux et paramètres restent en place lors d’une mise à jour.
 
-- **macOS :** Coppice télécharge la mise à jour pour vous. Choisissez **Restart to update** dans le bandeau, ou elle s’installe la prochaine fois que vous quittez Coppice.
-- **Linux :** installer le `.deb` ajoute la source de paquets de Coppice, donc les nouvelles versions arrivent avec vos autres mises à jour dans le gestionnaire de mises à jour, ou lancez `sudo apt update && sudo apt upgrade`.
+- **macOS :** Coppice télécharge la mise à jour pour vous. Choisissez **Restart to update** dans le bandeau, ou la mise à jour s’installe la prochaine fois que vous quittez Coppice.
+- **Linux :** installer le `.deb` ajoute la source de paquets de Coppice, donc les nouvelles versions arrivent avec vos autres mises à jour dans le gestionnaire de mises à jour, ou lancez `sudo apt update && sudo apt upgrade`.
 
 <a id="windows-11-through-wsl"></a>
 
@@ -45,14 +45,14 @@ La version Linux x64 devrait tourner sous Windows 11 via WSL. Nous ne l’avons 
 Il faut Windows 11, car les anciennes versions de Windows 10 ne peuvent pas afficher les fenêtres d’applications Linux. Les PC Windows sur Arm ne sont pas couverts pour l’instant.
 
 1. Ouvrez PowerShell en administrateur et lancez `wsl --install`. Cela installe Ubuntu. Redémarrez quand c’est demandé, puis terminez la création de votre utilisateur Ubuntu.
-2. Dans PowerShell en administrateur, mettez WSL à jour pour que les fenêtres d’applications Linux s’affichent sur votre bureau Windows :
+2. Dans PowerShell en administrateur, mettez WSL à jour pour que les fenêtres d’applications Linux s’affichent sur votre bureau Windows :
 
    ```powershell
    wsl --update
    wsl --shutdown
    ```
 
-3. Ouvrez Ubuntu depuis le menu Démarrer. Faites la suite des étapes dans Ubuntu. Téléchargez le `.deb` Linux x64 et installez-le. Remplacez `<version>` par la dernière version sur [GitHub Releases](https://github.com/fertile-org/coppice/releases) :
+3. Ouvrez Ubuntu depuis le menu Démarrer. Faites la suite des étapes dans Ubuntu. Téléchargez le `.deb` Linux x64 et installez-le. Remplacez `<version>` par la dernière version sur [GitHub Releases](https://github.com/fertile-org/coppice/releases) :
 
    ```sh
    cd ~
@@ -79,14 +79,14 @@ Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-a
 2. Indiquez-lui un checkout git local que vous avez déjà sur le disque.
 3. **Connectez votre CLI d’agent.** Choisissez votre CLI d’agent en créant un agent, et Coppice l’active. Chacune indique si elle est **Ready**, **Found, not signed in** ou **Not on your PATH**. Connectez-vous d’abord à la CLI dans votre terminal, comme d’habitude.
 
-   Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
+   Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
 
-   Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
+   Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
 
-   - macOS: `~/Library/Application Support/Coppice/config.toml`
-   - Linux: `~/.config/Coppice/config.toml`
+   - macOS : `~/Library/Application Support/Coppice/config.toml`
+   - Linux : `~/.config/Coppice/config.toml`
 
-4. Créez un ticket (ou approuvez-en un proposé) et passez-le en Ready. Les agents le font avancer dans In Progress, In Review et In QA, puis il attend votre Human Review.
+4. Créez un ticket (ou approuvez-en un proposé) et passez-le en Ready. Les agents le font avancer dans In Progress, In Review et In QA. Le ticket attend ensuite votre Human Review.
 
 <a id="requirements"></a>
 

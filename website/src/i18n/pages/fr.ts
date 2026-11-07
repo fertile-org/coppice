@@ -5,16 +5,16 @@ export const locale = 'fr';
 /** Français homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice : tableau d’agents de code IA, local et open source',
+    title: 'Coppice : tableau d’agents de code IA, local et open source',
     description:
-      'Coppice est un tableau d’agents de code IA, local et open source. Claude Code, Codex, Cursor et d’autres planifient, codent et relisent ; vous validez le diff.',
+      'Coppice est un tableau d’agents de code IA, local et open source. Claude Code, Codex, Cursor et d’autres planifient, codent et relisent ; vous validez le diff.',
     worksWith: 'Fonctionne avec',
     h1: 'Recrutez des spécialistes. Gardez le dernier mot.',
     lede: 'Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
     hero: {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:
-        'Coppice : écrivez un ticket, comparez les options de design, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté.',
+        'Coppice : écrivez un ticket, comparez les options de design, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté.',
       captions: [
         'Écrivez un ticket.',
         'Votre agent PM rédige un plan.',
@@ -35,7 +35,7 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Confiez le travail.',
-        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM, qui rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez avant que quiconque n’écrive du code.',
+        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez ce plan.',
       },
       {
         title: 'Laissez les agents construire.',
@@ -43,34 +43,34 @@ export const pages: Pages = {
       },
       {
         title: 'Human Review.',
-        body: 'Lisez le diff dans l’application, commentez n’importe quelle ligne, et rien ne compte comme terminé tant que vous ne l’avez pas accepté.',
+        body: 'Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté.',
       },
     ],
-    howClose: 'Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de compte Coppice.',
+    howClose: 'Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de compte Coppice.',
     whyTitle: 'Pourquoi Coppice',
     reasons: [
       {
         title: 'Le bon modèle pour chaque rôle.',
-        body: 'Chaque agent choisit sa CLI et son modèle. Planifiez et relisez avec votre modèle le plus fort, codez avec un plus rapide, le tout sur un seul tableau.',
+        body: 'Chaque agent choisit sa CLI et son modèle. Planifiez et relisez avec votre modèle le plus fort, et codez avec un modèle plus rapide, le tout sur un seul tableau.',
       },
       {
         title: 'Arrêtez de jongler entre les terminaux.',
-        body: 'Le travail de chaque agent est une carte sur un seul tableau. Les tickets bloqués et le travail qui attend votre revue ressortent, donc vous savez où on a besoin de vous.',
+        body: 'Le travail de chaque agent est une carte sur un seul tableau. Les tickets bloqués et le travail qui attend votre revue ressortent. Vous savez donc où intervenir.',
       },
       {
         title: 'Repérez les erreurs avant qu’elles n’arrivent.',
-        body: 'Chaque changement vous attend sous forme de diff dans l’application. Rien ne compte comme terminé tant que vous ne l’avez pas accepté, et ce que vous acceptez est exactement ce qui est fusionné.',
+        body: 'Chaque changement vous attend sous forme de diff dans l’application. Rien ne compte comme terminé tant que vous ne l’avez pas accepté. Ce que vous acceptez est exactement ce qui est fusionné.',
       },
       {
         title: 'Pas de deuxième abonnement.',
-        body: 'Coppice pilote les CLI que vous payez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok.',
+        body: 'Coppice pilote les CLI que vous payez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok.',
       },
     ],
     notTitle: 'Ce que ce n’est pas',
     notItems: [
       'Pas un service de code dans le cloud',
       'Pas un remplaçant de Jira',
-      'Pas « dites-le à l’agent et recevez le produit fini »',
+      'Pas « dites-le à l’agent et recevez le produit fini »',
     ],
   },
   download: {
@@ -81,7 +81,7 @@ export const pages: Pages = {
     intro: 'Gratuit, tourne sur votre propre machine, sans compte Coppice.',
     groups: [
       {
-        note: 'Vous ne savez pas quel Mac vous avez ? Ouvrez le menu Pomme → À propos de ce Mac. S’il indique une puce, choisissez Apple Silicon. S’il indique un processeur, choisissez Intel.',
+        note: 'Pour savoir quel Mac vous avez, ouvrez le menu Pomme → À propos de ce Mac. S’il indique une puce, choisissez Apple Silicon. S’il indique un processeur, choisissez Intel.',
         rows: [
           { name: 'macOS (Apple Silicon)', label: 'Télécharger le .dmg' },
           { name: 'macOS (Intel)', label: 'Télécharger le .dmg' },

@@ -1,12 +1,12 @@
 ---
 title: Fournisseurs
-metaTitle: "CLI d’agents prises en charge : Claude Code, Codex"
-description: "Coppice pilote les CLI d’agents que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok."
+metaTitle: "CLI d’agents prises en charge : Claude Code, Codex"
+description: "Coppice pilote les CLI d’agents que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok."
 ---
 
 # Fournisseurs
 
-Fatigué de garder un terminal ouvert pour chaque agent ? Coppice pilote les CLI d’agents de code que vous utilisez déjà et réunit leur travail sur un seul tableau. Vous gardez vos abonnements et vos connexions. Pas de compte Coppice.
+Coppice pilote les CLI d’agents de code que vous utilisez déjà et réunit leur travail sur un seul tableau. Vous gardez vos abonnements et vos connexions. Pas de compte Coppice.
 
 <a id="supported-connectors"></a>
 
@@ -31,7 +31,7 @@ Les informations de compatibilité seront mises à jour au fil du temps, à mesu
 <figcaption>Choisissez un modèle, ou laissez celui par défaut.</figcaption>
 </figure>
 
-Choisissez un modèle pour cet agent, ou laissez celui par défaut. Vous avez installé un nouveau modèle ? Cliquez sur Refresh models.
+Choisissez un modèle pour cet agent, ou laissez celui par défaut. Après avoir installé un nouveau modèle, cliquez sur **Refresh models**.
 
 <a id="connect-your-agent-cli"></a>
 
@@ -40,18 +40,18 @@ Choisissez un modèle pour cet agent, ou laissez celui par défaut. Vous avez in
 1. Installez la CLI et connectez-vous dans votre terminal, comme d’habitude.
 2. Choisissez votre CLI d’agent en créant un agent, et Coppice l’active.
 
-Le formulaire d’agent liste chaque connecteur avec son statut :
+Le formulaire d’agent liste chaque connecteur avec son statut :
 
 | Statut | Ce que ça veut dire |
 | --- | --- |
 | **Ready** | Une vérification de connexion gratuite a confirmé que vous êtes connecté. |
 | **Found, not signed in** | Coppice a trouvé la commande, mais vous n’êtes pas connecté. Connectez-vous depuis votre terminal. |
 | **Not on your PATH** | Coppice ne trouve pas la commande. Installez-la, ou vérifiez votre PATH. |
-| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code et Kimi Code, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
+| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code et Kimi Code, Coppice ne peut pas vérifier la connexion sans utiliser votre forfait. |
 
-Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une fonctionne, utilisez **Test connection** : il lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code, Kimi Code et Grok n’ont pas de bandeau : dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une d’elles fonctionne, utilisez **Test connection**. Ce bouton lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code, Kimi Code et Grok n’ont pas de bandeau. Dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
 
-Vous pouvez enregistrer un agent avant que sa CLI soit prête. Il commence à travailler sur les tickets une fois la CLI installée et connectée. Si vous avez installé la CLI après avoir ouvert Coppice, quittez et rouvrez Coppice pour qu’il trouve la nouvelle commande.
+Vous pouvez enregistrer un agent avant que sa CLI soit prête. Cet agent commence à travailler sur les tickets une fois la CLI installée et connectée. Si vous avez installé la CLI après avoir ouvert Coppice, quittez Coppice et rouvrez-le pour que Coppice trouve la nouvelle commande.
 
 Un connecteur dont Coppice trouve la commande est activé, sauf si vous n’êtes pas connecté. Pour en activer ou en désactiver un, utilisez son interrupteur dans **System → Connectors**.
 
@@ -59,20 +59,20 @@ Un connecteur dont Coppice trouve la commande est activé, sauf si vous n’ête
 
 ## Utiliser votre propre clé d’API ou un autre fournisseur
 
-Vous voulez utiliser votre propre clé d’API, ou un modèle que votre CLI ne propose pas ? Utilisez OpenCode. Il fonctionne avec plus de 75 fournisseurs de modèles et avec des modèles locaux. Voir [la liste des fournisseurs d’OpenCode](https://opencode.ai/docs/providers/).
+Pour utiliser votre propre clé d’API, ou un modèle que votre CLI ne propose pas, utilisez OpenCode. OpenCode fonctionne avec plus de 75 fournisseurs de modèles et avec des modèles locaux. Voir [la liste des fournisseurs d’OpenCode](https://opencode.ai/docs/providers/).
 
 1. Installez OpenCode.
-2. Lancez `opencode` dans votre terminal, tapez `/connect`, choisissez votre fournisseur et collez votre clé. OpenCode garde la clé, et Coppice ne la demande jamais. Pas dans la liste ? Suivez les [étapes pour un fournisseur personnalisé](https://opencode.ai/docs/providers/#custom-provider) d’OpenCode.
+2. Lancez `opencode` dans votre terminal, tapez `/connect`, choisissez votre fournisseur et collez votre clé. OpenCode garde la clé, et Coppice ne la demande jamais. Si votre fournisseur n’est pas dans la liste, suivez les [étapes pour un fournisseur personnalisé](https://opencode.ai/docs/providers/#custom-provider) d’OpenCode.
 3. Dans Coppice, créez un agent et réglez **Connector** sur **OpenCode**. Les modèles de votre fournisseur apparaissent sous **Model**. Si vous avez ajouté le fournisseur pendant que Coppice était ouvert, cliquez sur **Refresh models**.
 
 <a id="on-a-ticket"></a>
 
 ## Sur un ticket
 
-Quand un agent prend un ticket, Coppice lance sa CLI dans le worktree git propre à ce ticket. Vous pouvez suivre sa progression en direct sur le ticket.
+Quand un agent prend un ticket, Coppice lance sa CLI dans le worktree git propre à ce ticket. Vous pouvez suivre la progression de l’agent en direct sur le ticket.
 
 <a id="what-coppice-does-not-do"></a>
 
 ## Ce que Coppice ne fait pas
-- Il ne fait pas tourner de service de code dans le cloud
-- Il ne fusionne pas de code sans votre Human Review
+- Coppice ne fait pas tourner de service de code dans le cloud
+- Coppice ne fusionne pas de code sans votre Human Review

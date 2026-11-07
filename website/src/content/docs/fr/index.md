@@ -1,12 +1,12 @@
 ---
 title: Documentation
-metaTitle: "Documentation Coppice : des agents de code IA sur un tableau"
-description: "Coppice réunit des agents de code sur un seul tableau : des tickets, une branche par agent, et chaque diff relu par vous. Commencez par Installer."
+metaTitle: "Documentation Coppice : des agents de code IA sur un tableau"
+description: "Coppice réunit des agents de code sur un seul tableau : des tickets, une branche par agent, et chaque diff relu par vous. Commencez par Installer."
 ---
 
 # Documentation
 
-Coppice réunit une équipe d’agents de code sur un seul tableau : mettez le travail en tickets, laissez les agents construire chacun sur sa branche, et relisez chaque diff avant qu’il compte. Commencez par Installer pour lancer votre premier ticket.
+Coppice réunit une équipe d’agents de code sur un seul tableau. Mettez le travail dans des tickets, laissez chaque agent construire sur sa branche, et relisez chaque diff avant qu’il compte comme terminé. Commencez par Installer pour lancer votre premier ticket.
 
 | Guide | |
 | --- | --- |
@@ -21,8 +21,8 @@ Coppice réunit une équipe d’agents de code sur un seul tableau : mettez le t
 
 ## Avancé
 
-- [Paramètres](/docs/settings) : chaque champ de config.toml
-- [Raccourcis clavier](/docs/shortcuts) : les touches par défaut pour le tableau, les tickets et la revue
-- [Sauvegarder les données](/docs/backup) : sauvegarder, déménager et remplacer les clés
+- [Paramètres](/docs/settings) : chaque champ de config.toml
+- [Raccourcis clavier](/docs/shortcuts) : les touches par défaut pour le tableau, les tickets et la revue
+- [Sauvegarder les données](/docs/backup) : sauvegarder, déménager et remplacer les clés
 
-Vous voulez contribuer ou bidouiller le code ? Voyez la [documentation du dépôt](https://github.com/fertile-org/coppice/tree/main/docs) sur GitHub.
+Pour contribuer ou modifier le code, voyez la [documentation du dépôt](https://github.com/fertile-org/coppice/tree/main/docs) sur GitHub.
