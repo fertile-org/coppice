@@ -7,7 +7,7 @@ export const pages: Pages = {
   home: {
     title: 'Coppice: Bảng điều phối AI coding agent, mã nguồn mở',
     description:
-      'Coppice là bảng điều phối AI coding agent chạy ngay trên máy bạn. Claude Code, Codex, Cursor… cùng lên kế hoạch, viết code và review; bạn duyệt từng diff.',
+      'Coppice là bảng điều phối AI coding agent chạy ngay trên máy bạn. Claude Code, Codex, Cursor… lên kế hoạch, viết code và review; bạn chấp nhận từng diff.',
     worksWith: 'Dùng được với',
     h1: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',
     lede: 'Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
@@ -18,7 +18,7 @@ export const pages: Pages = {
       captions: [
         'Viết một ticket.',
         'Agent PM soạn kế hoạch.',
-        'Nó đưa ra các phương án thiết kế.',
+        'Agent PM đưa ra các phương án thiết kế.',
         'Bạn duyệt.',
         'Các agent viết code, review và test.',
         'Xem diff, góp ý ở bất kỳ dòng nào.',
@@ -35,11 +35,11 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Giao việc.',
-        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai đụng vào code.',
+        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai viết code.',
       },
       {
-        title: 'Để agent bắt tay vào làm.',
-        body: 'Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ đụng vào bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.',
+        title: 'Để các agent làm việc.',
+        body: 'Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ thay đổi bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.',
       },
       {
         title: 'Human Review.',
@@ -54,11 +54,11 @@ export const pages: Pages = {
         body: 'Mỗi agent tự chọn CLI và model riêng. Lên kế hoạch và review bằng model mạnh nhất, viết code bằng model nhanh hơn, tất cả trên cùng một bảng.',
       },
       {
-        title: 'Khỏi phải nhảy qua lại giữa các terminal.',
-        body: 'Việc của mỗi agent là một thẻ trên cùng một bảng. Ticket bị kẹt và việc đang chờ bạn review hiện rõ, nên bạn biết ngay chỗ nào cần mình.',
+        title: 'Không phải chuyển qua lại giữa các terminal.',
+        body: 'Việc của mỗi agent là một thẻ trên cùng một bảng. Ticket bị kẹt và việc đang chờ bạn review hiện rõ, nên bạn biết ngay chỗ nào cần bạn.',
       },
       {
-        title: 'Phát hiện lỗi trước khi nó lọt vào code.',
+        title: 'Phát hiện lỗi trước khi lỗi đó lọt vào code.',
         body: 'Mọi thay đổi đều nằm chờ bạn dưới dạng diff trong ứng dụng. Bạn chưa chấp nhận thì chưa xong, và thứ bạn chấp nhận chính là thứ được merge.',
       },
       {
@@ -81,7 +81,7 @@ export const pages: Pages = {
     intro: 'Miễn phí, chạy ngay trên máy bạn, không cần tài khoản Coppice.',
     groups: [
       {
-        note: 'Không rõ máy Mac của mình loại nào? Vào menu Apple → About This Mac. Nếu thấy dòng Chip, chọn Apple Silicon. Nếu thấy dòng Processor, chọn Intel.',
+        note: 'Không rõ máy Mac của bạn loại nào? Vào menu Apple → About This Mac. Nếu thấy dòng Chip, chọn Apple Silicon. Nếu thấy dòng Processor, chọn Intel.',
         rows: [
           { name: 'macOS (Apple Silicon)', label: 'Tải .dmg' },
           { name: 'macOS (Intel)', label: 'Tải .dmg' },

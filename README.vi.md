@@ -16,8 +16,8 @@
 
 <p align="center">
   <strong>Thuê chuyên gia. Bạn là người quyết định cuối cùng.</strong><br />
-  Mỗi coding agent đảm nhận một vai trò, cùng lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.<br />
-  Chạy ngay trên máy bạn, mã nguồn mở, dùng luôn các agent CLI bạn đang trả phí.
+  Mỗi coding agent đảm nhận một vai trò. Các agent lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.<br />
+  Chạy ngay trên máy bạn, mã nguồn mở, dùng các agent CLI bạn đang trả phí.
 </p>
 
 <p align="center">
@@ -44,14 +44,14 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
 ## Vì sao chọn Coppice
 
 - **Mỗi vai trò một model phù hợp.** Mỗi agent tự chọn CLI và model riêng. Lên kế hoạch và review bằng model mạnh nhất, viết code bằng model nhanh hơn, tất cả trên cùng một bảng.
-- **Khỏi phải nhảy qua lại giữa các terminal.** Việc của mỗi agent là một thẻ trên cùng một bảng. Ticket bị kẹt và việc đang chờ bạn review hiện rõ, nên bạn biết ngay chỗ nào cần mình.
-- **Phát hiện lỗi trước khi nó lọt vào code.** Mọi thay đổi đều nằm chờ bạn dưới dạng diff trong ứng dụng. Bạn chưa chấp nhận thì chưa xong, và thứ bạn chấp nhận chính là thứ được merge.
+- **Không phải chuyển qua lại giữa các terminal.** Việc của mỗi agent là một thẻ trên cùng một bảng. Ticket bị kẹt và việc đang chờ bạn review hiện rõ, nên bạn biết ngay chỗ nào cần bạn.
+- **Phát hiện lỗi trước khi lỗi đó lọt vào code.** Mọi thay đổi đều nằm chờ bạn dưới dạng diff trong ứng dụng. Bạn chưa chấp nhận thì chưa xong, và thứ bạn chấp nhận chính là thứ được merge.
 - **Không phải mua thêm gói nào.** Coppice dùng luôn các CLI bạn đang trả phí, đăng nhập như bạn vẫn làm.
 
 ## Cách hoạt động
 
-1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM, nó sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai đụng vào code. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
-2. **Để agent bắt tay vào làm.** Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ đụng vào bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.
+1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai viết code. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
+2. **Để các agent làm việc.** Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ thay đổi bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.
 3. **Human Review.** Đọc diff ngay trong ứng dụng, góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong.
 
 <table>
@@ -90,7 +90,7 @@ Xem trang [Nhà cung cấp](https://getcoppice.app/vi/docs/providers) để lấ
 ## Còn gì nữa
 
 - **Chat với agent.** Bàn về code, một ý tưởng hay một ticket. Agent có thể soạn sẵn ticket hoặc gợi ý một ghi chú Knowledge, nhưng phải đợi bạn duyệt mới được lưu.
-- **Mọi thứ đều nằm trên thẻ.** Bình luận, kế hoạch và các lần chạy agent đều lưu trên ticket. Các agent chỉ nói chuyện với nhau qua bình luận của ticket, nên có chuyện gì xảy ra bạn cũng đọc được ở đó.
+- **Mọi thứ đều nằm trên thẻ.** Bình luận, kế hoạch và các lần chạy agent đều lưu trên ticket. Các agent chỉ nói chuyện với nhau qua bình luận của ticket, nên chuyện gì xảy ra, bạn cũng đọc được ở đó.
 - **Knowledge.** Agent ghi chú lại những điều về dự án để dùng cho các ticket sau. Mặc định, ghi chú nào được giữ là do bạn duyệt.
 - **Plugin.** Bổ sung skill và công cụ MCP cho agent. Cài plugin từ git hoặc từ một thư mục, rồi chọn agent nào được dùng.
 - **Tự động cập nhật.** Bản Linux cập nhật qua apt, còn bản macOS tự cập nhật.
@@ -107,7 +107,7 @@ Xem trang [Nhà cung cấp](https://getcoppice.app/vi/docs/providers) để lấ
 2. Làm theo [các bước cài đặt](https://getcoppice.app/vi/docs/install).
 3. Đọc trang [Bắt đầu](https://getcoppice.app/vi/docs/getting-started) để tạo agent và ticket đầu tiên.
 
-**Beta.** Coppice đang ở bản beta. Gặp lỗi hoặc thấy chỗ nào chưa ổn, hãy [mở issue](https://github.com/fertile-org/coppice/issues) cho chúng tôi biết.
+**Beta.** Coppice đang ở bản beta. Gặp lỗi hoặc thấy chỗ nào chưa ổn, [mở issue](https://github.com/fertile-org/coppice/issues) cho chúng tôi biết.
 
 ## Người đóng góp
 

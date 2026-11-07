@@ -10,7 +10,7 @@ Nhấn `?` ở bất kỳ đâu để xem toàn bộ phím tắt. Phím tắt đ
 
 `Mod` là `⌘` trên macOS và `Ctrl` trên Linux và WSL. Chuỗi phím được ghi dạng `G then B` (nhấn G, rồi nhấn B).
 
-Phím tắt không có tác dụng khi bạn đang gõ trong ô nhập, và terminal có bộ phím riêng. Nhấn `Esc` để đóng thứ đang mở.
+Phím tắt không có tác dụng khi bạn đang gõ trong ô nhập. Terminal có bộ phím riêng. Nhấn `Esc` để đóng phần đang mở.
 
 <a id="navigate"></a>
 

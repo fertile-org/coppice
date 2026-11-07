@@ -21,8 +21,8 @@ Coppice gom cả một đội coding agent lên cùng một bảng: chia việc 
 
 ## Nâng cao
 
-- [Thiết lập](/docs/settings): Toàn bộ các trường trong config.toml
+- [Thiết lập](/docs/settings): Mọi trường trong config.toml
 - [Phím tắt](/docs/shortcuts): Phím mặc định cho bảng, ticket và review
 - [Sao lưu dữ liệu](/docs/backup): Sao lưu, chuyển sang máy khác và đổi khóa
 
-Muốn đóng góp hoặc vọc code? Xem [tài liệu trong repo](https://github.com/fertile-org/coppice/tree/main/docs) trên GitHub.
+Muốn đóng góp hoặc sửa mã nguồn? Xem [tài liệu trong repo](https://github.com/fertile-org/coppice/tree/main/docs) trên GitHub.

@@ -6,7 +6,7 @@ description: "Coppice chạy các agent CLI bạn đang dùng: Claude Code, Code
 
 # Nhà cung cấp
 
-Ngán cảnh mỗi agent phải mở một terminal? Coppice chạy luôn các coding agent CLI bạn đang dùng và gom việc của chúng lên một bảng. Bạn vẫn giữ gói đăng ký và tài khoản của mình. Không cần tài khoản Coppice.
+Coppice chạy các coding agent CLI bạn đang dùng và gom việc của chúng lên một bảng. Bạn vẫn giữ gói đăng ký và tài khoản của bạn. Không cần tài khoản Coppice.
 
 <a id="supported-connectors"></a>
 
@@ -38,28 +38,34 @@ Chọn model cho agent này, hoặc để mặc định. Mới cài thêm model?
 ## Kết nối agent CLI
 
 1. Cài CLI và đăng nhập trong terminal, như bạn vẫn làm.
-2. Khi tạo agent, chọn agent CLI muốn dùng, Coppice sẽ bật nó lên.
+2. Khi tạo agent, chọn agent CLI muốn dùng. Coppice sẽ bật CLI đó.
 
 Form tạo agent liệt kê mọi connector kèm trạng thái:
 
 | Trạng thái | Nghĩa là |
 | --- | --- |
 | **Ready** | Coppice đã kiểm tra (không tốn phí) và thấy bạn đang đăng nhập. |
-| **Found, not signed in** | Coppice tìm thấy lệnh nhưng bạn chưa đăng nhập. Hãy đăng nhập trong terminal. |
-| **Not on your PATH** | Coppice không tìm thấy lệnh. Hãy cài CLI, hoặc kiểm tra lại PATH. |
+| **Found, not signed in** | Coppice tìm thấy lệnh nhưng bạn chưa đăng nhập. Đăng nhập trong terminal. |
+| **Not on your PATH** | Coppice không tìm thấy lệnh. Cài CLI, hoặc kiểm tra lại PATH. |
 | **Installed** | Coppice tìm thấy lệnh. Với Kilo Code, GitHub Copilot, Qwen Code và Kimi Code, Coppice không kiểm tra được trạng thái đăng nhập nếu không dùng đến gói của bạn. |
 
-Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." Muốn chắc chắn là chạy được, dùng **Test connection**: nó chạy thử một lượt chat, một lượt lên kế hoạch và một lượt làm ticket ngắn. CLI nào cũng chat được. Khi chat với Claude Code, Codex và Kilo Code sẽ có dòng "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." (Coppice chưa xác nhận được {cli} luôn chỉ đọc. Agent vẫn có thể chạy lệnh trên máy bạn.) Chat với OpenCode, GitHub Copilot, Qwen Code, Kimi Code và Grok thì không có banner này: khi chat và lên kế hoạch, Coppice chặn chúng ghi file và chạy lệnh shell. Riêng các công cụ MCP bạn tự cấu hình trong CLI đó thì vẫn có thể thay đổi dữ liệu.
+Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 
-Bạn có thể lưu agent trước khi CLI sẵn sàng. Khi CLI đã cài và đăng nhập xong, agent sẽ bắt đầu nhận ticket. Nếu bạn cài CLI sau khi đã mở Coppice, hãy thoát rồi mở lại Coppice để nó tìm thấy lệnh mới.
+Muốn chắc chắn một CLI chạy được, dùng **Test connection**. **Test connection** chạy thử một lượt chat, một lượt lên kế hoạch và một lượt làm ticket ngắn.
 
-Connector nào Coppice tìm thấy lệnh thì được bật, trừ khi bạn chưa đăng nhập. Muốn bật hay tắt một connector, dùng công tắc của nó trong **System → Connectors**.
+CLI nào cũng chat được. Chat với Claude Code, Codex và Kilo Code sẽ có dòng "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." (Coppice chưa xác nhận được {cli} luôn chỉ đọc. Agent vẫn có thể chạy lệnh trên máy bạn.)
+
+Chat với OpenCode, GitHub Copilot, Qwen Code, Kimi Code và Grok thì không có banner này. Khi chat và lên kế hoạch, Coppice chặn các CLI này ghi file và chạy lệnh shell. Công cụ MCP mà bạn tự cấu hình trong CLI đó vẫn có thể thay đổi dữ liệu.
+
+Bạn có thể lưu agent trước khi CLI sẵn sàng. Khi CLI đã cài và đăng nhập xong, agent sẽ bắt đầu nhận ticket. Nếu bạn cài CLI sau khi đã mở Coppice, thoát Coppice rồi mở lại để Coppice tìm thấy lệnh mới.
+
+Connector nào Coppice tìm thấy lệnh thì được bật, trừ khi bạn chưa đăng nhập. Muốn bật hay tắt một connector, dùng công tắc của connector đó trong **System → Connectors**.
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 
 ## Dùng API key riêng hoặc nhà cung cấp khác
 
-Muốn dùng API key của riêng mình, hoặc một model mà CLI của bạn không có? Hãy dùng OpenCode. OpenCode hỗ trợ hơn 75 nhà cung cấp model, kể cả model chạy trên máy. Xem [danh sách nhà cung cấp của OpenCode](https://opencode.ai/docs/providers/).
+Muốn dùng API key của riêng bạn, hoặc một model mà CLI của bạn không có? Dùng OpenCode. OpenCode hỗ trợ hơn 75 nhà cung cấp model, kể cả model chạy trên máy. Xem [danh sách nhà cung cấp của OpenCode](https://opencode.ai/docs/providers/).
 
 1. Cài OpenCode.
 2. Chạy `opencode` trong terminal, gõ `/connect`, chọn nhà cung cấp và dán key vào. Key do OpenCode giữ, Coppice không bao giờ hỏi đến. Không thấy nhà cung cấp của bạn trong danh sách? Làm theo [hướng dẫn thêm nhà cung cấp tùy chỉnh](https://opencode.ai/docs/providers/#custom-provider) của OpenCode.

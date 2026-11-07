@@ -32,13 +32,13 @@ Bạn cũng có thể sửa file bằng trình soạn thảo bất kỳ. Nâng c
 ## Cập nhật
 Mở **System → Updates** để xem phiên bản và chọn **Check for updates**. **Automatic updates** bật sẵn. Tắt đi thì Coppice sẽ không tự kiểm tra phiên bản mới nữa.
 
-Công tắc này không nằm trong `config.toml`. Coppice lưu nó dưới tên `automaticUpdates` trong `update-settings.json`, cùng thư mục.
+Công tắc này không nằm trong `config.toml`. Coppice lưu thiết lập này dưới tên `automaticUpdates` trong `update-settings.json`, cùng thư mục.
 
 <a id="replace-keys"></a>
 
 ## Thay khóa
 
-Nếu đã lỡ chia sẻ bản sao lưu, hãy tạo khóa mới và mật khẩu admin mới. Token đã lưu vẫn dùng được, nhưng mọi người sẽ bị đăng xuất.
+Nếu đã lỡ chia sẻ bản sao lưu, tạo khóa mới và mật khẩu admin mới. Token đã lưu vẫn dùng được, nhưng mọi người sẽ bị đăng xuất.
 
 Mở **System → Backup → Replace keys**, nhập mật khẩu admin mới, và xác nhận.
 
@@ -49,7 +49,7 @@ Admin có thể mở **System → Logs** để lọc và theo dõi trực tiếp
 
 **Export logs** lưu các dòng khớp với bộ lọc hiện tại thành `coppice-logs.zip`. Coppice đã xóa các token và khóa mà nó biết, nhưng bạn vẫn nên xem lại file trước khi gửi cho người khác.
 
-**Report a problem** mở một GitHub issue mới, điền sẵn phiên bản Coppice của bạn. Hãy mô tả chuyện gì đã xảy ra và đáng lẽ phải ra sao, rồi đính kèm file zip từ **Export logs**.
+**Report a problem** mở một GitHub issue mới, điền sẵn phiên bản Coppice của bạn. Mô tả chuyện gì đã xảy ra và đáng lẽ phải ra sao, rồi đính kèm file zip từ **Export logs**.
 
 ## `[logs]`
 
@@ -101,7 +101,7 @@ Các id: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `
 | Trường | Kiểu | Mặc định | Tác dụng |
 | --- | --- | --- | --- |
 | `enabled` | bool | không đặt: bật nếu CLI đã đăng nhập | Bật hoặc tắt connector. |
-| `model_providers` | list of strings | `[]` | Các nhà cung cấp model cho connector này. Được điền khi bạn bật nó. |
+| `model_providers` | list of strings | `[]` | Các nhà cung cấp model cho connector này. Được điền khi bạn bật connector này. |
 | `run_timeout_secs` | integer | `1800` với mọi connector | Chạy quá số giây này trên connector đó thì báo lỗi. |
 | `max_concurrent_runs` | integer | `2` | Số job connector này được chạy cùng lúc. Job thừa giữ `queued` và chạy theo thứ tự cũ nhất khi có chỗ. Dưới 1 tính là 1. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | File chạy của CLI. Claude Code luôn chạy `claude` và không có `command`. |
@@ -128,7 +128,7 @@ Các khóa trạng thái: `backlog`, `ready`, `in_progress`, `in_review`, `in_qa
 
 Khi tự giao việc bật cho trạng thái đó, Coppice giao ticket cho agent mà lần chạy đề xuất. Khi tắt, ticket hiện **Recommends:** thay vào đó.
 
-Khi tự tách bật cho trạng thái đó, Coppice tạo các ticket con mà lần chạy đề xuất. Khi tắt, nó lưu một **Pending split recommendation** cho đến khi bạn bấm **Approve splits**.
+Khi tự tách bật cho trạng thái đó, Coppice tạo các ticket con mà lần chạy đề xuất. Khi tắt, Coppice lưu một **Pending split recommendation** cho đến khi bạn bấm **Approve splits**.
 
 ## `[knowledge]`
 

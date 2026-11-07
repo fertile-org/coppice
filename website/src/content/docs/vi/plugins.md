@@ -11,7 +11,7 @@ Plugin bổ sung skill và công cụ MCP cho agent. Mỗi plugin là một thư
 - **Skill**: các file `SKILL.md`.
 - **Công cụ MCP**: một file `.mcp.json`.
 
-Mở **Plugins** ở thanh bên để quản lý. Plugin `coppice` có sẵn và luôn ở đó, bạn không tắt được các skill của nó.
+Mở **Plugins** ở thanh bên để quản lý. Plugin `coppice` có sẵn và luôn ở đó. Bạn không tắt được các skill của plugin này.
 
 <a id="install-a-plugin"></a>
 
@@ -31,10 +31,10 @@ Trang **Plugins** có ba tab:
 
 <figure>
 <img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Tab Marketplace trên trang Plugins, có ô tìm kiếm, bộ lọc theo nguồn và các thẻ plugin với nút Install.">
-<figcaption>Tìm trong hàng nghìn plugin và cài chỉ với một cú nhấp.</figcaption>
+<figcaption>Tìm trong hàng nghìn plugin, rồi bấm Install để cài.</figcaption>
 </figure>
 
-Plugin sẽ xuất hiện ở tab **Installed**, ở trạng thái tắt. Tiếp theo, hãy [bật plugin](#enable-it). Plugin dùng được cho mọi agent bạn cấp quyền, dù agent chạy trên CLI nào.
+Plugin sẽ xuất hiện ở tab **Installed**, ở trạng thái tắt. Tiếp theo, [bật plugin](#enable-it). Plugin dùng được cho mọi agent bạn cấp quyền, dù agent chạy trên CLI nào.
 
 <a id="marketplace-sources"></a>
 
@@ -51,13 +51,13 @@ Cách các nguồn được tải:
 
 - Mỗi nguồn tự tải khi bạn mở tab **Marketplace** lần đầu.
 - Nguồn được tải lại ở chế độ nền nếu đã cũ hơn 24 giờ.
-- Nguồn tải lỗi sẽ báo lỗi trên chip của nó. Bấm vào chip để thử lại.
+- Nguồn tải lỗi sẽ báo lỗi trên chip của nguồn đó. Bấm chip để thử lại.
 
 <a id="community-plugins"></a>
 
 #### Ai đã xem xét plugin
 - Thẻ có nhãn **Coppice** đến từ danh mục của Coppice.
-- Mọi thẻ khác có nhãn **Community: not reviewed by Coppice**. Hãy xem xét trước khi bật.
+- Mọi thẻ khác có nhãn **Community: not reviewed by Coppice**. Xem xét plugin trước khi bật.
 - Mục trong danh mục có ghim `sha` sẽ cài đúng commit đó, kể cả khi nhánh đã thay đổi.
 
 <a id="manage-sources"></a>
@@ -65,7 +65,7 @@ Cách các nguồn được tải:
 #### Quản lý nguồn
 Bấm **Manage sources** để xem từng nguồn và lần làm mới gần nhất.
 
-- **Thêm nguồn**: thêm một git repo có `.claude-plugin/marketplace.json`. Coppice tải danh mục của nó ngay.
+- **Thêm nguồn**: thêm một git repo có `.claude-plugin/marketplace.json`. Coppice tải danh mục của repo đó ngay.
 - **Tải lại**: bấm **Refresh**, hoặc **Retry** sau khi có lỗi.
 - **Xóa nguồn**: bạn xóa được mọi nguồn trừ **coppice**. Plugin đã cài từ nguồn đó vẫn được giữ. Nguồn mặc định đã xóa sẽ không quay lại.
 
@@ -107,11 +107,12 @@ Coppice clone repo bằng thông tin đăng nhập git trên máy bạn. Sau nà
 ## 2. Bật plugin
 Plugin mới thêm vào đều đang tắt.
 
+Plugin có MCP server chạy cục bộ sẽ chạy trên máy bạn, với quyền của bạn, nên Coppice sẽ hỏi xác nhận trước khi chạy.
+
 1. Bật công tắc trên hàng plugin. Chỉ plugin ở trạng thái `ok` mới bật được.
 2. Nếu chi tiết có mục **Settings**, điền từng giá trị rồi bấm **Save settings**. Các giá trị này được mã hóa khi lưu.
 3. Bấm **Test** để khởi động công cụ của plugin và xem danh sách công cụ. Chưa bật plugin vẫn bấm được.
 
-- Plugin có MCP server chạy cục bộ sẽ chạy trên máy bạn với quyền của chính máy bạn, nên Coppice sẽ hỏi bạn xác nhận trước.
 - Mỗi skill có công tắc riêng. Skill nào bị tắt sẽ ẩn với mọi agent, kể cả các lần chạy đang diễn ra.
 
 <a id="choose-which-agents-can-use-it"></a>
@@ -230,4 +231,4 @@ Thêm `.mcp.json` với một map `mcpServers`. Mỗi server là cục bộ ho�
 
 Ví dụ này cung cấp công cụ `hello-coppice__greet` và skill `hello-coppice:greeting-style`. Xem ví dụ đầy đủ tại [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins).
 
-Các thư mục `commands/`, `agents/` và `hooks/` chưa được hỗ trợ. Chúng hiện "Not supported yet" và không chạy.
+Các thư mục `commands/`, `agents/` và `hooks/` chưa được hỗ trợ. Ba thư mục này hiện "Not supported yet" và không chạy.

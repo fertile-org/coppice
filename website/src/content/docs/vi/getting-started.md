@@ -19,7 +19,7 @@ Nhà cung cấp là agent CLI mà Coppice chạy giúp bạn: Claude Code, Codex
 2. Trong Coppice, mở **System** ở thanh bên, rồi chọn **Connectors**.
 3. Tìm dòng của CLI đó. Dòng hiện **Ready** là Coppice dùng được. Mở dòng để xem chi tiết.
 
-Nếu hiện **Found, not signed in**, hãy đăng nhập CLI trong terminal. Nếu hiện **Not on your PATH**, hãy cài CLI, hoặc làm theo **Install docs** trong ngăn chi tiết. Xong thì bấm **Run check**.
+Nếu hiện **Found, not signed in**, đăng nhập CLI trong terminal. Nếu hiện **Not on your PATH**, cài CLI, hoặc làm theo **Install docs** trong ngăn chi tiết. Xong thì bấm **Run check**.
 
 Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Coppice không kiểm tra được trạng thái đăng nhập của các CLI này nếu không dùng đến gói của bạn, nên nếu bạn đã đăng xuất thì lần chạy sẽ báo lỗi.
 
@@ -35,7 +35,7 @@ Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Coppice
 
 Lưu agent xong, connector đó sẽ được bật. Bạn sẽ thấy dòng "{name} turned on."
 
-Hãy thêm một agent **PM**, một agent **Technical Lead**, và ít nhất một agent làm việc (**Frontend Engineer**, **Backend Engineer** hoặc **Research**). Khâu lên kế hoạch và chuyển giao việc cần đủ cả ba.
+Thêm một agent **PM**, một agent **Technical Lead**, và ít nhất một agent làm việc (**Frontend Engineer**, **Backend Engineer** hoặc **Research**). Lên kế hoạch và chuyển giao việc cần đủ cả ba.
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="Form tạo agent mới, đã điền tên, vai trò và chọn một CLI.">
@@ -47,10 +47,10 @@ Hãy thêm một agent **PM**, một agent **Technical Lead**, và ít nhất m�
 ## 3. Thêm repository
 1. Mở **Repositories** ở thanh bên và bấm **Add repository**.
 2. Cạnh **Local path**, bấm **Browse…** và chọn một git checkout trên máy.
-3. Coppice sẽ cố điền sẵn **Name**, **Remote URL (optional)** và **Default branch** từ checkout đó. Hãy kiểm tra lại.
+3. Coppice sẽ cố điền sẵn **Name**, **Remote URL (optional)** và **Default branch** từ checkout đó. Kiểm tra lại các mục đó.
 4. Bấm **Add repository**.
 
-Dòng mới sẽ hiện **Ready**. Nếu hiện **Path missing** hoặc **Not a git repo**, hãy chọn lại thư mục.
+Dòng mới sẽ hiện **Ready**. Nếu hiện **Path missing** hoặc **Not a git repo**, chọn lại thư mục.
 
 <a id="4-set-up-a-board"></a>
 
@@ -76,7 +76,7 @@ Nút **Run agent** chỉ bật khi ticket đã có người được giao và re
 
 <figure>
 <img src="/assets/docs/backlog-ticket.webp" width="1440" height="900" alt="Một bảng có ticket mới ở cột Backlog, nút Run agent đang hiện.">
-<figcaption>Bấm Run agent là PM bắt đầu viết kế hoạch.</figcaption>
+<figcaption>Bấm Run agent thì agent PM bắt đầu viết kế hoạch.</figcaption>
 </figure>
 
 <a id="what-happens-next"></a>
