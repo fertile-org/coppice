@@ -22,7 +22,7 @@ Use this skill for English in this repository:
 
 Cursor loads it from `.cursor/skills/english-technical-writing/` for agents working in this checkout. Do not copy it into `.agents/skills/`, `.claude/skills/`, a root `skills/` directory, `server/builtin-plugins/`, or `server/marketplace/`. Those paths are Coppice runtime skill layouts. This skill must not be injected into end-user agents.
 
-Do not apply these English habits to locale READMEs or translated site docs as if that language had already been researched. A translation edit still preserves literals, but the prose rules below are English-only. Add another language only as its own reviewed skill under `.cursor/skills/`, in a later loop. Do not draft that skill from this file.
+Do not apply these English habits to Vietnamese pages. Vietnamese authoring has its own skill, [vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md). A translation edit still preserves literals, but the prose rules below are English-only. Other languages still need their own reviewed skills. Do not draft those from this file.
 
 On a style pass, do not change product behavior. Preserve the locked positioning and design line recorded in [docs/milestones/M12-beta-release.md](../../../docs/milestones/M12-beta-release.md) and [docs/web/DESIGN.md](../../../docs/web/DESIGN.md). Leave Beta labels and the human-gate names **Plan Review** and **Wait for Human Review** as written unless a separate product change asks for them.
 
