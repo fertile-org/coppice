@@ -35,13 +35,13 @@ describe('download page copy', () => {
           note: macHelp,
           rows: [
             {
-              name: 'macOS (Apple Silicon)',
+              name: 'macOS (Apple Silicon) · arm64',
               label: 'Download .dmg',
               href: asset('Coppice-mac-arm64.dmg'),
               kind: 'button',
             },
             {
-              name: 'macOS (Intel)',
+              name: 'macOS (Intel) · x64',
               label: 'Download .dmg',
               href: asset('Coppice-mac-x64.dmg'),
               kind: 'button',
@@ -53,7 +53,7 @@ describe('download page copy', () => {
           note: null,
           rows: [
             {
-              name: 'Linux (x64)',
+              name: 'Linux (x64) · amd64',
               label: 'Download .deb',
               href: asset('Coppice-linux-amd64.deb'),
               kind: 'button',
@@ -71,7 +71,7 @@ describe('download page copy', () => {
           note: null,
           rows: [
             {
-              name: 'Windows 11',
+              name: 'Windows 11 · x64 through WSL',
               label: 'Install through WSL',
               href: '/docs/install#windows-11-through-wsl',
               kind: 'link',
@@ -108,15 +108,15 @@ describe('download row order', () => {
   it('puts both Mac rows first, Apple Silicon then Intel, without reading CPU architecture', () => {
     assert.deepEqual(orderOs('mac'), ['mac', 'linux', 'windows']);
     assert.deepEqual(downloadPage.groups.find((group) => group.os === 'mac')?.rows.map((row) => row.name), [
-      'macOS (Apple Silicon)',
-      'macOS (Intel)',
+      'macOS (Apple Silicon) · arm64',
+      'macOS (Intel) · x64',
     ]);
   });
 
   it('puts Linux x64 before Linux ARM64, then the other rows in no-JS order', () => {
     assert.deepEqual(orderOs('linux'), ['linux', 'mac', 'windows']);
     assert.deepEqual(downloadPage.groups.find((group) => group.os === 'linux')?.rows.map((row) => row.name), [
-      'Linux (x64)',
+      'Linux (x64) · amd64',
       'Linux (ARM64)',
     ]);
   });

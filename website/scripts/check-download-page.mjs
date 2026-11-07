@@ -54,6 +54,7 @@ expectOrder(
     'Windows 11',
     '/docs/install#windows-11-through-wsl',
     'Install through WSL',
+    'untested',
     'Check your download against ',
     'https://github.com/fertile-org/coppice/releases/latest/download/SHA256SUMS',
     'SHA256SUMS',

@@ -347,6 +347,17 @@ a:hover {
   font-weight: 650;
 }
 
+.download-choice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+}
+
+.download-untested {
+  color: var(--color-bark-700);
+  font-size: 0.95rem;
+}
+
 .download-mac-help {
   margin: 0;
   max-width: 42rem;
