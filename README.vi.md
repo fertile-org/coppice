@@ -50,7 +50,7 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
 
 ## Cách hoạt động
 
-1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai viết code. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
+1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện. Bạn duyệt kế hoạch trước khi bắt đầu viết code, trừ khi bạn chọn **Skip planning**. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
 2. **Để các agent làm việc.** Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ thay đổi bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.
 3. **Human Review.** Đọc diff ngay trong ứng dụng, góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong.
 
@@ -64,7 +64,7 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
   <tr>
     <td align="center">Mọi agent trên một bảng</td>
     <td align="center">So sánh các phương án thiết kế</td>
-    <td align="center">Duyệt kế hoạch trước khi làm</td>
+    <td align="center">Duyệt kế hoạch trước khi viết code, trừ khi chọn Skip planning</td>
     <td align="center">Review diff từng dòng</td>
   </tr>
 </table>

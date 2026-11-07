@@ -35,7 +35,7 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Giao việc.',
-        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện, để bạn duyệt trước khi ai viết code.',
+        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện. Bạn duyệt kế hoạch trước khi bắt đầu viết code, trừ khi bạn chọn Skip planning.',
       },
       {
         title: 'Để các agent làm việc.',
