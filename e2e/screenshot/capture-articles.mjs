@@ -204,6 +204,7 @@ async function enableDemoConnectors() {
     `,
     { user: '0:0' },
   );
+  await serverSh('rm -f /home/coppice/.local/bin/cursor-agent', { user: '0:0' });
   for (const name of ['claude', 'codex']) {
     const bin = path.join(HERE, 'fixtures/bin', name);
     await run(composeArgs(['cp', bin, `server:/home/coppice/.local/bin/${name}`]));
@@ -323,7 +324,7 @@ async function captureConnectors(page) {
   await page.goto(`${WEB}/system/connectors`, { waitUntil: 'domcontentloaded' });
   await page.getByText('Claude Code', { exact: false }).first().waitFor({ timeout: 30_000 });
   await page.getByText('Codex', { exact: true }).first().waitFor();
-  await hideMockRow(page);
+  await hideDevMock(page);
   const claude = page.getByRole('button', { name: /Claude Code/ });
   const codex = page.getByRole('button', { name: /^Codex\b/ });
   await claude.waitFor();
@@ -341,6 +342,18 @@ async function captureConnectors(page) {
 async function selectCombobox(page, id, optionName) {
   await page.locator(`#${id}`).click();
   await page.getByRole('option', { name: optionName, exact: true }).click();
+  await page.getByRole('listbox').waitFor({ state: 'hidden' }).catch(() => {});
+}
+
+async function hideDevMock(page) {
+  // The Compose image is built with mock-provider. Desktop builds omit it.
+  // Remove that row so the still matches the desktop product.
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('li, button, [role="option"]')) {
+      const text = (el.innerText || el.textContent || '').trim();
+      if (/^Mock\b/.test(text)) el.remove();
+    }
+  });
 }
 
 async function captureNewAgent(page) {
@@ -356,9 +369,23 @@ async function captureNewAgent(page) {
   await selectCombobox(page, 'agent-connector', 'Claude Code — Ready');
   await page.locator('#agent-model').waitFor();
   await page.locator('#agent-system-prompt').evaluate((node) => {
-    node.style.height = '7.5rem';
+    node.style.height = '4.5rem';
   });
-  await page.locator('#agent-name').evaluate((node) => node.scrollIntoView({ block: 'start' }));
+  await page.locator('#agent-preset').evaluate((node) => node.scrollIntoView({ block: 'start' }));
+  const fitted = await page.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    const ids = ['agent-preset', 'agent-role', 'agent-connector', 'agent-model'];
+    if (!dialog) return false;
+    const box = dialog.getBoundingClientRect();
+    return ids.every((id) => {
+      const node = document.getElementById(id);
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1;
+    });
+  });
+  if (!fitted) fail('new agent form does not show the preset, role, connector, and model together');
+  await hideDevMock(page);
   await preparePage(page, 'new agent');
   await shoot(page, 'new-agent.png');
 }

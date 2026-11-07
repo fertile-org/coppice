@@ -4,7 +4,7 @@
 # It does not read a key, a home directory, or a credential file.
 case "${1:-} ${2:-}" in
   "--version ")
-    printf '%s\n' 'claude 2.1.0'
+    printf '%s\n' 'claude 2.1.0-demo'
     ;;
   "auth status")
     printf '%s\n' '{"loggedIn":true}'

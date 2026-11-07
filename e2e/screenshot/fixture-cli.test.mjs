@@ -22,7 +22,7 @@ describe('demo connector fixtures', () => {
   it('answers the Claude Code sign-in probe without a host secret', () => {
     const version = runFixture('claude', ['--version']);
     assert.equal(version.status, 0, version.stderr);
-    assert.match(version.stdout, /^claude 2\./);
+    assert.match(version.stdout, /^claude 2\.1\.0-demo\n$/);
     const status = runFixture('claude', ['auth', 'status']);
     assert.equal(status.status, 0, status.stderr);
     assert.match(status.stdout, /"loggedIn":true/);
