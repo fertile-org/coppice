@@ -1,7 +1,7 @@
 ---
 title: 外掛
 metaTitle: "外掛：代理技能與 MCP 工具"
-description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git 或資料夾安裝，啓用後選擇哪些代理可以使用，也可以自己撰寫外掛。"
+description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git 或資料夾安裝，啟用後選擇哪些代理可以使用，也可以自己撰寫外掛。"
 ---
 
 # 外掛
@@ -11,7 +11,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 - **技能**：`SKILL.md` 檔案。
 - **MCP 工具**：一個 `.mcp.json` 檔案。
 
-在側邊欄中開啓 **Plugins**（外掛）來管理它們。內建的 `coppice` 外掛始終存在，它的技能無法關閉。
+在側邊欄中開啟 **Plugins**（外掛）來管理它們。內建的 `coppice` 外掛始終存在，它的技能無法關閉。
 
 <a id="install-a-plugin"></a>
 
@@ -25,16 +25,16 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 <a id="from-the-marketplace"></a>
 
 ### 從外掛市集安裝
-1. 開啓 **Plugins**，切換到 **Marketplace** 分頁。
+1. 開啟 **Plugins**，切換到 **Marketplace** 分頁。
 2. 搜尋，或按來源、類別篩選。
-3. 點選項目上的 **Install**。
+3. 在項目上按 **Install**。
 
 <figure>
 <img src="/assets/docs/plugin-marketplace.webp" width="1440" height="900" alt="Plugins 頁面的 Marketplace 分頁，包含搜尋框、來源篩選和帶 Install 按鈕的外掛卡片。">
 <figcaption>在數千個外掛中搜尋，一鍵安裝。</figcaption>
 </figure>
 
-外掛會出現在 **Installed** 分頁，處於停用狀態。接下來請[啓用它](#enable-it)。無論代理執行在哪個 CLI 上，外掛都能供你授權的代理使用。
+外掛會出現在 **Installed** 分頁，處於停用狀態。接下來請[啟用它](#enable-it)。無論代理執行在哪個 CLI 上，外掛都能供你授權的代理使用。
 
 <a id="marketplace-sources"></a>
 
@@ -49,67 +49,67 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 
 來源的載入方式：
 
-- 第一次開啓 **Marketplace** 分頁時，每個來源會自動載入。
+- 第一次開啟 **Marketplace** 分頁時，每個來源會自動載入。
 - 如果來源已超過 24 小時，會在背景重新載入。
-- 載入失敗的來源標籤會顯示錯誤，點選它可重試。
+- 載入失敗的來源標籤會顯示錯誤，按它可重試。
 
 <a id="community-plugins"></a>
 
 #### 誰審核過外掛
 - 標記為 **Coppice** 的卡片來自 Coppice 目錄。
-- 其他卡片都標記為 **Community: not reviewed by Coppice**。啓用前請先審核。
+- 其他卡片都標記為 **Community: not reviewed by Coppice**。啟用前請先審核。
 - 固定了 `sha` 的目錄項目會安裝那個確切的提交，即使分支已經變化。
 
 <a id="manage-sources"></a>
 
 #### 管理來源
-點選 **Manage sources**，檢視每個來源及其上次重新整理時間。
+按 **Manage sources**，查看每個來源及其上次重新整理時間。
 
 - **新增來源**：新增一個包含 `.claude-plugin/marketplace.json` 的 git 倉庫。Coppice 會立即取得它的目錄。
-- **重新取得**：點選 **Refresh**，出錯後點選 **Retry**。
+- **重新取得**：按 **Refresh**，出錯後按 **Retry**。
 - **移除來源**：除 **coppice** 外都可以移除。從該來源安裝的外掛會保留。移除的預設來源不會再回來。
 
 <a id="example-github"></a>
 
 #### 示例：GitHub
 1. 從外掛市集安裝 `github`。
-2. 開啓它，在 **Settings** 下把 GitHub 個人存取權杖貼到 `GITHUB_PERSONAL_ACCESS_TOKEN`，然後點選 **Save settings**。
-3. 點選 **Test** 列出它的工具。
-4. 啓用它，並選擇哪些代理可以使用。
+2. 開啟它，在 **Settings** 下把 GitHub 個人存取權杖貼到 `GITHUB_PERSONAL_ACCESS_TOKEN`，然後按 **Save settings**。
+3. 按 **Test** 列出它的工具。
+4. 啟用它，並選擇哪些代理可以使用。
 
 這個權杖與 **Settings** 裏 Coppice 用於拉取請求的 GitHub 權杖是分開的。
 
 <a id="from-git"></a>
 
 ### 從 git 安裝
-1. 開啓 **Custom** 分頁。
+1. 開啟 **Custom** 分頁。
 2. 貼上 **Git URL**。
 3. 可選：設定 **Ref (optional)**，例如 `main`。
 4. 選擇 **Target directory**（目標目錄）。
-5. 點選 **Install**。
+5. 按 **Install**。
 
-Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裏點選 **Update** 即可拉取新改動。
+Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裏按 **Update** 即可拉取新改動。
 
 <a id="from-a-folder"></a>
 
 ### 從資料夾安裝
-1. 開啓 **Custom** 分頁。
-2. 在 **Plugin directories**（外掛目錄）下點選 **Browse…** 選擇資料夾，或直接在 **Directory path** 中輸入路徑。
-3. 點選 **Add directory**。
+1. 開啟 **Custom** 分頁。
+2. 在 **Plugin directories**（外掛目錄）下按 **Browse…** 選擇資料夾，或直接在 **Directory path** 中輸入路徑。
+3. 按 **Add directory**。
 
 - 這個資料夾可以本身就是一個外掛，也可以把多個外掛作為子資料夾放在裏面。
-- 修改檔案後請點選 **Rescan**（重新掃描）。
+- 修改檔案後請按 **Rescan**（重新掃描）。
 - 如果兩個資料夾裏有同名外掛，列表中靠上的那個優先。用箭頭可以調整資料夾順序。
 - 你的預設資料夾標有 **Default**，無法移除。
 
 <a id="enable-it"></a>
 
-## 2. 啓用外掛
+## 2. 啟用外掛
 外掛初始為停用狀態。
 
-1. 開啓外掛列上的開關。只有狀態為 `ok` 的外掛才能啓用。
-2. 如果詳情裏有 **Settings**，填寫每個值並點選 **Save settings**。這些值會加密儲存。
-3. 點選 **Test**，啓動外掛的工具並列出它們。啓用之前也可以測試。
+1. 開啟外掛列上的開關。只有狀態為 `ok` 的外掛才能啟用。
+2. 如果詳情裏有 **Settings**，填寫每個值並按 **Save settings**。這些值會加密儲存。
+3. 按 **Test**，啟動外掛的工具並列出它們。啟用之前也可以測試。
 
 - 帶本地 MCP 伺服器的外掛會以你電腦的許可權在本機執行。Coppice 會先請你確認。
 - 每個技能都有自己的開關。關閉的技能對所有代理都不可見，即使是已經在執行中的任務也一樣。
@@ -133,18 +133,18 @@ Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裏點選 
 <a id="use-it-on-a-ticket"></a>
 
 ## 4. 在工單上使用
-1. 啓用外掛。
+1. 啟用外掛。
 2. 讓工單的負責人有權使用它。
-3. 點選 **Run agent**。
+3. 按 **Run agent**。
 
 - 代理能看到每個技能的名稱和描述，需要時再載入該技能。
 - 工具的命名格式為 `<plugin>__<tool>`。
 
-想檢視用了什麼：
+想查看用了甚麼：
 
-1. 開啓工單的 **Agent Runs**（代理執行）標籤頁。
+1. 開啟工單的 **Agent Runs**（代理執行）標籤頁。
 2. 展開一次執行。
-3. 開啓 **Tools & Skills**。外掛呼叫會標記為 **Plugin**。
+3. 開啟 **Tools & Skills**。外掛呼叫會標記為 **Plugin**。
 
 <a id="create-a-plugin"></a>
 
@@ -173,7 +173,7 @@ hello-coppice/
 }
 ```
 
-| 欄位 | 必填 | 説明 |
+| 欄位 | 必填 | 說明 |
 | --- | --- | --- |
 | `name` | 是 | 字母、數字、`.`、`_` 和 `-`，最多 64 個字元，必須以字母或數字開頭。`coppice` 為保留名稱。 |
 | `version` | 否 | 預設為 `0.0.0`。 |
@@ -201,7 +201,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 ```
 
 - `name` 和 `description` 為必填項。
-- description 要寫得讓代理知道什麼時候該載入這個技能。
+- description 要寫得讓代理知道甚麼時候該載入這個技能。
 
 <a id="mcp-tools"></a>
 
