@@ -66,7 +66,7 @@ Windows 11 が必要です。古い Windows 10 のビルドでは Linux アプ�
 4. 使うエージェント CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok）を Ubuntu にインストールします。CLI と git へのサインインも Ubuntu で行います。
 5. Windows のスタートメニュー（Ubuntu の下）から Coppice を起動するか、Ubuntu で `coppice` を実行します。
 
-   CLI に Not on your PATH と表示されたら、Ubuntu で `coppice` を実行して Coppice を起動してください。
+   CLI に **Not on your PATH** と表示されたら、Ubuntu で `coppice` を実行して Coppice を起動してください。
 
 WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 側の CLI を見つけてしまうことがあります。**System → Connectors** を開き、各コネクタの CLI のパスを確認してください。パスが `/mnt/c/` で始まっていたら、その CLI を Ubuntu にインストールしてください。
 
