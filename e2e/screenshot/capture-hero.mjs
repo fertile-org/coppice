@@ -39,6 +39,7 @@ import {
   DESIGN_SET_TITLE,
   RECOMMENDED_OPTION_ID,
 } from './design-options.mjs';
+import { composeInvocation } from './compose-cli.mjs';
 import { resetMarketingWorkspace } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
@@ -53,10 +54,6 @@ const MP4_OUT = path.join(ASSETS, 'marketing.mp4');
 const WEBM_OUT = path.join(ASSETS, 'marketing.webm');
 const POSTER = path.join(ASSETS, 'hero-screenshot.png');
 const PROJECT = process.env.COPPICE_COMPOSE_PROJECT ?? 'coppice-screenshot';
-const COMPOSE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.screenshot.yml',
-];
 
 const VIEWPORT = { width: 1440, height: 900 };
 const GIF_WIDTH = 960;
@@ -172,10 +169,8 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
 }
 
 function composeArgs(extra) {
-  const args = ['docker', 'compose', '-p', PROJECT];
-  for (const file of COMPOSE_FILES) args.push('-f', file);
-  args.push(...extra);
-  return args;
+  const { bin, args } = composeInvocation(extra, { project: PROJECT });
+  return [bin, ...args];
 }
 
 function serverUser() {

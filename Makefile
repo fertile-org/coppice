@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke gen-icons e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot screenshot-docs screenshot-down screenshot-check benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke gen-icons e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot screenshot-docs screenshot-articles screenshot-down screenshot-check benchmark-m06-knowledge-retrieval release-tar
 
 # Bound rustc parallelism so `make test` fits in 16 GB. Override for low-mem:
 #   make test CARGO_BUILD_JOBS=2 NEXTEST_PROFILE=low-mem
@@ -202,6 +202,10 @@ screenshot:
 # Docs stills only. The screenshot stack from `make screenshot` must still be up.
 screenshot-docs:
 	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh docs
+
+# Article stills on the stack from `make screenshot`. Does not start a second project.
+screenshot-articles:
+	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh articles
 
 # Stop the screenshot stack and delete its private directory.
 screenshot-down:

@@ -58,9 +58,24 @@ EOF
 compose() {
   # Do not pass a host SECRETS_MASTER_KEY into this process.
   unset SECRETS_MASTER_KEY || true
+  overlay="-f deploy/docker-compose.screenshot.yml"
+  if [ "${COPPICE_SCREENSHOT_TRANSFER:-bind}" = copy ]; then
+    overlay="$overlay -f deploy/docker-compose.screenshot-copy.yml"
+  elif [ "${COPPICE_SCREENSHOT_TRANSFER:-bind}" != bind ]; then
+    printf '%s\n' "COPPICE_SCREENSHOT_TRANSFER must be bind or copy" >&2
+    exit 1
+  fi
   # shellcheck disable=SC2086
   COPPICE_REPOS_HOST="$COPPICE_REPOS_HOST" COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" \
-    ${DOCKER_COMPOSE:-docker compose} -f deploy/docker-compose.yml -p coppice-screenshot -f deploy/docker-compose.screenshot.yml "$@"
+    ${DOCKER_COMPOSE:-docker compose} -f deploy/docker-compose.yml -p coppice-screenshot $overlay "$@"
+}
+
+publish_config() {
+  if [ -L "$COPPICE_SCREENSHOT_CONFIG" ] || [ ! -f "$COPPICE_SCREENSHOT_CONFIG" ]; then
+    printf '%s\n' "refusing to copy screenshot config: $COPPICE_SCREENSHOT_CONFIG" >&2
+    return 1
+  fi
+  compose cp "$COPPICE_SCREENSHOT_CONFIG" server:/etc/coppice/config.toml
 }
 
 case "$cmd" in
@@ -102,7 +117,22 @@ case "$cmd" in
       rm -f "$pointer"
       exit 1
     fi
-    if ! compose up -d --force-recreate --no-deps server; then
+    if [ "${COPPICE_SCREENSHOT_TRANSFER:-bind}" = copy ]; then
+      # Recreate would drop the copied file. The image's example config is
+      # replaced in the container, then the server starts again.
+      if ! publish_config; then
+        compose down -v --remove-orphans || true
+        sh "$root/e2e/screenshot/remove-capture.sh" "$dir" || true
+        rm -f "$pointer"
+        exit 1
+      fi
+      if ! compose restart server; then
+        compose down -v --remove-orphans || true
+        sh "$root/e2e/screenshot/remove-capture.sh" "$dir" || true
+        rm -f "$pointer"
+        exit 1
+      fi
+    elif ! compose up -d --force-recreate --no-deps server; then
       compose down -v --remove-orphans || true
       sh "$root/e2e/screenshot/remove-capture.sh" "$dir" || true
       rm -f "$pointer"
@@ -127,6 +157,12 @@ case "$cmd" in
     cd "$root"
     COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" node e2e/screenshot/capture-docs.mjs
     ;;
+  articles)
+    load_pointer
+    cd e2e && yarn install --frozen-lockfile && yarn playwright install chromium
+    cd "$root"
+    COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" node e2e/screenshot/capture-articles.mjs
+    ;;
   down)
     if [ -f "$pointer" ]; then
       load_pointer
@@ -138,7 +174,7 @@ case "$cmd" in
     fi
     ;;
   *)
-    printf '%s\n' "usage: run.sh up|docs|down" >&2
+    printf '%s\n' "usage: run.sh up|docs|articles|down" >&2
     exit 1
     ;;
 esac

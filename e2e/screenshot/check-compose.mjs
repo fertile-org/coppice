@@ -19,19 +19,8 @@ function fail(message) {
   process.exit(1);
 }
 
-const dir = mkdtempSync(path.join(tmpdir(), 'coppice-screenshot.'));
-try {
-  const prepared = spawnSync('sh', [path.join(root, 'e2e/screenshot/prepare-capture.sh'), dir, path.join(root, 'deploy/config/config.example.toml')], {
-    encoding: 'utf8',
-  });
-  if (prepared.status !== 0) fail(prepared.stderr || 'prepare-capture failed');
-  const [repos, config] = prepared.stdout.trim().split('\n');
-
-  const env = { ...process.env, SECRETS_MASTER_KEY: CANARY, HOME: HOME_CANARY, COPPICE_REPOS_HOST: repos, COPPICE_SCREENSHOT_CONFIG: config };
-  delete env.COPPICE_PG_PORT;
-  delete env.COPPICE_SERVER_PORT;
-  delete env.COPPICE_WEB_PORT;
-  const composeArgs = ['-f', 'deploy/docker-compose.yml', '-f', 'deploy/docker-compose.screenshot.yml', 'config'];
+function renderYaml(files, env) {
+  const composeArgs = [...files.flatMap((file) => ['-f', file]), 'config'];
   const attempts = [
     ['docker', ['compose', ...composeArgs]],
     ['docker-compose', composeArgs],
@@ -50,15 +39,20 @@ try {
   if (rendered.status !== 0) {
     fail(rendered.stderr || rendered.stdout || 'docker compose config failed');
   }
-  const yaml = rendered.stdout;
-  if (yaml.includes(CANARY)) fail('rendered config contains the host SECRETS_MASTER_KEY');
-  if (yaml.includes(HOME_CANARY)) fail('rendered config contains the host home path');
-  if (yaml.includes('0.0.0.0')) fail('rendered config publishes on 0.0.0.0');
-  if (!yaml.includes(`SECRETS_MASTER_KEY: ${DEMO_KEY}`) && !yaml.includes(`SECRETS_MASTER_KEY: "${DEMO_KEY}"`)) {
-    fail(`rendered config does not set SECRETS_MASTER_KEY to ${DEMO_KEY}`);
-  }
-  if (yaml.includes('deploy/config/config.toml')) fail('rendered config still mounts deploy/config/config.toml');
+  return rendered.stdout;
+}
 
+function assertDemoIsolation(yaml, label) {
+  if (yaml.includes(CANARY)) fail(`${label} contains the host SECRETS_MASTER_KEY`);
+  if (yaml.includes(HOME_CANARY)) fail(`${label} contains the host home path`);
+  if (yaml.includes('0.0.0.0')) fail(`${label} publishes on 0.0.0.0`);
+  if (!yaml.includes(`SECRETS_MASTER_KEY: ${DEMO_KEY}`) && !yaml.includes(`SECRETS_MASTER_KEY: "${DEMO_KEY}"`)) {
+    fail(`${label} does not set SECRETS_MASTER_KEY to ${DEMO_KEY}`);
+  }
+  if (yaml.includes('deploy/config/config.toml')) fail(`${label} still mounts deploy/config/config.toml`);
+}
+
+function assertLoopback(yaml) {
   const services = new Map();
   let service = null;
   let inPorts = false;
@@ -107,6 +101,24 @@ try {
       fail(`${name} host_ip is ${published.host_ip ?? '(unset)'} ${published.raw ?? ''}`);
     }
   }
+}
+
+const dir = mkdtempSync(path.join(tmpdir(), 'coppice-screenshot.'));
+try {
+  const prepared = spawnSync('sh', [path.join(root, 'e2e/screenshot/prepare-capture.sh'), dir, path.join(root, 'deploy/config/config.example.toml')], {
+    encoding: 'utf8',
+  });
+  if (prepared.status !== 0) fail(prepared.stderr || 'prepare-capture failed');
+  const [repos, config] = prepared.stdout.trim().split('\n');
+
+  const env = { ...process.env, SECRETS_MASTER_KEY: CANARY, HOME: HOME_CANARY, COPPICE_REPOS_HOST: repos, COPPICE_SCREENSHOT_CONFIG: config };
+  delete env.COPPICE_PG_PORT;
+  delete env.COPPICE_SERVER_PORT;
+  delete env.COPPICE_WEB_PORT;
+  const bindFiles = ['deploy/docker-compose.yml', 'deploy/docker-compose.screenshot.yml'];
+  const yaml = renderYaml(bindFiles, env);
+  assertDemoIsolation(yaml, 'bind mode');
+  assertLoopback(yaml);
 
   const reposMount = yaml.includes(repos);
   const configMount = yaml.includes(config);
@@ -114,6 +126,21 @@ try {
   if (!configMount) fail('rendered config does not mount the private config file');
   console.log('screenshot-check: merged config publishes postgres, API, and web on 127.0.0.1 only');
   console.log('screenshot-check: SECRETS_MASTER_KEY is the demo value; host key and home path are absent');
+
+  // The bind file still interpolates its required paths. Copy mode overrides
+  // those mounts, so the rendered service has no host file.
+  const copyYaml = renderYaml(
+    [...bindFiles, 'deploy/docker-compose.screenshot-copy.yml'],
+    env,
+  );
+  assertDemoIsolation(copyYaml, 'copy mode');
+  assertLoopback(copyYaml);
+  if (copyYaml.includes(repos) || copyYaml.includes(config)) {
+    fail('copy mode still mounts the private directory');
+  }
+  if (copyYaml.includes('type: bind')) fail('copy mode publishes a host bind');
+  if (!copyYaml.includes('screenshot_repos:')) fail('copy mode does not mount the project repos volume');
+  console.log('screenshot-check: copy mode publishes no host file');
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
