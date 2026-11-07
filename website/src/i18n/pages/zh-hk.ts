@@ -10,11 +10,11 @@ export const pages: Pages = {
       'Coppice 是在本地執行的開源 AI 程式設計代理看板。Claude Code、Codex、Cursor 等代理並行規劃、構建和審查，每個 diff 都由你接受。',
     worksWith: '支援',
     h1: '僱用專家，你來拍板。',
-    lede: '你的 PM 代理起草計劃，由你批准。專業代理並行構建。你接受 diff 之前，什麼都不算完成。',
+    lede: '你的 PM 代理起草計劃，由你批准。專業代理並行構建。你接受 diff 之前，甚麼都不算完成。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 倉庫的工單',
       videoAlt:
-        'Coppice：寫一個工單，比較設計方案，批准 PM 代理起草的計劃，讓代理構建和測試，然後對 diff 發表評論。你接受之前，什麼都不算完成。',
+        'Coppice：寫一個工單，比較設計方案，批准 PM 代理起草的計劃，讓代理構建和測試，然後對 diff 發表評論。你接受之前，甚麼都不算完成。',
       captions: [
         '寫一個工單。',
         '你的 PM 代理起草計劃。',
@@ -22,14 +22,14 @@ export const pages: Pages = {
         '你來批准。',
         '代理構建、審查、測試。',
         '審查 diff，可以評論任意一行。',
-        '你接受之前，什麼都不算完成。',
+        '你接受之前，甚麼都不算完成。',
       ],
     },
     support: '開源（Apache 2.0）。本地執行，無需 Coppice 帳號。',
     downloads: {
       mac: '下載 macOS 版（Apple Silicon）',
       linux: '下載 Linux 版（.deb）',
-      docs: '閲讀文件',
+      docs: '閱讀文件',
     },
     howTitle: '工作方式',
     steps: [
@@ -39,15 +39,15 @@ export const pages: Pages = {
       },
       {
         title: '讓代理去構建。',
-        body: '每個工單都有自己的 git worktree，並行的代理永遠不會碰你的主檢出目錄。任何一次執行都可以即時檢視。',
+        body: '每個工單都有自己的 git worktree，並行的代理永遠不會碰你的主檢出目錄。任何一次執行都可以即時查看。',
       },
       {
         title: '人工審查。',
-        body: '在應用裏閲讀 diff，可以評論任意一行，你接受之前，什麼都不算完成。',
+        body: '在應用裏閱讀 diff，可以評論任意一行，你接受之前，甚麼都不算完成。',
       },
     ],
-    howClose: '下載、開啓、開幹。無需任何配置：不用 Docker，也不用 Coppice 帳號。',
-    whyTitle: '為什麼選擇 Coppice',
+    howClose: '下載、開啟、開工。不用另外設定：不用 Docker，也不用 Coppice 帳號。',
+    whyTitle: '為甚麼選擇 Coppice',
     reasons: [
       {
         title: '每個角色都用合適的模型。',
@@ -59,15 +59,15 @@ export const pages: Pages = {
       },
       {
         title: '在落地之前發現錯誤。',
-        body: '每個改動都會以 diff 的形式在應用裏等你審查。你接受之前，什麼都不算完成；你接受的內容，就是最終合併的內容。',
+        body: '每個改動都會以 diff 的形式在應用裏等你審查。你接受之前，甚麼都不算完成；你接受的內容，就是最終合併的內容。',
       },
       {
-        title: '不用再多一份訂閲。',
+        title: '不用再多一份訂閱。',
         body: 'Coppice 驅動的是你已經付費的 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。',
       },
     ],
-    notTitle: '它不是什麼',
-    notItems: ['不是雲端程式設計服務', '不是 Jira 的替代品', '不是“告訴代理一句，就拿到成品”'],
+    notTitle: '它不是甚麼',
+    notItems: ['不是雲端程式設計服務', '不是 Jira 的替代品', '不是「告訴代理一句，就拿到成品」'],
   },
   download: {
     title: '下載 Coppice',
@@ -77,7 +77,7 @@ export const pages: Pages = {
     intro: '免費，在你自己的電腦上執行，無需 Coppice 帳號。',
     groups: [
       {
-        note: '不確定你的 Mac 是哪種？開啓蘋果選單 → 關於本機。如果顯示“晶片”，請選擇 Apple Silicon；如果顯示“處理器”，請選擇 Intel。',
+        note: '不確定你的 Mac 是哪種？開啟蘋果選單 → 關於本機。如果顯示「晶片」，請選擇 Apple Silicon；如果顯示「處理器」，請選擇 Intel。',
         rows: [
           { name: 'macOS (Apple Silicon)', label: '下載 .dmg' },
           { name: 'macOS (Intel)', label: '下載 .dmg' },
@@ -90,20 +90,20 @@ export const pages: Pages = {
         ],
       },
       {
-        rows: [{ name: 'Windows 11', label: '通過 WSL 安裝' }],
+        rows: [{ name: 'Windows 11', label: '經 WSL 安裝' }],
       },
     ],
     checksum: {
-      before: '可以用 ',
+      before: '可用 ',
       sumsLabel: 'SHA256SUMS',
-      between: ' 校驗你下載的檔案，具體方法見',
+      between: ' 校驗下載的檔案。做法見',
       installLabel: '安裝',
       after: '文件。',
     },
     next: {
-      before: '接下來，請按',
+      before: '接着請按',
       label: '安裝步驟',
-      after: '操作。',
+      after: '。',
     },
   },
 };

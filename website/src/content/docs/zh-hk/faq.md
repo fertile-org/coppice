@@ -14,7 +14,7 @@ description: "Coppice 能用於正式環境嗎？需要 Docker 或帳號嗎？�
 <a id="do-i-need-docker-or-an-account"></a>
 
 ## 需要 Docker 或帳號嗎？
-不需要。下載桌面應用，開啓就能用。不需要 Docker，不需要配置伺服器，也不需要 Coppice 帳號。
+不需要。下載桌面應用，開啟就能用。不需要 Docker，不需要設定伺服器，也不需要 Coppice 帳號。
 
 <a id="is-this-a-jira--linear-replacement"></a>
 
@@ -24,12 +24,12 @@ description: "Coppice 能用於正式環境嗎？需要 Docker 或帳號嗎？�
 <a id="is-this-a-cloud-coding-agent"></a>
 
 ## 這是雲端程式設計代理嗎？
-不是。代理通過你電腦上的 CLI 在你的倉庫裏執行。兩類產品的區別在於：雲端代理服務把工作交給別人的電腦去做；Coppice 讓工作留在本地，並由你把關。
+不是。代理經你電腦上的 CLI 在你的倉庫裏執行。兩類產品的區別在於：雲端代理服務把工作交給別人的電腦去做；Coppice 讓工作留在本地，並由你把關。
 
 <a id="will-agents-merge-without-me"></a>
 
 ## 代理會不經過我就合併嗎？
-不會。Human Review（人工審查）是 Coppice 的核心關卡。你開啓 diff，由你決定。
+不會。Human Review（人工審查）是 Coppice 的核心關卡。你開啟 diff，由你決定。
 
 <a id="what-happens-if-a-tickets-changes-conflict-with-main"></a>
 
@@ -38,13 +38,13 @@ Coppice 會在合併前停下，不動 main。它會列出衝突的檔案，並�
 
 <a id="what-about-set-and-forget-autopilots"></a>
 
-## “設好就不用管”的自動駕駛呢？
+## 「設好就不用管」的自動駕駛呢？
 那不是 Coppice 要做的產品。Coppice 是為管理代理而打造的：工作由你發起，每個改動都由你接受。
 
 <a id="windows"></a>
 
 ## Windows 呢？
-Windows 11 應該可以通過 WSL 執行 Linux x64 版本，但我們還沒有測試過。參見 [Windows 11（通過 WSL）](/docs/install#windows-11-through-wsl)。如果你試了，歡迎[在 GitHub 上告訴我們結果](https://github.com/fertile-org/coppice/issues)。本次 Beta 沒有計劃推出原生 Windows 應用。
+Windows 11 應該可以經 WSL 執行 Linux x64 版本，但我們還沒有測試過。參見 [Windows 11（經 WSL）](/docs/install#windows-11-through-wsl)。如果你試了，歡迎[在 GitHub 上告訴我們結果](https://github.com/fertile-org/coppice/issues)。本次 Beta 沒有計劃推出原生 Windows 應用。
 
 <a id="where-do-contributors-look"></a>
 
