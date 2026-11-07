@@ -33,7 +33,7 @@ export const pages = {
     steps: [
       {
         title: 'Hand off the work.',
-        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve before anyone writes code.',
+        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve the plan before coding starts, unless you choose Skip planning.',
       },
       {
         title: 'Let agents build.',

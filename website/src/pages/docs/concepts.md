@@ -7,7 +7,7 @@ description: "How a Coppice ticket moves from Backlog to Done, what each agent d
 
 # Concepts
 
-Coppice is a board for coding work. You write tickets, agents do the work on their own branches, and you review every change before you accept it. Nothing starts until you act, and nothing merges until you choose to merge.
+Coppice is a board for coding work. You write tickets, agents do the work on their own branches, and you review every change before you accept it. Once you start a ticket, agents can continue automatically through the workflow. You review and accept the final diff. Nothing merges until you choose to merge.
 
 ## How a ticket moves
 
