@@ -40,11 +40,13 @@ On the usual path the ticket goes to **In Progress** on its own branch, then **I
 
 ## Check the diff before you accept
 
-Open the ticket and click **Review code**. The page says **Code review**. Use this pass before **Accept**. The labels in the sidebar are the agent's report. They are not your sign-off.
+Open the ticket and click **Review code**. The page says **Code review**. Use this pass before **Accept**.
 
 ![Code review of the seeded file docs/greeting.md. The diff adds the line “Hello from the review demo.” Submit review is visible, and Accept is not on this page.](/blog/review-before-merging/diff-before-accept.png "Seeded demo: the greeting diff before Accept. Accept was not clicked, and the ticket stayed in Wait for Human Review. Not a live CLI result.")
 
-1. **Compare the change with the approved plan.** While the ticket is in **Wait for Human Review**, **Approved plan** sits beside the diff. Read each acceptance criterion and any evidence under it, then find that behavior in the code. **Met**, **Not met**, and **Not checked** are the words Coppice shows. A **Met** line still needs you to look. The steps under the plan are a reading list. Their boxes stay unchecked.
+The frame shows that seeded diff and the **Changed files** list. It does not show the **Approved plan** sidebar.
+
+1. **Compare the change with the approved plan.** That sidebar is present only while the ticket is in **Wait for Human Review** and an approved plan is saved. It sits beside **Changed files** and the diff. Read each acceptance criterion and any evidence under it, then find that behavior in the code. **Met**, **Not met**, and **Not checked** are the agent's report, not your sign-off. A **Met** line still needs you to look. The steps under the plan are a reading list. Their boxes stay unchecked.
 2. **Inspect files the plan did not name.** A changed file can be marked **Not in the plan**. Open those first. A lockfile, a migration, or a rename can belong with the work, or it can be scope the plan never asked for. When **Reviewer brief** is on the page, it matches this commit. **Changes from the plan** says what shifted, or **None**. **Look here first** names a file. The brief also says: “The agent wrote these notes when it finished. Coppice tags any file that wasn't in the plan you approved.”
 3. **Judge correctness and the error paths.** Read what the change does when input is missing, a call fails, or a value is empty. Use the plan's risks and acceptance criteria as the list. Where the code is wrong, click the line number, type in “Leave a comment…”, and click **Add comment**. That note stays on the diff until you submit the review.
 4. **Review permissions and dependencies.** In the diff, look for new packages, scripts, credentials, and checks that decide who can read or change data. Agents run with the permissions of the CLIs on your machine. This pass is where you catch an access change or a new dependency before it reaches your base branch.
@@ -66,7 +68,7 @@ A **Done** card with a current acceptance shows “Accepted, not merged” and *
 
 The board figure is from an earlier seeded demo. It was not recaptured with the plan and diff figures above.
 
-If files conflict, Coppice leaves the base branch untouched, names the files, and keeps the ticket in **Done** until you choose **Ask [agent] to resolve**. That returns the ticket to **In Progress**. When the conflicts are resolved, it comes back to **In Review**, and you accept it again before it merges.
+If **Merge…** conflicts and Coppice can abort the merge cleanly, the base branch stays as it was and the message names the files. The ticket stays in **Done** until you choose **Ask [agent] to resolve**. That moves the ticket to **In Progress** and starts a work run. **Accept** is refused there. When that run succeeds, the ticket is in **In Review**. That return is still before the next **Accept**. **Accept** is offered again only in **Wait for Human Review**. Record the new commit there before you merge.
 
 **Create PR via API** is the other path. It needs a GitHub remote and a forge token. A merge on GitHub.com is recorded by a sweep at startup and every 5 minutes. Other remotes keep “Accepted, not merged” until you merge in Coppice. [FAQ](/docs/faq) states the same gate.
 
