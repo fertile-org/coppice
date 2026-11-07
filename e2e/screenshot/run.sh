@@ -82,8 +82,11 @@ case "$cmd" in
     export COPPICE_REPOS_HOST=$dir/repos
     export COPPICE_SCREENSHOT_CONFIG=$dir/config.toml
     export COPPICE_SCREENSHOT_DIR=$dir
-    if ! node "$root/e2e/screenshot/check-compose.mjs"; then
-      status=$?
+    set +e
+    node "$root/e2e/screenshot/check-compose.mjs"
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ]; then
       sh "$root/e2e/screenshot/remove-capture.sh" "$dir" || true
       rm -f "$pointer"
       exit "$status"
