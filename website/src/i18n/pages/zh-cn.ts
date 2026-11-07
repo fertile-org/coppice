@@ -7,7 +7,7 @@ export const pages: Pages = {
   home: {
     title: 'Coppice：本地开源的 AI 编程智能体看板',
     description:
-      'Coppice 是在本地运行的开源 AI 编程智能体看板。Claude Code、Codex、Cursor 等智能体并行规划、构建和审核，每个 diff 都由你接受。',
+      'Coppice 是本地运行的开源 AI 编程智能体看板。Claude Code、Codex、Cursor 等智能体并行规划、构建和审核，每个 diff 都由你接受。',
     worksWith: '支持',
     h1: '雇用专家，你来拍板。',
     lede: '你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
@@ -18,7 +18,7 @@ export const pages: Pages = {
       captions: [
         '写一个工单。',
         '你的 PM 智能体起草计划。',
-        '它向你展示设计方案。',
+        'PM 智能体向你展示设计方案。',
         '你来批准。',
         '智能体构建、审查、测试。',
         '审核 diff，可以评论任意一行。',
@@ -35,18 +35,18 @@ export const pages: Pages = {
     steps: [
       {
         title: '把工作交出去。',
-        body: '写一个工单，或批准智能体建议的工单。把它指派给你的 PM 智能体，它会起草一份计划，并为界面改动提供设计方案，经你批准后才会有人写代码。',
+        body: '写一个工单，或批准智能体建议的工单。把工单指派给 PM 智能体。PM 智能体会起草计划，并为界面改动提供设计方案。你批准之后，才会有人写代码。',
       },
       {
         title: '让智能体去构建。',
-        body: '每个工单都有自己的 git worktree，并行的智能体永远不会碰你的主检出目录。任何一次运行都可以实时查看。',
+        body: '每个工单都有自己的 git worktree，并行的智能体永远不会碰你的主检出目录。你可以实时查看任何一次运行。',
       },
       {
         title: '人工审核。',
         body: '在应用里阅读 diff，可以评论任意一行，你接受之前，什么都不算完成。',
       },
     ],
-    howClose: '下载、打开、开干。无需任何配置：不用 Docker，也不用 Coppice 账号。',
+    howClose: '下载、打开、开始工作。无需任何配置：不用 Docker，也不用 Coppice 账号。',
     whyTitle: '为什么选择 Coppice',
     reasons: [
       {
@@ -101,9 +101,9 @@ export const pages: Pages = {
       after: '文档。',
     },
     next: {
-      before: '接下来，请按',
+      before: '接下来，跟着',
       label: '安装步骤',
-      after: '操作。',
+      after: '做。',
     },
   },
 };

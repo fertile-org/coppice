@@ -11,7 +11,7 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 - **技能**：`SKILL.md` 文件。
 - **MCP 工具**：一个 `.mcp.json` 文件。
 
-在侧边栏中打开 **Plugins**（插件）来管理它们。内置的 `coppice` 插件始终存在，它的技能无法关闭。
+在侧边栏中打开 **Plugins**（插件）来管理插件。内置的 `coppice` 插件始终存在，它的技能无法关闭。
 
 <a id="install-a-plugin"></a>
 
@@ -34,7 +34,7 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 <figcaption>在数千个插件中搜索，一键安装。</figcaption>
 </figure>
 
-插件会出现在 **Installed** 标签页，处于禁用状态。接下来请[启用它](#enable-it)。无论智能体运行在哪个 CLI 上，插件都能供你授权的智能体使用。
+插件会出现在 **Installed** 标签页，处于禁用状态。接下来请[启用这个插件](#enable-it)。无论智能体运行在哪个 CLI 上，插件都能供你授权的智能体使用。
 
 <a id="marketplace-sources"></a>
 
@@ -50,8 +50,8 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 来源的加载方式：
 
 - 第一次打开 **Marketplace** 标签页时，每个来源会自动加载。
-- 如果来源已超过 24 小时，会在后台重新加载。
-- 加载失败的来源标签会显示错误，点击它可重试。
+- 如果来源已超过 24 小时，Coppice 会在后台重新加载。
+- 加载失败的来源标签会显示错误，点击该标签可重试。
 
 <a id="community-plugins"></a>
 
@@ -73,9 +73,9 @@ description: "插件为 Coppice 的智能体提供技能和 MCP 工具。从 git
 
 #### 示例：GitHub
 1. 从插件市场安装 `github`。
-2. 打开它，在 **Settings** 下把 GitHub 个人访问令牌粘贴到 `GITHUB_PERSONAL_ACCESS_TOKEN`，然后点击 **Save settings**。
-3. 点击 **Test** 列出它的工具。
-4. 启用它，并选择哪些智能体可以使用。
+2. 打开这个插件，在 **Settings** 下把 GitHub 个人访问令牌粘贴到 `GITHUB_PERSONAL_ACCESS_TOKEN`，然后点击 **Save settings**。
+3. 点击 **Test**，列出这个插件的工具。
+4. 启用这个插件，并选择哪些智能体可以使用。
 
 这个令牌与 **Settings** 里 Coppice 用于拉取请求的 GitHub 令牌是分开的。
 

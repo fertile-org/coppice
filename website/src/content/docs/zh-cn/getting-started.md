@@ -8,7 +8,7 @@ description: "从全新安装到第一次运行智能体只需五步：登录智
 
 从全新安装到第一次运行智能体，只需五步。你需要一个本地 git 仓库和一个智能体 CLI，不需要 Coppice 账号。
 
-全新安装后，Coppice 会打开一个简短的设置向导，帮你添加第一个仓库、看板和初始团队。之后可以在 **System → Connectors** 中点击 **Set up workspace** 重新打开它。
+全新安装后，Coppice 会打开一个简短的设置向导，帮你添加第一个仓库、看板和初始团队。之后可以在 **System → Connectors** 中点击 **Set up workspace**，重新打开这个向导。
 
 <a id="1-install-a-provider-and-sign-in"></a>
 
@@ -21,7 +21,7 @@ description: "从全新安装到第一次运行智能体只需五步：登录智
 
 如果显示 **Found, not signed in**（已找到，未登录），请在终端里登录该 CLI。如果显示 **Not on your PATH**（不在 PATH 中），请安装它，或在详细信息侧栏按 **Install docs**（安装文档）。然后点击 **Run check**（运行检查）。
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已安装）。不消耗你的套餐额度，Coppice 就无法检查它们的登录状态，所以如果你已退出登录，运行时会报错。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已安装）。不消耗套餐额度，Coppice 就无法检查它们是否已登录。如果你已退出登录，运行时会报错。
 
 <a id="2-set-up-an-agent"></a>
 
@@ -35,7 +35,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已�
 
 保存时会启用该连接器，你会看到 "{name} turned on."（已启用 {name}）。
 
-请添加一个 **PM** 智能体、一个 **Technical Lead**（技术负责人）智能体，以及至少一个干活的智能体（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。规划和交接需要这三类角色都在。
+请添加一个 **PM** 智能体、一个 **Technical Lead**（技术负责人）智能体，以及至少一个负责具体工作的智能体（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。规划和交接需要这三类角色都在。
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="新建智能体表单，已填写名称并选好角色和 CLI。">
@@ -47,7 +47,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已�
 ## 3. 添加仓库
 1. 在侧边栏中打开 **Repositories**（仓库），点击 **Add repository**（添加仓库）。
 2. 在 **Local path**（本地路径）旁点击 **Browse…**，选择一个本地 git 仓库。
-3. Coppice 会尽量根据仓库自动填写 **Name**、**Remote URL (optional)** 和 **Default branch**。请检查一下。
+3. 能从仓库读到时，Coppice 会填上 **Name**、**Remote URL (optional)** 和 **Default branch**。请核对。
 4. 点击 **Add repository**。
 
 新的一行应显示 **Ready**。如果显示 **Path missing**（路径不存在）或 **Not a git repo**（不是 git 仓库），请重新选择文件夹。
@@ -70,22 +70,22 @@ Coppice 会打开你的新看板。
 4. 在 **Detail**（详情）中，把 **Assignee**（负责人）设为你的智能体，把 **Repository** 设为你的仓库。点击 **Save metadata**。
 5. 点击 **Run agent**（运行智能体）。
 
-工单会切换到 **Live Console**（实时控制台），你可以看着智能体工作。点击 **Stop** 可结束运行。
+工单会切到 **Live Console**（实时控制台），你可以看着智能体工作。点击 **Stop** 可结束这次运行。
 
-在工单有负责人、且所选仓库显示 **Ready** 之前，**Run agent** 按钮不可用。仅仅指派智能体并不会自动开始运行。
+在工单有负责人、且所选仓库显示 **Ready** 之前，**Run agent** 不可用。只是指派智能体，并不会因此开始运行。
 
 <figure>
 <img src="/assets/docs/backlog-ticket.webp" width="1440" height="900" alt="看板的 Backlog 中有一个新工单，并显示 Run agent 按钮。">
-<figcaption>点击 Run agent，PM 就会写计划。</figcaption>
+<figcaption>点击 Run agent，PM 智能体就会写计划。</figcaption>
 </figure>
 
 <a id="what-happens-next"></a>
 
 ## 接下来会发生什么
-1. **Plan Review**（计划审核）。PM 智能体写好计划后，工单会移到 Plan Review。计划就显示在描述下方，下面是 **Approve plan**（批准计划）和 **Ask for changes**（要求修改）。批准后，计划会以 **Approved plan** 一节加到描述里，排在你写的内容之后。
-2. **Ready**。你批准后，工单移到 Ready。Technical Lead 智能体会对照代码检查计划，只在需要时修改已批准的计划，然后决定由谁来做。被指派的智能体会立即开始。如果没有合适的人选，工单会保持未指派，并留言说明原因。
-3. **In Progress**。被指派的智能体在自己的 git worktree 中完成工作。
-4. **Wait for Human Review**（等待人工审核）。你来阅读 diff，在 Human Review 中点击 **Accept**（接受）。
-5. **Done**。Done 卡片上可能显示 "Accepted, not merged"（已接受，未合并）。打开工单选择 **Merge…**；如果你更想以 pull request 的形式审核，就选 **Create PR via API**。
+1. **Plan Review**（计划审核）。PM 智能体写好计划后，工单会移到 Plan Review。计划显示在描述下方，下面是 **Approve plan**（批准计划）和 **Ask for changes**（要求修改）。你批准后，计划会作为 **Approved plan** 一节加到描述里，排在你写的内容之后。
+2. **Ready**。你批准后，工单移到 Ready。Technical Lead 智能体会对照代码检查计划，只在需要时修改已批准的计划，然后决定由谁来做。被指派的智能体会马上开始运行。没有合适人选时，工单保持未指派，并附一条说明原因的评论。
+3. **In Progress**。被指派的智能体在自己的 git worktree 里完成工作。
+4. **Wait for Human Review**（等待人工审核）。你阅读 diff，在 Human Review 中点击 **Accept**（接受）。
+5. **Done**。Done 卡片上可能显示 "Accepted, not merged"（已接受，未合并）。打开工单，选择 **Merge…**。如果想以 pull request 的形式审核，就选 **Create PR via API**。
 
 想跳过计划，就在工单上勾选 **Skip planning**（跳过规划）。工单会从 Backlog 直接进入 Ready。

@@ -47,6 +47,6 @@ export const ui: Ui = {
     hint: '/',
     footer: '↑↓ 移动，Enter 打开，Esc 关闭',
     close: '关闭',
-    noResults: '没有找到与“{query}”相关的结果。',
+    noResults: '没有找到“{query}”的结果。',
   },
 };

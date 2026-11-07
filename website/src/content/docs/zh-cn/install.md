@@ -34,7 +34,7 @@ Coppice Beta 以桌面应用的形式发布。不需要 Docker，不需要服务
 
 Coppice 会在后台检查新版本。如果想关闭，打开 **System → Updates**（系统 → 更新），关掉 **Automatic updates**（自动更新）。更新后，你的看板和设置都会保留。
 
-- **macOS：** Coppice 会替你下载更新。在横幅中选择 **Restart to update**（重启以更新），或者在你下次退出 Coppice 时自动安装。
+- **macOS：** Coppice 会替你下载更新。在横幅中选择 **Restart to update**（重启以更新），或者等你下次退出 Coppice 时由 Coppice 安装。
 - **Linux：** 安装 `.deb` 时会添加 Coppice 的软件源，所以新版本会和其他更新一起出现在“软件更新器”里；也可以运行 `sudo apt update && sudo apt upgrade`。
 
 <a id="windows-11-through-wsl"></a>
@@ -66,7 +66,7 @@ Linux x64 版本应该可以通过 WSL 在 Windows 11 上运行，但我们还�
 4. 在 Ubuntu 中安装你要用的智能体 CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok），并在 Ubuntu 里登录这些 CLI 和 git。
 5. 从 Windows“开始”菜单（Ubuntu 分组下）启动 Coppice，或在 Ubuntu 中运行 `coppice`。
 
-   如果某个 CLI 显示 Not on your PATH，请在 Ubuntu 中运行 `coppice` 来启动 Coppice。
+   如果某个 CLI 显示 **Not on your PATH**（不在 PATH 中），请在 Ubuntu 中运行 `coppice` 来启动 Coppice。
 
 WSL 会把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能会找到某个 CLI 的 Windows 版本。打开 **System → Connectors**（系统 → 连接器），查看每个连接器的 CLI 路径。如果路径以 `/mnt/c/` 开头，请在 Ubuntu 中安装该 CLI。
 
@@ -86,7 +86,7 @@ WSL 会把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能会找到�
    - macOS：`~/Library/Application Support/Coppice/config.toml`
    - Linux：`~/.config/Coppice/config.toml`
 
-4. 创建一个工单（或批准一个建议的工单），把它移到 Ready。智能体会带着它依次经过 In Progress、In Review 和 In QA，然后等待你进行 Human Review（人工审核）。
+4. 创建一个工单（或批准一个建议的工单），把工单移到 Ready。智能体会带着工单依次经过 In Progress、In Review 和 In QA，然后等你做 Human Review（人工审核）。
 
 <a id="requirements"></a>
 

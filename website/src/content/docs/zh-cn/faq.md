@@ -24,7 +24,7 @@ description: "Coppice 能用于生产吗？需要 Docker 或账号吗？智能�
 <a id="is-this-a-cloud-coding-agent"></a>
 
 ## 这是云端编程智能体吗？
-不是。智能体通过你电脑上的 CLI 在你的仓库里运行。两类产品的区别在于：云端智能体服务把工作交给别人的电脑去做；Coppice 让工作留在本地，并由你把关。
+不是。智能体通过你电脑上的 CLI，在你的仓库里运行。云端智能体服务把工作交给别人的电脑；Coppice 让工作留在本地，并由你把关。
 
 <a id="will-agents-merge-without-me"></a>
 
@@ -34,7 +34,7 @@ description: "Coppice 能用于生产吗？需要 Docker 或账号吗？智能�
 <a id="what-happens-if-a-tickets-changes-conflict-with-main"></a>
 
 ## 如果工单的改动和 main 冲突怎么办？
-Coppice 会在合并前停下，不动 main。它会列出冲突的文件，并把工单送回 In Progress，由同一个智能体开始解决冲突。之后你需要在 Human Review 中再接受一次，才会合并。
+Coppice 会在合并前停下，不动 main。Coppice 会列出冲突的文件，并把工单送回 In Progress，由同一个智能体开始解决冲突。之后你需要在 Human Review 中再接受一次，才会合并。
 
 <a id="what-about-set-and-forget-autopilots"></a>
 
