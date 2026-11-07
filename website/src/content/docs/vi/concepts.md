@@ -6,7 +6,7 @@ description: "Ticket trong Coppice đi từ Backlog đến Done ra sao, mỗi ag
 
 # Khái niệm
 
-Coppice là một bảng để quản lý việc lập trình. Bạn viết ticket, agent làm trên branch riêng, và bạn review mọi thay đổi trước khi đưa vào code. Bạn chưa bấm thì chưa có gì chạy, và bạn chưa chọn merge thì chưa có gì được merge.
+Coppice là một bảng để quản lý việc lập trình. Bạn viết ticket, agent làm trên branch riêng, và bạn review mọi thay đổi trước khi đưa vào code. Một khi bạn đã bắt đầu ticket, các agent có thể tự tiếp tục qua quy trình. Bạn review và chấp nhận diff cuối cùng. Bạn chưa chọn merge thì chưa có gì được merge.
 
 <a id="how-a-ticket-moves"></a>
 
