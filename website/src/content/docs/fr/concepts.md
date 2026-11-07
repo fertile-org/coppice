@@ -6,7 +6,7 @@ description: "Comment un ticket Coppice passe de Backlog à Done, ce que fait ch
 
 # Concepts
 
-Coppice est un tableau pour le travail de code. Vous écrivez les tickets, les agents travaillent chacun sur sa branche, et vous relisez chaque changement avant qu’il soit intégré. Rien ne démarre tant que vous n’agissez pas, et rien n’est fusionné tant que vous ne le décidez pas.
+Coppice est un tableau pour le travail de code. Vous écrivez les tickets, les agents travaillent chacun sur sa branche, et vous relisez chaque changement avant qu’il soit intégré. Une fois que vous lancez un ticket, les agents peuvent avancer automatiquement dans le parcours. Vous relisez le diff final et vous l’acceptez. Rien n’est fusionné tant que vous ne le décidez pas.
 
 <a id="how-a-ticket-moves"></a>
 
