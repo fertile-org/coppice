@@ -13,7 +13,10 @@ const macHelp =
 describe('download page copy', () => {
   it('keeps the locked strings in one module', () => {
     assert.equal(downloadPage.title, 'Download Coppice');
-    assert.equal(downloadPage.intro, 'Free, runs on your own machine, with no Coppice account.');
+    assert.equal(
+      downloadPage.intro,
+      "Coppice is free. It runs on your machine, and you don't need a Coppice account.",
+    );
 
     assert.deepEqual(
       downloadPage.groups.map((group) => ({

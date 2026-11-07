@@ -7,7 +7,7 @@ description: "Install the Coppice desktop app on macOS or Linux, or on Windows 1
 
 # Install
 
-Coppice Beta ships as a desktop app. No Docker, no server, no Coppice account.
+Coppice Beta is a desktop app. You don't need Docker, a server, or a Coppice account.
 
 ## Supported platforms
 | Platform | Package |
@@ -29,7 +29,7 @@ You can also get every build from [GitHub Releases](https://github.com/fertile-o
 
 Coppice checks for new versions in the background. To turn this off, open **System → Updates** and turn off **Automatic updates**. Your boards and settings stay when you update.
 
-- **macOS:** Coppice downloads the update for you. Choose **Restart to update** in the banner, or it installs the next time you quit Coppice.
+- **macOS:** Coppice downloads the update for you. Choose **Restart to update** in the banner, or the update installs the next time you quit Coppice.
 - **Linux:** installing the `.deb` adds Coppice's package source, so new versions arrive with your other updates in Software Updater, or run `sudo apt update && sudo apt upgrade`.
 
 ## Windows 11 (through WSL)
@@ -59,7 +59,7 @@ You need Windows 11, because older Windows 10 builds can't show Linux app window
 4. Install the agent CLIs you use (Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code, Grok) in Ubuntu. Sign in to them and to git there too.
 5. Start Coppice from the Windows Start menu (under Ubuntu), or run `coppice` in Ubuntu.
 
-   If a CLI shows Not on your PATH, start Coppice by running `coppice` in Ubuntu.
+   If a CLI shows **Not on your PATH**, start Coppice by running `coppice` in Ubuntu.
 
 WSL adds your Windows PATH to Ubuntu, so Coppice could find a Windows copy of a CLI. Open **System → Connectors** and look at each connector's CLI path. If a path starts with `/mnt/c/`, install that CLI in Ubuntu.
 
@@ -77,11 +77,11 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`
 
-4. Create a ticket (or approve a proposed one) and move it to Ready. Agents take it through In Progress, In Review and In QA, then it waits for your Human Review.
+4. Create a ticket (or approve a proposed one) and move it to Ready. Agents take it through In Progress, In Review, and In QA. It then waits for your Human Review.
 
 ## Requirements
 - A local git repository you can write to (Coppice uses isolated worktrees)
 - At least one supported agent CLI installed and authenticated the normal way for that tool
 
 ## Troubleshooting
-If the app won’t start or an agent never picks up a ticket, check the live terminal on the ticket and the FAQ. For build-from-source, see the [contributor docs](https://github.com/fertile-org/coppice/blob/main/docs/development.md) in the repo.
+If the app won't start, or an agent never picks up a ticket, check the live terminal on the ticket and the FAQ. For a build from source, see the [contributor docs](https://github.com/fertile-org/coppice/blob/main/docs/development.md) in the repo.

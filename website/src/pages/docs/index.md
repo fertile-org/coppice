@@ -7,7 +7,7 @@ description: "Coppice puts a team of coding agents on one board: queue work as t
 
 # Docs
 
-Coppice puts a team of coding agents on one board: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket.
+Coppice puts a team of coding agents on one board. You queue work as tickets, and agents build on their own branches. You review every diff. Nothing is done until you accept it. Start with Install to run your first ticket.
 
 | Guide | |
 | --- | --- |

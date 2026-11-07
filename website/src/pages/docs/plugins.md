@@ -35,7 +35,7 @@ The **Plugins** page has three tabs:
 <figcaption>Search thousands of plugins, and install one with a click.</figcaption>
 </figure>
 
-The plugin lands on the **Installed** tab, disabled. Next, [enable it](#enable-it). A plugin works for every agent you give it to, whatever CLI the agent runs on.
+The plugin appears on the **Installed** tab, disabled. Next, [enable it](#enable-it). A plugin works for every agent you give it to, whatever CLI that agent runs on.
 
 <a id="marketplace-sources"></a>
 
@@ -51,8 +51,8 @@ Five sources are listed out of the box:
 How sources load:
 
 - Each source loads on its own the first time you open the **Marketplace** tab.
-- It loads again in the background if it is older than 24 hours.
-- A failed source chip shows an error. Click it to retry that source.
+- That source loads again in the background if it is older than 24 hours.
+- A failed source chip shows an error. Click the chip to retry that source.
 
 <a id="community-plugins"></a>
 
@@ -106,13 +106,12 @@ Coppice clones the repo with your computer's git credentials. Click **Update** i
 <a id="enable-it"></a>
 
 ## 2. Enable it
-Plugins start disabled.
+Plugins start disabled. If a plugin has a local MCP server, that server runs on your computer with your computer's privileges. Coppice asks you to confirm first.
 
 1. Turn on the switch on the plugin's row. Only plugins with status `ok` can be enabled.
 2. If its details have **Settings**, fill in each value and click **Save settings**. Values are stored encrypted.
 3. Click **Test** to start the plugin's tools and list them. This works before you enable it.
 
-- A plugin with a local MCP server runs on your computer with your computer's privileges. Coppice asks you to confirm first.
 - Each skill has its own switch. A skill you turn off is hidden from every agent, even in runs already going.
 
 <a id="choose-which-agents-can-use-it"></a>
@@ -187,7 +186,7 @@ Without `plugin.json`, a folder is still a plugin if it has either:
 - A `SKILL.md` at the top.
 - Skills in `skills/`, `.agents/skills/`, `.claude/skills/`, or `<name>/SKILL.md`.
 
-It takes the folder's name and version `0.0.0`.
+The plugin takes the folder's name and version `0.0.0`.
 
 <a id="skills"></a>
 

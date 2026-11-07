@@ -16,8 +16,8 @@
 
 <p align="center">
   <strong>Hire specialists. Keep the final say.</strong><br />
-  Coding agents with their own roles plan, build and review on one board, and nothing is done until you accept the diff.<br />
-  Local, open source, with the agent CLIs you already pay for.
+  Coding agents, each with a role, plan, build, and review on one board. Nothing is done until you accept the diff.<br />
+  It runs on your machine, it is open source, and it uses the agent CLIs you already pay for.
 </p>
 
 <p align="center">
@@ -37,21 +37,21 @@
   <img src="static/marketing.gif" alt="Write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it." width="960" />
 </p>
 
-Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you. Nothing is done until you accept the diff.
+Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel, each on its own branch. The board shows what's moving, what's stuck, and what's waiting on you. Nothing is done until you accept the diff.
 
-Download, open, work. There's nothing to set up: no Docker and no Coppice account.
+Download the app and open it. There's nothing to set up: no Docker and no Coppice account.
 
 ## Why Coppice
 
-- **The right model for each role.** Every agent picks its own CLI and model. Plan and review with your strongest model, and code with a faster one, all on one board.
-- **Stop tab-hopping between terminals.** Every agent's work is a card on one board. Blocked tickets and work waiting for your review stand out, so you know where you're needed.
+- **The right model for each role.** Each agent uses its own CLI and model. You can plan and review with your strongest model, and code with a faster one, on the same board.
+- **Stop tab-hopping between terminals.** Each agent's work is a card on one board. Blocked tickets, and work waiting for your review, stand out, so you can see where you're needed.
 - **Catch mistakes before they land.** Every change waits for you as a diff in the app. Nothing counts as done until you accept it, and what you accept is exactly what merges.
-- **No second subscription.** Coppice drives the CLIs you already pay for, signed in the way you already use them.
+- **No second subscription.** Coppice drives the CLIs you already pay for, using the sign-in you already use for each CLI.
 
 ## How it works
 
-1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent, which drafts a plan and shows you design options for UI changes. You approve before anyone writes code. Turn on **Skip planning** to send a ticket straight to Ready.
-2. **Let agents build.** Each ticket gets its own git worktree, so parallel agents never touch your main checkout. Follow any run live.
+1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve before anyone writes code, or turn on **Skip planning** to send the ticket straight to Ready.
+2. **Let agents build.** Each ticket gets its own git worktree, so agents working in parallel never touch your main checkout. Follow any run live.
 3. **Human Review.** Read the diff in the app and comment on any line. Nothing counts as done until you accept it.
 
 <table>
@@ -85,17 +85,17 @@ Install and sign in to them the usual way. Coppice finds them on your login shel
 | Kimi Code | `kimi` | 2.2.0 |
 | Grok | `grok` | 1.0.62 |
 
-Compatibility info will be updated over time as we test more CLI versions.
+We will update this list as we test more CLI versions.
 
 See [Providers](https://getcoppice.app/docs/providers) for install links and what each one supports.
 
 ## What else is inside
 
-- **Chat with your agents.** Talk about your code, an idea or a ticket. An agent can draft a ticket or suggest a Knowledge note, but nothing is saved until you approve it.
-- **Everything is on the card.** Comments, plans and agent runs live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there.
+- **Chat with your agents.** Talk about your code, an idea, or a ticket. An agent can draft a ticket or suggest a Knowledge note, but nothing is saved until you approve it.
+- **Everything is on the card.** Comments, plans, and agent runs live on the ticket. Agents talk to each other only through ticket comments. If it happened, you can read it there.
 - **Knowledge.** Agents save notes about your project for later tickets. By default, you approve what they keep.
 - **Plugins.** Give agents skills and MCP tools. Install a plugin from git or a folder, then choose which agents can use it.
-- **Automatic updates.** The Linux app updates through apt and the macOS app updates itself.
+- **Automatic updates.** The Linux app updates through apt, and the macOS app updates itself.
 
 ## What it is not
 
