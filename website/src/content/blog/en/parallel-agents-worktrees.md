@@ -18,19 +18,17 @@ Each ticket has one assignee. When implementation starts, Coppice adds one branc
 
 A branch is a name for a line of commits. A worktree is another folder of the same repository, with its own checked-out branch. Coppice creates the folder and the branch. Leave that folder alone: do not add a worktree inside it, and do not commit, rebase, or edit files there yourself.
 
-The steps below name the controls in the current app. This note did not run them as a Coppice session. A card can show a mark labeled **Agent running** while a run is queued or running. Read the diff and the run before you treat that ticket as finished.
+A card can show a mark labeled **Agent running** while a run is queued or running. Read the diff and the run before you treat that ticket as finished.
 
 ## What you need first
 
-Install Coppice, sign in to one supported agent CLI, and register a local Git checkout. Those steps stay in the existing guides: [Install](/docs/install), [Getting started](/docs/getting-started), [Providers](/docs/providers), and [Concepts](/docs/concepts).
+Install the Coppice desktop app, sign in to one supported agent CLI, and register a local Git checkout. Those steps stay in the existing guides: [Install](/docs/install), [Getting started](/docs/getting-started), [Providers](/docs/providers), and [Concepts](/docs/concepts).
 
 Use a repository you can throw away. The paths in the next section are example names for that repository. Coppice does not include those files, and no agent created them for this note.
 
-Before an implementation run creates a ticket branch, leave the registered checkout on the commit both tasks should share, usually the tip of the default branch, and leave it clean. Coppice creates the branch with `git worktree add -b <branch> <path>` and does not name a start commit, so the new branch starts at that checkout's current commit. Outside Coppice, on a throwaway repository, two calls of that command produced two branches at the same current commit.
+Before an implementation run creates a ticket branch, leave the registered checkout on the commit both tasks should share, usually the tip of the default branch, and leave it clean. Coppice starts the new ticket branch at that commit.
 
-**Merge…** also needs the registered checkout clean. Commit or stash any uncommitted work there, in the checkout you registered, before you merge. That is not a change inside a ticket worktree.
-
-The header button is **Run Agent**. The guides call the same control Run agent. It stays off until the ticket has an assignee and a repository that shows **Ready**, and until no run is already queued or running.
+**Run Agent** stays off until the ticket has an assignee and a repository that shows **Ready**, and until no run is already queued or running.
 
 `workflow.auto_start_runs` defaults to true. Assigning an agent then starts a run only when the ticket already has a repository and is not Done. **Save metadata** assigns first and saves a newly chosen repository after that, so the first save that sets both does not start a run. A later assign, once the repository is already saved, can start one. Click **Run Agent** when you want a run.
 
@@ -74,7 +72,7 @@ The ticket worktree appears when the first work run starts. The directory is `TI
 
 Open the ticket and find **Git actions**. **Ticket branch** is the branch name. **Worktree** is the directory once the work run has created it. Before that, the worktree line shows `(removed)`.
 
-The frame below is a seeded demonstration, not that empty state and not a coding session. The greeting ticket is still in **Backlog**. **Ticket branch** and **Worktree** are filled in because the seed ran `git worktree add` in the container, under `/data/worktrees`. **Rebase…** is visible and was not opened. **Stop** is in the header because a running row was inserted. No connector process started. This frame is not an approved plan, a completed rebase, or a merge.
+The frame below is a seeded demonstration, not a coding session. The greeting ticket is still in **Backlog**. The demo seed created the worktree ahead of time, so **Ticket branch** and **Worktree** are already filled in. **Rebase…** is visible and was not opened. No connector ran. This frame is not an approved plan, a completed rebase, or a merge.
 
 ![Greeting ticket still in Backlog. Git actions shows Ticket branch and Worktree. Rebase is visible. Stop is in the header.](/blog/parallel-agents-worktrees/branch-and-worktree.png "Demo: seeded Ticket branch and Worktree. A running row was inserted. No connector started, and Rebase was not opened.")
 
@@ -86,7 +84,7 @@ Use those screens for the diff. They show the checkout Coppice created. They are
 
 **Accept** and **Merge…** are separate actions. **Accept** is on the ticket header in **Wait for Human Review**. The dialog title is "Accept this ticket?", and the confirm button is **Accept**. The card can then show "Accepted, not merged". Merge only the commit you accepted.
 
-**Merge…** checks out the base branch in the registered checkout and merges the ticket branch. The default base is the repository's default branch. A successful merge does not move the other ticket. A worktree that already exists stays on its old commits. A worktree created after the merge starts from whatever commit the registered checkout is on at that moment.
+**Merge…** needs that registered checkout clean. Commit or stash uncommitted work there before you merge. Coppice then checks out the base branch in that checkout and merges the ticket branch. The default base is the repository's default branch. A successful merge does not move the other ticket. A worktree that already exists stays on its old commits. A worktree created after the merge starts from whatever commit the registered checkout is on at that moment.
 
 You update the second ticket yourself, after its run has finished and its worktree is clean. In **Git actions**, click **Rebase…**. Keep the default branch unless you mean a different base. Coppice rebases inside the ticket worktree. If a fetch succeeds and `origin/<base>` exists, the rebase uses that remote-tracking ref. A merge that exists only on your local branch can be absent from it. With no remote-tracking ref, the rebase uses the local base branch.
 
@@ -104,7 +102,7 @@ A semantic conflict has no file list. **Rebase…** can succeed while `docs/gree
 
 ## If the second run waits
 
-Two tickets proceed together only while a worker is free for each run. At startup Coppice uses `agent.worker_count` workers, default 8, and each connector's `max_concurrent_runs`, default 2. Extra jobs stay queued. Those are the numbers loaded when the process starts. The fields are in [Settings](/docs/settings).
+Two tickets proceed together only while a worker is free for each run. When the app starts, Coppice uses `agent.worker_count` workers, default 8, and each connector's `max_concurrent_runs`, default 2. Extra jobs stay queued. Those are the numbers in effect when the app starts. The fields are in [Settings](/docs/settings).
 
 A board **Review cap** can hold a Ready ticket when you set one. Leave the field empty for no cap.
 
@@ -114,4 +112,4 @@ A board **Review cap** can hold a Ready ticket when you set one. Leave the field
 
 [Concepts](/docs/concepts) is the status list, including **Plan Review** and **Wait for Human Review**. [Getting started](/docs/getting-started) is the first ticket. [Providers](/docs/providers) is the CLI you sign in to. [Settings](/docs/settings) is `worktrees_path`, `worker_count`, and `max_concurrent_runs`.
 
-Removing old worktrees, and building a larger team, are outside this note. Different agents can use different models. This note does not compare those models or their cost.
+Removing old worktrees, and building a larger team, are outside this note.
