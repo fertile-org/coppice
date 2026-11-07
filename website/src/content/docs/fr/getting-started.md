@@ -1,7 +1,7 @@
 ---
 title: Premiers pas
-metaTitle: "Premiers pas : votre premier agent de code"
-description: "D’une installation neuve à votre premier lancement d’agent en cinq étapes : connexion à une CLI d’agent, un agent, un dépôt, un tableau, puis un ticket."
+metaTitle: "Premiers pas : votre premier agent de code"
+description: "D’une installation neuve à votre premier lancement d’agent en cinq étapes : connexion à une CLI d’agent, un agent, un dépôt, un tableau, puis un ticket."
 ---
 
 # Premiers pas
@@ -13,13 +13,13 @@ Cinq étapes vous mènent d’une installation neuve à votre premier lancement 
 <a id="1-install-a-provider-and-sign-in"></a>
 
 ## 1. Installer un fournisseur et se connecter
-Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code ou Grok. Coppice ne l’installe pas. Il trouve les CLI déjà présentes sur votre ordinateur.
+Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code ou Grok. Coppice ne l’installe pas. Coppice trouve les CLI déjà présentes sur votre ordinateur.
 
 1. Installez la CLI et connectez-vous dans votre terminal, comme d’habitude.
 2. Dans Coppice, ouvrez **System** dans la barre latérale, puis **Connectors**.
 3. Trouvez la ligne de votre CLI. Elle affiche **Ready** quand Coppice peut l’utiliser. Ouvrez la ligne pour les détails.
 
-Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** dans le tiroir de détails. Cliquez ensuite sur **Run check**.
+Si la ligne affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** dans le tiroir de détails. Cliquez ensuite sur **Run check**.
 
 Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppice ne peut pas vérifier leur connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
 
@@ -27,13 +27,13 @@ Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppi
 
 ## 2. Créer un agent
 1. Ouvrez **Agents** dans la barre latérale et cliquez sur **New agent**.
-2. Choisissez un **Preset**. Il remplit le rôle et le prompt.
+2. Choisissez un **Preset**. Ce preset remplit le rôle et le prompt.
 3. Saisissez un **Name**.
 4. Choisissez un **Connector**. Coppice sélectionne le premier qui est prêt.
 5. Choisissez un **Model**, ou laissez celui par défaut.
 6. Cliquez sur **Create agent**.
 
-L’enregistrement active ce connecteur. Vous verrez « {name} turned on. ».
+L’enregistrement active ce connecteur. Vous verrez « {name} turned on. ».
 
 Ajoutez un agent **PM**, un agent **Technical Lead**, et au moins un agent qui fait le travail (**Frontend Engineer**, **Backend Engineer** ou **Research**). La planification et les passages de relais ont besoin des trois.
 
@@ -83,9 +83,9 @@ Le ticket passe sur **Live Console** pour que vous puissiez suivre le travail de
 
 ## Et ensuite
 1. **Plan Review.** L’agent PM écrit un plan, et le ticket passe en Plan Review. Le plan s’affiche juste sous la description, avec **Approve plan** et **Ask for changes** en dessous. Approuver ajoute le plan à la description sous **Approved plan**, après votre propre texte.
-2. **Ready.** Quand vous approuvez, le ticket passe en Ready. Votre agent Technical Lead vérifie le plan par rapport au code, corrige le plan approuvé seulement si nécessaire, et choisit qui fait le travail. Cet agent démarre aussitôt. Si personne ne convient, le ticket reste sans responsable avec un commentaire qui explique pourquoi.
+2. **Ready.** Quand vous approuvez, le ticket passe en Ready. Votre agent Technical Lead vérifie le plan par rapport au code, corrige le plan approuvé seulement si nécessaire, et choisit qui fait le travail. Cet agent démarre aussitôt. Si personne ne convient, le ticket reste sans responsable, avec un commentaire qui explique pourquoi.
 3. **In Progress.** L’agent assigné fait le travail dans son propre worktree git.
 4. **Wait for Human Review.** Vous lisez le diff. Cliquez sur **Accept** dans Human Review.
-5. **Done.** Une carte Done peut afficher « Accepted, not merged ». Ouvrez le ticket et choisissez **Merge…**, ou **Create PR via API** si vous préférez le relire sous forme de pull request.
+5. **Done.** Une carte Done peut afficher « Accepted, not merged ». Ouvrez le ticket et choisissez **Merge…**, ou **Create PR via API** si vous préférez le relire sous forme de pull request.
 
-Pour sauter le plan, cochez **Skip planning** sur le ticket. Il passe directement de Backlog à Ready.
+Pour sauter le plan, cochez **Skip planning** sur le ticket. Le ticket passe directement de Backlog à Ready.

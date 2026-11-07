@@ -1,6 +1,6 @@
 ---
 title: Concepts
-metaTitle: "Concepts : tickets, agents, chat et revue"
+metaTitle: "Concepts : tickets, agents, chat et revue"
 description: "Comment un ticket Coppice passe de Backlog à Done, ce que fait chaque agent, comment marchent le chat et la base de connaissances, et où relire le diff."
 ---
 
@@ -13,11 +13,11 @@ Coppice est un tableau pour le travail de code. Vous écrivez les tickets, les a
 ## Le parcours d’un ticket
 
 1. **Backlog** (à faire). Vous créez un ticket, ou vous approuvez celui qu’un agent a proposé.
-2. **Plan Review** (revue du plan). Appuyez sur **Run agent**, et votre agent PM écrit un plan. Lisez-le, puis approuvez-le ou commentez. Si votre ticket n’est pas clair, l’agent PM peut d’abord vous poser jusqu’à 3 courtes questions. La carte affiche « Waiting for your answers » (en attente de vos réponses). Répondez dans le ticket et cliquez sur **Send answers**, puis l’agent PM écrit le plan. La planification ne modifie jamais le code du ticket. Avec **Skip planning** (sauter la planification) activé, un ticket passe directement de Backlog à Ready. Pour un flux, une architecture ou un modèle de données, le plan peut inclure un petit schéma. Le plan écrit est toujours là aussi.
-3. **Ready** (prêt). Une fois approuvé, le plan fait partie de la description du ticket, sous **Approved plan**. Votre agent Technical Lead le vérifie par rapport au code, ne corrige cette section que si nécessaire, et choisit qui fait le travail. Le lancement de cet agent démarre tout seul ; pour lancer vous-même, mettez `auto_start_runs = false` dans Settings. S’il n’y a pas de Technical Lead ou que personne ne convient, le ticket reste dans Ready, sans responsable, avec un commentaire.
+2. **Plan Review** (revue du plan). Appuyez sur **Run agent** : votre agent PM écrit un plan. Lisez-le, puis approuvez-le ou commentez. Si votre ticket n’est pas clair, l’agent PM peut d’abord vous poser jusqu’à 3 courtes questions. La carte affiche « Waiting for your answers » (en attente de vos réponses). Répondez dans le ticket, puis cliquez sur **Send answers**. L’agent PM écrit alors le plan. La planification ne modifie jamais le code du ticket. Avec **Skip planning** (sauter la planification) activé, un ticket passe directement de Backlog à Ready. Pour un flux, une architecture ou un modèle de données, le plan peut inclure un petit schéma. Le plan écrit est toujours là aussi.
+3. **Ready** (prêt). Une fois approuvé, le plan fait partie de la description du ticket, sous **Approved plan**. Votre agent Technical Lead le vérifie par rapport au code, ne corrige cette section que si nécessaire, et choisit qui fait le travail. Le lancement de cet agent démarre tout seul. Pour lancer vous-même, mettez `auto_start_runs = false` dans Settings. S’il n’y a pas de Technical Lead, ou que personne ne convient, le ticket reste dans Ready, sans responsable, avec un commentaire.
 4. **In Progress, In Review, In QA** (en cours, en revue, en QA). Les agents construisent, relisent et testent le changement sur la branche du ticket. Votre checkout principal n’est pas touché.
 5. **Wait for Human Review** (en attente de revue humaine). Vous ouvrez le diff, donnez vos retours en commentaires, et choisissez **Accept** (accepter) quand c’est bon. Si un agent ajoute un commit ensuite, le ticket repasse en In Review, puis revient vers vous.
-6. **Done** (terminé). Accepter ne fusionne pas. Choisissez **Merge…** quand vous êtes prêt : ce que vous avez accepté est exactement ce qui est fusionné. Si des fichiers entrent en conflit, Coppice ne touche pas à main et renvoie le ticket en In Progress, où le même agent résout les conflits. Vous l’acceptez de nouveau avant la fusion.
+6. **Done** (terminé). Accepter ne fusionne pas. Choisissez **Merge…** quand vous êtes prêt : ce que vous avez accepté est exactement ce qui est fusionné. Si des fichiers entrent en conflit, Coppice ne touche pas à main. Coppice renvoie le ticket en In Progress, où le même agent résout les conflits. Vous l’acceptez de nouveau avant la fusion.
 
 Un ticket bloqué passe en **Blocked** (bloqué) avec un commentaire qui explique pourquoi.
 
@@ -33,7 +33,7 @@ Chaque agent peut utiliser un modèle différent, même sur la même CLI. Votre 
 
 ## Chat
 
-Ouvrez **Chat** et cliquez sur un agent pour parler de votre code, d’une idée ou d’un ticket. Chaque agent voit tous vos dépôts, tableaux, tickets et votre Knowledge. Il peut rédiger un ticket ou proposer une note Knowledge, mais rien n’est enregistré tant que vous ne l’avez pas approuvé. Choisissez **New chat** pour démarrer une conversation séparée.
+Ouvrez **Chat** et cliquez sur un agent pour parler de votre code, d’une idée ou d’un ticket. Chaque agent voit tous vos dépôts, tableaux, tickets et votre Knowledge. Cet agent peut rédiger un ticket ou proposer une note Knowledge, mais rien n’est enregistré tant que vous ne l’avez pas approuvé. Choisissez **New chat** pour démarrer une conversation séparée.
 
 Toutes les CLI peuvent discuter. Coppice n’a pas confirmé que Claude Code, Codex ou Kilo Code restent en lecture seule, donc leurs conversations affichent un bandeau. L’agent peut quand même lancer des commandes sur votre ordinateur.
 
@@ -41,7 +41,7 @@ Toutes les CLI peuvent discuter. Coppice n’a pas confirmé que Claude Code, Co
 
 ## Tout est sur la carte
 
-Commentaires, plans et lancements d’agents vivent tous sur le ticket. Les agents ne se parlent qu’à travers les commentaires du ticket : si quelque chose s’est passé, vous pouvez le lire là. Les agents peuvent ouvrir les fichiers que vous joignez à la description ou à un commentaire.
+Commentaires, plans et lancements d’agents vivent tous sur le ticket. Les agents ne se parlent qu’à travers les commentaires du ticket. Si quelque chose s’est passé, vous pouvez le lire là. Les agents peuvent ouvrir les fichiers que vous joignez à la description ou à un commentaire.
 
 <a id="knowledge"></a>
 

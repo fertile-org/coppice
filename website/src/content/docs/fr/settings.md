@@ -1,12 +1,12 @@
 ---
 title: Référence des paramètres
-metaTitle: "Référence des paramètres : config.toml"
-description: "Chaque champ du config.toml de Coppice, avec son type et sa valeur par défaut : logs, stockage, agents, connecteurs, workflow, git, plugins, MCP."
+metaTitle: "Référence des paramètres : config.toml"
+description: "Chaque champ du config.toml de Coppice, avec son type et sa valeur par défaut : logs, stockage, agents, connecteurs, workflow, git, plugins, MCP."
 ---
 
 # Référence des paramètres
 
-Coppice garde ses paramètres dans un seul fichier, `config.toml` :
+Coppice garde ses paramètres dans un seul fichier, `config.toml` :
 
 | Système | Chemin |
 | --- | --- |
@@ -18,19 +18,19 @@ Sous Linux, si `XDG_CONFIG_HOME` est défini, le fichier se trouve dans `$XDG_CO
 <a id="edit-it-in-the-app"></a>
 
 ## Le modifier dans l’application
-Ouvrez **Settings** dans la barre latérale. La page affiche le fichier en texte, et vos commentaires sont conservés.
+Ouvrez **Settings** dans la barre latérale. La page affiche le fichier en texte. Vos commentaires sont conservés.
 
 - **Save** vérifie le fichier avant de l’écrire. Une valeur incorrecte n’est pas enregistrée.
 - **Restore last good version** annule une mauvaise modification.
 
-Certains changements s’appliquent tout de suite. D’autres affichent « Saved. Restart Coppice to apply. » (enregistré ; redémarrez Coppice pour appliquer).
+Certains changements s’appliquent tout de suite. D’autres affichent « Saved. Restart Coppice to apply. » (enregistré ; redémarrez Coppice pour appliquer).
 
 Vous pouvez aussi modifier le fichier dans n’importe quel éditeur de texte. Vos modifications survivent aux mises à jour.
 
 <a id="updates"></a>
 
 ## Mises à jour
-Ouvrez **System → Updates** pour voir votre version et choisir **Check for updates**. **Automatic updates** est activé par défaut. Désactivez-le, et Coppice arrête de chercher les nouvelles versions en arrière-plan.
+Ouvrez **System → Updates** pour voir votre version et choisir **Check for updates**. **Automatic updates** est activé par défaut. Désactivez-le pour que Coppice arrête de chercher les nouvelles versions en arrière-plan.
 
 Cet interrupteur n’est pas dans `config.toml`. Coppice l’enregistre sous `automaticUpdates` dans `update-settings.json`, dans le même dossier.
 
@@ -38,7 +38,7 @@ Cet interrupteur n’est pas dans `config.toml`. Coppice l’enregistre sous `au
 
 ## Remplacer les clés
 
-Si vous avez partagé une sauvegarde, créez de nouvelles clés et un nouveau mot de passe administrateur. Les jetons enregistrés continuent de fonctionner, et tout le monde est déconnecté.
+Si vous avez partagé une sauvegarde, créez de nouvelles clés et un nouveau mot de passe administrateur. Les jetons enregistrés continuent de fonctionner. Tout le monde est déconnecté.
 
 Ouvrez **System → Backup → Replace keys**, saisissez le nouveau mot de passe administrateur, et confirmez.
 
@@ -55,9 +55,9 @@ Les administrateurs peuvent ouvrir **System → Logs** pour filtrer et suivre en
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
-| `retention_days` | integer | `14` | Combien de jours de journaux garder, aujourd’hui compris : 3, 7, 14 ou 30. La valeur par défaut est 14. Coppice supprime les journaux plus anciens toutes les heures, et les changements s’appliquent sans redémarrage. Si les journaux dépassent 256 Mio, Coppice supprime d’abord les plus anciens, même avant la fin de `retention_days`. |
+| `retention_days` | integer | `14` | Combien de jours de journaux garder, aujourd’hui compris : 3, 7, 14 ou 30. La valeur par défaut est 14. Coppice supprime les journaux plus anciens toutes les heures. Les changements s’appliquent sans redémarrage. Si les journaux dépassent 256 Mio, Coppice supprime d’abord les plus anciens, même avant la fin de `retention_days`. |
 
-Le journal de chaque jour est découpé en fichiers de 32 Mio au plus, et chaque fichier compte dans la limite de 256 Mio, ceux du jour compris. Coppice ne supprime jamais le fichier de journal ni le journal de base de données en cours d’écriture. Les journaux de base de données comptent dans la limite, et Coppice les supprime une fois `retention_days` dépassé.
+Le journal de chaque jour est découpé en fichiers de 32 Mio au plus. Chaque fichier compte dans la limite de 256 Mio, ceux du jour compris. Coppice ne supprime jamais le fichier de journal ni le journal de base de données en cours d’écriture. Les journaux de base de données comptent dans la limite. Coppice les supprime une fois `retention_days` dépassé.
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
@@ -66,7 +66,7 @@ Le journal de chaque jour est découpé en fichiers de 32 Mio au plus, et chaque
 <a id="connectors"></a>
 
 ## Connecteurs
-Les CLI que Coppice trouve sont activées par défaut, sauf si leur vérification de connexion indique que vous êtes déconnecté. Il ne faut une ligne que pour en désactiver une :
+Les CLI que Coppice trouve sont activées par défaut, sauf si leur vérification de connexion indique que vous êtes déconnecté. Vous n’avez besoin d’une ligne que pour en désactiver une :
 
 ```toml
 [agent.connectors.claude-code]
@@ -85,21 +85,21 @@ Kilo Code, GitHub Copilot, Qwen Code et Kimi Code sont activés dès que Coppice
 | `worker_count` | integer | `8` | Plafond total de tâches d’agents, tous connecteurs confondus. En dessous de 1, vaut 1. Un ancien `worker_count = 2` garde l’ancien plafond et peut bloquer les autres connecteurs tant que vous ne l’augmentez pas ou ne le retirez pas. |
 | `health_check_interval_secs` | integer | `60` | Secondes entre deux vérifications de santé des agents. En dessous de 10, vaut 10. |
 
-`<data-dir>` est le dossier qui contient `config.toml` : `~/.config/Coppice` sous Linux et WSL, et `~/Library/Application Support/Coppice` sous macOS.
+`<data-dir>` est le dossier qui contient `config.toml` : `~/.config/Coppice` sous Linux et WSL, et `~/Library/Application Support/Coppice` sous macOS.
 
 ## `[agent.connectors.<id>]`
 
-Ids : `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `qwen-code`, `kimi`, `grok`. Chaque table est facultative.
+Ids : `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `qwen-code`, `kimi`, `grok`. Chaque table est facultative.
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
-| `enabled` | bool | non défini : activé si la CLI est connectée | Active ou désactive le connecteur. |
+| `enabled` | bool | non défini : activé si la CLI est connectée | Active ou désactive le connecteur. |
 | `model_providers` | list of strings | `[]` | Fournisseurs de modèles pour ce connecteur. Remplis quand vous l’activez. |
 | `run_timeout_secs` | integer | `1800` pour tous les connecteurs | Secondes avant qu’un lancement sur ce connecteur échoue. |
 | `max_concurrent_runs` | integer | `2` | Nombre de tâches que ce connecteur peut exécuter en même temps. Les autres restent en file et partent de la plus ancienne. En dessous de 1, vaut 1. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | Le binaire de CLI à lancer. Claude Code lance toujours `claude` et n’a pas de `command`. |
 
-OpenCode uniquement :
+OpenCode uniquement :
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
@@ -113,11 +113,11 @@ Changer la `command` d’OpenCode demande aussi un redémarrage.
 | --- | --- | --- | --- |
 | `auto_start_runs` | bool | `true` | Si true, assigner un agent à un ticket qui a un dépôt lance un lancement. Si false, vous cliquez sur **Run agent**. |
 | `auto_assign.default` | bool | `true` | Active l’assignation automatique pour chaque statut sans réglage propre. |
-| `auto_assign.<status>` | bool | `backlog` : `false`. Autres : suit `default` | Active ou désactive l’assignation automatique pour un statut. |
+| `auto_assign.<status>` | bool | `backlog` : `false`. Autres : suit `default` | Active ou désactive l’assignation automatique pour un statut. |
 | `auto_split.default` | bool | `false` | Active le découpage automatique pour chaque statut sans réglage propre. |
 | `auto_split.<status>` | bool | suit `default` | Active ou désactive le découpage automatique pour un statut. |
 
-Clés de statut : `backlog`, `ready`, `in_progress`, `in_review`, `in_qa`, `wait_for_final_review` (Wait for Human Review), `blocked`, `done`.
+Clés de statut : `backlog`, `ready`, `in_progress`, `in_review`, `in_qa`, `wait_for_final_review` (Wait for Human Review), `blocked`, `done`.
 
 Quand l’assignation automatique est activée pour ce statut, Coppice assigne l’agent désigné par le lancement. Sinon, le ticket affiche **Recommends:** à la place.
 
@@ -135,10 +135,10 @@ Quand le découpage automatique est activé pour ce statut, Coppice crée les ti
 | `compaction.max_candidates_per_batch` | integer | `20` | Nombre maximal de candidats qu’un lot peut proposer. |
 | `compaction.max_attempts` | integer | `3` | Nombre maximal d’essais pour un lot. |
 | `auto_save.enabled` | bool | `false` | Enregistre les candidats peu risqués sans vous demander. |
-| `auto_save.allowed_types` | list of strings | `[]` | Types que l’enregistrement automatique peut garder : `bug_pattern`, `coding_convention`, `dependency_note`, `performance_note`, `review_feedback`, `test_command`. |
+| `auto_save.allowed_types` | list of strings | `[]` | Types que l’enregistrement automatique peut garder : `bug_pattern`, `coding_convention`, `dependency_note`, `performance_note`, `review_feedback`, `test_command`. |
 | `auto_save.minimum_confidence` | string | `high` | Doit rester `high`. |
 | `retrieval.top_k` | integer | `8` | Nombre d’entrées renvoyées par une recherche. De 1 à 20. |
-| `retrieval.allowed_types` | list of strings | `[]` (tous les types) | Ne renvoie que ces types : `coding_convention`, `architecture_rule`, `bug_pattern`, `test_command`, `review_feedback`, `dependency_note`, `api_contract`, `workflow_rule`, `human_preference`, `operational_runbook`, `security_rule`, `performance_note`. |
+| `retrieval.allowed_types` | list of strings | `[]` (tous les types) | Ne renvoie que ces types : `coding_convention`, `architecture_rule`, `bug_pattern`, `test_command`, `review_feedback`, `dependency_note`, `api_contract`, `workflow_rule`, `human_preference`, `operational_runbook`, `security_rule`, `performance_note`. |
 | `retrieval.minimum_confidence` | string | `medium` | `low`, `medium` ou `high`. |
 | `retrieval.default_page_size` | integer | `25` | Taille de page par défaut. |
 | `retrieval.max_page_size` | integer | `100` | Taille de page maximale. 100 au plus. |
@@ -153,7 +153,7 @@ Chaque nombre et intervalle ci-dessus doit être supérieur à 0.
 | --- | --- | --- | --- |
 | `author_name` | string | `Coppice` | Nom d’auteur des commits créés par Coppice. |
 | `author_email` | string | `coppice@localhost` | E-mail d’auteur de ces commits. |
-| `push_enabled` | bool | `false` (`true` dans l'application de bureau) | Autorise Coppice à pousser des branches et à ouvrir des pull requests. |
+| `push_enabled` | bool | `false` (`true` dans l’application de bureau) | Autorise Coppice à pousser des branches et à ouvrir des pull requests. |
 
 ## `[plugins]`
 
@@ -178,7 +178,7 @@ Chaque nombre et intervalle ci-dessus doit être supérieur à 0.
 
 ## `[keybindings]`
 
-Chaque clé est un id de commande de [Raccourcis clavier](/docs/shortcuts). Vos touches remplacent celles par défaut de la commande, et une valeur vide désactive le raccourci.
+Chaque clé est un id de commande de [Raccourcis clavier](/docs/shortcuts). Vos touches remplacent celles par défaut de la commande. Une valeur vide désactive le raccourci.
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
@@ -191,4 +191,4 @@ Chaque clé est un id de commande de [Raccourcis clavier](/docs/shortcuts). Vos 
 "board.nextCard" = ["J", "Down"]
 ```
 
-`Mod` correspond à Cmd sur macOS et à Ctrl sur Linux et WSL. Une séquence s’écrit `G then B`. Plusieurs touches pour une même commande se séparent par ` or `, ou s’écrivent en liste. Save applique le changement sans redémarrage. Un raccourci que Coppice ne sait pas lire, un id de commande inconnu, une touche déjà prise par une autre commande, ou une touche qui appartient au navigateur ou au système est ignoré. La commande garde sa valeur par défaut, et Settings explique pourquoi.
+`Mod` correspond à Cmd sur macOS et à Ctrl sur Linux et WSL. Une séquence s’écrit `G then B`. Plusieurs touches pour une même commande se séparent par ` or `, ou s’écrivent en liste. **Save** applique le changement sans redémarrage. Coppice ignore un raccourci qu’il ne sait pas lire, un id de commande inconnu, une touche déjà prise par une autre commande, ou une touche qui appartient au navigateur ou au système. La commande garde sa valeur par défaut. Settings explique pourquoi.

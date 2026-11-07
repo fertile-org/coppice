@@ -1,7 +1,7 @@
 ---
 title: Raccourcis clavier
 metaTitle: "Raccourcis clavier"
-description: "Utilisez Coppice au clavier : parcourez le tableau, ouvrez et déplacez les tickets, relisez les diffs sans souris, et définissez vos propres raccourcis."
+description: "Utilisez Coppice au clavier : parcourez le tableau, ouvrez et déplacez les tickets, relisez les diffs sans souris, et définissez vos propres raccourcis."
 ---
 
 # Raccourcis clavier
@@ -10,7 +10,7 @@ Appuyez sur `?` n’importe où pour voir tous les raccourcis. Ils sont regroup�
 
 `Mod` correspond à `⌘` sur macOS et à `Ctrl` sur Linux et WSL. Les séquences s’affichent comme `G then B`.
 
-Les raccourcis ne se déclenchent pas pendant que vous tapez dans un champ, et le terminal garde ses propres touches. Appuyez sur `Esc` pour fermer ce qui est ouvert.
+Les raccourcis ne se déclenchent pas pendant que vous tapez dans un champ. Le terminal garde ses propres touches. Appuyez sur `Esc` pour fermer ce qui est ouvert.
 
 <a id="navigate"></a>
 
@@ -46,7 +46,7 @@ Les raccourcis ne se déclenchent pas pendant que vous tapez dans un champ, et l
 | Section suivante | `drawer.nextSection` | `]` |
 | Section précédente | `drawer.previousSection` | `[` |
 
-**Aller à la colonne 1** à **Aller à la colonne 9** suivent le tableau de gauche à droite : 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked.
+**Aller à la colonne 1** à **Aller à la colonne 9** suivent le tableau de gauche à droite : 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked.
 
 **Aller à Plugins**, **Aller à Users**, **Aller à System** et **Aller à Settings** n’existent pas pour les membres, comme dans la barre latérale. L’application de bureau n’a pas non plus **Aller à Users**.
 
@@ -102,7 +102,7 @@ Les raccourcis ne se déclenchent pas pendant que vous tapez dans un champ, et l
 
 ## Raccourcis personnalisés
 
-Modifiez n’importe quel raccourci dans Settings, sous `[keybindings]`. Utilisez l’id de la commande donné dans les tableaux ci-dessus. Vos touches remplacent celles par défaut, et une valeur vide désactive le raccourci.
+Modifiez n’importe quel raccourci dans Settings, sous `[keybindings]`. Utilisez l’id de la commande donné dans les tableaux ci-dessus. Vos touches remplacent celles par défaut. Une valeur vide désactive le raccourci.
 
 Si un raccourci est illisible, désigne une commande inconnue, utilise une touche déjà prise par une autre commande, ou appartient au navigateur ou au système, cette commande garde sa valeur par défaut. Settings explique pourquoi. L’aide des raccourcis et la palette de commandes affichent les touches réellement en vigueur.
 

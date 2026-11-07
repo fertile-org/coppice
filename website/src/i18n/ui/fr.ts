@@ -47,6 +47,6 @@ export const ui: Ui = {
     hint: '/',
     footer: '↑↓ pour naviguer, Entrée pour ouvrir, Échap pour fermer',
     close: 'Fermer',
-    noResults: 'Aucun résultat pour « {query} ».',
+    noResults: 'Aucun résultat pour « {query} ».',
   },
 };
