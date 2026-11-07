@@ -1,3 +1,4 @@
+import { loadBlogPosts, publishedTranslationSources } from '../lib/blog';
 import { buildCatalog } from './catalog';
 import type { LocalePath } from './paths';
 
@@ -7,7 +8,13 @@ type DocModule = {
 };
 
 const docModules = import.meta.glob('../content/docs/*/**/*.{md,mdx}', { eager: true }) as Record<string, DocModule>;
-const blogModuleKeys = Object.keys(import.meta.glob('../content/blog/**/*.{md,mdx}', { eager: false }));
+const blogModules = import.meta.glob('../content/blog/**/*.{md,mdx}', { eager: true }) as Record<
+  string,
+  { frontmatter?: Record<string, unknown> }
+>;
+const blogPosts = loadBlogPosts(
+  Object.entries(blogModules).map(([file, mod]) => ({ file, data: mod.frontmatter ?? {} })),
+);
 const localePageKeys = Object.keys(import.meta.glob('../pages/*/**/*.{astro,md,mdx}', { eager: false }));
 const pageStringKeys = Object.keys(import.meta.glob('./pages/*.ts', { eager: false })).map(
   (file) => `src/i18n/pages/${file.split('/').pop()}`,
@@ -15,7 +22,7 @@ const pageStringKeys = Object.keys(import.meta.glob('./pages/*.ts', { eager: fal
 
 export const catalog = buildCatalog([
   ...Object.keys(docModules),
-  ...blogModuleKeys,
+  ...publishedTranslationSources(blogPosts),
   ...localePageKeys,
   ...pageStringKeys,
 ]);

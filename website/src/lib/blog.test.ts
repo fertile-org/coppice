@@ -8,6 +8,7 @@ import {
   blogLastmod,
   blogLocalesForSlug,
   collectBlogPosts,
+  publishedTranslationSources,
   displayWidth,
   englishArticlePaths,
   formatBlogDate,
@@ -110,9 +111,18 @@ describe('blog frontmatter', () => {
 
 describe('blog sitemap alternates', () => {
   it('lists a real translation and omits locales that have no file', () => {
-    const sources = [post('en', 'worktrees'), post('ja', 'worktrees')];
+    const sources = [
+      post('en', 'worktrees'),
+      post('ja', 'worktrees'),
+      post('fr', 'worktrees', { draft: true }),
+      post('en', 'hidden', { draft: true }),
+      post('vi', 'hidden'),
+    ];
     const { posts } = collectBlogPosts(sources);
-    const catalog = buildCatalog(sources.map((source) => source.file));
+    const catalog = buildCatalog(publishedTranslationSources(posts));
+    assert.deepEqual(publishedTranslationSources(posts), ['src/content/blog/ja/worktrees.md']);
+    assert.deepEqual(englishArticlePaths(posts), ['/blog/worktrees']);
+    assert.deepEqual(blogLocalesForSlug(posts, 'hidden'), []);
     assert.deepEqual(translatedLocales(catalog, '/blog/worktrees'), blogLocalesForSlug(posts, 'worktrees'));
     const xml = sitemapXml({
       englishRoutes: ['/blog', ...englishArticlePaths(posts)],
@@ -124,6 +134,8 @@ describe('blog sitemap alternates', () => {
     assert.match(xml, /<loc>https:\/\/getcoppice\.app\/ja\/blog\/worktrees<\/loc>/);
     assert.doesNotMatch(xml, /\/fr\/blog\/worktrees/);
     assert.doesNotMatch(xml, /hreflang="fr"/);
+    assert.doesNotMatch(xml, /\/blog\/hidden/);
+    assert.doesNotMatch(xml, /hreflang="vi"/);
     assert.match(xml, /hreflang="ja" href="https:\/\/getcoppice\.app\/ja\/blog\/worktrees"/);
     assert.match(xml, /hreflang="x-default" href="https:\/\/getcoppice\.app\/blog\/worktrees"/);
   });

@@ -91,13 +91,28 @@ function indexedUrls(outDir) {
 
 const LOCALE_CODES = Object.fromEntries(LOCALES.map((locale) => [locale.path, locale.code]));
 
-function blogContentExists(locale, slug) {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return false;
-  return ['md', 'mdx'].some(
-    (ext) =>
-      fs.existsSync(path.join(root, 'src/content/blog', locale, `${slug}.${ext}`)) ||
-      fs.existsSync(path.join(root, 'src/content/blog', locale, slug, `index.${ext}`)),
-  );
+function blogSourceFiles(locale, slug) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return [];
+  const dir = path.join(root, 'src/content/blog', locale);
+  return [
+    path.join(dir, `${slug}.md`),
+    path.join(dir, `${slug}.mdx`),
+    path.join(dir, slug, 'index.md'),
+    path.join(dir, slug, 'index.mdx'),
+  ].filter((file) => fs.existsSync(file));
+}
+
+/** `draft: true` in the frontmatter block. Body text is ignored. */
+function frontmatterIsDraft(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const fence = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (!fence) return false;
+  return /^draft:\s*true\s*$/m.test(fence[1]);
+}
+
+function blogPublished(locale, slug) {
+  const files = blogSourceFiles(locale, slug);
+  return files.length > 0 && files.every((file) => !frontmatterIsDraft(file));
 }
 
 function englishBlogSlugs() {
@@ -105,11 +120,19 @@ function englishBlogSlugs() {
   if (!fs.existsSync(dir)) return [];
   const slugs = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory() && blogContentExists('en', entry.name)) slugs.push(entry.name);
+    if (entry.isDirectory() && blogSourceFiles('en', entry.name).length) slugs.push(entry.name);
     const file = entry.name.match(/^([a-z0-9]+(?:-[a-z0-9]+)*)\.(md|mdx)$/);
     if (file) slugs.push(file[1]);
   }
-  return slugs.sort();
+  return [...new Set(slugs)].sort();
+}
+
+function publishedEnglishBlogSlugs() {
+  return englishBlogSlugs().filter((slug) => blogPublished('en', slug));
+}
+
+function draftEnglishBlogSlugs() {
+  return englishBlogSlugs().filter((slug) => !blogPublished('en', slug));
 }
 
 /** Translations that ship in the repo (not the fixture): `[hreflang, localized path]` for one English path. */
@@ -121,7 +144,7 @@ function shippedTranslations(englishPath) {
       found = fs.existsSync(path.join(root, 'src/i18n/pages', `${locale}.ts`));
     } else if (englishPath.startsWith('/blog/')) {
       const slug = englishPath.slice('/blog/'.length);
-      found = blogContentExists(locale, slug);
+      found = blogPublished('en', slug) && blogPublished(locale, slug);
     } else if (englishPath === '/docs' || englishPath.startsWith('/docs/')) {
       const slug = englishPath === '/docs' ? 'index' : englishPath.slice('/docs/'.length);
       found = ['.md', '.mdx'].some(
@@ -212,11 +235,17 @@ function checkBuild(outDir, { translated, site }) {
   }
   for (const route of english) {
     const slug = route.match(/^\/blog\/([a-z0-9]+(?:-[a-z0-9]+)*)$/)?.[1];
-    if (slug && blogContentExists('en', slug)) continue;
+    if (slug && blogPublished('en', slug)) continue;
     if (!baseline.includes(route) && !allowedExtra.has(route)) fail(`unexpected English route ${route}`);
   }
-  for (const slug of englishBlogSlugs()) {
+  for (const slug of publishedEnglishBlogSlugs()) {
     if (!english.includes(`/blog/${slug}`)) fail(`missing /blog/${slug}`);
+  }
+  for (const slug of draftEnglishBlogSlugs()) {
+    const route = `/blog/${slug}`;
+    if (routes.some((item) => item === route || item.endsWith(route))) {
+      fail(`draft ${route} is a public route`);
+    }
   }
   for (const locale of locales) {
     for (const route of baseline) {
@@ -318,7 +347,7 @@ function checkBuild(outDir, { translated, site }) {
   }
   checkFallback(outDir, 'ja', '/blog', site);
 
-  for (const slug of englishBlogSlugs()) {
+  for (const slug of publishedEnglishBlogSlugs()) {
     const englishPath = `/blog/${slug}`;
     const article = readHtml(outDir, englishPath);
     if (!article) {
@@ -440,8 +469,12 @@ const jaDocs = path.join(root, 'src/content/docs/ja');
 const fixtureDest = path.join(jaDocs, 'concepts.md');
 const fixtureSrc = path.join(root, 'scripts/fixtures/i18n/ja-concepts.md');
 const blogEn = path.join(root, 'src/content/blog/en/fixture-note.md');
+const blogEnDraft = path.join(root, 'src/content/blog/en/draft-only.md');
 const blogJaDir = path.join(root, 'src/content/blog/ja');
 const blogJa = path.join(blogJaDir, 'fixture-note.md');
+const blogJaDraft = path.join(blogJaDir, 'draft-only.md');
+const blogFrDir = path.join(root, 'src/content/blog/fr');
+const blogFr = path.join(blogFrDir, 'fixture-note.md');
 const fixtureOut = path.join(root, '.i18n-fixture-dist');
 const stash = fs.mkdtempSync(path.join(root, '.i18n-stash-'));
 const jaDocsExisted = fs.existsSync(jaDocs);
@@ -451,8 +484,12 @@ try {
   fs.mkdirSync(jaDocs, { recursive: true });
   fs.copyFileSync(fixtureSrc, fixtureDest);
   fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/en-fixture-note.md'), blogEn);
+  fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/en-draft-only.md'), blogEnDraft);
   fs.mkdirSync(blogJaDir, { recursive: true });
   fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/ja-fixture-note.md'), blogJa);
+  fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/ja-draft-only.md'), blogJaDraft);
+  fs.mkdirSync(blogFrDir, { recursive: true });
+  fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/fr-fixture-note.md'), blogFr);
   const build = spawnSync('npx', ['astro', 'build', '--outDir', fixtureOut], {
     cwd: root,
     env: process.env,
@@ -467,12 +504,25 @@ try {
     if (!japaneseNote?.includes('日本語の見本本文です。')) fail('Japanese blog fixture did not render');
     if (englishNote?.includes('日本語の見本本文です。')) fail('English blog fixture rendered the Japanese body');
     if (!japaneseNote?.includes('class="blog-answer"')) fail('blog fixture is missing the direct answer');
+    if (readHtml(fixtureOut, '/blog/draft-only')) fail('draft English article was built');
+    if (readHtml(fixtureOut, '/ja/blog/draft-only')) fail('translation of a draft English article was built');
+    const sitemap = fs.readFileSync(path.join(fixtureOut, 'sitemap.xml'), 'utf8');
+    if (sitemap.includes('/blog/draft-only')) fail('sitemap lists a draft article');
+    if (sitemap.includes('/fr/blog/fixture-note')) fail('sitemap lists a draft translation');
+    const alternateFr = [...englishNote.matchAll(/<link\b[^>]*>/gi)].some(
+      (tag) => /rel="alternate"/i.test(tag[0]) && /hreflang="fr"/i.test(tag[0]),
+    );
+    if (alternateFr) fail('draft French translation is an alternate');
   }
 } finally {
   fs.rmSync(fixtureDest, { force: true });
   fs.rmSync(blogEn, { force: true });
+  fs.rmSync(blogEnDraft, { force: true });
   fs.rmSync(blogJa, { force: true });
+  fs.rmSync(blogJaDraft, { force: true });
+  fs.rmSync(blogFr, { force: true });
   if (fs.existsSync(blogJaDir) && fs.readdirSync(blogJaDir).length === 0) fs.rmdirSync(blogJaDir);
+  if (fs.existsSync(blogFrDir) && fs.readdirSync(blogFrDir).length === 0) fs.rmdirSync(blogFrDir);
   for (const name of swapped) fs.renameSync(path.join(stash, name), path.join(jaDocs, name));
   if (!jaDocsExisted && fs.readdirSync(jaDocs).length === 0) fs.rmdirSync(jaDocs);
   fs.rmSync(stash, { recursive: true, force: true });

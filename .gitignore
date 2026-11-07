@@ -3,6 +3,8 @@
 .DS_Store
 config.toml
 deploy/config/config.toml
+e2e/screenshot/.capture-dir
+e2e/screenshot/.capture-dir.*
 .env
 .env.*
 !.env.example

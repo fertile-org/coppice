@@ -3,17 +3,33 @@
 # stack does not share the dev database or volumes.
 # Forces the desktop product session so the SPA skips login and hides the
 # account email and Sign out, matching `coppice-server desktop`.
-# `make screenshot` sets COPPICE_REPOS_HOST and COPPICE_SCREENSHOT_CONFIG to
-# throwaway /tmp paths and runs `down -v` first. Do not point those variables
-# at a home directory, SSH keys, or a config file that holds real tokens.
+#
+# `make screenshot` creates a private directory and sets COPPICE_REPOS_HOST
+# and COPPICE_SCREENSHOT_CONFIG to paths inside it. Do not point those
+# variables at a home directory, SSH keys, or a config file that holds real
+# tokens. There is no fixed /tmp fallback: an unset path fails the render.
+#
+# Ports replace the base file's mappings. The base file publishes
+# "HOST:CONTAINER" with no address, which listens on every interface.
+# `!override` is what asks Compose to drop those mappings; `make screenshot-check`
+# renders `docker compose config` and fails if any wildcard binding remains.
 services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5432:5432"
+
   server:
+    ports: !override
+      - "127.0.0.1:5000:5000"
     environment:
       COPPICE_AUTH__DESKTOP_MODE: "true"
       WORKFLOW_AUTO_START_RUNS: "false"
       # Inside the container, not the operator's home. The plugins frame must
       # not show the container /data dir.
       COPPICE_PLUGINS__DIR: /home/coppice/plugins
+      # Literal demo value. Do not interpolate SECRETS_MASTER_KEY: the base
+      # file would otherwise copy the host's key into this stack.
+      SECRETS_MASTER_KEY: "coppice-screenshot-demo-only"
     # Replace the base volume list so the operator config and $HOME checkouts
     # are not mounted beside these throwaway paths.
     volumes: !override
@@ -21,5 +37,9 @@ services:
       - worktree_data:/data/worktrees
       - plugin_data:/data/plugins
       - connector_data:/home/coppice
-      - ${COPPICE_SCREENSHOT_CONFIG:-/tmp/coppice-screenshot-config.toml}:/etc/coppice/config.toml
-      - ${COPPICE_REPOS_HOST:-/tmp/coppice-screenshot-repos}:/repos
+      - ${COPPICE_SCREENSHOT_CONFIG:?set COPPICE_SCREENSHOT_CONFIG to a private file}:/etc/coppice/config.toml
+      - ${COPPICE_REPOS_HOST:?set COPPICE_REPOS_HOST to a private directory}:/repos
+
+  web:
+    ports: !override
+      - "127.0.0.1:5001:5001"

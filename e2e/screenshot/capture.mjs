@@ -6,6 +6,8 @@
  * Marketing screenshots and GIF.
  *
  * Assumes the screenshot Compose project is already up (`make screenshot`).
+ * That stack publishes Postgres, the API, and the web UI on 127.0.0.1 only.
+ * This script does not choose ports, secrets, or the private config path.
  * That project forces desktop mode and does not enable extra mock-provider
  * config. The script seeds a board, a final-review diff, a finished live
  * console, chat transcripts, and plugins, then captures five 1440×900 frames:
