@@ -10,7 +10,7 @@ description: "用键盘操作 Coppice：在看板上移动，打开和移动工�
 
 `Mod` 在 macOS 上是 `⌘`，在 Linux 和 WSL 上是 `Ctrl`。按键序列写作 `G then B`（先按 G，再按 B）。
 
-在输入框中打字时快捷键不会触发，终端也保留自己的按键。按 `Esc` 可关闭当前打开的任何内容。
+在输入框中打字时，快捷键不会触发。终端也保留自己的按键。按 `Esc` 可关闭当前打开的任何内容。
 
 <a id="navigate"></a>
 
@@ -50,7 +50,7 @@ description: "用键盘操作 Coppice：在看板上移动，打开和移动工�
 
 和侧边栏一样，成员（member）看不到 **Go to Plugins**、**Go to Users**、**Go to System** 和 **Go to Settings**。桌面应用中也没有 **Go to Users**。
 
-**Next card** 和 **Previous card** 在同一列内移动，到头后不会循环。**Next column** 和 **Previous column** 会落到相同序号的卡片上；如果没有，就落到最后一张卡片；如果该列为空，就落到列标题上。**Next section** 和 **Previous section** 会在已打开的抽屉面板中依次切换 Detail、Live Console 和 Agent Runs。
+**Next card** 和 **Previous card** 在同一列内移动，到头后不会循环。**Next column** 和 **Previous column** 会落到相同序号的卡片上；这个序号没有卡片时，落到最后一张卡片；这一列为空时，落到列标题上。**Next section** 和 **Previous section** 在已打开的抽屉里，依次切换 Detail、Live Console 和 Agent Runs。
 
 <a id="tickets"></a>
 

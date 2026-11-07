@@ -6,7 +6,7 @@ description: "Coppice 运行你已在用的智能体 CLI：Claude Code、Codex�
 
 # 提供商
 
-受够了为每个智能体都开一个终端？Coppice 运行你已经在用的编程智能体 CLI，并把它们的工作放到同一块看板上。订阅和登录都还是你自己的，不需要 Coppice 账号。
+Coppice 运行你已经在用的编程智能体 CLI，把它们的工作放到同一块看板上。订阅和登录仍是你自己的，不需要 Coppice 账号。
 
 <a id="supported-connectors"></a>
 
@@ -44,14 +44,14 @@ description: "Coppice 运行你已在用的智能体 CLI：Claude Code、Codex�
 
 | 状态 | 含义 |
 | --- | --- |
-| **Ready** | 一次免费的登录检查确认你已登录。 |
+| **Ready** | 一次不消耗套餐额度的登录检查确认你已登录。 |
 | **Found, not signed in** | Coppice 找到了命令，但你还没有登录。请在终端里登录。 |
 | **Not on your PATH** | Coppice 找不到该命令。请安装它，或检查你的 PATH。 |
-| **Installed** | Coppice 找到了命令。对于 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code，不消耗你的套餐额度就无法检查登录状态。 |
+| **Installed** | Coppice 找到了命令。Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 不消耗套餐额度，就无法检查是否已登录。 |
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示为 **Installed**。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）想确认它能用，就点 **Test connection**（测试连接）：它会跑一次简短的聊天、规划和工单。所有 CLI 都能聊天。Claude Code、Codex 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读，智能体仍可在你的电脑上执行命令。）OpenCode、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 的聊天没有这条横幅：在聊天和规划中，Coppice 会阻止它们写文件和执行 shell 命令。你在这些 CLI 里自己配置的 MCP 工具仍可能改动内容。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示为 **Installed**。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）想确认这个连接器能用，就点 **Test connection**（测试连接）。这次测试会跑一次简短的聊天、规划和工单。所有 CLI 都能聊天。Claude Code、Codex 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读。智能体仍可在你的电脑上执行命令。）OpenCode、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 的聊天没有这条横幅。在这些 CLI 的聊天和规划里，Coppice 会阻止它们写文件和执行 shell 命令。你在这些 CLI 里自己配置的 MCP 工具仍可能改动内容。
 
-CLI 还没就绪时，也可以先保存智能体。CLI 安装并登录后，它就会开始处理工单。如果你是在打开 Coppice 之后才安装的 CLI，请退出并重新打开 Coppice，让它找到新命令。
+CLI 还没就绪时，也可以先保存智能体。CLI 安装并登录后，这个智能体就会开始处理工单。如果你是在打开 Coppice 之后才安装的 CLI，请退出并重新打开 Coppice，让 Coppice 找到新命令。
 
 Coppice 找到命令的连接器会开启，除非你未登录。要开启或关闭某个连接器，请使用 **System → Connectors**（系统 → 连接器）中的开关。
 
@@ -69,7 +69,7 @@ Coppice 找到命令的连接器会开启，除非你未登录。要开启或关
 
 ## 在工单上
 
-智能体接手工单时，Coppice 会在该工单自己的 git worktree 中启动它的 CLI。你可以在工单上实时查看进度。
+智能体接手工单时，Coppice 会在该工单自己的 git worktree 中启动这个智能体的 CLI。你可以在工单上实时查看进度。
 
 <a id="what-coppice-does-not-do"></a>
 

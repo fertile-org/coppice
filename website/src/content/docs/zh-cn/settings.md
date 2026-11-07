@@ -32,7 +32,7 @@ Coppice 把设置保存在一个文件 `config.toml` 中：
 ## 更新
 打开 **System → Updates**（系统 → 更新）可以查看当前版本，并选择 **Check for updates**（检查更新）。**Automatic updates**（自动更新）默认开启。关闭后，Coppice 将不再在后台检查新版本。
 
-这个开关不在 `config.toml` 中。Coppice 把它以 `automaticUpdates` 保存在同一文件夹下的 `update-settings.json` 中。
+这个开关不在 `config.toml` 中。Coppice 把这项设置以 `automaticUpdates` 保存在同一文件夹下的 `update-settings.json` 中。
 
 <a id="replace-keys"></a>
 
@@ -47,7 +47,7 @@ Coppice 把设置保存在一个文件 `config.toml` 中：
 ## 日志
 管理员可以打开 **System → Logs**（系统 → 日志），筛选并实时查看服务器、请求、智能体运行和数据库日志。每次运行都有一个 **View logs** 链接。
 
-**Export logs** 会把符合当前筛选条件的日志行保存为 `coppice-logs.zip`。Coppice 会移除它已知的令牌和密钥，但分享之前请自己再检查一遍。
+**Export logs** 会把符合当前筛选条件的日志行保存为 `coppice-logs.zip`。Coppice 会移除自己已知的令牌和密钥，但分享之前请自己再检查一遍。
 
 **Report a problem** 会新建一个 GitHub issue，并自动填好你的 Coppice 版本。写明发生了什么、你原本期望什么，然后附上通过 **Export logs** 导出的 zip 文件。
 
@@ -57,7 +57,7 @@ Coppice 把设置保存在一个文件 `config.toml` 中：
 | --- | --- | --- | --- |
 | `retention_days` | 整数 | `14` | 日志保留天数（含当天）：3、7、14 或 30，默认 14。Coppice 每小时删除一次过期日志，修改无需重启即可生效。如果日志超过 256 MiB，即使还没到 `retention_days`，Coppice 也会从最旧的开始删除。 |
 
-即使超过限制，Coppice 也不会删除当天的日志，以及正在写入的数据库日志。数据库日志计入 256 MiB 上限，超过 `retention_days` 后会被删除。
+即使超过限制，Coppice 也不会删除当天的日志，也不会删除正在写入的数据库日志。数据库日志计入 256 MiB 上限；超过 `retention_days` 后，Coppice 会删除数据库日志。
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
@@ -75,7 +75,7 @@ enabled = false
 
 **System → Connectors** 中的开关写入的也是这一行。
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就会开启。Coppice 无法免费检查它们的登录状态，所以如果你已退出登录，运行时会报错。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就会开启。不消耗套餐额度，Coppice 就无法检查它们是否已登录。如果你已退出登录，运行时会报错。
 
 ## `[agent]`
 
@@ -96,7 +96,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | `enabled` | 布尔值 | 未设置：CLI 已登录则开启 | 开启或关闭该连接器。 |
 | `model_providers` | 字符串列表 | `[]` | 该连接器的模型提供商。开启连接器时自动填写。 |
 | `run_timeout_secs` | 整数 | 所有连接器均为 `1800` | 该连接器上的一次运行超过多少秒算失败。 |
-| `max_concurrent_runs` | 整数 | `2` | 该连接器同时可跑的任务数。多出来的保持排队，空出槽位后按最旧优先启动。小于 1 时按 1 处理。 |
+| `max_concurrent_runs` | 整数 | `2` | 该连接器同时可跑的任务数。多出来的任务保持排队。有空位后，Coppice 按最旧的优先启动。小于 1 时按 1 处理。 |
 | `command` | 字符串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 要运行的 CLI 可执行文件。Claude Code 始终运行 `claude`，没有 `command`。 |
 
 仅限 OpenCode：
@@ -121,7 +121,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 
 某个状态开启自动指派时，Coppice 会指派该次运行指定的智能体。关闭时，工单上会改为显示 **Recommends:**（推荐）。
 
-某个状态开启自动拆分时，Coppice 会创建该次运行建议的子工单。关闭时，它会保存一条 **Pending split recommendation**（待处理的拆分建议），直到你点击 **Approve splits**。
+某个状态开启自动拆分时，Coppice 会创建该次运行建议的子工单。关闭时，Coppice 会保存一条 **Pending split recommendation**（待处理的拆分建议），直到你点击 **Approve splits**。
 
 ## `[knowledge]`
 
@@ -191,4 +191,4 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 "board.nextCard" = ["J", "Down"]
 ```
 
-`Mod` 在 macOS 上是 Cmd，在 Linux 和 WSL 上是 Ctrl。按键序列写作 `G then B`。一个命令的多个按键用 ` or ` 分隔，或写成列表。保存后无需重启即可生效。无法解析的快捷键、未知的命令 id、已被其他命令占用的按键，以及属于浏览器或系统的按键都会被跳过。该命令保留默认按键，Settings 会说明原因。
+`Mod` 在 macOS 上是 Cmd，在 Linux 和 WSL 上是 Ctrl。按键序列写作 `G then B`。一个命令的多个按键用 ` or ` 分隔，或写成列表。保存后无需重启即可生效。无法解析的快捷键、未知的命令 id、已被其他命令占用的按键，以及属于浏览器或系统的按键，Coppice 都会跳过。该命令保留默认按键，Settings 会说明原因。
