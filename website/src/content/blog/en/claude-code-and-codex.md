@@ -1,8 +1,8 @@
 ---
 title: How to use Claude Code and Codex together on one project
 metaTitle: Claude Code and Codex on one project
-description: "Create one Claude Code agent and one Codex agent. Configuring both does not make both run. You assign or confirm the assignee for each stage."
-answer: "Create one agent on Claude Code and another on Codex. Configuring both connectors does not make both run. A ticket has one assignee. You assign or confirm that assignee for each stage, and the Technical Lead's assignment decides who implements. You approve the plan unless you skip it, then accept the diff before a separate merge."
+description: "Create one Claude Code agent and one Codex agent. Configuring both does not make both run. Check the assignee. The Technical Lead decides who implements."
+answer: "Create one agent on Claude Code and another on Codex. Configuring both connectors does not make both run. A ticket has one assignee. Check which agent was assigned: the Technical Lead's handoff decides who implements, and that run continues on its own while auto_start_runs is on. You approve the plan unless you skip it, then accept the diff before a separate merge."
 published: "2026-11-07"
 draft: true
 author: Coppice
@@ -14,7 +14,7 @@ keywords:
   - tickets
 ---
 
-Coppice is a desktop app. It runs the `claude` and `codex` commands already on your computer. Each agent has one connector, and a ticket stores one assignee. Configuring Claude Code on one agent and Codex on another does not make both run. You assign or confirm the assignee for each stage. The Technical Lead's assignment decides which agent implements the work.
+Coppice is a desktop app. It runs the `claude` and `codex` commands already on your computer. Each agent has one connector, and a ticket stores one assignee. Configuring Claude Code on one agent and Codex on another does not make both run. Check which agent is in **Assignee**. The Technical Lead's handoff decides who implements, and that run continues on its own while `auto_start_runs` is on.
 
 Install and sign-in for the app and the CLIs are in the docs. This note covers how the two agents share one project, and where you still have to act.
 
@@ -54,9 +54,9 @@ You need three roles for the handoff below: a **PM**, a **Technical Lead**, and 
 
 ## A ticket has one assignee
 
-**Assignee** on the ticket is one agent. You assign or confirm that name for each stage. The Technical Lead's assignment decides which agent implements. With the default auto-assign for **Ready**, Coppice sets **Assignee** to the agent the Technical Lead named. If that is not the agent you want, change **Assignee**.
+**Assignee** on the ticket is one agent. Check which agent Coppice put there. The Technical Lead's handoff decides who implements. While `auto_start_runs` is on, that agent's run starts on its own.
 
-The plan is written by the earliest enabled PM. If you create one PM and that PM is the assignee, that agent writes the plan. An implementer runs after the Technical Lead names them and you confirm that assignee.
+The plan is written by the earliest enabled PM. If you create one PM and that PM is the assignee, that agent writes the plan. The implementer is the agent the Technical Lead names. Check **Assignee** for that name.
 
 [Concepts](/docs/concepts) describes the columns. The steps below are the controls you use.
 
@@ -80,7 +80,9 @@ When a plan is there, it is the **Proposed plan**, with **Approve plan** and **A
 
 ## What continues on its own
 
-`auto_start_runs` defaults to true. After a run hands the ticket to another agent, Coppice sets **Assignee** to that agent and starts the run. The setting is in [Settings](/docs/settings). Turn it off when you want to click **Run Agent** for each later stage.
+`auto_start_runs` defaults to true. After a run hands the ticket to another agent, Coppice sets **Assignee** to that agent and starts the run. The setting is in [Settings](/docs/settings).
+
+To pick the implementer yourself, set `auto_start_runs = false` before that handoff. Then set **Assignee** and click **Run Agent** in the ticket header. Settings calls that button **Run agent**.
 
 That handoff still needs a person at two points:
 
@@ -89,7 +91,7 @@ That handoff still needs a person at two points:
 
 If there is no Technical Lead, the ticket stays in **Ready** with no assignee. The comment says: "No Technical Lead agent is available, so this ticket stays in Ready without an assignee. Assign an agent to start work."
 
-If the Technical Lead does not name an implementer, the ticket stays in **Ready** and the implementation run does not start. The comment on the ticket says why. With the default auto-assign for **Ready**, a named implementer becomes the only assignee, and that agent's run starts. Confirm that name. To use the other connector, set **Assignee** to that agent.
+If the Technical Lead does not name an implementer, the ticket stays in **Ready** and the implementation run does not start. The comment on the ticket says why. With the default auto-assign for **Ready**, a named implementer becomes the only assignee, and that agent's run starts while `auto_start_runs` is on.
 
 A stuck ticket can move to **Blocked** with a comment. Read the comment before you start it again.
 
