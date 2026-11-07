@@ -18,19 +18,19 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 <a id="edit-it-in-the-app"></a>
 
 ## 在應用中編輯
-在側邊欄中開啟 **Settings**（設定）。頁面會以文本形式顯示該檔案，你寫的註釋也會保留。
+在側邊欄中開啟 **Settings**（設定）。頁面會以文字顯示該檔案，你寫的註解也會保留。
 
 - **Save** 會在寫入前檢查檔案。無效的值不會被儲存。
 - **Restore last good version** 可以撤銷一次錯誤的修改。
 
 有些修改會立即生效，另一些會提示 "Saved. Restart Coppice to apply."（已儲存，重啟 Coppice 後生效。）
 
-你也可以用任意文本編輯器修改這個檔案。你的修改在升級後依然保留。
+你也可以用任意文字編輯器修改這個檔案。你的修改在升級後依然保留。
 
 <a id="updates"></a>
 
 ## 更新
-開啟 **System → Updates**（系統 → 更新）可以檢視當前版本，並選擇 **Check for updates**（檢查更新）。**Automatic updates**（自動更新）預設開啟。關閉後，Coppice 將不再在後臺檢查新版本。
+開啟 **System → Updates**（系統 → 更新）可以檢視目前版本，並選擇 **Check for updates**（檢查更新）。**Automatic updates**（自動更新）預設開啟。關閉後，Coppice 不會再在背景檢查新版本。
 
 這個開關不在 `config.toml` 中。Coppice 把它以 `automaticUpdates` 儲存在同一資料夾下的 `update-settings.json` 中。
 
@@ -38,7 +38,7 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 
 ## 更換金鑰
 
-如果你分享過備份，請生成新的金鑰和新的管理員密碼。已儲存的令牌仍然可用，所有人都會被退出登入。
+如果你分享過備份，請產生新的金鑰和新的管理員密碼。已儲存的權杖仍然可用，所有人都會被登出。
 
 開啟 **System → Backup → Replace keys**，輸入新的管理員密碼並確認。
 
@@ -47,9 +47,9 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 ## 日誌
 管理員可以開啟 **System → Logs**（系統 → 日誌），篩選並即時檢視伺服器、請求、代理執行和資料庫日誌。每次執行都有一個 **View logs** 連結。
 
-**Export logs** 會把符合當前篩選條件的日誌行儲存為 `coppice-logs.zip`。Coppice 會移除它已知的令牌和金鑰，但分享之前請自己再檢查一遍。
+**Export logs** 會把符合目前篩選條件的日誌行儲存為 `coppice-logs.zip`。Coppice 會移除它已知的權杖和金鑰，但分享之前請自己再檢查一遍。
 
-**Report a problem** 會新建一個 GitHub issue，並自動填好你的 Coppice 版本。寫明發生了什麼、你原本期望什麼，然後附上通過 **Export logs** 匯出的 zip 檔案。
+**Report a problem** 會新建一個 GitHub issue，並自動填好你的 Coppice 版本。寫明發生了什麼、你原本期望什麼，然後附上透過 **Export logs** 匯出的 zip 檔案。
 
 <h2 id="logs-1"><code>[logs]</code></h2>
 
@@ -65,8 +65,8 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 
 <a id="connectors"></a>
 
-## 聯結器
-Coppice 找到的 CLI 預設開啟，除非登入檢查顯示你已退出登入。只有想關閉某個聯結器時，才需要加一行：
+## 連接器
+Coppice 找到的 CLI 預設開啟，除非登入檢查顯示你已登出。只有想關閉某個連接器時，才需要加一行：
 
 ```toml
 [agent.connectors.claude-code]
@@ -75,14 +75,14 @@ enabled = false
 
 **System → Connectors** 中的開關寫入的也是這一行。
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就會開啟。Coppice 無法免費檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就會開啟。Coppice 不耗用你的方案，就無法檢查它們的登入狀態，所以如果你已登出，執行時會報錯。
 
 ## `[agent]`
 
 | 欄位 | 型別 | 預設值 | 作用 |
 | --- | --- | --- | --- |
 | `worktrees_path` | 字串 | `<data-dir>/worktrees` | 存放 worktree 的資料夾，每個工單各有一個 git worktree。 |
-| `worker_count` | 整數 | `8` | 所有聯結器合計的代理任務上限。小於 1 時按 1 處理。舊設定的 `worker_count = 2` 仍會擋住其他聯結器，直到你提高或刪掉這一行。 |
+| `worker_count` | 整數 | `8` | 所有連接器合計的代理任務上限。小於 1 時按 1 處理。舊設定的 `worker_count = 2` 仍會擋住其他連接器，直到你提高或刪掉這一行。 |
 | `health_check_interval_secs` | 整數 | `60` | 代理健康檢查的間隔秒數。小於 10 時按 10 處理。 |
 
 `<data-dir>` 是存放 `config.toml` 的資料夾：Linux 和 WSL 上為 `~/.config/Coppice`，macOS 上為 `~/Library/Application Support/Coppice`。
@@ -93,17 +93,17 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 
 | 欄位 | 型別 | 預設值 | 作用 |
 | --- | --- | --- | --- |
-| `enabled` | 布林值 | 未設定：CLI 已登入則開啟 | 開啟或關閉該聯結器。 |
-| `model_providers` | 字串列表 | `[]` | 該聯結器的模型提供商。開啟聯結器時自動填寫。 |
-| `run_timeout_secs` | 整數 | 所有聯結器均為 `1800` | 該聯結器上的一次執行超過多少秒算失敗。 |
-| `max_concurrent_runs` | 整數 | `2` | 該聯結器同時可跑的任務數。多出來的保持排隊，空出槽位後由最舊的先開始。小於 1 時按 1 處理。 |
+| `enabled` | 布林值 | 未設定：CLI 已登入則開啟 | 開啟或關閉該連接器。 |
+| `model_providers` | 字串清單 | `[]` | 該連接器的模型提供商。開啟連接器時自動填寫。 |
+| `run_timeout_secs` | 整數 | 所有連接器均為 `1800` | 該連接器上的一次執行超過多少秒算失敗。 |
+| `max_concurrent_runs` | 整數 | `2` | 該連接器同時可跑的任務數。多出來的保持排隊；有空位後，由排隊最久的先開始。小於 1 時按 1 處理。 |
 | `command` | 字串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 要執行的 CLI 執行檔。Claude Code 始終執行 `claude`，沒有 `command`。 |
 
 僅限 OpenCode：
 
 | 欄位 | 型別 | 預設值 | 作用 |
 | --- | --- | --- | --- |
-| `serve_hostname` | 字串 | `127.0.0.1` | 執行期間 OpenCode 輔助程序使用的主機名。修改後需要重啟。 |
+| `serve_hostname` | 字串 | `127.0.0.1` | 執行期間 OpenCode 輔助行程使用的主機名。修改後需要重啟。 |
 
 修改 OpenCode 的 `command` 也需要重啟。
 
@@ -131,14 +131,14 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | `poll_interval_ms` | 整數 | `500` | 壓縮排程器的喚醒頻率。小於 100 時按 100 處理。 |
 | `compaction.interval_secs` | 整數 | `1800` | 兩輪壓縮之間的間隔秒數。 |
 | `compaction.batch_max_tickets` | 整數 | `10` | 一批最多包含的工單數。 |
-| `compaction.batch_max_source_bytes` | 整數 | `200000` | 一批最多包含的源資料位元組數。 |
+| `compaction.batch_max_source_bytes` | 整數 | `200000` | 一批最多包含的來源資料位元組數。 |
 | `compaction.max_candidates_per_batch` | 整數 | `20` | 一批最多能提出的候選條目數。 |
 | `compaction.max_attempts` | 整數 | `3` | 一批最多嘗試的次數。 |
 | `auto_save.enabled` | 布林值 | `false` | 不經詢問，直接儲存低風險的候選條目。 |
-| `auto_save.allowed_types` | 字串列表 | `[]` | 自動儲存允許儲存的型別：`bug_pattern`、`coding_convention`、`dependency_note`、`performance_note`、`review_feedback`、`test_command`。 |
+| `auto_save.allowed_types` | 字串清單 | `[]` | 自動儲存允許儲存的型別：`bug_pattern`、`coding_convention`、`dependency_note`、`performance_note`、`review_feedback`、`test_command`。 |
 | `auto_save.minimum_confidence` | 字串 | `high` | 必須保持為 `high`。 |
-| `retrieval.top_k` | 整數 | `8` | 一次查詢返回的條目數，1 到 20。 |
-| `retrieval.allowed_types` | 字串列表 | `[]`（所有型別） | 只返回這些型別：`coding_convention`、`architecture_rule`、`bug_pattern`、`test_command`、`review_feedback`、`dependency_note`、`api_contract`、`workflow_rule`、`human_preference`、`operational_runbook`、`security_rule`、`performance_note`。 |
+| `retrieval.top_k` | 整數 | `8` | 一次查詢回傳的條目數，1 到 20。 |
+| `retrieval.allowed_types` | 字串清單 | `[]`（所有型別） | 只回傳這些型別：`coding_convention`、`architecture_rule`、`bug_pattern`、`test_command`、`review_feedback`、`dependency_note`、`api_contract`、`workflow_rule`、`human_preference`、`operational_runbook`、`security_rule`、`performance_note`。 |
 | `retrieval.minimum_confidence` | 字串 | `medium` | `low`、`medium` 或 `high`。 |
 | `retrieval.default_page_size` | 整數 | `25` | 預設每頁條數。 |
 | `retrieval.max_page_size` | 整數 | `100` | 每頁最大條數，最多 100。 |
@@ -152,7 +152,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | 欄位 | 型別 | 預設值 | 作用 |
 | --- | --- | --- | --- |
 | `author_name` | 字串 | `Coppice` | Coppice 所做提交的作者名。 |
-| `author_email` | 字串 | `coppice@localhost` | 這些提交的作者郵箱。 |
+| `author_email` | 字串 | `coppice@localhost` | 這些提交的作者電子郵件。 |
 | `push_enabled` | 布林值 | `false`（桌面應用程式為 `true`） | 允許 Coppice 推送分支並建立 pull request。 |
 
 ## `[plugins]`
@@ -161,7 +161,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | --- | --- | --- | --- |
 | `dir` | 字串 | `<data-dir>/plugins` | 你的預設外掛資料夾。更多資料夾可在 Plugins 頁面新增。 |
 | `allow_file_git_urls` | 布林值 | `false` | 允許安裝外掛時使用 `file:` 形式的 git URL。 |
-| `git_timeout_secs` | 整數 | `300` | 外掛克隆或更新超過多少秒算失敗。 |
+| `git_timeout_secs` | 整數 | `300` | 外掛 clone 或更新超過多少秒算失敗。 |
 | `mcp_start_timeout_secs` | 整數 | `20` | 等待外掛 MCP 伺服器啟動的秒數。 |
 | `mcp_list_timeout_secs` | 整數 | `10` | 等待外掛列出工具的秒數。 |
 | `mcp_idle_shutdown_secs` | 整數 | `600` | 空閒的外掛 MCP 伺服器保持執行的秒數。 |
@@ -174,7 +174,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | `call_timeout_secs` | 整數 | `60` | 單次工具呼叫超過多少秒算失敗。 |
 | `max_output_bytes` | 整數 | `32768` | 工具結果的最大位元組數。 |
 | `comment_post_limit` | 整數 | `5` | 一次執行最多能發表的評論數。 |
-| `token_ttl_secs` | 整數 | `14400` | 一次執行的工具令牌有效期（秒）。 |
+| `token_ttl_secs` | 整數 | `14400` | 一次執行的工具權杖有效期（秒）。 |
 
 ## `[keybindings]`
 
@@ -182,7 +182,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 
 | 欄位 | 型別 | 預設值 | 作用 |
 | --- | --- | --- | --- |
-| `"<command id>"` | 字串或字串列表 | 內建快捷鍵 | 替換該命令的按鍵。`""` 會移除它們。 |
+| `"<command id>"` | 字串或字串清單 | 內建快捷鍵 | 替換該命令的按鍵。`""` 會移除它們。 |
 
 ```toml
 [keybindings]

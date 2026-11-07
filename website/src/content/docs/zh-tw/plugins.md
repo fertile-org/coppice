@@ -34,7 +34,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 <figcaption>在數千個外掛中搜尋，一鍵安裝。</figcaption>
 </figure>
 
-外掛會出現在 **Installed** 分頁，處於停用狀態。接下來請[啟用它](#enable-it)。無論代理執行在哪個 CLI 上，外掛都能供你授權的代理使用。
+外掛會出現在 **Installed** 分頁，而且是停用的。接下來請[啟用它](#enable-it)。不論代理用哪個 CLI，只要你允許，該代理就能使用這個外掛。
 
 <a id="marketplace-sources"></a>
 
@@ -71,7 +71,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 
 <a id="example-github"></a>
 
-#### 示例：GitHub
+#### 範例：GitHub
 1. 從外掛市集安裝 `github`。
 2. 開啟它，在 **Settings** 下把 GitHub 個人存取權杖貼到 `GITHUB_PERSONAL_ACCESS_TOKEN`，然後點選 **Save settings**。
 3. 點選 **Test** 列出它的工具。
@@ -88,7 +88,7 @@ description: "外掛為 Coppice 的代理提供技能和 MCP 工具。從 git �
 4. 選擇 **Target directory**（目標目錄）。
 5. 點選 **Install**。
 
-Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裡點選 **Update** 即可拉取新改動。
+Coppice 會用你電腦上既有的 git 認證資訊 clone 倉庫。之後在詳情裡點選 **Update**，即可拉取新的變更。
 
 <a id="from-a-folder"></a>
 
@@ -111,7 +111,7 @@ Coppice 會用你電腦上的 git 憑據克隆倉庫。之後在詳情裡點選 
 2. 如果詳情裡有 **Settings**，填寫每個值並點選 **Save settings**。這些值會加密儲存。
 3. 點選 **Test**，啟動外掛的工具並列出它們。啟用之前也可以測試。
 
-- 帶本地 MCP 伺服器的外掛會以你電腦的許可權在本機執行。Coppice 會先請你確認。
+- 帶本地 MCP 伺服器的外掛會以你電腦的權限在本機執行。Coppice 會先請你確認。
 - 每個技能都有自己的開關。關閉的技能對所有代理都不可見，即使是已經在執行中的任務也一樣。
 
 <a id="choose-which-agents-can-use-it"></a>
@@ -179,7 +179,7 @@ hello-coppice/
 | `version` | 否 | 預設為 `0.0.0`。 |
 | `description` | 否 | 預設為空。 |
 | `author` | 否 | 字串，或 `{ "name": "..." }`。 |
-| `skills` | 否 | 一個技能目錄的路徑，或目錄路徑列表，相對於外掛根目錄。 |
+| `skills` | 否 | 一個技能目錄的路徑，或目錄路徑清單，相對於外掛根目錄。 |
 
 沒有 `plugin.json` 時，只要符合以下任一條件，資料夾仍然算一個外掛：
 
@@ -200,7 +200,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 ---
 ```
 
-- `name` 和 `description` 為必填項。
+- `name` 和 `description` 為必填。
 - description 要寫得讓代理知道什麼時候該載入這個技能。
 
 <a id="mcp-tools"></a>
@@ -228,6 +228,6 @@ description: How to greet people in ticket comments. Load before writing a greet
 - Coppice 會把 `${CLAUDE_PLUGIN_ROOT}` 替換為外掛的安裝資料夾，它不是一項設定。
 - 不支援 SSE 伺服器。
 
-這個示例提供了工具 `hello-coppice__greet` 和技能 `hello-coppice:greeting-style`。完整示例見 [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins)。
+這個範例提供了工具 `hello-coppice__greet` 和技能 `hello-coppice:greeting-style`。完整範例見 [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins)。
 
 `commands/`、`agents/` 和 `hooks/` 資料夾暫不支援。它們會顯示 "Not supported yet"，並且不會執行。
