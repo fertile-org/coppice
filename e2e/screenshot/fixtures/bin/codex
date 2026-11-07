@@ -1,0 +1,16 @@
+#!/bin/sh
+# Demo Codex binary for the screenshot container.
+# `codex login status` exits 0 and prints nothing. There is no account name.
+# It does not read a key, a home directory, or a credential file.
+case "${1:-} ${2:-}" in
+  "--version ")
+    printf '%s\n' 'codex-cli 0.0.0-demo'
+    ;;
+  "login status")
+    exit 0
+    ;;
+  *)
+    printf '%s\n' 'demo fixture: unsupported codex command' >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,17 @@
+# Extra overlay for COPPICE_SCREENSHOT_TRANSFER=copy.
+# Use it when the Docker engine cannot see this machine's files.
+# The private directory still lives only on the operator machine.
+# `e2e/screenshot/run.sh` sends config.toml with `docker compose cp`
+# after the server container exists. /repos is an empty project volume.
+# Do not add a host path here.
+services:
+  server:
+    volumes: !override
+      - artifact_data:/data/artifacts
+      - worktree_data:/data/worktrees
+      - plugin_data:/data/plugins
+      - connector_data:/home/coppice
+      - screenshot_repos:/repos
+
+volumes:
+  screenshot_repos:

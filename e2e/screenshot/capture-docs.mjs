@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { composeInvocation } from './compose-cli.mjs';
 import { resetMarketingWorkspace } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
@@ -28,10 +29,6 @@ const REPO_ROOT = path.resolve(HERE, '../..');
 const DOCS_ASSETS = path.join(REPO_ROOT, 'website', 'public', 'assets', 'docs');
 const AGENT_BIN = path.join(HERE, 'fixtures', 'bin', 'agent');
 const PROJECT = process.env.COPPICE_COMPOSE_PROJECT ?? 'coppice-screenshot';
-const COMPOSE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.screenshot.yml',
-];
 const REPO_PATH = '/tmp/coppice-screenshot-repo';
 const VIEWPORT = { width: 1440, height: 900 };
 
@@ -66,9 +63,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function run(args, { input, cwd = REPO_ROOT } = {}) {
+function run(invocation, { input, cwd = REPO_ROOT } = {}) {
+  const command = Array.isArray(invocation)
+    ? { bin: invocation[0], args: invocation.slice(1) }
+    : invocation;
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', args, {
+    const child = spawn(command.bin, command.args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -83,7 +83,7 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`docker ${args.join(' ')} failed (${code}): ${stderr || stdout}`));
+        reject(new Error(`${command.bin} ${command.args.join(' ')} failed (${code}): ${stderr || stdout}`));
         return;
       }
       resolve(stdout);
@@ -94,10 +94,7 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
 }
 
 function composeArgs(extra) {
-  const args = ['compose', '-p', PROJECT];
-  for (const file of COMPOSE_FILES) args.push('-f', file);
-  args.push(...extra);
-  return args;
+  return composeInvocation(extra, { project: PROJECT });
 }
 
 function serverUser() {
@@ -209,6 +206,9 @@ async function enableCursorInConfig() {
     fail(`could not turn Cursor on in ${file}`);
   }
   if (next !== text) await writeFile(file, next);
+  if (process.env.COPPICE_SCREENSHOT_TRANSFER === 'copy') {
+    await run(composeArgs(['cp', file, 'server:/etc/coppice/config.toml']));
+  }
   console.log('screenshot: Cursor connector is on in the throwaway config');
 }
 
