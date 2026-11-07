@@ -2,20 +2,24 @@
 layout: ../../layouts/Docs.astro
 title: Install
 metaTitle: "Install Coppice on macOS, Linux and Windows (WSL)"
-description: "Install the Coppice desktop app on macOS or Linux, or on Windows 11 through WSL. No Docker, no server, no account. Covers updates, requirements and fixes."
+description: "Install Coppice on macOS (Apple Silicon or Intel) or Linux (x64 or ARM64), or on Windows 11 through WSL. No Docker and no Coppice account."
 ---
 
 # Install
 
-Coppice Beta is a desktop app. You don't need Docker, a server, or a Coppice account.
+Coppice Beta is a desktop app. You don't need Docker, a server, or a Coppice account. You do need a local git checkout and one supported agent CLI, signed in with that CLI. [Providers](/docs/providers) lists the CLIs. Coppice does not install them, and it never asks for a provider API key.
 
-## Supported platforms
-| Platform | Package |
-| --- | --- |
-| macOS (Apple Silicon) | `.dmg` |
-| Linux (x64) | `.deb` |
+## Packages by platform and architecture
 
-There's no Windows app in this beta. On Windows 11, see [Windows 11 (through WSL)](#windows-11-through-wsl).
+| Platform | Architecture | Package | Setup |
+| --- | --- | --- | --- |
+| macOS | Apple Silicon (arm64) | `.dmg` | Open the disk image and move Coppice to Applications. Then follow [Getting started](/docs/getting-started). |
+| macOS | Intel (x64) | `.dmg` | Same as Apple Silicon. |
+| Linux | x64 (amd64) | `.deb` | [Install the package](#linux). |
+| Linux | ARM64 | `.deb` | [Install the package](#linux). |
+| Windows 11 | x64, through WSL | No Windows package. Use the Linux x64 `.deb` inside Ubuntu. | [Windows 11 (through WSL)](#windows-11-through-wsl). We haven't tested this path. Windows on Arm isn't covered. |
+
+Not sure which Mac you have? Open Apple menu → About This Mac. If it lists a Chip, choose Apple Silicon. If it lists a Processor, choose Intel.
 
 ## Download
 - [macOS (Apple Silicon) `.dmg`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-mac-arm64.dmg)
@@ -24,6 +28,12 @@ There's no Windows app in this beta. On Windows 11, see [Windows 11 (through WSL
 - [Linux (ARM64) `.deb`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-linux-arm64.deb)
 
 You can also get every build from [GitHub Releases](https://github.com/fertile-org/coppice/releases).
+
+## Linux
+
+Download the `.deb` for your architecture from the list above. In the folder that contains the file, install the x64 package with `sudo apt install ./Coppice-linux-amd64.deb`. On ARM64, use `./Coppice-linux-arm64.deb` instead. Use `apt`, not `dpkg -i`. `apt` also installs what Coppice needs.
+
+Then follow [Getting started](/docs/getting-started).
 
 ## Updates
 
@@ -68,20 +78,18 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
 ## First run
 1. Install and open Coppice.
 2. Point it at a local git checkout you already have on disk.
-3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
-
-   Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed** (for example **Kilo Code — Installed**). System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
+3. Sign in to your agent CLI in your terminal before a ticket runs. Coppice does not ask for a provider API key. [Getting started](/docs/getting-started) walks through the connector check. [Providers](/docs/providers) lists the CLIs and the statuses you can see.
 
    To turn a connector off later, use the toggle in System → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`
 
-4. Create a ticket (or approve a proposed one) and move it to Ready. Agents take it through In Progress, In Review, and In QA. It then waits for your Human Review.
+4. Create a ticket and run it. You approve the plan before coding starts, unless you choose Skip planning. Once you start a ticket, agents can continue automatically through the workflow. You review and accept the final diff. Accept and Merge are separate choices.
 
 ## Requirements
 - A local git repository you can write to (Coppice uses isolated worktrees)
-- At least one supported agent CLI installed and authenticated the normal way for that tool
+- At least one supported agent CLI installed and signed in the way that CLI normally signs in. See [Providers](/docs/providers).
 
 ## Troubleshooting
 If the app won't start, or an agent never picks up a ticket, check the live terminal on the ticket and the FAQ. For a build from source, see the [contributor docs](https://github.com/fertile-org/coppice/blob/main/docs/development.md) in the repo.

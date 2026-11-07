@@ -9,6 +9,8 @@ description: "Coppice runs the agent CLIs you already use: Claude Code, Codex, C
 
 Coppice runs the coding agent CLIs you already use and puts their work on one board. You keep your own subscriptions and sign-ins. You don't need a Coppice account.
 
+Coppice does not install these CLIs. Install the command from the vendor guide in the table. Then sign in with the CLI in your terminal, before a run. That sign-in stays with the CLI. Coppice never asks for a provider API key and does not store one.
+
 ## Supported connectors
 
 | Connector | Command Coppice looks for | Install | Tested versions |
@@ -34,8 +36,9 @@ Pick a model for this agent, or leave it on the default. If you installed a new 
 
 ## Connect your agent CLI
 
-1. Install the CLI and sign in to it in your terminal, the same way you normally would.
-2. Pick your agent CLI when you create an agent, and Coppice turns it on.
+1. Install the CLI from the guide in the table above. Coppice does not install it for you.
+2. Sign in to that CLI in your terminal, the same way you normally would. Do this before a ticket runs. Coppice never asks for or stores the provider API key.
+3. Pick your agent CLI when you create an agent, and Coppice turns it on.
 
 The agent form lists every connector with its status:
 
@@ -45,6 +48,8 @@ The agent form lists every connector with its status:
 | **Found, not signed in** | Coppice found the command, but you aren't signed in. Sign in from your terminal. |
 | **Not on your PATH** | Coppice can't find the command. Install it, or check your PATH. |
 | **Installed** | Coppice found the command. For Kilo Code, GitHub Copilot, Qwen Code and Kimi Code it cannot check sign-in without using your plan. |
+
+Claude Code, Codex, Cursor, OpenCode, and Grok have a free sign-in check, so a clear result shows **Ready** or **Found, not signed in**. The check does not open a browser, prompt you, or call a model.
 
 Kilo Code, GitHub Copilot, Qwen Code, and Kimi Code show **Installed**. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." To check one of these CLIs, use **Test connection**. It runs a short chat, plan, and ticket turn.
 
