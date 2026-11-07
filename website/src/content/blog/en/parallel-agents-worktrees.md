@@ -45,6 +45,10 @@ A safe split gives each ticket files the other must not change, and it keeps sha
 
 Write the owned path and the check into each description. For the greeting ticket, the check is that `docs/greeting.md` exists and `docs/farewell.md` is unchanged. Swap those paths for the farewell ticket.
 
+The board below is a seeded Demo frame for that split. Both tickets are in Backlog. It does not show two agents coding at the same time. The green mark on **Add a greeting note** is a running row inserted for the shot. No connector process started.
+
+![Demo board named Demo. Add a greeting note and Add a farewell note are both in Backlog. Plan Review, Ready, and In Progress are empty. The greeting card has a green running mark.](/blog/parallel-agents-worktrees/two-tickets.png "Demo: two Backlog tickets for the file split. The greeting mark is a seeded running row, not a connector at work.")
+
 Two conflicts can still show up at merge time.
 
 **Overlapping files.** Both tickets change one path, or both regenerate a lockfile. Separate folders do not stop that. The merge or rebase stops and lists the files.
@@ -69,6 +73,10 @@ The ticket worktree appears when the first work run starts. The directory is `TI
 ## Read each checkout
 
 Open the ticket and find **Git actions**. **Ticket branch** is the branch name. **Worktree** is the directory once the work run has created it. Before that, the worktree line shows `(removed)`.
+
+The frame below is a seeded demonstration, not that empty state and not a coding session. The greeting ticket is still in **Backlog**. **Ticket branch** and **Worktree** are filled in because the seed ran `git worktree add` in the container, under `/data/worktrees`. **Rebase…** is visible and was not opened. **Stop** is in the header because a running row was inserted. No connector process started. This frame is not an approved plan, a completed rebase, or a merge.
+
+![Greeting ticket still in Backlog. Git actions shows Ticket branch and Worktree. Rebase is visible. Stop is in the header.](/blog/parallel-agents-worktrees/branch-and-worktree.png "Demo: seeded Ticket branch and Worktree. A running row was inserted. No connector started, and Rebase was not opened.")
 
 **Review code** opens Code review when the repository is Ready. The **Worktree** list shows the folder name, the branch, and the ticket title. **Base** is the branch you compare against. A long branch can be shortened on screen. **Ticket branch** on the ticket is the full name.
 
