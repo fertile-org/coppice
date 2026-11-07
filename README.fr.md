@@ -50,7 +50,7 @@ Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de c
 
 ## Comment ça marche
 
-1. **Confiez le travail.** Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez ce plan avant que quiconque n’écrive du code, sauf si vous activez **Skip planning** (sauter la planification) : le ticket part alors directement en Ready.
+1. **Confiez le travail.** Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez le plan avant le début du codage, sauf si vous choisissez **Skip planning**.
 2. **Laissez les agents construire.** Chaque ticket a son propre worktree git, donc les agents qui travaillent en parallèle ne touchent jamais à votre checkout principal. Suivez n’importe quel lancement en direct.
 3. **Human Review.** Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté.
 

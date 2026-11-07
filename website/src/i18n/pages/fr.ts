@@ -35,7 +35,7 @@ export const pages: Pages = {
     steps: [
       {
         title: 'Confiez le travail.',
-        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez ce plan avant que quiconque n’écrive du code, sauf si vous activez Skip planning (sauter la planification) : le ticket part alors directement en Ready.',
+        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez le plan avant le début du codage, sauf si vous choisissez Skip planning.',
       },
       {
         title: 'Laissez les agents construire.',
