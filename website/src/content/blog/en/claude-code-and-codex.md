@@ -1,9 +1,10 @@
 ---
 title: How to use Claude Code and Codex together on one project
 metaTitle: Claude Code and Codex on one project
-description: "Put Claude Code on one agent and Codex on another. A ticket has one assignee, so each CLI takes a different stage. You approve the plan, accept, then merge."
-answer: "Put Claude Code on one agent and Codex on another, on the same board. A ticket has one assignee at a time, so the two CLIs take different stages. You approve the plan unless you skip it, later runs continue on their own, and you accept the diff before a separate merge."
+description: "Create one Claude Code agent and one Codex agent. Configuring both does not make both run. You assign or confirm the assignee for each stage."
+answer: "Create one agent on Claude Code and another on Codex. Configuring both connectors does not make both run. A ticket has one assignee. You assign or confirm that assignee for each stage, and the Technical Lead's assignment decides who implements. You approve the plan unless you skip it, then accept the diff before a separate merge."
 published: "2026-11-07"
+draft: true
 author: Coppice
 authorType: Organization
 keywords:
@@ -13,7 +14,7 @@ keywords:
   - tickets
 ---
 
-Coppice is a desktop app. It runs the `claude` and `codex` commands already on your computer. Each agent has one connector, and a ticket stores one assignee. Claude Code and Codex meet the work at different stages of that ticket.
+Coppice is a desktop app. It runs the `claude` and `codex` commands already on your computer. Each agent has one connector, and a ticket stores one assignee. Configuring Claude Code on one agent and Codex on another does not make both run. You assign or confirm the assignee for each stage. The Technical Lead's assignment decides which agent implements the work.
 
 Install and sign-in for the app and the CLIs are in the docs. This note covers how the two agents share one project, and where you still have to act.
 
@@ -53,9 +54,9 @@ You need three roles for the handoff below: a **PM**, a **Technical Lead**, and 
 
 ## A ticket has one assignee
 
-**Assignee** on the ticket is one agent. When the stage changes, Coppice replaces that assignee with the agent for the next stage. Claude Code and Codex each take a turn in that field.
+**Assignee** on the ticket is one agent. You assign or confirm that name for each stage. The Technical Lead's assignment decides which agent implements. With the default auto-assign for **Ready**, Coppice sets **Assignee** to the agent the Technical Lead named. If that is not the agent you want, change **Assignee**.
 
-The plan is written by the earliest enabled PM. If you create one PM, that is the planner. The implementer on the other CLI runs later, after the Technical Lead names them and Coppice assigns that one agent.
+The plan is written by the earliest enabled PM. If you create one PM and that PM is the assignee, that agent writes the plan. An implementer runs after the Technical Lead names them and you confirm that assignee.
 
 [Concepts](/docs/concepts) describes the columns. The steps below are the controls you use.
 
@@ -88,7 +89,7 @@ That handoff still needs a person at two points:
 
 If there is no Technical Lead, the ticket stays in **Ready** with no assignee. The comment says: "No Technical Lead agent is available, so this ticket stays in Ready without an assignee. Assign an agent to start work."
 
-If the Technical Lead does not name an implementer, the ticket stays in **Ready** and the implementation run does not start. The comment on the ticket says why. With the default auto-assign for **Ready**, a named implementer becomes the only assignee, and that agent's run starts.
+If the Technical Lead does not name an implementer, the ticket stays in **Ready** and the implementation run does not start. The comment on the ticket says why. With the default auto-assign for **Ready**, a named implementer becomes the only assignee, and that agent's run starts. Confirm that name. To use the other connector, set **Assignee** to that agent.
 
 A stuck ticket can move to **Blocked** with a comment. Read the comment before you start it again.
 
