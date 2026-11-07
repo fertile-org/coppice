@@ -24,6 +24,15 @@ const downloadPage = downloadPageFor(copy);
       <p class="lede">{downloadPage.intro}</p>
     </header>
 
+    {
+      ctx.locale === 'en' && (
+        <p class="download-follow">
+          Choose the row for your platform and architecture. Setup steps, including Windows 11 through WSL, are in{' '}
+          <a href={withBase('/docs/install')}>Install</a>.
+        </p>
+      )
+    }
+
     <div class="download-platforms" id="download-platforms">
       {
         downloadPage.groups.map((group) => (

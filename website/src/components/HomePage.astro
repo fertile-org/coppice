@@ -1,6 +1,7 @@
 ---
 import { AGENT_CLIS, PRIMARY_KEYWORD } from '../content/agents';
 import { pagesFor } from '../i18n/pages';
+import { homeEntry } from '../i18n/pages/en';
 import { hrefFor, useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
 import { softwareSchema } from '../lib/page-schema';
@@ -34,6 +35,31 @@ const copy = pagesFor(ctx.locale).home;
     <p class="works-with">
       {copy.worksWith} <a href={hrefFor(ctx.locale, '/docs/providers')}>{AGENT_CLIS.join(' · ')}</a>
     </p>
+
+    {
+      ctx.locale === 'en' && (
+        <>
+          <section class="block" aria-labelledby="what-coppice-is">
+            <h2 id="what-coppice-is">{homeEntry.whatTitle}</h2>
+            <p>{homeEntry.whatBody}</p>
+          </section>
+          <section class="block pair-follow" aria-labelledby="what-you-do">
+            <h2 id="what-you-do">{homeEntry.doTitle}</h2>
+            <p>{homeEntry.doBody}</p>
+          </section>
+          <section class="block pair-follow" aria-labelledby="guides">
+            <h2 id="guides">{homeEntry.guidesTitle}</h2>
+            <ul class="plain-list">
+              {homeEntry.guides.map((guide) => (
+                <li>
+                  <a href={hrefFor(ctx.locale, guide.href)}>{guide.label}</a> {guide.note}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )
+    }
 
     <section class="block" aria-labelledby="how-it-works">
       <h2 id="how-it-works">{copy.howTitle}</h2>

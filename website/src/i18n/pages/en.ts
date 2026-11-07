@@ -5,7 +5,7 @@ export const pages = {
   home: {
     title: 'Coppice: AI Coding Agent Board, Local and Open Source',
     description:
-      'Coppice is an AI coding agent board on your own machine. Claude Code, Codex, Cursor, and others plan, build, and review in parallel. You accept every diff.',
+      'Coppice is a local board for coding agents. You write tickets, approve the plan, and accept the diff. Agents run CLIs such as Claude Code and Codex.',
     worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
     lede: 'Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
@@ -41,10 +41,11 @@ export const pages = {
       },
       {
         title: 'Human Review.',
-        body: 'Read the diff in the app and comment on any line. Nothing counts as done until you accept it.',
+        body: 'Read the diff in the app and comment on any line. Nothing counts as done until you accept it. Accept and Merge are separate choices.',
       },
     ],
-    howClose: "Download the app and open it. There's nothing to set up: no Docker and no Coppice account.",
+    howClose:
+      "Download the app and open it. You don't need Docker or a Coppice account. You do need a local git checkout and one supported agent CLI, signed in with that CLI.",
     whyTitle: 'Why Coppice',
     reasons: [
       {
@@ -57,7 +58,7 @@ export const pages = {
       },
       {
         title: 'Catch mistakes before they land.',
-        body: 'Every change waits for you as a diff in the app. Nothing counts as done until you accept it, and what you accept is exactly what merges.',
+        body: 'You review the final diff in the app. Nothing counts as done until you accept it. Accept and Merge are separate choices.',
       },
       {
         title: 'No second subscription.',
@@ -81,18 +82,18 @@ export const pages = {
       {
         note: 'Not sure which Mac you have? Open Apple menu → About This Mac. If it lists a Chip, choose Apple Silicon. If it lists a Processor, choose Intel.',
         rows: [
-          { name: 'macOS (Apple Silicon)', label: 'Download .dmg' },
-          { name: 'macOS (Intel)', label: 'Download .dmg' },
+          { name: 'macOS (Apple Silicon) · arm64', label: 'Download .dmg' },
+          { name: 'macOS (Intel) · x64', label: 'Download .dmg' },
         ],
       },
       {
         rows: [
-          { name: 'Linux (x64)', label: 'Download .deb' },
+          { name: 'Linux (x64) · amd64', label: 'Download .deb' },
           { name: 'Linux (ARM64)', label: 'Download .deb' },
         ],
       },
       {
-        rows: [{ name: 'Windows 11', label: 'Install through WSL' }],
+        rows: [{ name: 'Windows 11 · x64 through WSL', label: 'Install through WSL' }],
       },
     ],
     checksum: {
@@ -111,3 +112,44 @@ export const pages = {
 };
 
 export type Pages = typeof pages;
+
+/**
+ * English-only homepage explanation. These strings are plain text.
+ * HomePage renders links itself; Markdown such as **bold** is not interpreted.
+ */
+export const homeEntry = {
+  whatTitle: 'What Coppice is',
+  whatBody:
+    'Coppice is a local desktop board for coding agents. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
+  doTitle: 'What you do',
+  doBody:
+    'You approve the plan before coding starts, unless you choose Skip planning. Once you start a ticket, agents can continue automatically through the workflow. You review and accept the final diff. Accept and Merge are separate choices.',
+  guidesTitle: 'Guides',
+  guides: [
+    {
+      href: '/docs/install',
+      label: 'Install',
+      note: 'Packages by platform and architecture, with links to the setup steps.',
+    },
+    {
+      href: '/docs/getting-started',
+      label: 'Getting started',
+      note: 'What to install, how to sign in, and the first ticket.',
+    },
+    {
+      href: '/docs/providers',
+      label: 'Providers',
+      note: 'Supported agent CLIs, and which sign-ins Coppice can check.',
+    },
+    {
+      href: '/docs/concepts',
+      label: 'Concepts',
+      note: 'How a ticket moves, including Accept and Merge.',
+    },
+    {
+      href: '/docs/faq',
+      label: 'FAQ',
+      note: 'Beta limits, Docker, Windows, and what Coppice is not.',
+    },
+  ],
+};
