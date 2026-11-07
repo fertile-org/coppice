@@ -25,7 +25,7 @@ Dùng skill này khi sửa tiếng Việt trong repo này:
 
 Cursor nạp skill từ `.cursor/skills/vietnamese-technical-writing/`. Không chép sang `.agents/skills/`, `.claude/skills/`, thư mục `skills/` ở gốc repo, `server/builtin-plugins/` hay `server/marketplace/`. Đó là layout skill mà server có thể đưa vào agent của người dùng cuối.
 
-Skill tiếng Anh là [english-technical-writing](../english-technical-writing/SKILL.md). Không áp thói quen tiếng Anh sang tiếng Việt, và không dùng skill này để sửa văn tiếng Anh. Tiếng Trung giản thể có skill riêng: [zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md). Tiếng Trung phồn thể Đài Loan có skill riêng: [zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md). Các ngôn ngữ khác vẫn chờ vòng nghiên cứu riêng; không phác chúng từ skill này.
+Skill tiếng Anh là [english-technical-writing](../english-technical-writing/SKILL.md). Không áp thói quen tiếng Anh sang tiếng Việt, và không dùng skill này để sửa văn tiếng Anh. Tiếng Trung giản thể có skill riêng: [zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md). Tiếng Trung phồn thể Đài Loan có skill riêng: [zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md). Tiếng Trung phồn thể Hồng Kông có skill riêng: [zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md). Các ngôn ngữ khác vẫn chờ vòng nghiên cứu riêng; không phác chúng từ skill này.
 
 Khi chỉ sửa văn phong, giữ nguyên định vị đã khóa trong [docs/milestones/M12-beta-release.md](../../../docs/milestones/M12-beta-release.md) và [docs/web/DESIGN.md](../../../docs/web/DESIGN.md), nhãn Beta, cùng tên cổng **Plan Review** và **Wait for Human Review**.
 
