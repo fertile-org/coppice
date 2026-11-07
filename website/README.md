@@ -8,6 +8,8 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 | --- | --- |
 | `/` | `src/pages/index.astro` |
 | `/download` | `src/pages/download.astro` |
+| `/blog` | `src/pages/blog/index.astro` |
+| `/blog/<slug>` | `src/content/blog/en/<slug>.md` |
 | `/docs` | `src/pages/docs/index.md` |
 | `/docs/install` | `src/pages/docs/install.md` |
 | `/docs/concepts` | `src/pages/docs/concepts.md` |
@@ -15,6 +17,8 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 | `/docs/faq` | `src/pages/docs/faq.md` |
 
 Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. Asset URLs live in `src/content/downloads.ts`. Homepage and download wording live in `src/i18n/pages/en.ts`.
+
+The blog index and article pages are generated from `src/content/blog/`. See [BLOG.md](BLOG.md). The homepage does not link to `/blog` yet.
 
 English keeps those URLs. `vi`, `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
 
@@ -53,7 +57,7 @@ npm run check:links
 npm run check:seo
 ```
 
-`check:seo` reads `dist`: one title, description, and canonical per page, Open Graph and Twitter tags that match them, `robots.txt`, `sitemap.xml` (only indexable pages, `lastmod` from git, left out on shallow clones), the manifest, and JSON-LD. Every page carries one JSON-LD `@graph` (`src/lib/structured-data.ts`): Organization and WebSite everywhere, SoftwareApplication on the homepage and download page, TechArticle and BreadcrumbList on docs. The agent CLI names in it come from `src/content/agents.ts`. Keep that list in step with the Providers doc. The social card is `public/assets/og-card.png` (1200×630). Rebuild it with `npm run og:image` after changing the logo, the hero screenshot, or the card copy in `scripts/make-og-image.mjs`.
+`check:seo` reads `dist`: one title, description, and canonical per page, Open Graph and Twitter tags that match them, `robots.txt`, `sitemap.xml` (only indexable pages, `lastmod` from git except blog articles, which use their frontmatter date; git dates are left out on shallow clones), the manifest, and JSON-LD. Every page carries one JSON-LD `@graph` (`src/lib/structured-data.ts`): Organization and WebSite everywhere, SoftwareApplication on the homepage and download page, TechArticle and BreadcrumbList on docs, Blog and BreadcrumbList on `/blog`, and BlogPosting and BreadcrumbList on each article. Article `datePublished` and `dateModified` come from the note's frontmatter. The agent CLI names in it come from `src/content/agents.ts`. Keep that list in step with the Providers doc. The social card is `public/assets/og-card.png` (1200×630). Rebuild it with `npm run og:image` after changing the logo, the hero screenshot, or the card copy in `scripts/make-og-image.mjs`.
 
 The page serves compressed copies, not the sources: the hero poster is `hero-screenshot-1440.webp`, the reduced-motion still picks AVIF or WebP at 720 or 1440 wide, and the header mark is `logo-72.webp` / `logo-108.webp`. Rebuild them with `npm run web:images` after changing `public/assets/hero-screenshot.png` or `public/logo.svg`. `check:seo` also fails any `<img>` over 200 KB that loads eagerly; the GIF fallback inside the hero `<video>` is lazy for that reason, since browsers fetch fallback images even when the video plays.
 

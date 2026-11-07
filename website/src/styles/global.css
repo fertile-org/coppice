@@ -848,6 +848,48 @@ a:hover {
   font-size: 0.98rem;
 }
 
+.blog-answer {
+  margin-top: 1.25rem;
+  font-size: 1.2rem;
+  line-height: 1.45;
+}
+
+.blog-meta {
+  margin: 0.85rem 0 0;
+  color: var(--color-bark-600);
+  font-size: 0.95rem;
+}
+
+.blog-meta > * + *::before {
+  content: '·';
+  margin: 0 0.45rem;
+}
+
+.blog-list {
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.blog-list li {
+  padding: 1rem 0;
+  border-top: 1px solid var(--color-bark-200);
+}
+
+.blog-list a {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.blog-list time,
+.blog-list p {
+  margin: 0.35rem 0 0;
+}
+
 .prose code {
   padding: 0.05rem 0.28rem;
   border-radius: 4px;

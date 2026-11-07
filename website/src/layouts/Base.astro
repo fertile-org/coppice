@@ -23,6 +23,10 @@ interface Props {
   keywords?: readonly string[];
   /** `article:tag`, one per entry (docs). */
   tags?: readonly string[];
+  /** ISO date (`YYYY-MM-DD`) for `article:published_time`. */
+  publishedTime?: string;
+  /** ISO date (`YYYY-MM-DD`) for `article:modified_time`. */
+  modifiedTime?: string;
 }
 
 const {
@@ -33,6 +37,8 @@ const {
   structuredData = [],
   keywords = [],
   tags = [],
+  publishedTime,
+  modifiedTime,
 } = Astro.props;
 const ctx = useI18n(Astro);
 // Titles that already name the product keep their wording.
@@ -79,6 +85,8 @@ const vercelAnalytics = process.env.VERCEL === '1';
     <meta property="og:type" content={ogType} />
     <meta property="og:url" content={ctx.canonical} />
     {ogType === 'article' && tags.map((tag) => <meta property="article:tag" content={tag} />)}
+    {ogType === 'article' && publishedTime && <meta property="article:published_time" content={publishedTime} />}
+    {ogType === 'article' && modifiedTime && <meta property="article:modified_time" content={modifiedTime} />}
     <meta property="og:locale" content={ogLocale(ctx.translated ? ctx.locale : 'en')} />
     {alternateOgLocales.map((locale) => <meta property="og:locale:alternate" content={locale} />)}
     {image && <meta property="og:image" content={image} />}

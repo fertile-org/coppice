@@ -1,0 +1,16 @@
+#!/bin/sh
+# Demo Claude Code binary for the screenshot container.
+# It answers `claude --version` and `claude auth status` with fixed text.
+# It does not read a key, a home directory, or a credential file.
+case "${1:-} ${2:-}" in
+  "--version ")
+    printf '%s\n' 'claude 2.1.0-demo'
+    ;;
+  "auth status")
+    printf '%s\n' '{"loggedIn":true}'
+    ;;
+  *)
+    printf '%s\n' 'demo fixture: unsupported claude command' >&2
+    exit 1
+    ;;
+esac

@@ -53,6 +53,9 @@ jobs:
       - name: Check structured data
         working-directory: website
         run: node --experimental-strip-types --test src/lib/structured-data.test.ts
+      - name: Check blog content rules
+        working-directory: website
+        run: node --experimental-strip-types --test src/lib/blog.test.ts
       - name: Install and build
         working-directory: website
         run: npm ci && npm run build

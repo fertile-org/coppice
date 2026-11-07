@@ -2,7 +2,8 @@ import { AGENT_CLIS } from '../content/agents';
 import { localizedPath } from '../i18n/paths';
 import type { PageI18n } from '../i18n/runtime';
 import { heroScreenshot, ogCard } from './hero-assets';
-import { breadcrumbList, softwareApplication, techArticle, type SiteRef, type Thing } from './structured-data';
+import type { BlogPost } from './blog';
+import { blog, blogPosting, breadcrumbList, softwareApplication, techArticle, type SiteRef, type Thing } from './structured-data';
 import { lastCommitDate, pageSources } from './lastmod';
 import { withBase } from './url';
 
@@ -34,6 +35,61 @@ export function softwareSchema(astro: AstroLike, ctx: PageI18n, description: str
       image: absolute(astro, ogCard),
       screenshot: absolute(astro, heroScreenshot),
     }),
+  ];
+}
+
+function blogCrumbs(locale: string, ctx: PageI18n, title?: string) {
+  const crumbs = [
+    { name: 'Coppice', pathname: localizedPath(locale, '/') },
+    { name: 'Blog', pathname: localizedPath(locale, '/blog') },
+  ];
+  if (title && ctx.englishPath !== '/blog') crumbs.push({ name: title, pathname: localizedPath(locale, ctx.englishPath) });
+  return crumbs;
+}
+
+/** Blog index. `blogPost` is omitted when nothing is published. */
+export function blogIndexSchema(
+  astro: AstroLike,
+  ctx: PageI18n,
+  description: string,
+  posts: readonly { title: string; englishPath: string }[],
+): Thing[] {
+  const ref = siteRef(astro);
+  if (!ref) return [];
+  const { locale, code } = contentLocale(ctx);
+  return [
+    blog(ref, {
+      name: 'Coppice blog',
+      description,
+      pathname: localizedPath(locale, '/blog'),
+      inLanguage: code,
+      posts: posts.map((post) => ({ headline: post.title, pathname: localizedPath(locale, post.englishPath) })),
+    }),
+    breadcrumbList(ref, blogCrumbs(locale, ctx)),
+  ];
+}
+
+/** One blog article. `dateModified` is `updated`, or `published` when the note was not updated. */
+export function blogPostSchema(astro: AstroLike, ctx: PageI18n, post: BlogPost): Thing[] {
+  const ref = siteRef(astro);
+  if (!ref) return [];
+  const { locale, code } = contentLocale(ctx);
+  const pathname = localizedPath(locale, ctx.englishPath);
+  const imagePath = post.image?.startsWith('/') ? post.image : ogCard;
+  return [
+    blogPosting(ref, {
+      headline: post.title,
+      description: post.description,
+      pathname,
+      inLanguage: code,
+      datePublished: post.published,
+      dateModified: post.updated ?? post.published,
+      authorName: post.author,
+      authorType: post.authorType,
+      image: post.image?.startsWith('https://') ? post.image : absolute(astro, imagePath),
+      keywords: post.keywords,
+    }),
+    breadcrumbList(ref, blogCrumbs(locale, ctx, post.title)),
   ];
 }
 

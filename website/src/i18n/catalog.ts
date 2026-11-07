@@ -11,6 +11,14 @@ export function normalizeSourcePath(file: string): string {
   return path;
 }
 
+function blogEnglishPath(relative: string): string | null {
+  let slug = relative.replace(/\.(md|mdx)$/i, '');
+  if (slug.endsWith('/index')) slug = slug.slice(0, -'/index'.length);
+  if (!slug || slug.includes('/') || slug === 'index') return null;
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return null;
+  return `/blog/${slug}`;
+}
+
 function docsEnglishPath(relative: string): string | null {
   const noExt = relative.replace(/\.(md|mdx|astro)$/i, '');
   if (!noExt || noExt.endsWith('.')) return null;
@@ -28,6 +36,11 @@ export function matchTranslation(file: string): { locale: LocalePath; englishPat
   let match = path.match(/^src\/content\/docs\/([^/]+)\/(.+)$/);
   if (match && LOCALE_SET.has(match[1]) && isLocalePath(match[1])) {
     const englishPath = docsEnglishPath(match[2]);
+    return englishPath ? { locale: match[1], englishPath } : null;
+  }
+  match = path.match(/^src\/content\/blog\/([^/]+)\/(.+)$/);
+  if (match && LOCALE_SET.has(match[1]) && isLocalePath(match[1])) {
+    const englishPath = blogEnglishPath(match[2]);
     return englishPath ? { locale: match[1], englishPath } : null;
   }
   match = path.match(/^src\/pages\/([^/]+)\/docs\/(.+)$/);
@@ -82,6 +95,10 @@ export function englishRoutesFromPages(files: readonly string[]): string[] {
     }
     if (path === 'download.astro' || path === 'download.md') {
       routes.add('/download');
+      continue;
+    }
+    if (path === 'blog/index.astro' || path === 'blog/index.md' || path === 'blog/index.mdx') {
+      routes.add('/blog');
       continue;
     }
     if (path.startsWith('docs/')) {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { AGENT_CLIS } from '../content/agents.ts';
-import { breadcrumbList, ids, jsonLd, organization, softwareApplication, techArticle } from './structured-data.ts';
+import { blog, blogPosting, breadcrumbList, ids, jsonLd, organization, softwareApplication, techArticle } from './structured-data.ts';
 
 const ref = { site: 'https://example.com' };
 
@@ -35,6 +35,28 @@ describe('structured data', () => {
       { '@type': 'ListItem', position: 1, name: 'Coppice', item: 'https://example.com/coppice' },
       { '@type': 'ListItem', position: 2, name: 'Docs', item: 'https://example.com/coppice/docs' },
     ]);
+  });
+
+  it('builds a BlogPosting from supplied dates and does not invent an author', () => {
+    const post = blogPosting(ref, {
+      headline: 'Worktrees',
+      description: 'd',
+      pathname: '/blog/worktrees',
+      inLanguage: 'en',
+      datePublished: '2026-03-02',
+      dateModified: '2026-03-02',
+      authorName: 'Ada',
+      authorType: 'Person',
+      image: 'https://getcoppice.app/assets/og-card.png',
+    });
+    assert.equal(post.url, 'https://example.com/blog/worktrees');
+    assert.equal(post.datePublished, '2026-03-02');
+    assert.equal(post.dateModified, '2026-03-02');
+    assert.deepEqual(post.author, { '@type': 'Person', name: 'Ada' });
+    assert.equal('keywords' in post, false);
+    const index = blog(ref, { name: 'Coppice blog', description: 'd', pathname: '/blog', inLanguage: 'en' });
+    assert.equal('blogPost' in index, false);
+    assert.deepEqual(index.publisher, { '@id': ids.organization(ref) });
   });
 
   it('escapes < so a value cannot end the script element', () => {

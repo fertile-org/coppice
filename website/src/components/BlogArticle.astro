@@ -1,0 +1,48 @@
+---
+import type { BlogPost } from '../lib/blog';
+import { formatBlogDate } from '../lib/blog';
+import { hrefFor, useI18n } from '../i18n/runtime';
+import { blogPostSchema } from '../lib/page-schema';
+import Base from '../layouts/Base.astro';
+
+interface Props {
+  post: BlogPost;
+  Content: (props: Record<string, unknown>) => unknown;
+}
+
+const { post, Content } = Astro.props;
+const ctx = useI18n(Astro);
+const modified = post.updated ?? post.published;
+const showUpdated = Boolean(post.updated && post.updated !== post.published);
+---
+
+<Base
+  title={post.metaTitle || post.title}
+  description={post.description}
+  ogType="article"
+  structuredData={blogPostSchema(Astro, ctx, post)}
+  keywords={post.keywords}
+  tags={post.keywords}
+  publishedTime={post.published}
+  modifiedTime={modified}
+>
+  <div class="shell landing">
+    <article class="prose">
+      <nav class="docs-breadcrumbs" aria-label="Breadcrumb">
+        <ol>
+          <li><a href={hrefFor(ctx.locale, '/')}>Coppice</a></li>
+          <li><a href={hrefFor(ctx.locale, '/blog')}>Blog</a></li>
+          <li aria-current="page">{post.title}</li>
+        </ol>
+      </nav>
+      <h1>{post.title}</h1>
+      <p class="blog-meta">
+        <time datetime={post.published}>Published {formatBlogDate(post.published)}</time>
+        {showUpdated && <time datetime={post.updated}>Updated {formatBlogDate(post.updated!)}</time>}
+        <span>{post.author}</span>
+      </p>
+      <p class="blog-answer">{post.answer}</p>
+      <Content />
+    </article>
+  </div>
+</Base>

@@ -13,12 +13,13 @@
  *   node e2e/screenshot/capture-docs.mjs
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { composeInvocation } from './compose-cli.mjs';
 import { resetMarketingWorkspace } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
@@ -28,10 +29,6 @@ const REPO_ROOT = path.resolve(HERE, '../..');
 const DOCS_ASSETS = path.join(REPO_ROOT, 'website', 'public', 'assets', 'docs');
 const AGENT_BIN = path.join(HERE, 'fixtures', 'bin', 'agent');
 const PROJECT = process.env.COPPICE_COMPOSE_PROJECT ?? 'coppice-screenshot';
-const COMPOSE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.screenshot.yml',
-];
 const REPO_PATH = '/tmp/coppice-screenshot-repo';
 const VIEWPORT = { width: 1440, height: 900 };
 
@@ -66,9 +63,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function run(args, { input, cwd = REPO_ROOT } = {}) {
+function run(invocation, { input, cwd = REPO_ROOT } = {}) {
+  const command = Array.isArray(invocation)
+    ? { bin: invocation[0], args: invocation.slice(1) }
+    : invocation;
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', args, {
+    const child = spawn(command.bin, command.args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -83,7 +83,7 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`docker ${args.join(' ')} failed (${code}): ${stderr || stdout}`));
+        reject(new Error(`${command.bin} ${command.args.join(' ')} failed (${code}): ${stderr || stdout}`));
         return;
       }
       resolve(stdout);
@@ -94,10 +94,7 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
 }
 
 function composeArgs(extra) {
-  const args = ['compose', '-p', PROJECT];
-  for (const file of COMPOSE_FILES) args.push('-f', file);
-  args.push(...extra);
-  return args;
+  return composeInvocation(extra, { project: PROJECT });
 }
 
 function serverUser() {
@@ -178,21 +175,41 @@ async function serverSh(script, { user } = {}) {
   return run(composeArgs(args), { input: script });
 }
 
+async function screenshotConfigPath() {
+  const file = process.env.COPPICE_SCREENSHOT_CONFIG;
+  if (!file) {
+    fail('COPPICE_SCREENSHOT_CONFIG is unset. Run `make screenshot` so the capture uses the private config.');
+  }
+  let stat;
+  try {
+    stat = await lstat(file);
+  } catch (error) {
+    fail(`screenshot config is not readable (${file}): ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) fail(`refusing to edit symlink screenshot config: ${file}`);
+  if (!stat.isFile()) fail(`screenshot config is not a regular file: ${file}`);
+  return file;
+}
+
 async function enableCursorInConfig() {
   // Saving an agent turns its connector on by rewriting config.toml. That
   // rewrite cannot replace the bind-mounted file, so Cursor is turned on
-  // here before the server starts. The example leaves it off.
-  const file = path.join(REPO_ROOT, 'deploy/config/config.toml');
+  // here before the server starts. The example leaves it off. This edits the
+  // throwaway screenshot config, not deploy/config/config.toml.
+  const file = await screenshotConfigPath();
   const text = await readFile(file, 'utf8');
   const next = text.replace(
     /(\[agent\.connectors\.cursor\]\r?\nenabled = )false\b/,
     '$1true',
   );
   if (!/\[agent\.connectors\.cursor\]\r?\nenabled = true\b/.test(next)) {
-    fail('could not turn Cursor on in deploy/config/config.toml');
+    fail(`could not turn Cursor on in ${file}`);
   }
   if (next !== text) await writeFile(file, next);
-  console.log('screenshot: Cursor connector is on in config');
+  if (process.env.COPPICE_SCREENSHOT_TRANSFER === 'copy') {
+    await run(composeArgs(['cp', file, 'server:/etc/coppice/config.toml']));
+  }
+  console.log('screenshot: Cursor connector is on in the throwaway config');
 }
 
 async function installCursorCli() {

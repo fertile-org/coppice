@@ -117,6 +117,73 @@ export function techArticle(
   };
 }
 
+export function blog(
+  ref: SiteRef,
+  options: {
+    name: string;
+    description: string;
+    pathname: string;
+    inLanguage: string;
+    posts?: readonly { headline: string; pathname: string }[];
+  },
+): Thing {
+  const page = url(ref, options.pathname);
+  const posts = options.posts ?? [];
+  return {
+    '@type': 'Blog',
+    '@id': `${page}#blog`,
+    name: options.name,
+    description: options.description,
+    url: page,
+    inLanguage: options.inLanguage,
+    ...(posts.length
+      ? {
+          blogPost: posts.map((post) => ({
+            '@type': 'BlogPosting',
+            headline: post.headline,
+            url: url(ref, post.pathname),
+          })),
+        }
+      : {}),
+    publisher: { '@id': ids.organization(ref) },
+    isPartOf: { '@id': ids.website(ref) },
+  };
+}
+
+export function blogPosting(
+  ref: SiteRef,
+  options: {
+    headline: string;
+    description: string;
+    pathname: string;
+    inLanguage: string;
+    datePublished: string;
+    dateModified: string;
+    authorName: string;
+    authorType: 'Person' | 'Organization';
+    image: string;
+    keywords?: readonly string[];
+  },
+): Thing {
+  const page = url(ref, options.pathname);
+  return {
+    '@type': 'BlogPosting',
+    '@id': `${page}#post`,
+    headline: options.headline,
+    description: options.description,
+    url: page,
+    mainEntityOfPage: page,
+    datePublished: options.datePublished,
+    dateModified: options.dateModified,
+    inLanguage: options.inLanguage,
+    image: options.image,
+    author: { '@type': options.authorType, name: options.authorName },
+    ...(options.keywords?.length ? { keywords: options.keywords.join(', ') } : {}),
+    publisher: { '@id': ids.organization(ref) },
+    isPartOf: { '@id': ids.website(ref) },
+  };
+}
+
 /** One `@graph` document. `<` is escaped so the JSON cannot close the script tag. */
 export function jsonLd(items: readonly Thing[]): string {
   return JSON.stringify({ '@context': 'https://schema.org', '@graph': items }).replace(/</g, '\\u003c');
