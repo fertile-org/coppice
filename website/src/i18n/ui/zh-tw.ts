@@ -14,7 +14,7 @@ export const ui: Ui = {
   footer: {
     tagline: '僱用專家，你來拍板。',
     licenseBefore: 'Coppice 基於 ',
-    licenseLabel: 'Apache 2.0 許可證',
+    licenseLabel: 'Apache 2.0 授權',
     licenseAfter: '開源。',
     docs: '文件',
     install: '安裝',
@@ -47,6 +47,6 @@ export const ui: Ui = {
     hint: '/',
     footer: '↑↓ 移動，Enter 開啟，Esc 關閉',
     close: '關閉',
-    noResults: '沒有找到與“{query}”相關的結果。',
+    noResults: '找不到與「{query}」相關的結果。',
   },
 };

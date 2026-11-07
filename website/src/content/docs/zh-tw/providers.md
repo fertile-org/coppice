@@ -6,13 +6,13 @@ description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cu
 
 # 提供商
 
-受夠了為每個代理都開一個終端？Coppice 執行你已經在用的程式設計代理 CLI，並把它們的工作放到同一塊看板上。訂閱和登入都還是你自己的，不需要 Coppice 帳號。
+不想再為每個代理開一個終端？Coppice 執行你已經在用的程式設計代理 CLI，並把工作放在同一塊看板上。訂閱和登入仍是你自己的，不需要 Coppice 帳號。
 
 <a id="supported-connectors"></a>
 
-## 支援的聯結器
+## 支援的連接器
 
-| 聯結器 | Coppice 查詢的命令 | 安裝 | 已測試版本 |
+| 連接器 | Coppice 查詢的命令 | 安裝 | 已測試版本 |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [安裝指南](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [安裝指南](https://developers.openai.com/codex/cli) | 0.163.0 |
@@ -24,7 +24,7 @@ description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cu
 | Kimi Code | `kimi` | [安裝指南](https://moonshotai.github.io/kimi-code/) | 2.2.0 |
 | Grok | `grok` | [安裝指南](https://x.ai/cli) | 1.0.62 |
 
-相容性資訊會隨著我們測試更多 CLI 版本而持續更新。
+相容性資訊會隨著我們測試更多 CLI 版本而更新。
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="代理上的模型選擇器，列出該代理 CLI 提供的模型。">
@@ -37,42 +37,43 @@ description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cu
 
 ## 連線你的代理 CLI
 
-1. 像平常一樣安裝 CLI，並在終端裡登入。
+1. 依平常的方式安裝 CLI，並在終端裡登入。
 2. 建立代理時選擇你的代理 CLI，Coppice 就會啟用它。
 
-代理表單會列出每個聯結器及其狀態：
+代理表單會列出每個連接器及其狀態：
 
 | 狀態 | 含義 |
 | --- | --- |
-| **Ready** | 一次免費的登入檢查確認你已登入。 |
+| **Ready** | 一次免費的登入檢查，確認你已登入。 |
 | **Found, not signed in** | Coppice 找到了命令，但你還沒有登入。請在終端裡登入。 |
 | **Not on your PATH** | Coppice 找不到該命令。請安裝它，或檢查你的 PATH。 |
-| **Installed** | Coppice 找到了命令。對於 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code，不消耗你的套餐額度就無法檢查登入狀態。 |
+| **Installed** | Coppice 找到了命令。對 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 來說，不耗用你的方案就無法檢查登入狀態。 |
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示為 **Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）想確認它能用，就點 **Test connection**（測試連線）：它會跑一次簡短的聊天、規劃和工單。所有 CLI 都能聊天。Claude Code、Codex 和 Kilo Code 的聊天會顯示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未確認 {cli} 會保持只讀，代理仍可在你的電腦上執行命令。）OpenCode、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 的聊天沒有這條橫幅：在聊天和規劃中，Coppice 會阻止它們寫入檔案和執行 shell 命令。你在這些 CLI 裡自己設定的 MCP 工具仍可能改動內容。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示為 **Installed**。System → Connectors 還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不耗用你的方案，Coppice 就無法檢查登入狀態；如果你已登出，執行時會報錯。）若要確認它能用，點 **Test connection**（測試連線）：它會跑一次簡短的聊天、規劃和工單。所有 CLI 都能聊天。Claude Code、Codex 和 Kilo Code 的聊天會顯示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未確認 {cli} 會保持只讀。代理仍可在你的電腦上執行命令。）OpenCode、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 的聊天沒有這條橫幅：在聊天和規劃中，Coppice 會阻止它們寫入檔案和執行 shell 命令。你在這些 CLI 裡自己設定的 MCP 工具仍可能改動內容。
 
-CLI 還沒就緒時，也可以先儲存代理。CLI 安裝並登入後，它就會開始處理工單。如果你是在開啟 Coppice 之後才安裝的 CLI，請退出並重新開啟 Coppice，讓它找到新命令。
+CLI 還沒就緒時，也可以先儲存代理。CLI 安裝並登入後，它就會開始處理工單。如果你是在開啟 Coppice 之後才安裝 CLI，請結束並重新開啟 Coppice，讓它找到新命令。
 
-Coppice 找到命令的聯結器會開啟，除非你未登入。要開啟或關閉某個聯結器，請使用 **System → Connectors**（系統 → 聯結器）中的開關。
+Coppice 找到命令的連接器會開啟，除非你未登入。若要開啟或關閉某個連接器，請用 **System → Connectors**（系統 → 連接器）裡的開關。
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 
 ## 使用自己的 API 金鑰或其他提供商
 
-想用自己的 API 金鑰，或者想用你的 CLI 不提供的模型？請用 OpenCode。它支援 75 個以上的模型提供商，也支援本地模型。參見 [OpenCode 的提供商列表](https://opencode.ai/docs/providers/)。
+想用自己的 API 金鑰，或用你的 CLI 沒有提供的模型？請用 OpenCode。它支援 75 個以上的模型提供商，也支援本機模型。參見 [OpenCode 的提供商列表](https://opencode.ai/docs/providers/)。
 
 1. 安裝 OpenCode。
-2. 在終端執行 `opencode`，輸入 `/connect`，選擇你的提供商並貼上金鑰。金鑰由 OpenCode 保管，Coppice 從不索要。列表裡沒有？請按 OpenCode 的[自定義提供商步驟](https://opencode.ai/docs/providers/#custom-provider)操作。
-3. 在 Coppice 中建立一個代理，把 **Connector**（聯結器）設為 **OpenCode**。你的提供商的模型會出現在 **Model**（模型）下。如果你是在 Coppice 開啟期間新增的提供商，請點選 **Refresh models**（重新整理模型）。
+2. 在終端執行 `opencode`，輸入 `/connect`，選擇你的提供商並貼上金鑰。金鑰由 OpenCode 保管，Coppice 從不向你索取。列表裡沒有？請依照 OpenCode 的[自訂提供商步驟](https://opencode.ai/docs/providers/#custom-provider)操作。
+3. 在 Coppice 中建立一個代理，把 **Connector**（連接器）設為 **OpenCode**。你的提供商的模型會出現在 **Model**（模型）下。如果是在 Coppice 開啟期間新增的提供商，請點選 **Refresh models**（重新整理模型）。
 
 <a id="on-a-ticket"></a>
 
 ## 在工單上
 
-代理接手工單時，Coppice 會在該工單自己的 git worktree 中啟動它的 CLI。你可以在工單上即時檢視進度。
+代理接手工單時，Coppice 會在該工單自己的 git worktree 中啟動它的 CLI。你可以在工單上即時查看進度。
 
 <a id="what-coppice-does-not-do"></a>
 
 ## Coppice 不做什麼
-- 不提供雲端編碼服務
+
+- 不提供雲端程式設計服務
 - 不會在未經你 Human Review（人工審查）的情況下合併程式碼
