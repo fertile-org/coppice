@@ -37,7 +37,7 @@ export const pages = {
       },
       {
         title: 'Let agents build.',
-        body: 'Each ticket gets its own git worktree, so parallel agents never touch your main checkout. Follow any run live.',
+        body: 'Each ticket gets its own git worktree, so parallel agents never touch your main checkout. Once you start a ticket, agents can continue automatically through the workflow. Follow any run live.',
       },
       {
         title: 'Human Review.',
@@ -121,9 +121,6 @@ export const homeEntry = {
   whatTitle: 'What Coppice is',
   whatBody:
     'Coppice is a local desktop board for coding agents. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
-  doTitle: 'What you do',
-  doBody:
-    'You approve the plan before coding starts, unless you choose Skip planning. Once you start a ticket, agents can continue automatically through the workflow. You review and accept the final diff. Accept and Merge are separate choices.',
   guidesTitle: 'Guides',
   guides: [
     {

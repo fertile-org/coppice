@@ -40,12 +40,17 @@ const downloadPage = downloadPageFor(copy);
             {group.rows.map((row) => (
               <div class="download-platform">
                 <p>{row.name}</p>
-                <a
-                  class={row.action.kind === 'button' ? 'btn' : 'text-link'}
-                  href={withBase(row.action.href)}
-                >
-                  {row.action.label}
-                </a>
+                <span class="download-choice">
+                  <a
+                    class={row.action.kind === 'button' ? 'btn' : 'text-link'}
+                    href={withBase(row.action.href)}
+                  >
+                    {row.action.label}
+                  </a>
+                  {ctx.locale === 'en' && row.action.href.includes('#windows-11-through-wsl') && (
+                    <span class="download-untested">untested</span>
+                  )}
+                </span>
               </div>
             ))}
             {group.note && <p class="download-mac-help">{group.note}</p>}
