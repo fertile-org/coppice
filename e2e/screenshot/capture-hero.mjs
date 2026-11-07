@@ -39,6 +39,7 @@ import {
   DESIGN_SET_TITLE,
   RECOMMENDED_OPTION_ID,
 } from './design-options.mjs';
+import { composeInvocation } from './compose-cli.mjs';
 import { resetMarketingWorkspace } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
@@ -53,10 +54,6 @@ const MP4_OUT = path.join(ASSETS, 'marketing.mp4');
 const WEBM_OUT = path.join(ASSETS, 'marketing.webm');
 const POSTER = path.join(ASSETS, 'hero-screenshot.png');
 const PROJECT = process.env.COPPICE_COMPOSE_PROJECT ?? 'coppice-screenshot';
-const COMPOSE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.screenshot.yml',
-];
 
 const VIEWPORT = { width: 1440, height: 900 };
 const GIF_WIDTH = 960;
@@ -172,10 +169,8 @@ function run(args, { input, cwd = REPO_ROOT } = {}) {
 }
 
 function composeArgs(extra) {
-  const args = ['docker', 'compose', '-p', PROJECT];
-  for (const file of COMPOSE_FILES) args.push('-f', file);
-  args.push(...extra);
-  return args;
+  const { bin, args } = composeInvocation(extra, { project: PROJECT });
+  return [bin, ...args];
 }
 
 function serverUser() {
@@ -558,7 +553,7 @@ const CAPTION_STYLE = `
 `;
 
 const COLUMN_RULE =
-  '#board{scroll-behavior:auto!important}#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
+  '#board{scroll-behavior:auto!important}#board > div > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
 const CAPTION_CSS = `${CAPTION_STYLE}\n${COLUMN_RULE}`;
 const SPEED = 1.25;
 // 0.5s on screen after the speed-up.
@@ -669,7 +664,7 @@ async function boardGeometry(page) {
   return page.locator('#board').evaluate((board) => {
     const rect = board.getBoundingClientRect();
     const style = getComputedStyle(board);
-    const cols = [...board.querySelectorAll(':scope > div > section')].map((el) => {
+    const cols = [...board.querySelectorAll(':scope > div > div > section')].map((el) => {
       const box = el.getBoundingClientRect();
       return { label: el.getAttribute('aria-label'), x: box.x, w: box.width };
     });

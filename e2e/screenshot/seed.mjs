@@ -15,14 +15,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { composeInvocation } from './compose-cli.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '../..');
 
-const COMPOSE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.screenshot.yml',
-];
 const PROJECT = process.env.COPPICE_COMPOSE_PROJECT ?? 'coppice-screenshot';
 
 const REPO_NAME = 'Coppice Desktop';
@@ -43,9 +40,9 @@ export function ticketShort(id) {
   return id.split('-')[0];
 }
 
-function run(args, { input } = {}) {
+function run(invocation, { input } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', args, {
+    const child = spawn(invocation.bin, invocation.args, {
       cwd: REPO_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -62,7 +59,7 @@ function run(args, { input } = {}) {
       if (code !== 0) {
         reject(
           new Error(
-            `docker ${args.join(' ')} failed (${code}): ${stderr || stdout}`,
+            `${invocation.bin} ${invocation.args.join(' ')} failed (${code}): ${stderr || stdout}`,
           ),
         );
         return;
@@ -75,12 +72,7 @@ function run(args, { input } = {}) {
 }
 
 function composeArgs(extra) {
-  const args = ['compose', '-p', PROJECT];
-  for (const file of COMPOSE_FILES) {
-    args.push('-f', file);
-  }
-  args.push(...extra);
-  return args;
+  return composeInvocation(extra, { project: PROJECT });
 }
 
 function serverUser() {
