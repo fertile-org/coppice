@@ -184,6 +184,8 @@ for (const file of walk(dist)) {
   const required = ['Organization', 'WebSite'];
   if (englishRoute === '/' || englishRoute === '/download') required.push('SoftwareApplication');
   if (englishRoute === '/docs' || englishRoute.startsWith('/docs/')) required.push('TechArticle', 'BreadcrumbList');
+  if (englishRoute === '/blog') required.push('Blog', 'BreadcrumbList');
+  if (/^\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(englishRoute)) required.push('BlogPosting', 'BreadcrumbList');
   for (const type of required) if (!schema.has(type)) where(`JSON-LD is missing ${type}`);
   const app = schema.get('SoftwareApplication');
   if (app) {
@@ -195,6 +197,25 @@ for (const file of walk(dist)) {
   const article = schema.get('TechArticle');
   if (article && article.url !== canonical) where(`TechArticle url ${article.url} is not the canonical ${canonical}`);
   if (article && article.inLanguage !== lang) where(`TechArticle inLanguage ${article.inLanguage} is not <html lang> ${lang}`);
+  const posting = schema.get('BlogPosting');
+  if (posting) {
+    if (posting.url !== canonical) where(`BlogPosting url ${posting.url} is not the canonical ${canonical}`);
+    if (posting.inLanguage !== lang) where(`BlogPosting inLanguage ${posting.inLanguage} is not <html lang> ${lang}`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(posting.datePublished ?? '')) where('BlogPosting datePublished must be YYYY-MM-DD');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(posting.dateModified ?? '')) where('BlogPosting dateModified must be YYYY-MM-DD');
+    if (posting.datePublished && posting.dateModified && posting.dateModified < posting.datePublished) {
+      where('BlogPosting dateModified is earlier than datePublished');
+    }
+    const author = posting.author ?? {};
+    if (!author.name || (author['@type'] !== 'Person' && author['@type'] !== 'Organization')) {
+      where('BlogPosting author needs a Person or Organization name');
+    }
+    if (!html.includes('class="blog-answer"')) where('missing direct-answer opening');
+    if (!html.includes(`datetime="${posting.datePublished}"`)) where('visible published date does not match BlogPosting datePublished');
+  }
+  const blog = schema.get('Blog');
+  if (blog && blog.url !== canonical) where(`Blog url ${blog.url} is not the canonical ${canonical}`);
+  if (blog && Array.isArray(blog.blogPost) && blog.blogPost.length === 0) where('Blog blogPost must be omitted when there are no posts');
   const crumbs = schema.get('BreadcrumbList')?.itemListElement ?? [];
   for (const crumb of crumbs) {
     if (!crumb.item || !distFileFor(crumb.item, site)) where(`breadcrumb ${crumb.name} points at ${crumb.item}, which is not a page`);

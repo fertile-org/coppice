@@ -91,6 +91,27 @@ function indexedUrls(outDir) {
 
 const LOCALE_CODES = Object.fromEntries(LOCALES.map((locale) => [locale.path, locale.code]));
 
+function blogContentExists(locale, slug) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return false;
+  return ['md', 'mdx'].some(
+    (ext) =>
+      fs.existsSync(path.join(root, 'src/content/blog', locale, `${slug}.${ext}`)) ||
+      fs.existsSync(path.join(root, 'src/content/blog', locale, slug, `index.${ext}`)),
+  );
+}
+
+function englishBlogSlugs() {
+  const dir = path.join(root, 'src/content/blog/en');
+  if (!fs.existsSync(dir)) return [];
+  const slugs = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && blogContentExists('en', entry.name)) slugs.push(entry.name);
+    const file = entry.name.match(/^([a-z0-9]+(?:-[a-z0-9]+)*)\.(md|mdx)$/);
+    if (file) slugs.push(file[1]);
+  }
+  return slugs.sort();
+}
+
 /** Translations that ship in the repo (not the fixture): `[hreflang, localized path]` for one English path. */
 function shippedTranslations(englishPath) {
   const out = [];
@@ -98,6 +119,9 @@ function shippedTranslations(englishPath) {
     let found = false;
     if (englishPath === '/' || englishPath === '/download') {
       found = fs.existsSync(path.join(root, 'src/i18n/pages', `${locale}.ts`));
+    } else if (englishPath.startsWith('/blog/')) {
+      const slug = englishPath.slice('/blog/'.length);
+      found = blogContentExists(locale, slug);
     } else if (englishPath === '/docs' || englishPath.startsWith('/docs/')) {
       const slug = englishPath === '/docs' ? 'index' : englishPath.slice('/docs/'.length);
       found = ['.md', '.mdx'].some(
@@ -187,7 +211,12 @@ function checkBuild(outDir, { translated, site }) {
     if (!english.includes(route)) fail(`missing English route ${route}`);
   }
   for (const route of english) {
+    const slug = route.match(/^\/blog\/([a-z0-9]+(?:-[a-z0-9]+)*)$/)?.[1];
+    if (slug && blogContentExists('en', slug)) continue;
     if (!baseline.includes(route) && !allowedExtra.has(route)) fail(`unexpected English route ${route}`);
+  }
+  for (const slug of englishBlogSlugs()) {
+    if (!english.includes(`/blog/${slug}`)) fail(`missing /blog/${slug}`);
   }
   for (const locale of locales) {
     for (const route of baseline) {
@@ -271,6 +300,67 @@ function checkBuild(outDir, { translated, site }) {
     });
   }
 
+  const blogIndex = readHtml(outDir, '/blog');
+  if (!blogIndex) fail('missing /blog');
+  else {
+    checkHead(blogIndex, {
+      englishPath: '/blog',
+      lang: 'en',
+      canonicalPath: '/blog',
+      site,
+      hreflangs: [
+        ['en', '/blog'],
+        ['x-default', '/blog'],
+      ],
+      absent: ['ja', 'vi', 'zh-CN', 'fr'],
+    });
+    if (blogIndex.includes('data-pagefind-body')) fail('/blog is in the docs search index');
+  }
+  checkFallback(outDir, 'ja', '/blog', site);
+
+  for (const slug of englishBlogSlugs()) {
+    const englishPath = `/blog/${slug}`;
+    const article = readHtml(outDir, englishPath);
+    if (!article) {
+      fail(`missing ${englishPath}`);
+      continue;
+    }
+    checkHead(article, {
+      englishPath,
+      lang: 'en',
+      canonicalPath: englishPath,
+      site,
+      hreflangs: [
+        ['en', englishPath],
+        ['x-default', englishPath],
+      ],
+    });
+    if (article.includes('data-pagefind-body')) fail(`${englishPath} is in the docs search index`);
+    for (const locale of locales) {
+      const localized = `/${locale}${englishPath}`;
+      if (shippedTranslations(englishPath).some(([code, have]) => have === localized)) {
+        const translatedHtml = readHtml(outDir, localized);
+        if (!translatedHtml) fail(`missing blog translation ${localized}`);
+        else {
+          const code = shippedTranslations(englishPath).find(([, have]) => have === localized)?.[0];
+          checkHead(translatedHtml, {
+            englishPath,
+            lang: code,
+            canonicalPath: localized,
+            site,
+            hreflangs: [
+              ['en', englishPath],
+              ['x-default', englishPath],
+            ],
+          });
+          if (translatedHtml.includes('data-pagefind-body')) fail(`${localized} is in the docs search index`);
+        }
+        continue;
+      }
+      if (routes.includes(localized)) checkFallback(outDir, locale, englishPath, site);
+    }
+  }
+
   const sitemapFile = path.join(outDir, 'sitemap.xml');
   if (!fs.existsSync(sitemapFile)) fail('missing sitemap.xml');
   else {
@@ -338,6 +428,9 @@ const site = configuredSite();
 checkBuild(dist, { translated: false, site });
 const plain = readHtml(dist, '/ja/docs/concepts');
 if (plain?.includes('Concepts fixture')) fail('production build contains the i18n fixture');
+if (readHtml(dist, '/blog')?.includes('Fixture note') || readHtml(dist, '/blog/fixture-note')?.includes('English fixture body.')) {
+  fail('production build contains the blog fixture');
+}
 
 // The fixture build swaps in a known Japanese concepts page and takes the
 // Japanese install page away, so both a translation and a fallback are checked
@@ -346,6 +439,9 @@ if (plain?.includes('Concepts fixture')) fail('production build contains the i18
 const jaDocs = path.join(root, 'src/content/docs/ja');
 const fixtureDest = path.join(jaDocs, 'concepts.md');
 const fixtureSrc = path.join(root, 'scripts/fixtures/i18n/ja-concepts.md');
+const blogEn = path.join(root, 'src/content/blog/en/fixture-note.md');
+const blogJaDir = path.join(root, 'src/content/blog/ja');
+const blogJa = path.join(blogJaDir, 'fixture-note.md');
 const fixtureOut = path.join(root, '.i18n-fixture-dist');
 const stash = fs.mkdtempSync(path.join(root, '.i18n-stash-'));
 const jaDocsExisted = fs.existsSync(jaDocs);
@@ -354,15 +450,29 @@ try {
   for (const name of swapped) fs.renameSync(path.join(jaDocs, name), path.join(stash, name));
   fs.mkdirSync(jaDocs, { recursive: true });
   fs.copyFileSync(fixtureSrc, fixtureDest);
+  fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/en-fixture-note.md'), blogEn);
+  fs.mkdirSync(blogJaDir, { recursive: true });
+  fs.copyFileSync(path.join(root, 'scripts/fixtures/blog/ja-fixture-note.md'), blogJa);
   const build = spawnSync('npx', ['astro', 'build', '--outDir', fixtureOut], {
     cwd: root,
     env: process.env,
     stdio: 'inherit',
   });
   if (build.status !== 0) fail('fixture build failed');
-  else checkBuild(fixtureOut, { translated: true, site });
+  else {
+    checkBuild(fixtureOut, { translated: true, site });
+    const englishNote = readHtml(fixtureOut, '/blog/fixture-note');
+    const japaneseNote = readHtml(fixtureOut, '/ja/blog/fixture-note');
+    if (!englishNote?.includes('English fixture body.')) fail('English blog fixture did not render');
+    if (!japaneseNote?.includes('日本語の見本本文です。')) fail('Japanese blog fixture did not render');
+    if (englishNote?.includes('日本語の見本本文です。')) fail('English blog fixture rendered the Japanese body');
+    if (!japaneseNote?.includes('class="blog-answer"')) fail('blog fixture is missing the direct answer');
+  }
 } finally {
   fs.rmSync(fixtureDest, { force: true });
+  fs.rmSync(blogEn, { force: true });
+  fs.rmSync(blogJa, { force: true });
+  if (fs.existsSync(blogJaDir) && fs.readdirSync(blogJaDir).length === 0) fs.rmdirSync(blogJaDir);
   for (const name of swapped) fs.renameSync(path.join(stash, name), path.join(jaDocs, name));
   if (!jaDocsExisted && fs.readdirSync(jaDocs).length === 0) fs.rmdirSync(jaDocs);
   fs.rmSync(stash, { recursive: true, force: true });

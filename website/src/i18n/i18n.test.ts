@@ -161,6 +161,12 @@ describe('translation sources', () => {
     assert.equal(pages.get('/download')?.has('ja'), true);
     assert.equal(matchTranslation('src/pages/ja/index.astro'), null);
     assert.equal(matchTranslation('src/pages/docs/concepts.md'), null);
+    assert.deepEqual(matchTranslation('src/content/blog/ja/worktrees.md'), {
+      locale: 'ja',
+      englishPath: '/blog/worktrees',
+    });
+    assert.equal(matchTranslation('src/content/blog/en/worktrees.md'), null);
+    assert.equal(matchTranslation('src/content/blog/fr/index.md'), null);
   });
 
   it('lists English routes from page files and skips locale shells', () => {
@@ -174,8 +180,10 @@ describe('translation sources', () => {
         './docs/concepts.md',
         './ja/index.astro',
         './ja/docs/concepts.md',
+        './blog/index.astro',
+        './blog/[slug].astro',
       ]),
-      ['/', '/docs', '/docs/concepts', '/download'],
+      ['/', '/blog', '/docs', '/docs/concepts', '/download'],
     );
   });
 });

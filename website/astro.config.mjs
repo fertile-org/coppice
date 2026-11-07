@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { unified } from '@astrojs/markdown-remark';
 import pagefind from 'astro-pagefind';
 import { defineConfig } from 'astro/config';
+import { rehypeBlogFigures, remarkBlogHeadings } from './src/lib/blog-figures.mjs';
 import { localeFromDistFile, rewriteLocaleHtml } from './src/i18n/locale-html.mjs';
 import { astroLocales, DEFAULT_LOCALE, fallbackMap, LOCALE_PATHS } from './src/i18n/locales.mjs';
 
@@ -92,6 +93,8 @@ export default defineConfig({
     processor: unified({
       gfm: true,
       smartypants: true,
+      remarkPlugins: [remarkBlogHeadings],
+      rehypePlugins: [rehypeBlogFigures],
     }),
   },
 });

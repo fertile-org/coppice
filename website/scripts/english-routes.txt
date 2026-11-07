@@ -1,5 +1,6 @@
 /
 /404
+/blog
 /docs
 /docs/backup
 /docs/chat

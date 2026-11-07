@@ -43,6 +43,7 @@ export function lastCommitDate(files: readonly string[]): string | undefined {
 
 /** Source files whose edits change the page at `englishPath` in `locale`. */
 export function pageSources(locale: string, englishPath: string): string[] {
+  if (englishPath === '/blog' || englishPath.startsWith('/blog/')) return [];
   const english = locale === 'en';
   if (englishPath === '/' || englishPath === '/download') {
     const component = englishPath === '/' ? 'src/components/HomePage.astro' : 'src/components/DownloadPage.astro';

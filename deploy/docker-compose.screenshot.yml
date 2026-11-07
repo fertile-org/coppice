@@ -3,10 +3,23 @@
 # stack does not share the dev database or volumes.
 # Forces the desktop product session so the SPA skips login and hides the
 # account email and Sign out, matching `coppice-server desktop`.
+# `make screenshot` sets COPPICE_REPOS_HOST and COPPICE_SCREENSHOT_CONFIG to
+# throwaway /tmp paths and runs `down -v` first. Do not point those variables
+# at a home directory, SSH keys, or a config file that holds real tokens.
 services:
   server:
     environment:
       COPPICE_AUTH__DESKTOP_MODE: "true"
       WORKFLOW_AUTO_START_RUNS: "false"
-      # A home path, so the Plugins frame does not show the container /data dir.
+      # Inside the container, not the operator's home. The plugins frame must
+      # not show the container /data dir.
       COPPICE_PLUGINS__DIR: /home/coppice/plugins
+    # Replace the base volume list so the operator config and $HOME checkouts
+    # are not mounted beside these throwaway paths.
+    volumes: !override
+      - artifact_data:/data/artifacts
+      - worktree_data:/data/worktrees
+      - plugin_data:/data/plugins
+      - connector_data:/home/coppice
+      - ${COPPICE_SCREENSHOT_CONFIG:-/tmp/coppice-screenshot-config.toml}:/etc/coppice/config.toml
+      - ${COPPICE_REPOS_HOST:-/tmp/coppice-screenshot-repos}:/repos

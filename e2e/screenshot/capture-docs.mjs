@@ -178,21 +178,30 @@ async function serverSh(script, { user } = {}) {
   return run(composeArgs(args), { input: script });
 }
 
+function screenshotConfigPath() {
+  const file = process.env.COPPICE_SCREENSHOT_CONFIG;
+  if (!file) {
+    fail('COPPICE_SCREENSHOT_CONFIG is unset. Run `make screenshot` so the capture uses the throwaway config.');
+  }
+  return file;
+}
+
 async function enableCursorInConfig() {
   // Saving an agent turns its connector on by rewriting config.toml. That
   // rewrite cannot replace the bind-mounted file, so Cursor is turned on
-  // here before the server starts. The example leaves it off.
-  const file = path.join(REPO_ROOT, 'deploy/config/config.toml');
+  // here before the server starts. The example leaves it off. This edits the
+  // throwaway screenshot config, not deploy/config/config.toml.
+  const file = screenshotConfigPath();
   const text = await readFile(file, 'utf8');
   const next = text.replace(
     /(\[agent\.connectors\.cursor\]\r?\nenabled = )false\b/,
     '$1true',
   );
   if (!/\[agent\.connectors\.cursor\]\r?\nenabled = true\b/.test(next)) {
-    fail('could not turn Cursor on in deploy/config/config.toml');
+    fail(`could not turn Cursor on in ${file}`);
   }
   if (next !== text) await writeFile(file, next);
-  console.log('screenshot: Cursor connector is on in config');
+  console.log('screenshot: Cursor connector is on in the throwaway config');
 }
 
 async function installCursorCli() {

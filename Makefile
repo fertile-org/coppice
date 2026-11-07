@@ -192,21 +192,28 @@ e2e-smoke-m10:
 # Own Compose project (coppice-screenshot) so the seed does not touch a dev
 # database. Overlay forces auth.desktop_mode and disables auto-start so the
 # shot matches the Electron app (no login, no account email, no Sign out).
-SCREENSHOT_COMPOSE = $(COMPOSE) -p coppice-screenshot -f deploy/docker-compose.screenshot.yml
+# Each run deletes that project's volumes, then mounts a throwaway config
+# copied from the example and an empty repos directory. It does not mount
+# the operator's home checkouts, SSH directory, or deploy/config/config.toml.
+SCREENSHOT_REPOS := /tmp/coppice-screenshot-repos
+SCREENSHOT_CONFIG := /tmp/coppice-screenshot-config.toml
+SCREENSHOT_COMPOSE = COPPICE_REPOS_HOST=$(SCREENSHOT_REPOS) COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) $(COMPOSE) -p coppice-screenshot -f deploy/docker-compose.screenshot.yml
 screenshot:
-	@test -f deploy/config/config.toml || cp deploy/config/config.example.toml deploy/config/config.toml
+	mkdir -p $(SCREENSHOT_REPOS)
+	cp deploy/config/config.example.toml $(SCREENSHOT_CONFIG)
+	$(SCREENSHOT_COMPOSE) down -v --remove-orphans
 	$(SCREENSHOT_COMPOSE) up -d --build
 	$(SCREENSHOT_COMPOSE) up -d --force-recreate --no-deps server
 	cd e2e && yarn install --frozen-lockfile
 	cd e2e && yarn playwright install chromium
-	node e2e/screenshot/capture-hero.mjs
-	node e2e/screenshot/capture-docs.mjs
+	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-hero.mjs
+	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-docs.mjs
 
-# Docs stills only. The screenshot stack must already be up.
+# Docs stills only. The screenshot stack must already be up from `make screenshot`.
 screenshot-docs:
 	cd e2e && yarn install --frozen-lockfile
 	cd e2e && yarn playwright install chromium
-	node e2e/screenshot/capture-docs.mjs
+	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-docs.mjs
 
 benchmark-m06-knowledge-retrieval:
 	$(MAKE) compose-up
