@@ -1,0 +1,751 @@
+{
+  "scope": "fertile-org/coppice authoring only; .cursor/skills/zh-tw-technical-writing; NOT marketplace/runtime/global",
+  "status": "repository authoring guidance in .cursor/skills/zh-tw-technical-writing; not a marketplace, runtime, or global skill",
+  "cutoff_strictly_before": "2020-11-07",
+  "accepted_article_count": 30,
+  "authors": {
+    "huli": 5,
+    "arvinh": 3,
+    "othree": 4,
+    "Will 保哥": 4,
+    "Heresy": 4,
+    "高見龍": 5,
+    "ihower": 2,
+    "Gea-Suan Lin": 3
+  },
+  "hosts": {
+    "blog.techbridge.cc": 7,
+    "blog.othree.net": 4,
+    "blog.miniasp.com": 4,
+    "kheresy.wordpress.com": 4,
+    "kaochenlong.com": 5,
+    "ihower.tw": 2,
+    "blog.gslin.org": 3,
+    "blog.huli.tw": 1
+  },
+  "eligibility_limits": [
+    "Initially published before cutoff; living revisions are not immutable historical wording.",
+    "Original Taiwan-register authored prose assessed at article level, not mother-tongue biography or character conversion.",
+    "Establishment via books/talks/community/institutional publication, not audited popularity. Heresy evidence remains institutional-host + self-reported teaching; arvinh reach is outlet/newsletter self-report.",
+    "Not an exhaustive originality search or executed technical validation. UI, reference genre and website adaptation are editorial extrapolations."
+  ],
+  "excluded_from_first_pass_selection": [
+    {
+      "id": "TW09",
+      "reason": "REPLACE: stronger adaptation concern than first pass admitted. Its five-item definition L13–19 follows the linked j101044 article’s same ordered five definitions; L99–108 tracks the same circular-queue motivation, Q[0:N-1], spare-slot explanation and empty/full formulas. Read the linked primary comparator in full. Common algorithms alone would not disqualify it, but this multi-part explanatory spine is too derivative for this strict brief. Not a plagiarism allegation."
+    },
+    {
+      "id": "TW11",
+      "reason": "REPLACE for establishment gate: E01 curator role is outlet/editorial evidence only; E05 demonstrates robotics interest/practice, not personal popularity or external recognition as a writer. Body plausibly original installation/resource integration, but that does not satisfy every eligibility condition."
+    },
+    {
+      "id": "TW13",
+      "reason": "REPLACE: body itself says the concept comes from the named paper (L28), follows its hole-detection → GrabCut pipeline, and mainly retells that algorithm rather than recording an independently developed experiment. ORK primary overview confirms attributed paper/pipeline, not a word-for-word comparison of the paper. A respectable explanatory synthesis can still be an adaptation under this user’s unusually strict original-only brief. Same weak writer evidence as TW11."
+    },
+    {
+      "id": "TW32",
+      "reason": "HOLD / REPLACE in final corpus: entire L1–127 read. Own contrasts are plausible, but cited Rails3 Way comparison remains inaccessible (WebFetch HTTP and HTTPS 403; ordinary curl HTTP returned 500). Cannot establish its adaptation boundary confidently enough for this strict brief. This is uncertainty, not a finding that it is translated. Replacement avoids claiming certification."
+    }
+  ],
+  "sources": [
+    {
+      "id": "TW02",
+      "title": "輕鬆理解 Ajax 與跨來源請求 | TechBridge 技術共筆部落格",
+      "author_candidate": "huli",
+      "url": "https://blog.techbridge.cc/2017/05/20/api-ajax-cors-and-jsonp/",
+      "first_publication_date": "2017-05-20",
+      "displayed_date": "2017-05-20",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Article footer 關於作者 with linked @huli",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.huli.tw/about/"
+      ],
+      "originality_assessment": "PASS: authored beginner progression, Twitch example and personal food-court mapping; preserve preflight exception at L227–241, not just L175–181.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-05-20T22:31:12+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW03",
+      "title": "直播協定 hls 筆記 | TechBridge 技術共筆部落格",
+      "author_candidate": "huli",
+      "url": "https://blog.techbridge.cc/2016/12/03/livestreamming-hls-note/",
+      "first_publication_date": "2016-12-03",
+      "displayed_date": "2016-12-03",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Article footer 關於作者 with linked @huli",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.huli.tw/about/"
+      ],
+      "originality_assessment": "PASS with limits: own inspected Twitch/livehouse playlists and player choice at L69–104 distinguish this from translating its linked background readings. English specification quotations are not Chinese style evidence.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2016-12-03T08:22:49+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW05",
+      "title": "D3v4 工作坊 - React + D3 繪製 svg 動態路線地圖 | TechBridge 技術共筆部落格",
+      "author_candidate": "arvinh",
+      "url": "https://blog.techbridge.cc/2017/07/21/d3-workshop-map/",
+      "first_publication_date": "2017-07-21",
+      "displayed_date": "2017-07-21",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Article footer 關於作者 with linked @arvinh",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.arvinh.info/about/"
+      ],
+      "originality_assessment": "PASS: own typhoon-route prototype, modified dataset/gist and acknowledged approximate radius solution L179–203. Referenced formulas and animation mechanism do not make the whole project report a prose adaptation.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-07-21T07:25:01+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Outlet/editor role + self-reported newsletter reach, not individual article traffic"
+    },
+    {
+      "id": "TW06",
+      "title": "D3v4 工作坊 - WebVR 與資料視覺化 | TechBridge 技術共筆部落格",
+      "author_candidate": "arvinh",
+      "url": "https://blog.techbridge.cc/2017/09/23/webvr-d3/",
+      "first_publication_date": "2017-09-23",
+      "displayed_date": "2017-09-23",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Article footer 關於作者 with linked @arvinh",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.arvinh.info/about/"
+      ],
+      "originality_assessment": "PASS: own A-Frame/D3 experiments, authored component and Taiwan population-data use L92–133; upstream cursor example acknowledged and not treated as original code.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-09-23T17:53:07+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Outlet/editor role + self-reported newsletter reach, not individual article traffic"
+    },
+    {
+      "id": "TW07",
+      "title": "利用 Elm 製作 Chrome Extension | TechBridge 技術共筆部落格",
+      "author_candidate": "arvinh",
+      "url": "https://blog.techbridge.cc/2019/04/22/elm-chrome-extension/",
+      "first_publication_date": "2019-04-23",
+      "displayed_date": "2019-04-22",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Article footer 關於作者 with linked @arvinh",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.arvinh.info/about/"
+      ],
+      "originality_assessment": "PASS: original hackday currency-conversion narrative and implementation, not a translation of the older code scaffold. Explicitly attributes borrowed diagram/scaffold L121–125/L181; no image prose used as evidence.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2019-04-23T05:47:05+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Outlet/editor role + self-reported newsletter reach, not individual article traffic"
+    },
+    {
+      "id": "TW14",
+      "title": "ESLint Plugin 入門 : O3noBLOG",
+      "author_candidate": "othree",
+      "url": "https://blog.othree.net/log/2018/04/21/eslint-plugin-intro/",
+      "first_publication_date": "2018-04-21",
+      "displayed_date": "04月 21日",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Site owner identity/about; own projects and first-person account; sole-author O3noBLOG site identity",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. A single datetime field labels both publication and modification; no distinct revision history.",
+      "author_evidence_urls": [
+        "https://blog.othree.net/about/me/",
+        "https://pretalx.com/coscup-2022/speaker/XAGTHP/",
+        "https://blog.othree.net/log/2018/"
+      ],
+      "originality_assessment": "PASS: own named ESLint plugin, RuleTester example and stated next task; L16 distinguishes upstream naming rule from speculation about enforcement.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW15",
+      "title": "Immer 原理 : O3noBLOG",
+      "author_candidate": "othree",
+      "url": "https://blog.othree.net/log/2018/04/19/immer/",
+      "first_publication_date": "2018-04-19",
+      "displayed_date": "04月 19日",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Site owner identity/about; own projects and first-person account; sole-author O3noBLOG site identity",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. A single datetime field labels both publication and modification; no distinct revision history.",
+      "author_evidence_urls": [
+        "https://blog.othree.net/about/me/",
+        "https://pretalx.com/coscup-2022/speaker/XAGTHP/",
+        "https://blog.othree.net/log/2018/"
+      ],
+      "originality_assessment": "PASS with limits: personally developed hypothesis followed by code inspection L28; third-party snippets cited. No proof of exclusive originality asserted. L30 etymology is only a guess.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW16",
+      "title": "ECMAScript 2015 新功能間的關係 : O3noBLOG",
+      "author_candidate": "othree",
+      "url": "https://blog.othree.net/log/2018/09/17/ecmascript-2015-rel-of-features/",
+      "first_publication_date": "2018-09-17",
+      "displayed_date": "09月 17日",
+      "date_proof": "Primary HTML time[itemprop~=\"datePublished\"] plus dated canonical permalink",
+      "byline_proof": "Site owner identity/about; own projects and first-person account; sole-author O3noBLOG site identity",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. A single datetime field labels both publication and modification; no distinct revision history.",
+      "author_evidence_urls": [
+        "https://blog.othree.net/about/me/",
+        "https://pretalx.com/coscup-2022/speaker/XAGTHP/",
+        "https://blog.othree.net/log/2018/"
+      ],
+      "originality_assessment": "PASS: original connective account previously discussed by author, multiple standards references, attributed V8 tweet not counted as native prose. Long chains are counterevidence to short-sentence mandates.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW18",
+      "title": "如何透過 Git Credential 管理透過 HTTP 通訊協定存取儲存庫的帳號密碼 | The Will Will Web",
+      "author_candidate": "Will 保哥",
+      "url": "https://blog.miniasp.com/post/2018/05/28/Git-Credential-Howto",
+      "first_publication_date": "2018-05-28",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. manager-core mentions may reflect later edits without a date; omit L29-31 and L45 from historical style inference.",
+      "author_evidence_urls": [
+        "https://dotnetfoundation.org/community/bio/will-huang"
+      ],
+      "originality_assessment": "PASS with exclusions: own cross-platform example repo and platform comparison. Exclude L29–31 and L45 manager-core material from period-language evidence; live copy not changed. Plaintext warning L25 is useful safety evidence, not an endorsement.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-05-28T19:48:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW19",
+      "title": "如何解決在命令提示字元下使用 Git for Windows 顯示中文亂碼的問題 | The Will Will Web",
+      "author_candidate": "Will 保哥",
+      "url": "https://blog.miniasp.com/post/2017/09/17/Git-for-Windows-Command-Prompt-Display-Chinese-Issues",
+      "first_publication_date": "2017-09-17",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://dotnetfoundation.org/community/bio/will-huang"
+      ],
+      "originality_assessment": "PASS: own Windows reinstall symptom, locally inspected output and resolution; linked references are acknowledged support, not sufficient to call this translated.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-09-17T22:35:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW20",
+      "title": "關於 Windows 重大 CredSSP 更新導致遠端桌面連線無法連接的解決辦法 | The Will Will Web",
+      "author_candidate": "Will 保哥",
+      "url": "https://blog.miniasp.com/post/2018/05/15/windows-credssp",
+      "first_publication_date": "2018-05-15",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://dotnetfoundation.org/community/bio/will-huang"
+      ],
+      "originality_assessment": "PASS with limits: authored incident explanation, two response choices and scoped temporary downgrade/restoration. Not a current security recommendation; restoration command not independently validated.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-05-15T21:19:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW21",
+      "title": "介紹好用工具：Git Credential Manager for Windows (記憶 Git 常用密碼) | The Will Will Web",
+      "author_candidate": "Will 保哥",
+      "url": "https://blog.miniasp.com/post/2016/02/01/Useful-tool-Git-Credential-Manager-for-Windows",
+      "first_publication_date": "2016-02-01",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://dotnetfoundation.org/community/bio/will-huang"
+      ],
+      "originality_assessment": "PASS: own company setup failure L35 and observed token handling L53–61; own practical account surrounds product feature list.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2016-02-01T19:57:34+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW22",
+      "title": "K4W v2 C++ Part 1：簡單的深度讀取方法 – Heresy's Space",
+      "author_candidate": "Heresy",
+      "url": "https://kheresy.wordpress.com/2015/01/08/k4w-v2-simple-depth-reader-cpp/",
+      "first_publication_date": "2015-01-08",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2015-03-30T04:51:55+00:00",
+          "saigon": "2015-03-30T11:51:55+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://viml.nchc.org.tw/archive_blog_567/",
+        "https://viml.nchc.org.tw/archive_blog_325/"
+      ],
+      "originality_assessment": "PASS: original numbered C++ demonstration and personal environment, caveat on omitted checks, later limits. SDK is technical input, not proof of prose translation.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2015-01-08T17:44:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Institutional-host authored article + same-author invited-teaching retrospective, no audited individual popularity"
+    },
+    {
+      "id": "TW23",
+      "title": "K4W v2 C++ Part 2：使用 OpenCV 顯示深度影像 – Heresy's Space",
+      "author_candidate": "Heresy",
+      "url": "https://kheresy.wordpress.com/2015/01/13/k4w-v2-opencv-depth-viewer/",
+      "first_publication_date": "2015-01-13",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2015-03-30T04:51:49+00:00",
+          "saigon": "2015-03-30T11:51:49+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://viml.nchc.org.tw/archive_blog_567/",
+        "https://viml.nchc.org.tw/archive_blog_325/"
+      ],
+      "originality_assessment": "PASS: own previous sample modified, stated reason for OpenCV, local observed distance differs from suggested range L111. Same-author NCHC copy is corroboration, never a second counted article.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2015-01-13T17:28:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Institutional-host authored article + same-author invited-teaching retrospective, no audited individual popularity"
+    },
+    {
+      "id": "TW24",
+      "title": "K4W v2 C++ Part 3：讀取彩色影像與紅外線影像 – Heresy's Space",
+      "author_candidate": "Heresy",
+      "url": "https://kheresy.wordpress.com/2015/01/16/k4w-v2-read-color-and-ir-image/",
+      "first_publication_date": "2015-01-16",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2015-03-30T04:51:43+00:00",
+          "saigon": "2015-03-30T11:51:43+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://viml.nchc.org.tw/archive_blog_567/",
+        "https://viml.nchc.org.tw/archive_blog_325/"
+      ],
+      "originality_assessment": "PASS with correctness caveat: original color/IR experiments and explicit unknown at L9. Buffer allocation in L86–89 appears inconsistent with stated four-channel size; not executed or silently corrected.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2015-01-16T17:39:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Institutional-host authored article + same-author invited-teaching retrospective, no audited individual popularity"
+    },
+    {
+      "id": "TW25",
+      "title": "K4W v2 C++ Part 4：讀取人體位置（Body Index） – Heresy's Space",
+      "author_candidate": "Heresy",
+      "url": "https://kheresy.wordpress.com/2015/01/20/k4w-v2-body-index/",
+      "first_publication_date": "2015-01-20",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2015-03-30T04:51:38+00:00",
+          "saigon": "2015-03-30T11:51:38+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://viml.nchc.org.tw/archive_blog_567/",
+        "https://viml.nchc.org.tw/archive_blog_325/"
+      ],
+      "originality_assessment": "PASS: own indexed image display implementation and coordinate-mapping limitation; same-author institutional publication supports educator context but is not an independent audience measurement.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2015-01-20T17:07:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Institutional-host authored article + same-author invited-teaching retrospective, no audited individual popularity"
+    },
+    {
+      "id": "TW26",
+      "title": "在 Gemfile 裡看到版本寫法有好幾款，各是代表什麼意思? | 高見龍",
+      "author_candidate": "高見龍",
+      "url": "https://kaochenlong.com/gemfile",
+      "first_publication_date": "2016-05-02",
+      "displayed_date": "2016.05.02",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [
+        {
+          "original": "2023-09-13T20:42:07+08:00",
+          "saigon": "2023-09-13T19:42:07+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Explicit modified metadata is later than cutoff; modern 工商服務/course section excluded from evidence; prose revision boundaries unknown, no historical-snapshot claim.",
+      "author_evidence_urls": [
+        "https://kaochenlong.com/about",
+        "https://kaochenlong.com/tags/ruby.md"
+      ],
+      "originality_assessment": "PASS with revision caveat: original Gemfile teaching question, specific historical versions and explanations. L103 double negative conflicts with intended compatibility explanation; never imitate it. Core reading L26–112; full L1–120 read including excluded modern promotion.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW27",
+      "title": "你知道 require 幫你做了什麼事嗎? | 高見龍",
+      "author_candidate": "高見龍",
+      "url": "https://kaochenlong.com/require",
+      "first_publication_date": "2016-05-01",
+      "displayed_date": "2016.05.01",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [
+        {
+          "original": "2025-12-27T19:07:05+08:00",
+          "saigon": "2025-12-27T18:07:05+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Explicit modified metadata is later than cutoff; modern 工商服務/course section excluded from evidence; prose revision boundaries unknown, no historical-snapshot claim.",
+      "author_evidence_urls": [
+        "https://kaochenlong.com/about",
+        "https://kaochenlong.com/tags/ruby.md"
+      ],
+      "originality_assessment": "PASS with revision caveat: own takami gem experiment, counts/output and source reading. Quoted RubyGems/Ruby source not native language evidence. L184 itself has a tangled negative; do not canonize source correctness.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW28",
+      "title": "有時候會看到有兩個冒號寫法是什麼意思？ | 高見龍",
+      "author_candidate": "高見龍",
+      "url": "https://kaochenlong.com/namespace",
+      "first_publication_date": "2015-04-19",
+      "displayed_date": "2015.04.19",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [
+        {
+          "original": "2023-09-13T21:03:11+08:00",
+          "saigon": "2023-09-13T20:03:11+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Explicit modified metadata is later than cutoff; modern 工商服務/course section excluded from evidence; prose revision boundaries unknown, no historical-snapshot claim.",
+      "author_evidence_urls": [
+        "https://kaochenlong.com/about",
+        "https://kaochenlong.com/tags/ruby.md"
+      ],
+      "originality_assessment": "PASS with revision caveat: authored local namespace analogy and Rails source inspection; L55 class/module slip is an error, not Taiwan terminology.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW29",
+      "title": "Ruby 的參數 | 高見龍",
+      "author_candidate": "高見龍",
+      "url": "https://kaochenlong.com/parameters",
+      "first_publication_date": "2015-03-22",
+      "displayed_date": "2015.03.22",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [
+        {
+          "original": "2023-09-13T21:19:37+08:00",
+          "saigon": "2023-09-13T20:19:37+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Explicit modified metadata is later than cutoff; modern 工商服務/course section excluded from evidence; prose revision boundaries unknown, no historical-snapshot claim.",
+      "author_evidence_urls": [
+        "https://kaochenlong.com/about",
+        "https://kaochenlong.com/tags/ruby.md"
+      ],
+      "originality_assessment": "PASS with revision caveat: own diagnostic question and progressive expansion of a Rails helper call. Historic argument behavior is not a present Ruby-version guarantee.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW30",
+      "title": "類別跟模組有什麼不一樣？ | 高見龍",
+      "author_candidate": "高見龍",
+      "url": "https://kaochenlong.com/class-and-module",
+      "first_publication_date": "2015-03-24",
+      "displayed_date": "2015.03.24",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "meta[name=\"author\"] / article:author",
+      "revision_metadata": [
+        {
+          "original": "2023-09-13T21:08:39+08:00",
+          "saigon": "2023-09-13T20:08:39+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Explicit modified metadata is later than cutoff; modern 工商服務/course section excluded from evidence; prose revision boundaries unknown, no historical-snapshot claim.",
+      "author_evidence_urls": [
+        "https://kaochenlong.com/about",
+        "https://kaochenlong.com/tags/ruby.md"
+      ],
+      "originality_assessment": "PASS with revision caveat: own introspection examples and teaching comparisons; distinctive manga analogy not reusable wording/template.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW31",
+      "title": "Git worktree: 同時開多個工作目錄 – ihower { blogging }",
+      "author_candidate": "ihower",
+      "url": "https://ihower.tw/blog/8740-git-worktree",
+      "first_publication_date": "2017-06-18",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2025-07-03T23:31:47+00:00",
+          "saigon": "2025-07-04T06:31:47+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Modified 2025 metadata disclosed; no separately dated addition identified; live prose only, not an immutable historical copy.",
+      "author_evidence_urls": [
+        "https://ihower.tw/blog/talks"
+      ],
+      "originality_assessment": "PASS with revision/safety caveat: own worktree workflow problem and output; destructive line L21 depends on committed state and is not sufficient contemporary safety guidance.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-06-18T10:00:20+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW33",
+      "title": "Rails3 如何寫 Helper 可以傳 Block 參數 – ihower { blogging }",
+      "author_candidate": "ihower",
+      "url": "https://ihower.tw/blog/archives/4225",
+      "first_publication_date": "2010-04-06",
+      "displayed_date": null,
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2011-04-08T17:52:34+00:00",
+          "saigon": "2011-04-09T00:52:34+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims. Live code includes █; preserve in research copy, do not reconstruct silently or use as code authority.",
+      "author_evidence_urls": [
+        "https://ihower.tw/blog/talks"
+      ],
+      "originality_assessment": "PASS with limits: author explicitly separates own helper question L7 from cited ERB syntax background L5. Corrupt █ in code preserved; not reconstructed, not technical authority.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2010-04-06T02:07:08+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW34",
+      "title": "玩 ReactOS 0.4.7 – Gea-Suan Lin's BLOG",
+      "author_candidate": "Gea-Suan Lin",
+      "url": "https://blog.gslin.org/archives/2017/12/08/7906/",
+      "first_publication_date": "2017-12-08",
+      "displayed_date": "December 8, 2017",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2017-12-08T21:00:20+08:00",
+          "saigon": "2017-12-08T20:00:20+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://coscup.org/2012/zh-tw/program/"
+      ],
+      "originality_assessment": "PASS: release/wiki are background; own VirtualBox test and failed Firefox updates distinguish original field note from translated news. Short but complete technical article; user did not impose length minimum.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2017-12-08T20:00:20+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW35",
+      "title": "Ubuntu 撥 HiNet PPPoE 時會因為 MTU 而導致有些網站連不上 – Gea-Suan Lin's BLOG",
+      "author_candidate": "Gea-Suan Lin",
+      "url": "https://blog.gslin.org/archives/2018/12/07/8616/",
+      "first_publication_date": "2018-12-07",
+      "displayed_date": "December 7, 2018",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2018-12-07T19:28:59+08:00",
+          "saigon": "2018-12-07T18:28:59+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://coscup.org/2012/zh-tw/program/"
+      ],
+      "originality_assessment": "PASS: own HiNet line change, intermittent symptom, measured MTU, failed upstream remedy and locally written interface-specific script; not translated workaround.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-12-07T02:30:02+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW36",
+      "title": "AWS CodeDeploy 跑在 On-Premises Instance 時的地雷… – Gea-Suan Lin's BLOG",
+      "author_candidate": "Gea-Suan Lin",
+      "url": "https://blog.gslin.org/archives/2018/05/09/8319/",
+      "first_publication_date": "2018-05-09",
+      "displayed_date": "May 9, 2018",
+      "date_proof": "Primary HTML meta[property=\"article:published_time\"] plus visible publication date",
+      "byline_proof": "Primary page entry-meta/byline and article:author; first-person practice",
+      "revision_metadata": [
+        {
+          "original": "2018-05-09T12:51:52+08:00",
+          "saigon": "2018-05-09T11:51:52+07:00"
+        }
+      ],
+      "revision_caveat": "Live page acquired in 2026; first publication meets cutoff, not proof every sentence existed then. No separately dated post-cutoff body insert identified. Exclude current navigation, ads, biography and comments from old-language claims.",
+      "author_evidence_urls": [
+        "https://coscup.org/2012/zh-tw/program/"
+      ],
+      "originality_assessment": "PASS: own CodeDeploy tests, distinct Ubuntu/EC2/On-Premises conditions, uncertain forum comparison. Attributed English prices/forum not Chinese evidence.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-05-09T11:00:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW37",
+      "title": "eslint-plugin-pep8-blank-lines : O3noBLOG",
+      "author_candidate": "othree",
+      "url": "https://blog.othree.net/log/2018/09/08/eslint-plugin-pep8-blank-lines/",
+      "first_publication_date": "2018-09-08",
+      "displayed_date": "09月 08日",
+      "date_proof": "Primary saved HTML published time + dated canonical URL; TW37 also E14 2018 archive",
+      "byline_proof": "TW37 owner/about and own plugin; TW38 article:author Huli; TW39/TW40 linked author footer @huli",
+      "revision_metadata": [],
+      "revision_caveat": "Live page, not immutable historic wording. TW38 modified in 2023; other unmarked changes cannot be dated. English quotations, navigation and biography excluded.",
+      "author_evidence_urls": [
+        "https://blog.othree.net/about/me/",
+        "https://pretalx.com/coscup-2022/speaker/XAGTHP/",
+        "https://blog.othree.net/log/2018/"
+      ],
+      "originality_assessment": "PASS replacement: own plugin implementation choices, AST limitation, unpublished customization interface and future fix work L12–14. Adapting a coding standard into software is not translating/adapting a prose article; original reflective development report.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": null,
+      "date_timezone_note": "No timezone specified by publisher; calendar date preserved, no offset invented",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW38",
+      "title": "記一次幫開源專案 spectrum 修 bug 的經歷 - Huli's blog",
+      "author_candidate": "huli",
+      "url": "https://blog.huli.tw/2019/04/19/fix-spectrum-bug/",
+      "first_publication_date": "2019-04-19",
+      "displayed_date": "2019年4月19日",
+      "date_proof": "Primary saved HTML published time + dated canonical URL; TW37 also E14 2018 archive",
+      "byline_proof": "TW37 owner/about and own plugin; TW38 article:author Huli; TW39/TW40 linked author footer @huli",
+      "revision_metadata": [
+        {
+          "saigon": "2023-05-07T08:15:16.480000+07:00"
+        }
+      ],
+      "revision_caveat": "Live page, not immutable historic wording. TW38 modified in 2023; other unmarked changes cannot be dated. English quotations, navigation and biography excluded.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.huli.tw/about/"
+      ],
+      "originality_assessment": "PASS replacement: original spectrum debugging journey, failed hypothesis, observed inputs/outputs, linked own issue/PR and resolution. Redraft documentation quotation is attributed evidence, not narrative spine translated wholesale.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2019-04-19T18:10:00+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW39",
+      "title": "AWS Lambda + GitHub API + Google Sheet = 自動化簽到系統 | TechBridge 技術共筆部落格",
+      "author_candidate": "huli",
+      "url": "https://blog.techbridge.cc/2018/09/14/lambda-and-github-api/",
+      "first_publication_date": "2018-09-15",
+      "displayed_date": "2018-09-14",
+      "date_proof": "Primary saved HTML published time + dated canonical URL; TW37 also E14 2018 archive",
+      "byline_proof": "TW37 owner/about and own plugin; TW38 article:author Huli; TW39/TW40 linked author footer @huli",
+      "revision_metadata": [],
+      "revision_caveat": "Live page, not immutable historic wording. TW38 modified in 2023; other unmarked changes cannot be dated. English quotations, navigation and biography excluded.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.huli.tw/about/"
+      ],
+      "originality_assessment": "PASS replacement: original authored attendance-system design, rejected Slack-only option, own code and observed timeout issue. Tool APIs are supporting inputs; not translated setup instructions.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-09-15T03:10:30+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    },
+    {
+      "id": "TW40",
+      "title": "利用 Github Classroom 加 Travis CI 打造改作業系統 | TechBridge 技術共筆部落格",
+      "author_candidate": "huli",
+      "url": "https://blog.techbridge.cc/2018/02/03/github-classroom-and-travis-ci/",
+      "first_publication_date": "2018-02-03",
+      "displayed_date": "2018-02-03",
+      "date_proof": "Primary saved HTML published time + dated canonical URL; TW37 also E14 2018 archive",
+      "byline_proof": "TW37 owner/about and own plugin; TW38 article:author Huli; TW39/TW40 linked author footer @huli",
+      "revision_metadata": [],
+      "revision_caveat": "Live page, not immutable historic wording. TW38 modified in 2023; other unmarked changes cannot be dated. English quotations, navigation and biography excluded.",
+      "author_evidence_urls": [
+        "https://blog.techbridge.cc/2016/03/19/about/",
+        "https://blog.huli.tw/about/"
+      ],
+      "originality_assessment": "PASS replacement: original course workflow and comparison of repository arrangements, custom testing arrangement and firsthand results. GitHub Flow is attributed background, not the whole article’s conceptual design.",
+      "full_body_read_by_second_reviewer": true,
+      "publication_timestamp_saigon": "2018-02-03T16:47:55+07:00",
+      "date_timezone_note": "Asia/Saigon normalized timestamp; separate displayed_date retains publisher calendar label",
+      "author_recognition_evidence_tier": "Published books, public talks or established community/educator record; not audited readership"
+    }
+  ]
+}
