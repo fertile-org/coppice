@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke gen-icons e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot screenshot-docs benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke gen-icons e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot screenshot-docs screenshot-down screenshot-check benchmark-m06-knowledge-retrieval release-tar
 
 # Bound rustc parallelism so `make test` fits in 16 GB. Override for low-mem:
 #   make test CARGO_BUILD_JOBS=2 NEXTEST_PROFILE=low-mem
@@ -192,28 +192,25 @@ e2e-smoke-m10:
 # Own Compose project (coppice-screenshot) so the seed does not touch a dev
 # database. Overlay forces auth.desktop_mode and disables auto-start so the
 # shot matches the Electron app (no login, no account email, no Sign out).
-# Each run deletes that project's volumes, then mounts a throwaway config
-# copied from the example and an empty repos directory. It does not mount
-# the operator's home checkouts, SSH directory, or deploy/config/config.toml.
-SCREENSHOT_REPOS := /tmp/coppice-screenshot-repos
-SCREENSHOT_CONFIG := /tmp/coppice-screenshot-config.toml
-SCREENSHOT_COMPOSE = COPPICE_REPOS_HOST=$(SCREENSHOT_REPOS) COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) $(COMPOSE) -p coppice-screenshot -f deploy/docker-compose.screenshot.yml
+# Each run creates a private directory, renders the merged Compose config,
+# then mounts that directory's config and empty repos folder. It does not
+# mount the operator's home checkouts, SSH directory, or deploy/config/config.toml.
+# Postgres, the API, and the web UI are published on 127.0.0.1 only.
 screenshot:
-	mkdir -p $(SCREENSHOT_REPOS)
-	cp deploy/config/config.example.toml $(SCREENSHOT_CONFIG)
-	$(SCREENSHOT_COMPOSE) down -v --remove-orphans
-	$(SCREENSHOT_COMPOSE) up -d --build
-	$(SCREENSHOT_COMPOSE) up -d --force-recreate --no-deps server
-	cd e2e && yarn install --frozen-lockfile
-	cd e2e && yarn playwright install chromium
-	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-hero.mjs
-	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-docs.mjs
+	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh up
 
-# Docs stills only. The screenshot stack must already be up from `make screenshot`.
+# Docs stills only. The screenshot stack from `make screenshot` must still be up.
 screenshot-docs:
-	cd e2e && yarn install --frozen-lockfile
-	cd e2e && yarn playwright install chromium
-	COPPICE_SCREENSHOT_CONFIG=$(SCREENSHOT_CONFIG) node e2e/screenshot/capture-docs.mjs
+	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh docs
+
+# Stop the screenshot stack and delete its private directory.
+screenshot-down:
+	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh down
+
+# Prepare-script tests, then `docker compose config` when the CLI exists.
+screenshot-check:
+	node --test e2e/screenshot/prepare-capture.test.mjs
+	node e2e/screenshot/check-compose.mjs
 
 benchmark-m06-knowledge-retrieval:
 	$(MAKE) compose-up

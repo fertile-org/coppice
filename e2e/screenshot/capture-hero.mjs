@@ -19,8 +19,8 @@
  *   website/public/assets/hero-screenshot.png
  *   static/screenshots/01-… through 08-…
  *
- * Run after the screenshot stack is up (`make screenshot` prepares it):
- *   COPPICE_SCREENSHOT_CONFIG=/tmp/coppice-screenshot-config.toml node e2e/screenshot/capture-hero.mjs
+ * Run after the screenshot stack is up (`make screenshot` prepares it).
+ * `make screenshot` exports COPPICE_SCREENSHOT_CONFIG to a private file.
  *
  * The seed is fictional (`acme-web`, hero@coppice.local). It does not read
  * host SSH keys or a CLI login, and it does not show a second ticket
