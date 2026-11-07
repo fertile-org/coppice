@@ -7,7 +7,7 @@ export const pages: Pages = {
   home: {
     title: 'Coppice：オープンソースの AI コーディングエージェントボード',
     description:
-      'Coppice はローカルで動くオープンソースの AI コーディングエージェントボードです。Claude Code、Codex、Cursor などが並行して計画し、実装し、レビューします。diff はあなたが承認します。',
+      'Coppice はローカルで動くオープンソースの AI コーディングエージェントボード。Claude Code、Codex、Cursor などが並行して計画・実装・レビュー。diff はあなたが承認。',
     worksWith: '対応 CLI：',
     h1: '専門家を雇い、最終判断はあなたに。',
     lede: 'PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
