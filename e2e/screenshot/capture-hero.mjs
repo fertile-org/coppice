@@ -553,7 +553,7 @@ const CAPTION_STYLE = `
 `;
 
 const COLUMN_RULE =
-  '#board{scroll-behavior:auto!important}#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
+  '#board{scroll-behavior:auto!important}#board > div > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
 const CAPTION_CSS = `${CAPTION_STYLE}\n${COLUMN_RULE}`;
 const SPEED = 1.25;
 // 0.5s on screen after the speed-up.
@@ -664,7 +664,7 @@ async function boardGeometry(page) {
   return page.locator('#board').evaluate((board) => {
     const rect = board.getBoundingClientRect();
     const style = getComputedStyle(board);
-    const cols = [...board.querySelectorAll(':scope > div > section')].map((el) => {
+    const cols = [...board.querySelectorAll(':scope > div > div > section')].map((el) => {
       const box = el.getBoundingClientRect();
       return { label: el.getAttribute('aria-label'), x: box.x, w: box.width };
     });
