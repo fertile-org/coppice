@@ -1,0 +1,696 @@
+{
+ "locale": "fr",
+ "reviewer": "independent second reviewer (different instance)",
+ "review_date": "2026-11-07 (Asia/Saigon, UTC+7)",
+ "gate": "native-original French technical text, first published strictly before 2020-11-07; live revisions disclosed; explicit late additions excluded from historical language proof",
+ "accepted_count": 30,
+ "distinct_current_credited_writers": 11,
+ "historical_original_author": [
+  "Geoffrey Crofte (FR17)"
+ ],
+ "outlets": 7,
+ "first_publication_range": [
+  "2003-06-02",
+  "2019-09-05"
+ ],
+ "outlet_counts": {
+  "openweb.eu.org": 9,
+  "alsacreations.com": 6,
+  "bortzmeyer.org": 5,
+  "iamvdo.me": 3,
+  "blog.pascal-martin.fr": 3,
+  "delicious-insights.com": 3,
+  "blog.octo.com": 1
+ },
+ "sources": [
+  {
+   "id": "FR02",
+   "title": "La cascade CSS: inherit et initial - Vincent De Oliveira",
+   "url": "https://iamvdo.me/blog/la-cascade-css-inherit-et-initial",
+   "authors": [
+    "Vincent De Oliveira"
+   ],
+   "outlet": "iamvdo.me",
+   "first_publication": "2013-03",
+   "date_evidence": "mars 2013",
+   "revision_limit": "Live page; no distinct update date surfaced. Browser support/future all claims historical only.",
+   "recognition": [
+    "E02"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "aee373ab6efeac60e0f92a1066c4f16a1c1abce4ee4b2ac3335aa0d26e830f44"
+  },
+  {
+   "id": "FR03",
+   "title": "Les postprocesseurs CSS - Vincent De Oliveira",
+   "url": "https://iamvdo.me/blog/les-postprocesseurs-css",
+   "authors": [
+    "Vincent De Oliveira"
+   ],
+   "outlet": "iamvdo.me",
+   "first_publication": "2013-11",
+   "date_evidence": "novembre 2013",
+   "revision_limit": "Live page; no update date surfaced; future-proof language is an opinion, not authority.",
+   "recognition": [
+    "E02"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "398539b0d1f04de29086a8deeb5158c33567e34e72482e81d3f98720f59c9d1e"
+  },
+  {
+   "id": "FR04",
+   "title": "Pourquoi je n'utilise pas les préprocesseurs CSS? - Vincent De Oliveira",
+   "url": "https://iamvdo.me/blog/pourquoi-je-nutilise-pas-les-preprocesseurs-css",
+   "authors": [
+    "Vincent De Oliveira"
+   ],
+   "outlet": "iamvdo.me",
+   "first_publication": "2013-03",
+   "date_evidence": "mars 2013",
+   "revision_limit": "Live page; strong polemic, speculative technical predictions and jokes are not Coppice voice rules.",
+   "recognition": [
+    "E02"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "ec5f1d89d450693396835fab9c8d9c377be3ca397c05ec4d9e0a895bc100252d"
+  },
+  {
+   "id": "FR05",
+   "title": "\nBlog Stéphane Bortzmeyer: Superviser ses signatures DNSSEC\n\n",
+   "url": "https://www.bortzmeyer.org/monitor-dnssec.html",
+   "authors": [
+    "Stéphane Bortzmeyer"
+   ],
+   "outlet": "bortzmeyer.org",
+   "first_publication": "2014-04-07",
+   "date_evidence": "7 avril 2014",
+   "revision_limit": "Last update 2019-03-15. English documentation quotation excluded from native-style evidence.",
+   "recognition": [
+    "E01"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "348d738b312a089af35f465e95ca91b8ce25b519af6200b8e02cd66ee42854c8"
+  },
+  {
+   "id": "FR06",
+   "title": "\nBlog Stéphane Bortzmeyer: delv, le futur outil principal de débogage de DNSSEC ?\n\n",
+   "url": "https://www.bortzmeyer.org/delv.html",
+   "authors": [
+    "Stéphane Bortzmeyer"
+   ],
+   "outlet": "bortzmeyer.org",
+   "first_publication": "2014-07-26",
+   "date_evidence": "26 juillet 2014",
+   "revision_limit": "No separate update surfaced. See-also is not treated as a translated source; reviewer should check provenance rather than infer from a reference alone.",
+   "recognition": [
+    "E01"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "52f5e4e03533c45e11b742e95d39ab5674af65aef853f424182f1330e973c6fb"
+  },
+  {
+   "id": "FR07",
+   "title": "\nBlog Stéphane Bortzmeyer: Un exemple de panne amusante de tcpdump\n\n",
+   "url": "https://www.bortzmeyer.org/tcpdump-filtrage.html",
+   "authors": [
+    "Stéphane Bortzmeyer"
+   ],
+   "outlet": "bortzmeyer.org",
+   "first_publication": "2010-08-26",
+   "date_evidence": "26 août 2010",
+   "revision_limit": "No update surfaced; actor attribution to colleague retained, not appropriated.",
+   "recognition": [
+    "E01"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "56dfe0254c48d7a7144a72e48f6596030a529492919167826cf3031f00dce28d"
+  },
+  {
+   "id": "FR08",
+   "title": "\nBlog Stéphane Bortzmeyer: Capturer les paquets qui passent sur le réseau\n\n",
+   "url": "https://www.bortzmeyer.org/capture-paquets.html",
+   "authors": [
+    "Stéphane Bortzmeyer"
+   ],
+   "outlet": "bortzmeyer.org",
+   "first_publication": "2008-12-17",
+   "date_evidence": "17 décembre 2008",
+   "revision_limit": "Last update 2009-03-27; referenced third-party example/docs not native-style evidence.",
+   "recognition": [
+    "E01"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "9e12e8dac4ceeaeecd246e59db9fb5181892e44bf29109a0a1c98e58890a72ab"
+  },
+  {
+   "id": "FR09",
+   "title": "Passer aux feuilles de style | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/initiation_css/",
+   "authors": [
+    "Laurent Denis"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2004-01-27",
+   "date_evidence": "27 janvier 2004",
+   "revision_limit": "Last update 2008-05-22; specification links and code not linguistic prescriptions.",
+   "recognition": [
+    "E03",
+    "E07"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "9585c26fff0cb79e962912193842cf6f3cbe3dec03300acdcc785890a3a27a5e"
+  },
+  {
+   "id": "FR10",
+   "title": "Styles auteur, utilisateur et agent utilisateur : 3 raisons de lâcher prise sur votre design | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/lacher_prise/",
+   "authors": [
+    "Laurent Denis"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2005-03-21",
+   "date_evidence": "21 mars 2005",
+   "revision_limit": "Last update 2008-07-02. Exclude translated standards blockquotes from style observations.",
+   "recognition": [
+    "E03",
+    "E07"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "dd697a2a3c572c0fa8059598019cff312c4b6a2f92455089c94e5f71f4ed440d"
+  },
+  {
+   "id": "FR12",
+   "title": "Accesskey, l'essai non transformé de l'accessibilité | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/accesskey_essai_non_transforme",
+   "authors": [
+    "Laurent Denis"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2004-05-01",
+   "date_evidence": "1er mai 2004",
+   "revision_limit": "Last update 2008-05-19; explicitly Jan 2005 addition is before cutoff. Standards quotations not native-style evidence.",
+   "recognition": [
+    "E03",
+    "E07"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "af01e65bcb39469cb97b6681f2c4e0ef5e0db2daa98d87eabf60cb96ec0fc725"
+  },
+  {
+   "id": "FR13",
+   "title": "Pour en finir avec les cadres | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/finir_cadres/",
+   "authors": [
+    "Denis Boudreau"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2003-06-02",
+   "date_evidence": "2 juin 2003",
+   "revision_limit": "Last update 2008-05-21. Quebec-associated author broadens register, does not make this a Quebec style guide.",
+   "recognition": [
+    "E08"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "7b387b919709807f129e34f1d05a948d65e1997334fd1c5abf23b574404e816f"
+  },
+  {
+   "id": "FR15",
+   "title": "CSS3 Flexbox Layout module - Alsacreations",
+   "url": "https://www.alsacreations.com/tuto/lire/1493-css",
+   "authors": [
+    "Raphaël Goetter"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2010-10",
+   "date_evidence": "octobre 2010 (explicit initial rédaction); displayed refonte 18 décembre 2014",
+   "revision_limit": "Latest displayed update 2020-04-06. No pretense current prose is unchanged since 2010; corpus gate is first publication.",
+   "recognition": [
+    "E03"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "7c5372412bd10f81441dca906c83ec30e7d0621a16d1d3a8bf3c36685c47b8af"
+  },
+  {
+   "id": "FR16",
+   "title": "Flexbox ou Grid Layout ? - Alsacreations",
+   "url": "https://www.alsacreations.com/article/lire/1794-flexbox-ou-grid-layout.html",
+   "authors": [
+    "Raphaël Goetter"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2019-09-05",
+   "date_evidence": "5 septembre 2019",
+   "revision_limit": "Displayed update 2021-02-07: LIVE-REVISED. Do not date individual current passages to 2019. No explicitly dated post-cutoff body addition used as historical evidence.",
+   "recognition": [
+    "E03"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "452b8fe479f72778b846763dd3dfa04ad01270cd4cf9f3a20fc0817a25da37a0"
+  },
+  {
+   "id": "FR17",
+   "title": "Responsive Images : comprendre srcset et sizes - Alsacreations",
+   "url": "https://www.alsacreations.com/article/lire/1621-responsive-images-srcset.html",
+   "authors": [
+    "Raphaël Goetter"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2014-04-14",
+   "date_evidence": "14 avril 2014",
+   "revision_limit": "Displayed update 2025-04-20: LIVE-REVISED. Author lineage must remain visible (Geoffrey Crofte original, Raphael current). W3C translated quotation excluded; no specific current wording asserted pre-2020.",
+   "recognition": [
+    "E03"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "Lineage: initially written April 2014 by Geoffrey Crofte; \"refonte intégrale\" May 2017; current signature Raphael (Goetter); live update 2025-04-20. Current wording attributed to the 2017 rewrite by inference, not to Crofte. Translated W3C/spec passage excluded.",
+   "stored_html_sha256": "4236cc733468b3723e089c964320fac7f503977c6b7b763911e5894589cf13d1",
+   "historical_original_author": "Geoffrey Crofte"
+  },
+  {
+   "id": "FR18",
+   "title": "Les attributs async et defer pour <script> - Alsacreations",
+   "url": "https://www.alsacreations.com/astuce/lire/1562-script-attribut-async-defer.html",
+   "authors": [
+    "Rodolphe Rimelé"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2013-07-07",
+   "date_evidence": "7 juillet 2013",
+   "revision_limit": "Displayed update 2017-01-24. Timings belong to historical author experiment, not new product performance evidence.",
+   "recognition": [
+    "E04"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "6e6211d094a199f85c3f75a4de70d012ccaf35ba2f4f5624b854c116eaa5520b"
+  },
+  {
+   "id": "FR20",
+   "title": "Revue de code : quel format choisir ? - OCTO Talks !",
+   "url": "https://blog.octo.com/revue-de-code-quel-format-choisir",
+   "authors": [
+    "Michel Domenjoud"
+   ],
+   "outlet": "blog.octo.com",
+   "first_publication": "2015-03-27",
+   "date_evidence": "27/03/2015",
+   "revision_limit": "No update label surfaced. Outlet-level recognition; embedded study statistics not verified current authority.",
+   "recognition": [
+    "E09",
+    "E19"
+   ],
+   "recognition_scope": "individual (conference talk, third-party report) + publication-level",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "E19 saved: Duchess France report names \"Michel Domenjoud et Nicolas De Nayer\" as speakers of a Devoxx France 2019 talk. Identity match with the 2015 OCTO author is by name only.",
+   "stored_html_sha256": "6b0841223eca0fef473947f2be8012f8e3addd0d1d734b1c67436be925e76ec3"
+  },
+  {
+   "id": "FR25",
+   "title": "Prendre des conventions en CSS et les documenter | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/prendre-des-conventions-et-les-documenter",
+   "authors": [
+    "Nicolas Hoffmann"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2014-05-08",
+   "date_evidence": "8 mai 2014",
+   "revision_limit": "Last update 2015-08-18. Mislabelled counterpart link says French although English title; compare counterpart date/body, not UI label.",
+   "recognition": [
+    "E05"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "French 2014-05-08; English page (E12) 2015-09-24 states it is a translation of the French. On-page link label mislabelled.",
+   "stored_html_sha256": "62a118bf653f9ccda5900151bd0fb237b3511c21fa8417fc20508f1333d3c467"
+  },
+  {
+   "id": "FR26",
+   "title": "Les performances vues des CSS | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/les-performances-vues-des-css",
+   "authors": [
+    "Nicolas Hoffmann"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2014-05-15",
+   "date_evidence": "15 mai 2014",
+   "revision_limit": "Last update 2015-08-28. Do not elevate legacy HTTP/CSS optimization advice to current technical authority; ignore comments as corpus.",
+   "recognition": [
+    "E05"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "French 2014-05-15; English page (E13) 2015-10-08.",
+   "stored_html_sha256": "1d50e0131a0b1415be5303f117c157b815e0f175f2f0897e8de0ba6d775935a2"
+  },
+  {
+   "id": "FR27",
+   "title": "PHP 5.3 : Nouveautes de la SPL (partie 1)",
+   "url": "https://blog.pascal-martin.fr/post/php-5.3-spl-1-nouveautes-standard-php-library/",
+   "authors": [
+    "Pascal Martin"
+   ],
+   "outlet": "blog.pascal-martin.fr",
+   "first_publication": "2008-11-17",
+   "date_evidence": "17 novembre 2008",
+   "revision_limit": "Live old-content warning is not dated historical prose. First date corroborated in body Monday 17/11 and tomorrow Tuesday 18 Nov 2008.",
+   "recognition": [
+    "E10"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "aafb96b660147a8b54438d027a6814838ca8fd19aa79eb01ba6ef9006a8f8def"
+  },
+  {
+   "id": "FR28",
+   "title": "PHP 5.3 : Nouveautes de la SPL (partie 2)",
+   "url": "https://blog.pascal-martin.fr/post/php-5.3-spl-2-nouveautes-standard-php-library/",
+   "authors": [
+    "Pascal Martin"
+   ],
+   "outlet": "blog.pascal-martin.fr",
+   "first_publication": "2008-11-18",
+   "date_evidence": "18 novembre 2008",
+   "revision_limit": "Live old-content warning excluded historically. IBM inspiration must be checked by reviewer; performance-code unequal loop bounds mean not reliable benchmark authority.",
+   "recognition": [
+    "E10"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "IBM developerWorks only cited as where author heard of SplFixedArray; examples/outputs his own. Second benchmark has unequal loop bounds (j<1000 vs j<10000): never performance authority.",
+   "stored_html_sha256": "2ee41823aa65a8fc2d7d63c839f3b907e673af2f5a60a357e5ec156c6e1fd01c"
+  },
+  {
+   "id": "FR32",
+   "title": "Les nouveaux défis de l'accessibilité numérique : 2- une autre vision de la démarche | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/nouveaux_defis_accessibilite_2",
+   "authors": [
+    "Élie Sloïm"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2008-02-12",
+   "date_evidence": "12 février 2008",
+   "revision_limit": "Last update 2010-09-08. Method essay, not syntax reference. Legal/standards claims historical, not current legal authority.",
+   "recognition": [
+    "E07"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "d786ea22f73c6d7d72508379e69aa227c652165131c0b9a236a9e7bca6609ad1"
+  },
+  {
+   "id": "FR33",
+   "title": "Cascade CSS et priorité des sélecteurs | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/cascade_css",
+   "authors": [
+    "Laurent Denis"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2005-04-21",
+   "date_evidence": "21 avril 2005",
+   "revision_limit": "Last update 2013-11-21. Opening normative quotation excluded; old specificity model may be incomplete/wrong today, retained only for prose structure.",
+   "recognition": [
+    "E03",
+    "E07"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "4c0a98f7059b2d158fe00f6bbbb2ea4b478392b27f3da0136d395e120632a60f"
+  },
+  {
+   "id": "FR35",
+   "title": "\nBlog Stéphane Bortzmeyer: Déboguer les problèmes réseau : la taille compte\n\n",
+   "url": "https://www.bortzmeyer.org/ping-taille-compte.html",
+   "authors": [
+    "Stéphane Bortzmeyer"
+   ],
+   "outlet": "bortzmeyer.org",
+   "first_publication": "2011-06-17",
+   "date_evidence": "17 juin 2011",
+   "revision_limit": "No update date surfaced. Router/ICMP advice not current security authority.",
+   "recognition": [
+    "E01"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "676768267bc4001bdaf482e8842a3d18749789fd463f68f2e41a1b083d5fa268"
+  },
+  {
+   "id": "FR36",
+   "title": "Sprites CSS : performance et maintenabilité | Openweb.eu.org",
+   "url": "https://openweb.eu.org/articles/performances_web_les_sprites_CSS",
+   "authors": [
+    "Nicolas Hoffmann"
+   ],
+   "outlet": "openweb.eu.org",
+   "first_publication": "2011-08-16",
+   "date_evidence": "16 août 2011",
+   "revision_limit": "Last update 2014-02-18. No rational explanation admitted for bug; do not replace uncertainty with confident causal claim.",
+   "recognition": [
+    "E05"
+   ],
+   "recognition_scope": "author/book/conference",
+   "decision": "accepted_by_independent_reviewer",
+   "reviewer_note": "",
+   "stored_html_sha256": "2c417e77e463da65e5b8d7da01634999a4f65a8dbe75ec5b5bfff26c8fc60306"
+  },
+  {
+   "id": "FR37",
+   "title": "Comprendre et maîtriser les clés SSH",
+   "url": "https://delicious-insights.com/fr/articles-et-tutos/comprendre-et-maitriser-les-cles-ssh/",
+   "authors": [
+    "Christophe Porteneuve"
+   ],
+   "outlet": "delicious-insights.com",
+   "first_publication": "2010-09-13",
+   "date_evidence": "« Publié le 13 septembre 2010 » (page)",
+   "revision_limit": "Live page; no update date shown. Trailing training promotion is current marketing, excluded. Security facts (DSA 1024, key sizes, \"256 bits\" SSL claim, cracking-time claims) are historical and partly wrong today: never current security authority.",
+   "recognition": [
+    "E18"
+   ],
+   "recognition_scope": "author: Eyrolles book \"Bien développer pour le Web 2.0\" (2008), publisher bio; Paris-Web 2008 president per publisher bio",
+   "decision": "accepted_by_independent_reviewer (replacement)",
+   "reviewer_note": "Full text read. French original: Git Attitude workshop context, own listing/commands; Baekdal article cited for passphrase idea only. No English counterpart found on site.",
+   "stored_html_sha256": "bd9767b81b0ca2e5febab949ff11036b5eac54c674fa7a9f625801e638f722a1"
+  },
+  {
+   "id": "FR38",
+   "title": "Truthy ou falsy : quand est-on dans le vrai en JavaScript ?",
+   "url": "https://delicious-insights.com/fr/articles-et-tutos/truthy-ou-falsy-en-javascript/",
+   "authors": [
+    "Christophe Porteneuve"
+   ],
+   "outlet": "delicious-insights.com",
+   "first_publication": "2012-09-10",
+   "date_evidence": "« Publié le 10 septembre 2012 » (page)",
+   "revision_limit": "Live page; trailing training promotion excluded. ES3-era statements historical.",
+   "recognition": [
+    "E18"
+   ],
+   "recognition_scope": "author (book)",
+   "decision": "accepted_by_independent_reviewer (replacement)",
+   "reviewer_note": "Full text read; spec walk-through paraphrased in French by author (section refs), no translation notice, no English counterpart found.",
+   "stored_html_sha256": "783f63194a82804536308c842de86df82d2b366b0ce5d00015e66662fa562fcb"
+  },
+  {
+   "id": "FR39",
+   "title": "Bien utiliser Git merge et rebase",
+   "url": "https://delicious-insights.com/fr/articles-et-tutos/bien-utiliser-git-merge-et-rebase/",
+   "authors": [
+    "Christophe Porteneuve"
+   ],
+   "outlet": "delicious-insights.com",
+   "first_publication": "2014-05-04",
+   "date_evidence": "« Publié le 4 mai 2014 » (page)",
+   "revision_limit": "Live page with undated later revisions: the Git 2.22 passages (2019) about pull --rebase=merges / -r, and the inclusive-writing sign-off « tou·te·s », are excluded from 2014 evidence. Training promotion excluded. Git command advice is historical, not current authority.",
+   "recognition": [
+    "E18"
+   ],
+   "recognition_scope": "author (book)",
+   "stored_html_sha256": "bb28fbeb3c316ec064c2b867a682d501ea6ba9c94d70b9070fdb16824b543ede",
+   "decision": "accepted_by_independent_reviewer (pass-2 replacement)",
+   "reviewer_note": "independent second reviewer, pass 2 (2026-11-07); full read"
+  },
+  {
+   "id": "FR41",
+   "title": "En route vers PHP 5.5 : Sécurité : API simple pour le hachage de mots de passe",
+   "url": "https://blog.pascal-martin.fr/post/php-5.5-securite-api-hachage-mots-de-passe/",
+   "authors": [
+    "Pascal Martin"
+   ],
+   "outlet": "blog.pascal-martin.fr",
+   "first_publication": "2012-10-18",
+   "date_evidence": "« 18 octobre 2012 » (page)",
+   "revision_limit": "The page banner « rédigé il y a plusieurs années » was added by the site. The footnote text is live. The English RFC/talk are only cited. Historical errors stay: mcrypt_create_iv and the manual salt option are obsolete/deprecated in later PHP; « probablement PHP 5.5 » is a pre-release prediction.",
+   "recognition": [
+    "existing Pascal Martin evidence (FR27/FR28 record)"
+   ],
+   "recognition_scope": "author (book/conference)",
+   "stored_html_sha256": "e5536eb3c8a5fcc627919c5a0402cbbc10100dea81f63dfe1aba5f62d89a3dbf",
+   "decision": "accepted_by_independent_reviewer (pass-2 replacement)",
+   "reviewer_note": "independent second reviewer, pass 2 (2026-11-07); full read"
+  },
+  {
+   "id": "FR42",
+   "title": "Géolocalisation en HTML5",
+   "url": "https://www.alsacreations.com/tuto/lire/926-geolocalisation-geolocation-html5.html",
+   "authors": [
+    "Rodolphe Rimelé (signed \"Rodolphe\", profile 2-Rodolphe)"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2011-08-11",
+   "date_evidence": "« le 11 Août 2011, mis à jour le 27 Septembre 2026 »",
+   "revision_limit": "Updated 2026-09-27. Excluded as late additions: the HTTPS paragraph (« depuis quelques années »), the ⚠️/💡 notes, and the modern devtools remark. Historical errors stay: the comment says « Châtelet à Paris » but the coordinates are in Strasbourg; one erreurPosition snippet assigns info outside the function; Google Maps sensor parameter and Firebug are obsolete. KiwiParty 2011 talk origin (French).",
+   "recognition": [
+    "existing Rimelé evidence"
+   ],
+   "recognition_scope": "author (individual, per pass-1 record)",
+   "stored_html_sha256": "affaa2fb102ffdaad0e23334934c5d68dafafaeb84f8f4e97a984962266a9331",
+   "decision": "accepted_by_independent_reviewer (pass-2 replacement)",
+   "reviewer_note": "independent second reviewer, pass 2 (2026-11-07); full read"
+  },
+  {
+   "id": "FR44",
+   "title": "Ébauche de workflow Gulp : tâches courantes, unCSS, includes HTML et critical-CSS",
+   "url": "https://www.alsacreations.com/tuto/lire/1685-ebauche-de-workflow-gulp-taches-uncss-includes-critical-css.html",
+   "authors": [
+    "Raphaël Goetter (signed \"Raphael\")"
+   ],
+   "outlet": "alsacreations.com",
+   "first_publication": "2015-07-16",
+   "date_evidence": "« le 16 Juillet 2015, mis à jour le 13 Décembre 2015 »",
+   "revision_limit": "The only update is before the cutoff. The embedded English tweet and English resource titles are excluded. Measurements are one personal site, one run: no performance authority. Gulp 3 API/plugins are obsolete.",
+   "recognition": [
+    "existing Goetter evidence"
+   ],
+   "recognition_scope": "author (book)",
+   "stored_html_sha256": "740cc257eacbb26800d501a3c5bcf86d95bc73e415c8b3bc9b778aaf2948cc89",
+   "decision": "accepted_by_independent_reviewer (pass-2 replacement)",
+   "reviewer_note": "independent second reviewer, pass 2 (2026-11-07); full read"
+  }
+ ],
+ "removed": [
+  {
+   "id": "FR01",
+   "reason": "Bilingual provenance unresolved: same-author English \"Deep dive CSS\" published the same month (February 2017); French body keeps English lorem lines (\"Good design will be better. We get to make a consequence.\"), an untranslated heading \"CSS is awesome\", and English-morphology slips (\"utilises\"). Researcher claim that the French text refers to the English article was not found in the text. Direction of translation cannot be established; excluded, not accused."
+  },
+  {
+   "id": "FR29",
+   "reason": "About 600 words; commemorative end-of-life note (history, thanks, personal migration anecdote). Real lifecycle sentence exists but the text is not a substantive technical explanation/tutorial under the brief. Excluded."
+  }
+ ],
+ "still_excluded": [
+  "FR14",
+  "FR23",
+  "FR24",
+  "FR30",
+  "FR31",
+  "FR34"
+ ],
+ "evidence_added": {
+  "E18": "https://www.eyrolles.com/Informatique/Livre/bien-developper-pour-le-web-2-0-9782212123913/ (saved evidence/E18.html, sha256 14d0c229…)",
+  "E19": {
+   "url": "https://www.duchess-france.fr/les-conferences/speakeuses/2019/08/05/retour-sur-devoxx-france-2019.html",
+   "saved": "evidence/review2/E19a.html",
+   "sha256": "16557fdf2d1564f652dc75eb91f6cbdd6b7fd4a913922692067de9601dc4e689",
+   "accessed": "2026-11-07T14:29+07:00",
+   "http": 200,
+   "excerpt": "« Retour sur Devoxx France 2019 » 05/08/2019 • Par Marina Rouillé … « The Boring Architecture, ou comment construire une licorne sur un monolith par Michel Domenjoud et Nicolas De Nayer »",
+   "note": "Search also surfaced https://devconf.net/talk/comment-construire-une-licorne-sur-un-monolith-n-domenjoud-n-de-nayer (2019-04-17), but curl returned nothing, so it is not saved and not cited."
+  },
+  "E20": {
+   "url": "https://blog.octo.com/hexagonal-architecture-three-principles-and-an-implementation-example",
+   "saved": "evidence/review2/E20.html",
+   "sha256": "e1bb09ddfee45951bd922abdd1943d601076014feacef34b29e51009a453488b",
+   "accessed": "2026-11-07T14:29+07:00",
+   "http": 200,
+   "excerpt": "« le 15/10/2018 par Erwan Alliaume , Sébastien Roccaserra » … « 👉 Accéder à la traduction en français »",
+   "note": "Now only a provenance record for removed FR22. Caution: the English page labels the French page as the \"traduction\", which conflicts with the dates (French 2018-07-17 earlier). The pass-1 conclusion that French came first is weakened, not confirmed. Moot for the corpus because FR22 was removed."
+  }
+ },
+ "recognition_caveat": "All 30 accepted sources now have individual third-party recognition evidence for the credited writer: De Oliveira, Bortzmeyer, Denis, Boudreau, Goetter, Rimelé, Hoffmann, Martin, Sloïm, Porteneuve, and Domenjoud (E19, identity by name only). No outlet-only writers remain. No audience figures and no mother-tongue claims. Alsacréations \"lectures\" counters are site-reported and are not used as recognition.",
+ "private_not_for_repo": [
+  "sources/*",
+  "evidence/*",
+  "*.py",
+  "full texts"
+ ],
+ "review_pass": 2,
+ "removed_pass2": [
+  {
+   "id": "FR11",
+   "authors": [
+    "Florian Hatat"
+   ],
+   "reason": "Writer recognition is outlet-level only. A bounded search found no independent professional or community recognition: Hatat has a thesis and an OpenWeb bio, which are credentials and not recognition; Gery and Dessaint returned nothing; for Raoul, LinkedIn results refer to unrelated people with the same name; Roccaserra has his own posts and one 2023 podcast guest spot, which is weak. Replaced conservatively."
+  },
+  {
+   "id": "FR19",
+   "authors": [
+    "Thibaut Gery",
+    "Jean-Charles Dessaint"
+   ],
+   "reason": "Writer recognition is outlet-level only. A bounded search found no independent professional or community recognition: Hatat has a thesis and an OpenWeb bio, which are credentials and not recognition; Gery and Dessaint returned nothing; for Raoul, LinkedIn results refer to unrelated people with the same name; Roccaserra has his own posts and one 2023 podcast guest spot, which is weak. Replaced conservatively."
+  },
+  {
+   "id": "FR21",
+   "authors": [
+    "Alexandre Raoul"
+   ],
+   "reason": "Writer recognition is outlet-level only. A bounded search found no independent professional or community recognition: Hatat has a thesis and an OpenWeb bio, which are credentials and not recognition; Gery and Dessaint returned nothing; for Raoul, LinkedIn results refer to unrelated people with the same name; Roccaserra has his own posts and one 2023 podcast guest spot, which is weak. Replaced conservatively."
+  },
+  {
+   "id": "FR22",
+   "authors": [
+    "Sébastien Roccaserra"
+   ],
+   "reason": "Writer recognition is outlet-level only. A bounded search found no independent professional or community recognition: Hatat has a thesis and an OpenWeb bio, which are credentials and not recognition; Gery and Dessaint returned nothing; for Raoul, LinkedIn results refer to unrelated people with the same name; Roccaserra has his own posts and one 2023 podcast guest spot, which is weak. Replaced conservatively."
+  }
+ ],
+ "read_not_used": [
+  {
+   "id": "FR43",
+   "title": "Négociation de contenu en HTTP (Bortzmeyer, 2007-07-09)",
+   "url": "https://www.bortzmeyer.org/negociation-contenu-http.html",
+   "reason": "Fully read and eligible, but not needed (only 4 slots). It would raise Bortzmeyer to 6. It also has undisclosed later edits (cites RFC 7231 of 2014 and Chrome under a \"last update 2007\" header).",
+   "sha256": "475f37c8709200420250c82866276e06c188958fd8bc44ed81921495df0389d6"
+  },
+  {
+   "id": "FR40",
+   "title": "Meilleures pratiques pour vos URLs, verbes HTTP et APIs (Porteneuve 2013)",
+   "reason": "Rejected: presents and relays an English StackOverflow answer by Bob Aman, so it is derivative/translated material."
+  }
+ ],
+ "history": "Pass-1 versions are preserved in review-history/*.v1.*"
+}
