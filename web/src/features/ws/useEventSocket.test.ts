@@ -83,7 +83,25 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['designs', 'ticket', 'ticket-789'],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
-    // The final usage snapshot is written before the finish is published.
+    // A stopped run's final snapshot can land after the finish.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['ticket-usage', 'ticket-789'],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-run-usage', 'run-2'],
+    });
+  });
+
+  it('refetches both usage queries on usage.updated', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'usage.updated',
+        ticket_id: 'ticket-789',
+        run_id: 'run-2',
+      }),
+    );
+
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['ticket-usage', 'ticket-789'],
     });
@@ -103,6 +121,8 @@ describe('useEventSocket dispatch', () => {
         ['tickets'],
         ['ticket'],
         ['agent-runs'],
+        ['ticket-usage'],
+        ['agent-run-usage'],
         ['comments'],
         ['designs'],
         ['notifications'],

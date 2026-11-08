@@ -747,6 +747,165 @@ async fn run_without_usage_reports_none() {
     assert!(ticket["runs"][0]["usage"].is_null());
 }
 
+/// Waits for an event matching `pick`, or returns None at the deadline.
+async fn drain_events<T>(
+    events: &mut tokio::sync::broadcast::Receiver<coppice_server::events::AppEvent>,
+    timeout: Duration,
+    mut pick: impl FnMut(&coppice_server::events::AppEvent) -> Option<T>,
+) -> Option<T> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(event)) => {
+                if let Some(found) = pick(&event) {
+                    return Some(found);
+                }
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) | Err(_) => return None,
+        }
+    }
+}
+
+/// Stopping a run publishes `agent_run.finished` before the worker saves the
+/// final snapshot, so the worker has to announce the save itself. The test does
+/// not assert which of the two events arrives first.
+#[tokio::test]
+async fn stopped_run_publishes_usage_updated_after_final_save() {
+    use coppice_server::events::AppEvent;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage_hold", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
+
+    let mut events = state.event_bus.subscribe();
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+
+    // The mock replays usage before it holds, and the live writer saves it.
+    // Stopping earlier could cancel the run before any usage exists.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (_, run) = get_json(
+            &app,
+            &format!("/api/agent-runs/{run_id}/usage"),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        if !run["totals"].is_null() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "usage never reported");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+
+    let mut finished = false;
+    let mut usage_updated = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(finished && usage_updated) {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let seen = drain_events(&mut events, remaining, |event| match event {
+            AppEvent::AgentRunFinished {
+                run_id, status, ..
+            } if *run_id == run_uuid => {
+                assert_eq!(status, "cancelled");
+                Some(true)
+            }
+            AppEvent::UsageUpdated {
+                run_id,
+                ticket_id,
+            } if *run_id == run_uuid => {
+                assert_eq!(*ticket_id, ticket_uuid);
+                Some(false)
+            }
+            _ => None,
+        })
+        .await
+        .expect("timed out waiting for agent_run.finished and usage.updated");
+        if seen {
+            finished = true;
+        } else {
+            usage_updated = true;
+        }
+    }
+
+    let (_, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(run["totals"]["tokens"]["output"], 120);
+}
+
+#[tokio::test]
+async fn run_without_usage_publishes_no_usage_updated() {
+    use coppice_server::events::AppEvent;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("done", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let mut events = state.event_bus.subscribe();
+    let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    // The run is terminal and `record_usage` has already run, so anything the
+    // worker publishes for usage is in the channel by now.
+    let mut finished = false;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            AppEvent::UsageUpdated { .. } => panic!("no usage was reported, got usage.updated"),
+            AppEvent::AgentRunFinished { .. } => finished = true,
+            _ => {}
+        }
+    }
+    assert!(finished, "expected agent_run.finished");
+}
+
 /// `tracked` follows the connector that ran, not the agent's current one, and
 /// a stored usage row always proves the run was tracked.
 #[tokio::test]

@@ -89,7 +89,8 @@ function dispatchMessage(raw: string) {
       queryKey: designsQueryKey(payload.ticket_id),
     });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
-    // The server writes the final usage snapshot before it publishes the finish.
+    // A stopped run publishes the finish before its worker saves the final
+    // snapshot; `usage.updated` covers that case.
     void queryClient.invalidateQueries({
       queryKey: ticketUsageQueryKey(payload.ticket_id),
     });
@@ -98,6 +99,20 @@ function dispatchMessage(raw: string) {
     });
     for (const listener of listeners) {
       listener.onRunFinished?.(payload);
+    }
+  }
+
+  if (msg.type === 'usage.updated') {
+    const payload = msg as { ticket_id?: string; run_id?: string };
+    if (payload.ticket_id) {
+      void queryClient.invalidateQueries({
+        queryKey: ticketUsageQueryKey(payload.ticket_id),
+      });
+    }
+    if (payload.run_id) {
+      void queryClient.invalidateQueries({
+        queryKey: runUsageQueryKey(payload.run_id),
+      });
     }
   }
 
@@ -141,11 +156,13 @@ function dispatchMessage(raw: string) {
   }
 }
 
-/** Every query an app event can change: tickets, runs, comments, designs, notifications. */
+/** Every query an app event can change: tickets, runs, usage, comments, designs, notifications. */
 export const EVENT_QUERY_FAMILIES = [
   ['tickets'],
   ['ticket'],
   ['agent-runs'],
+  ['ticket-usage'],
+  ['agent-run-usage'],
   ['comments'],
   ['designs'],
   NOTIFICATIONS_QUERY_KEY,

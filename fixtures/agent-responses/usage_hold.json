@@ -1,0 +1,64 @@
+{
+  "status": "done",
+  "summary": "Mock run that reports token usage, then holds so a test can stop it.",
+  "changedFiles": [],
+  "testsRun": [],
+  "nextStatus": "In Review",
+  "mentionAgents": [],
+  "blockers": [],
+  "usage": [
+    {
+      "kind": "request",
+      "id": "req-1",
+      "model": "mock-model",
+      "tokens": {
+        "input": 10,
+        "cacheRead": 1000,
+        "cacheWrite": 200,
+        "output": 50
+      }
+    },
+    {
+      "kind": "subagent",
+      "id": "sub-1",
+      "agentType": "explore",
+      "description": "Look around",
+      "status": "running"
+    },
+    {
+      "kind": "request",
+      "id": "req-2",
+      "model": "mock-model",
+      "tokens": {
+        "input": 5,
+        "cacheRead": 1200,
+        "output": 30,
+        "reasoning": 10
+      }
+    },
+    {
+      "kind": "subagent",
+      "id": "sub-1",
+      "model": "mock-model",
+      "status": "completed",
+      "tokens": {
+        "input": 3,
+        "output": 40
+      },
+      "toolUses": 2,
+      "durationMs": 900
+    },
+    {
+      "kind": "runTotal",
+      "tokens": {
+        "input": 18,
+        "cacheRead": 2200,
+        "cacheWrite": 200,
+        "output": 120,
+        "reasoning": 10
+      },
+      "costUsd": 0.0123
+    }
+  ],
+  "delayMsAfterToolCalls": 30000
+}

@@ -713,7 +713,9 @@ async fn execute_job(
         })
         .await;
     crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
-    crate::services::usage_service::record_usage(pool, run.id, &stream).await;
+    if crate::services::usage_service::record_usage(pool, run.id, &stream).await {
+        crate::events::publish::publish_usage_updated(&state.event_bus, ticket_id, run.id);
+    }
     grant.revoke().await;
     let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 

@@ -513,18 +513,25 @@ pub fn spawn_usage_writer(
 }
 
 /// Persist the latest usage. Safe to call more than once and alongside the writer.
-pub async fn record_usage(pool: &PgPool, run_id: Uuid, stream: &RunStreamHandle) {
-    if let Some(snapshot) = stream.usage_snapshot() {
-        save_or_warn(pool, run_id, &snapshot).await;
+/// Returns true only when a snapshot existed and the save succeeded, so callers
+/// can announce it.
+pub async fn record_usage(pool: &PgPool, run_id: Uuid, stream: &RunStreamHandle) -> bool {
+    match stream.usage_snapshot() {
+        Some(snapshot) => save_or_warn(pool, run_id, &snapshot).await,
+        None => false,
     }
 }
 
-async fn save_or_warn(pool: &PgPool, run_id: Uuid, snapshot: &UsageSnapshot) {
-    if let Err(err) = UsageService::new(pool)
+async fn save_or_warn(pool: &PgPool, run_id: Uuid, snapshot: &UsageSnapshot) -> bool {
+    match UsageService::new(pool)
         .save_snapshot(run_id, snapshot)
         .await
     {
-        tracing::warn!(%run_id, error = %err, "failed to save run usage");
+        Ok(_) => true,
+        Err(err) => {
+            tracing::warn!(%run_id, error = %err, "failed to save run usage");
+            false
+        }
     }
 }
 
