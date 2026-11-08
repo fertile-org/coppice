@@ -893,17 +893,16 @@ async fn run_without_usage_publishes_no_usage_updated() {
     )
     .await;
 
-    // The run is terminal and `record_usage` has already run, so anything the
-    // worker publishes for usage is in the channel by now.
-    let mut finished = false;
-    while let Ok(event) = events.try_recv() {
-        match event {
-            AppEvent::UsageUpdated { .. } => panic!("no usage was reported, got usage.updated"),
-            AppEvent::AgentRunFinished { .. } => finished = true,
-            _ => {}
-        }
-    }
-    assert!(finished, "expected agent_run.finished");
+    // The worker commits `succeeded` before it publishes `agent_run.finished`,
+    // so wait for the finish rather than draining what is already queued. A
+    // `usage.updated` would be published before both.
+    drain_events(&mut events, Duration::from_secs(10), |event| match event {
+        AppEvent::UsageUpdated { .. } => panic!("no usage was reported, got usage.updated"),
+        AppEvent::AgentRunFinished { .. } => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("timed out waiting for agent_run.finished");
 }
 
 /// `tracked` follows the connector that ran, not the agent's current one, and
