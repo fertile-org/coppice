@@ -1,6 +1,6 @@
 import { Bot, Coins } from 'lucide-react';
-import type { RequestUsage, SubagentUsage, TokenCounts } from '../../lib/schemas/usage';
-import { formatTokens, tokenDetail, tokenSummary, USAGE_COPY } from './tokenUsage';
+import type { RequestUsage, RunUsage, SubagentUsage, TokenCounts } from '../../lib/schemas/usage';
+import { formatTokens, tokenDetail, tokenSummary, USAGE_COPY, usageSummary } from './tokenUsage';
 import { useRunUsage } from './useRunUsage';
 
 interface RunTokenUsageProps {
@@ -74,6 +74,35 @@ function SubagentRow({ subagent }: { subagent: SubagentUsage }) {
   );
 }
 
+function RunTotal({ totals, live }: { totals: RunUsage; live: boolean }) {
+  if (totals.status === 'none') {
+    return (
+      <p className="font-body text-xs text-text-muted">
+        {live ? USAGE_COPY.nothingYet : USAGE_COPY.notReported}
+      </p>
+    );
+  }
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Coins className="size-4 text-moss-600" aria-hidden="true" />
+        <h4 className="font-display text-sm font-semibold text-bark-800">Run total</h4>
+        <span
+          className="font-body text-xs text-text-secondary"
+          title={tokenDetail(totals.tokens, totals.subagentTokens)}
+        >
+          {usageSummary(totals) ?? USAGE_COPY.notReported}
+        </span>
+      </div>
+      {totals.status === 'partial' && (
+        <p className="mt-1 font-body text-xs text-text-muted">
+          {live ? USAGE_COPY.partialLive : USAGE_COPY.partialEnded}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function RunTokenUsage({ runId, enabled, live = false }: RunTokenUsageProps) {
   const { data, isLoading, isError } = useRunUsage(runId, enabled, live ? 3000 : false);
 
@@ -87,18 +116,7 @@ export function RunTokenUsage({ runId, enabled, live = false }: RunTokenUsagePro
         <p className="font-body text-xs text-text-muted">{USAGE_COPY.noUsage}</p>
       )}
 
-      {data?.totals && (
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Coins className="size-4 text-moss-600" aria-hidden="true" />
-            <h4 className="font-display text-sm font-semibold text-bark-800">Run total</h4>
-            <Tokens tokens={data.totals.tokens} />
-          </div>
-          {data.totals.status === 'partial' && (
-            <p className="mt-1 font-body text-xs text-text-muted">{USAGE_COPY.partial}</p>
-          )}
-        </div>
-      )}
+      {data?.totals && <RunTotal totals={data.totals} live={live} />}
 
       {data && data.requests.length > 0 && (
         <div>

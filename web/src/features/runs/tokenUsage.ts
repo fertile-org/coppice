@@ -2,9 +2,21 @@ import type { TokenCounts } from '../../lib/schemas/usage';
 
 export const USAGE_COPY = {
   notReported: 'Tokens not reported',
-  partial: 'The CLI has not reported its own total yet; this is the sum of the requests so far.',
+  /** A running run: the CLI reports its own total when it ends. */
+  partialLive: 'Sum of the requests so far. The CLI reports its own total when the run ends.',
+  /** A finished run that ended without the CLI's total. */
+  partialEnded:
+    'The CLI did not report its own total, so this is what the run streamed: each request, plus subagents counted by their own totals.',
   noUsage: 'No token usage recorded for this run.',
+  nothingYet: 'No tokens reported yet.',
 } as const;
+
+/** "1 run ended without …" / "2 runs ended without …". */
+export function partialRunsNote(n: number): string {
+  return `${n} ${n === 1 ? 'run' : 'runs'} ended before the CLI reported a total; ${
+    n === 1 ? 'it counts' : 'they count'
+  } what was streamed.`;
+}
 
 /** One decimal below 10, none above. Rounds on integers: `toFixed` misrounds 9.95. */
 function scaled(abs: number, scale: number): number {
@@ -64,13 +76,47 @@ export function tokenSummary(tokens: TokenCounts): string | null {
 }
 
 /** Exact numbers for a tooltip. */
-export function tokenDetail(tokens: TokenCounts): string {
+export function tokenDetail(tokens: TokenCounts, subagentTokens: number | null = null): string {
   const fmt = (n: number | null) => (n == null ? 'not reported' : n.toLocaleString());
-  return [
+  const lines = [
     `Input: ${fmt(tokens.input)}`,
     `Cache write: ${fmt(tokens.cacheWrite)}`,
     `Cache read: ${fmt(tokens.cacheRead)}`,
     `Output: ${fmt(tokens.output)}`,
     `Reasoning (part of output): ${fmt(tokens.reasoning)}`,
-  ].join('\n');
+  ];
+  if (subagentTokens != null) {
+    lines.push(`Subagents, no breakdown: ${fmt(subagentTokens)}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Usage as the server reports it: the breakdown, plus subagent tokens that came
+ * without one (partial totals only).
+ */
+export interface UsageAmount {
+  tokens: TokenCounts;
+  subagentTokens: number | null;
+}
+
+/** Every token, subagents without a breakdown included. */
+export function usageTotal({ tokens, subagentTokens }: UsageAmount): number | null {
+  return sum(totalTokens(tokens), subagentTokens);
+}
+
+/** `tokenSummary`, plus `· 200k subagents` for subagents without a breakdown. */
+export function usageSummary({ tokens, subagentTokens }: UsageAmount): string | null {
+  const parts = [tokenSummary(tokens)];
+  if (subagentTokens != null) parts.push(`${formatTokens(subagentTokens)} subagents`);
+  const shown = parts.filter((part): part is string => part != null);
+  return shown.length > 0 ? shown.join(' · ') : null;
+}
+
+/** Field-by-field sum of two amounts. */
+export function addUsage(a: UsageAmount, b: UsageAmount): UsageAmount {
+  return {
+    tokens: addTokens(a.tokens, b.tokens),
+    subagentTokens: sum(a.subagentTokens, b.subagentTokens),
+  };
 }

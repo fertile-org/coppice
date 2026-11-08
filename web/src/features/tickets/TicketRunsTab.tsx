@@ -6,7 +6,7 @@ import { LOGS_COPY } from '../logs/copy';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
 import { RunTokenUsage } from '../runs/RunTokenUsage';
-import { tokenDetail, tokenSummary, USAGE_COPY } from '../runs/tokenUsage';
+import { tokenDetail, USAGE_COPY, usageSummary } from '../runs/tokenUsage';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
 import type { DesignSet } from '../../lib/schemas/design';
 import type { TicketRunUsage } from '../../lib/schemas/usage';
@@ -80,21 +80,31 @@ function agentName(
 }
 
 /** Tokens line for a run. Nothing for connectors Coppice cannot read yet. */
+/** Nothing for a run Coppice could not read; "not reported" once a tracked run ends empty. */
 function RunTokensLine({ run, usage }: { run: AgentRun; usage: TicketRunUsage | undefined }) {
-  if (!usage?.tracked) return null;
-  const summary = usage.usage ? tokenSummary(usage.usage.tokens) : null;
-  if (summary && usage.usage) {
-    return (
-      <p
-        className="font-body text-xs text-text-muted"
-        title={tokenDetail(usage.usage.tokens)}
-      >
-        Tokens: {summary}
-      </p>
+  const totals = usage?.usage;
+  if (!totals) return null;
+  const active = isActiveRunStatus(run.status);
+  const summary = totals.status === 'none' ? null : usageSummary(totals);
+  if (!summary) {
+    return active ? null : (
+      <p className="font-body text-xs text-text-muted">{USAGE_COPY.notReported}</p>
     );
   }
-  if (isActiveRunStatus(run.status)) return null;
-  return <p className="font-body text-xs text-text-muted">{USAGE_COPY.notReported}</p>;
+  const partial = totals.status === 'partial' && !active;
+  return (
+    <p
+      className="font-body text-xs text-text-muted"
+      title={
+        partial
+          ? `${tokenDetail(totals.tokens, totals.subagentTokens)}\n\n${USAGE_COPY.partialEnded}`
+          : tokenDetail(totals.tokens, totals.subagentTokens)
+      }
+    >
+      Tokens: {summary}
+      {partial && ' (partial)'}
+    </p>
+  );
 }
 
 function RunRow({

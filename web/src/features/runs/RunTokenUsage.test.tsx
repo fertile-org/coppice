@@ -22,7 +22,13 @@ describe('RunTokenUsage', () => {
   it('shows the run total, each request, and each subagent', () => {
     useRunUsage.mockReturnValue({
       data: {
-        totals: { status: 'reported', tokens: tokens(18, 2200, 120), requestCount: 2, subagentCount: 2 },
+        totals: {
+          status: 'reported',
+          tokens: tokens(18, 2200, 120),
+          subagentTokens: null,
+          requestCount: 2,
+          subagentCount: 2,
+        },
         requests: [
           { id: 'r1', granularity: 'request', model: 'claude-haiku-5-5', tokens: tokens(10, 1000, 50) },
           { id: 'r2', granularity: 'request', model: null, tokens: tokens(5, 1200, 30) },
@@ -60,7 +66,7 @@ describe('RunTokenUsage', () => {
 
     expect(useRunUsage).toHaveBeenCalledWith(RUN_ID, true, 3000);
     expect(screen.getByText('18 in · 2.2k cached · 120 out')).toBeVisible();
-    expect(screen.queryByText(USAGE_COPY.partial)).not.toBeInTheDocument();
+    expect(screen.queryByText(USAGE_COPY.partialLive)).not.toBeInTheDocument();
 
     const requests = screen.getAllByRole('listitem', { name: /request/i });
     expect(requests).toHaveLength(2);
@@ -78,10 +84,16 @@ describe('RunTokenUsage', () => {
     ).toBeVisible();
   });
 
-  it('explains a partial total and an empty run', () => {
+  it('explains a partial total that ended, with subagents counted apart', () => {
     useRunUsage.mockReturnValue({
       data: {
-        totals: { status: 'partial', tokens: tokens(1, null, 1), requestCount: 1, subagentCount: 0 },
+        totals: {
+          status: 'partial',
+          tokens: tokens(1, null, 1),
+          subagentTokens: 200_000,
+          requestCount: 1,
+          subagentCount: 1,
+        },
         requests: [],
         subagents: [],
       },
@@ -90,7 +102,32 @@ describe('RunTokenUsage', () => {
     });
     const { rerender } = render(<RunTokenUsage runId={RUN_ID} enabled />);
     expect(useRunUsage).toHaveBeenLastCalledWith(RUN_ID, true, false);
-    expect(screen.getByText(USAGE_COPY.partial)).toBeVisible();
+    expect(screen.getByText('1 in · 1 out · 200k subagents')).toBeVisible();
+    expect(screen.getByText(USAGE_COPY.partialEnded)).toBeVisible();
+
+    rerender(<RunTokenUsage runId={RUN_ID} enabled live />);
+    expect(screen.getByText(USAGE_COPY.partialLive)).toBeVisible();
+  });
+
+  it('tells a tracked run that reported nothing from an untracked one', () => {
+    const nothing = {
+      totals: {
+        status: 'none',
+        tokens: tokens(null, null, null),
+        subagentTokens: null,
+        requestCount: 0,
+        subagentCount: 0,
+      },
+      requests: [],
+      subagents: [],
+    };
+    useRunUsage.mockReturnValue({ data: nothing, isLoading: false, isError: false });
+    const { rerender } = render(<RunTokenUsage runId={RUN_ID} enabled live />);
+    expect(screen.getByText(USAGE_COPY.nothingYet)).toBeVisible();
+    expect(screen.queryByText('Run total')).not.toBeInTheDocument();
+
+    rerender(<RunTokenUsage runId={RUN_ID} enabled />);
+    expect(screen.getByText(USAGE_COPY.notReported)).toBeVisible();
 
     useRunUsage.mockReturnValue({
       data: { totals: null, requests: [], subagents: [] },

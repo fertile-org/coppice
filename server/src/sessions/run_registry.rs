@@ -166,13 +166,27 @@ impl RunStreamHandle {
         self.reported_tx.subscribe()
     }
 
-    /// Read usage from this run's output in `format`. The first call wins;
-    /// a format without a reader leaves usage off.
-    pub fn track_usage(&self, format: UsageFormat) {
+    /// A CLI process starts writing to this run; read its usage in `format`.
+    /// Call once per process, before its output. The first format with a
+    /// reader wins; a format without one leaves usage off. `resumed` says the
+    /// process continues an earlier session.
+    ///
+    /// Publishes a snapshot right away, so a tracked run that reports nothing
+    /// is still stored as tracked.
+    pub fn track_usage(&self, format: UsageFormat, resumed: bool) {
         let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
         if state.reader.is_none() {
             state.reader = reader_for(format);
         }
+        let UsageState { reader, tracker } = &mut *state;
+        let Some(reader) = reader.as_mut() else {
+            return;
+        };
+        for usage in reader.start_process(resumed) {
+            tracker.apply(usage);
+        }
+        self.usage_tx
+            .send_replace(Some(Arc::new(tracker.snapshot())));
     }
 
     /// One output event from the connector. Ignored until [`Self::track_usage`].
@@ -190,10 +204,11 @@ impl RunStreamHandle {
             tracker.apply(usage);
         }
         // Sent under the lock so snapshots go out in version order.
-        self.usage_tx.send_replace(tracker.snapshot().map(Arc::new));
+        self.usage_tx
+            .send_replace(Some(Arc::new(tracker.snapshot())));
     }
 
-    /// `None` until the connector reported any usage.
+    /// `None` until usage is tracked ([`Self::track_usage`] with a readable format).
     pub fn usage_snapshot(&self) -> Option<Arc<UsageSnapshot>> {
         self.usage_tx.borrow().clone()
     }
@@ -266,6 +281,7 @@ impl RunStreamRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::usage::UsageStatus;
 
     #[tokio::test]
     async fn usage_is_read_only_after_track_usage() {
@@ -277,9 +293,18 @@ mod tests {
         assert!(handle.usage_snapshot().is_none());
 
         let mut rx = handle.subscribe_usage();
-        handle.track_usage(UsageFormat::Normalized);
+        // A format without a reader leaves usage off.
+        handle.track_usage(UsageFormat::None, false);
+        assert!(handle.usage_snapshot().is_none());
+
+        handle.track_usage(UsageFormat::Normalized, false);
+        // Tracked before anything is reported: a version-0 snapshot.
+        let snapshot = handle.usage_snapshot().expect("tracked");
+        assert_eq!(snapshot.version, 0);
+        assert_eq!(snapshot.totals.status, UsageStatus::None);
+
         // A later format does not replace the first reader.
-        handle.track_usage(UsageFormat::None);
+        handle.track_usage(UsageFormat::None, true);
         handle.observe_usage(&event);
         handle.observe_usage(&serde_json::json!({ "type": "unrelated" }));
         let snapshot = handle.usage_snapshot().expect("snapshot");

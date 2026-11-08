@@ -16,6 +16,13 @@ pub use claude_stream_json::ClaudeStreamJsonReader;
 /// Reads one output event at a time. Readers may keep state across events
 /// (pending requests, cumulative totals).
 pub trait UsageReader: Send {
+    /// A CLI process starts writing to this run. One run can start several
+    /// (connector-check phases, retries). `resumed` says it continues an
+    /// earlier session, whose usage some CLIs fold into their totals.
+    fn start_process(&mut self, _resumed: bool) -> Vec<UsageEvent> {
+        Vec::new()
+    }
+
     fn read(&mut self, event: &Value) -> Vec<UsageEvent>;
 }
 

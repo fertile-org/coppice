@@ -8,7 +8,7 @@ import { designsQueryKey } from '../designs/useDesigns';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
 import { runUsageQueryKey } from '../runs/useRunUsage';
-import { ticketUsageQueryKey } from '../tickets/useTicketUsage';
+import { TICKET_USAGE_KEY } from '../tickets/useTicketUsage';
 import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
@@ -90,10 +90,9 @@ function dispatchMessage(raw: string) {
     });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     // A stopped run publishes the finish before its worker saves the final
-    // snapshot; `usage.updated` covers that case.
-    void queryClient.invalidateQueries({
-      queryKey: ticketUsageQueryKey(payload.ticket_id),
-    });
+    // snapshot; `usage.updated` covers that case. Every ticket's usage, not
+    // just this one: a parent's total includes its subtickets' runs.
+    void queryClient.invalidateQueries({ queryKey: TICKET_USAGE_KEY });
     void queryClient.invalidateQueries({
       queryKey: runUsageQueryKey(payload.run_id),
     });
@@ -104,10 +103,9 @@ function dispatchMessage(raw: string) {
 
   if (msg.type === 'usage.updated') {
     const payload = msg as { ticket_id?: string; run_id?: string };
+    // Every ticket's usage: a parent's total includes this run too.
     if (payload.ticket_id) {
-      void queryClient.invalidateQueries({
-        queryKey: ticketUsageQueryKey(payload.ticket_id),
-      });
+      void queryClient.invalidateQueries({ queryKey: TICKET_USAGE_KEY });
     }
     if (payload.run_id) {
       void queryClient.invalidateQueries({

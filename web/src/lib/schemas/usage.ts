@@ -13,13 +13,19 @@ export const tokenCountsSchema = z.object({
 
 export type TokenCounts = z.infer<typeof tokenCountsSchema>;
 
-export const usageStatusSchema = z.enum(['reported', 'partial']);
+/**
+ * `none`: Coppice reads this run's usage but nothing was reported.
+ * `reported`: the CLI's own total. `partial`: the sum of what was streamed.
+ */
+export const usageStatusSchema = z.enum(['none', 'reported', 'partial']);
 
 export type UsageStatus = z.infer<typeof usageStatusSchema>;
 
 export const runUsageSchema = z.object({
   status: usageStatusSchema,
   tokens: tokenCountsSchema,
+  /** Partial totals only: subagent tokens without a breakdown, on top of `tokens`. */
+  subagentTokens: count,
   requestCount: z.number().int(),
   subagentCount: z.number().int(),
 });
@@ -57,11 +63,17 @@ export const runUsageDetailSchema = z.object({
 
 export type RunUsageDetail = z.infer<typeof runUsageDetailSchema>;
 
+/** Tracked runs only: runs Coppice could not read are left out. */
 export const usageGroupSchema = z.object({
   key: z.string(),
   runs: z.number().int(),
   runsWithUsage: z.number().int(),
+  /** Finished runs that reported nothing. */
+  runsNotReported: z.number().int(),
+  /** Finished runs whose total is only the sum of what they streamed. */
+  partialRuns: z.number().int(),
   tokens: tokenCountsSchema,
+  subagentTokens: count,
 });
 
 export type UsageGroup = z.infer<typeof usageGroupSchema>;
@@ -72,7 +84,7 @@ export const ticketUsageSchema = z.object({
       runId: z.string().uuid(),
       agentId: z.string().uuid(),
       jobType: z.string(),
-      tracked: z.boolean(),
+      /** `null` when Coppice could not read the run's usage. */
       usage: runUsageSchema.nullable(),
     }),
   ),
@@ -81,7 +93,9 @@ export const ticketUsageSchema = z.object({
     .object({
       ticketCount: z.number().int(),
       runsWithUsage: z.number().int(),
+      partialRuns: z.number().int(),
       tokens: tokenCountsSchema,
+      subagentTokens: count,
     })
     .nullable(),
   byAgent: z.array(usageGroupSchema),

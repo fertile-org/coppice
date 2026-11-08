@@ -671,10 +671,14 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ticket["own"]["runs"], 1);
     assert_eq!(ticket["own"]["runsWithUsage"], 1);
+    assert_eq!(ticket["own"]["runsNotReported"], 0);
+    assert_eq!(ticket["own"]["partialRuns"], 0);
     assert_eq!(ticket["own"]["tokens"]["output"], 120);
+    // The CLI's total already includes its subagents.
+    assert!(ticket["own"]["subagentTokens"].is_null());
     assert!(ticket["subtickets"].is_null());
     assert_eq!(ticket["runs"][0]["runId"], run_id.as_str());
-    assert_eq!(ticket["runs"][0]["tracked"], true);
+    assert_eq!(ticket["runs"][0]["usage"]["status"], "reported");
     assert_eq!(ticket["byAgent"][0]["key"], agent_id.as_str());
     assert_eq!(ticket["byJobType"][0]["key"], "work_on_ticket");
 
@@ -697,8 +701,10 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// A fixture without `usage` stands for a connector Coppice cannot read:
+/// the run has no usage and is left out of the ticket's counts.
 #[tokio::test]
-async fn run_without_usage_reports_none() {
+async fn untracked_run_reports_nothing_and_is_not_counted() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -741,8 +747,9 @@ async fn run_without_usage_reports_none() {
         &csrf,
     )
     .await;
-    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runs"], 0);
     assert_eq!(ticket["own"]["runsWithUsage"], 0);
+    assert_eq!(ticket["own"]["runsNotReported"], 0);
     assert!(ticket["own"]["tokens"]["output"].is_null());
     assert!(ticket["runs"][0]["usage"].is_null());
 }
@@ -804,7 +811,8 @@ async fn stopped_run_publishes_usage_updated_after_final_save() {
             &csrf,
         )
         .await;
-        if !run["totals"].is_null() {
+        // Tracked runs have totals from the start (status `none`); wait for usage.
+        if !run["totals"].is_null() && run["totals"]["status"] != "none" {
             break;
         }
         assert!(Instant::now() < deadline, "usage never reported");
@@ -864,6 +872,7 @@ async fn stopped_run_publishes_usage_updated_after_final_save() {
     assert_eq!(run["totals"]["tokens"]["output"], 120);
 }
 
+/// An untracked run (fixture without `usage`) has no snapshot to announce.
 #[tokio::test]
 async fn run_without_usage_publishes_no_usage_updated() {
     use coppice_server::events::AppEvent;
@@ -905,10 +914,61 @@ async fn run_without_usage_publishes_no_usage_updated() {
     .expect("timed out waiting for agent_run.finished");
 }
 
-/// `tracked` follows the connector that ran, not the agent's current one, and
-/// a stored usage row always proves the run was tracked.
+/// `"usage": []`: Coppice read the run's output but nothing was reported.
 #[tokio::test]
-async fn usage_tracked_flag_survives_an_agent_connector_switch() {
+async fn tracked_run_that_reported_nothing_says_so() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage-empty").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["totals"]["status"], "none");
+    assert!(run["totals"]["tokens"]["output"].is_null());
+
+    let (_, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runsWithUsage"], 0);
+    assert_eq!(ticket["own"]["runsNotReported"], 1);
+    assert_eq!(ticket["runs"][0]["usage"]["status"], "none");
+}
+
+/// Whether a run counts comes from its stored usage row alone: no connector,
+/// current or past, is consulted.
+#[tokio::test]
+async fn usage_counts_follow_stored_rows_not_connectors() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -929,7 +989,7 @@ async fn usage_tracked_flag_survives_an_agent_connector_switch() {
     let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
     let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
 
-    let insert_run = |session_connector: Option<&'static str>, with_usage: bool| async move {
+    let insert_run = |session_connector: Option<&'static str>, usage: Option<&'static str>| async move {
         let run_id = uuid::Uuid::new_v4();
         sqlx::query(
             r#"
@@ -945,76 +1005,54 @@ async fn usage_tracked_flag_survives_an_agent_connector_switch() {
         .execute(pool)
         .await
         .unwrap();
-        if with_usage {
+        if let Some(status) = usage {
+            let output = (status == "reported").then_some(5_i64);
             sqlx::query(
-                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, 'reported', 1, 5)",
+                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, $2, 1, $3)",
             )
             .bind(run_id)
+            .bind(status)
+            .bind(output)
             .execute(pool)
             .await
             .unwrap();
         }
         run_id
     };
-    // (a) plan-run shape: usage row, no session connector.
-    let plan_shaped = insert_run(None, true).await;
-    // (b) a Claude session run with no usage row.
-    let claude_session = insert_run(Some("claude-code"), false).await;
-    // (c) a Codex session run.
-    let codex_session = insert_run(Some("codex"), false).await;
+    // Plan-run shape: a usage row, no session connector.
+    insert_run(None, Some("reported")).await;
+    // Tracked, but nothing reported.
+    insert_run(Some("claude-code"), Some("none")).await;
+    // No row: a Claude run from before tracking, and a Codex run.
+    let old_claude = insert_run(Some("claude-code"), None).await;
+    insert_run(Some("codex"), None).await;
 
-    let tracked = |ticket: &serde_json::Value, run_id: uuid::Uuid| -> bool {
-        ticket["runs"]
+    for connector in ["codex", "claude-code"] {
+        sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
+            .bind(agent_uuid)
+            .bind(connector)
+            .execute(pool)
+            .await
+            .unwrap();
+        let (status, ticket) = get_json(
+            &app,
+            &format!("/api/tickets/{ticket_id}/usage"),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ticket["runs"].as_array().unwrap().len(), 4, "{connector}");
+        assert_eq!(ticket["own"]["runs"], 2, "{connector}");
+        assert_eq!(ticket["own"]["runsWithUsage"], 1, "{connector}");
+        assert_eq!(ticket["own"]["runsNotReported"], 1, "{connector}");
+        assert_eq!(ticket["own"]["tokens"]["output"], 5, "{connector}");
+        let old = ticket["runs"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|r| r["runId"] == run_id.to_string().as_str())
-            .unwrap()["tracked"]
-            .as_bool()
-            .unwrap()
-    };
-
-    // The agent switches to Codex: a and b stay tracked, c stays untracked.
-    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
-        .bind(agent_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-    let (status, ticket) = get_json(
-        &app,
-        &format!("/api/tickets/{ticket_id}/usage"),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(tracked(&ticket, plan_shaped), "usage row, agent on codex");
-    assert!(
-        tracked(&ticket, claude_session),
-        "claude session, agent on codex"
-    );
-    assert!(
-        !tracked(&ticket, codex_session),
-        "codex session, agent on codex"
-    );
-
-    // And back to Claude: c is still a Codex run.
-    sqlx::query("UPDATE agents SET connector = 'claude-code' WHERE id = $1")
-        .bind(agent_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-    let (_, ticket) = get_json(
-        &app,
-        &format!("/api/tickets/{ticket_id}/usage"),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert!(tracked(&ticket, plan_shaped));
-    assert!(tracked(&ticket, claude_session));
-    assert!(
-        !tracked(&ticket, codex_session),
-        "codex session, agent on claude"
-    );
+            .find(|r| r["runId"] == old_claude.to_string().as_str())
+            .unwrap();
+        assert!(old["usage"].is_null(), "{connector}");
+    }
 }

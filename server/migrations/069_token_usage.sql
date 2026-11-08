@@ -2,10 +2,12 @@
 -- rows come from normalized usage events. A NULL count means "not reported".
 
 -- Totals per run: the CLI's own total when it gave one ('reported'), else the
--- sum of the rows below ('partial'). No row means the run reported no usage.
+-- sum of the rows below ('partial'). 'none': Coppice read the run's output but
+-- nothing was reported. No row means Coppice could not read the run's usage
+-- (its connector has no reader, or the run predates tracking).
 CREATE TABLE run_usage (
     run_id UUID PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('reported', 'partial')),
+    status TEXT NOT NULL CHECK (status IN ('none', 'reported', 'partial')),
     -- Grows with every change; a stale write never replaces a newer one.
     version BIGINT NOT NULL,
     input_tokens BIGINT,
@@ -13,6 +15,9 @@ CREATE TABLE run_usage (
     cache_write_tokens BIGINT,
     output_tokens BIGINT,
     reasoning_tokens BIGINT,
+    -- Partial totals only: subagents the CLI gave a total for but no breakdown.
+    -- Counted on top of the columns above.
+    subagent_tokens BIGINT,
     request_count INTEGER NOT NULL DEFAULT 0,
     subagent_count INTEGER NOT NULL DEFAULT 0,
     -- Stored when the CLI reports it; not shown.

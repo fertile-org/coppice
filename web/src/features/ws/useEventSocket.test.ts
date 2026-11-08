@@ -83,10 +83,9 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['designs', 'ticket', 'ticket-789'],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
-    // A stopped run's final snapshot can land after the finish.
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['ticket-usage', 'ticket-789'],
-    });
+    // A stopped run's final snapshot can land after the finish. All tickets'
+    // usage: a parent's total includes its subtickets' runs.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket-usage'] });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-run-usage', 'run-2'],
     });
@@ -102,9 +101,7 @@ describe('useEventSocket dispatch', () => {
       }),
     );
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['ticket-usage', 'ticket-789'],
-    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket-usage'] });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-run-usage', 'run-2'],
     });

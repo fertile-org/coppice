@@ -1,7 +1,8 @@
 //! Stores run usage snapshots and answers usage questions for runs and tickets.
 //!
 //! Works only with normalized usage (`domain::usage`); it never looks at which
-//! connector produced it, except to say whether a connector is tracked at all.
+//! connector produced it. A run is tracked when it has a `run_usage` row: the
+//! stream handle stores one as soon as a reader is attached.
 
 use crate::domain::usage::{
     Granularity, RequestUsage, SubagentUsage, TokenCounts, UsageSnapshot, UsageStatus,
@@ -22,6 +23,8 @@ pub struct UsageService<'a> {
 pub struct RunUsage {
     pub status: UsageStatus,
     pub tokens: TokenCounts,
+    /// Partial totals only: subagent tokens without a breakdown, on top of `tokens`.
+    pub subagent_tokens: Option<i64>,
     pub request_count: i64,
     pub subagent_count: i64,
 }
@@ -29,7 +32,8 @@ pub struct RunUsage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunUsageDetail {
-    /// `None` when the run reported no usage.
+    /// `None` when Coppice could not read the run's usage; status `none` when
+    /// it could but nothing was reported.
     pub totals: Option<RunUsage>,
     pub requests: Vec<RequestUsage>,
     pub subagents: Vec<SubagentUsage>,
@@ -41,20 +45,61 @@ pub struct TicketRunUsage {
     pub run_id: Uuid,
     pub agent_id: Uuid,
     pub job_type: String,
-    /// Coppice can read usage from this run's connector.
-    pub tracked: bool,
+    /// The run is no longer queued or running.
+    #[serde(skip)]
+    pub finished: bool,
+    /// `None` when Coppice could not read the run's usage.
     pub usage: Option<RunUsage>,
 }
 
-/// Runs grouped by one key (agent id or job type).
+/// Tracked runs grouped by one key (agent id or job type). Runs Coppice could
+/// not read are left out entirely.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageGroup {
     pub key: String,
     pub runs: i64,
-    /// Runs that reported any usage; the rest are not counted in `tokens`.
+    /// Runs that reported any usage; only these are in `tokens`.
     pub runs_with_usage: i64,
+    /// Finished runs that reported nothing.
+    pub runs_not_reported: i64,
+    /// Finished runs whose total is only the sum of what they streamed.
+    pub partial_runs: i64,
     pub tokens: TokenCounts,
+    /// Subagent tokens without a breakdown (partial runs), on top of `tokens`.
+    pub subagent_tokens: Option<i64>,
+}
+
+impl UsageGroup {
+    fn add(&mut self, run: &TicketRunUsage, usage: &RunUsage) {
+        self.runs += 1;
+        match usage.status {
+            UsageStatus::None => {
+                if run.finished {
+                    self.runs_not_reported += 1;
+                }
+            }
+            UsageStatus::Reported | UsageStatus::Partial => {
+                self.runs_with_usage += 1;
+                self.tokens.add(&usage.tokens);
+                self.subagent_tokens = add_opt(self.subagent_tokens, usage.subagent_tokens);
+                if usage.status == UsageStatus::Partial && run.finished {
+                    self.partial_runs += 1;
+                }
+            }
+        }
+    }
+
+    fn total(&self) -> i64 {
+        self.tokens.total().unwrap_or(0) + self.subagent_tokens.unwrap_or(0)
+    }
+}
+
+fn add_opt(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -62,7 +107,10 @@ pub struct UsageGroup {
 pub struct SubticketUsage {
     pub ticket_count: i64,
     pub runs_with_usage: i64,
+    /// Finished runs whose total is only the sum of what they streamed.
+    pub partial_runs: i64,
     pub tokens: TokenCounts,
+    pub subagent_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,26 +141,27 @@ impl<'a> UsageService<'a> {
         let mut tx = self.pool.begin().await?;
         // Locks the row, so a concurrent writer waits and then sees this version.
         // With no row yet, a concurrent first insert is still settled by the
-        // version guard below; reading 0 here only writes more rows than needed.
-        let stored: i64 =
+        // version guard below; missing it here only writes more rows than needed.
+        let stored: Option<i64> =
             sqlx::query_scalar("SELECT version FROM run_usage WHERE run_id = $1 FOR UPDATE")
                 .bind(run_id)
                 .fetch_optional(&mut *tx)
-                .await?
-                .unwrap_or(0);
-        if stored >= snapshot.version {
+                .await?;
+        // Version 0 (tracked, nothing reported) is written only when no row exists.
+        if stored.is_some_and(|stored| stored >= snapshot.version) {
             tx.rollback().await?;
             return Ok(false);
         }
+        let stored = stored.unwrap_or(0);
         let totals = &snapshot.totals;
         let written = sqlx::query(
             r#"
             INSERT INTO run_usage (
                 run_id, status, version,
                 input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
-                request_count, subagent_count, reported_cost_usd, updated_at
+                subagent_tokens, request_count, subagent_count, reported_cost_usd, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::float8, now())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::float8, now())
             ON CONFLICT (run_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 version = EXCLUDED.version,
@@ -121,6 +170,7 @@ impl<'a> UsageService<'a> {
                 cache_write_tokens = EXCLUDED.cache_write_tokens,
                 output_tokens = EXCLUDED.output_tokens,
                 reasoning_tokens = EXCLUDED.reasoning_tokens,
+                subagent_tokens = EXCLUDED.subagent_tokens,
                 request_count = EXCLUDED.request_count,
                 subagent_count = EXCLUDED.subagent_count,
                 reported_cost_usd = EXCLUDED.reported_cost_usd,
@@ -136,6 +186,7 @@ impl<'a> UsageService<'a> {
         .bind(totals.tokens.cache_write)
         .bind(totals.tokens.output)
         .bind(totals.tokens.reasoning)
+        .bind(totals.subagent_tokens)
         .bind(totals.request_count as i32)
         .bind(totals.subagent_count as i32)
         .bind(totals.cost_usd)
@@ -270,7 +321,7 @@ impl<'a> UsageService<'a> {
         let totals = sqlx::query(
             r#"
             SELECT status, input_tokens, cache_read_tokens, cache_write_tokens,
-                   output_tokens, reasoning_tokens, request_count, subagent_count
+                   output_tokens, reasoning_tokens, subagent_tokens, request_count, subagent_count
             FROM run_usage WHERE run_id = $1
             "#,
         )
@@ -348,13 +399,11 @@ impl<'a> UsageService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT ar.id, ar.agent_id, ar.job_type,
-                   COALESCE(ar.session_connector, a.connector) AS connector,
-                   (u.run_id IS NOT NULL) AS has_usage,
+                   ar.status NOT IN ('queued', 'running') AS finished,
                    u.status AS usage_status, u.input_tokens, u.cache_read_tokens,
                    u.cache_write_tokens, u.output_tokens, u.reasoning_tokens,
-                   u.request_count, u.subagent_count
+                   u.subagent_tokens, u.request_count, u.subagent_count
             FROM agent_runs ar
-            JOIN agents a ON a.id = ar.agent_id
             LEFT JOIN run_usage u ON u.run_id = ar.id
             WHERE ar.ticket_id = $1
             ORDER BY ar.created_at DESC
@@ -366,19 +415,11 @@ impl<'a> UsageService<'a> {
 
         let mut runs = Vec::with_capacity(rows.len());
         for row in &rows {
-            let connector: Option<String> = row.try_get("connector")?;
-            let has_usage: bool = row.try_get("has_usage")?;
             runs.push(TicketRunUsage {
                 run_id: row.try_get("id")?,
                 agent_id: row.try_get("agent_id")?,
                 job_type: row.try_get("job_type")?,
-                // A usage row proves the run was tracked, whatever connector the
-                // agent uses now. Plan runs leave `session_connector` NULL.
-                tracked: has_usage
-                    || connector
-                        .as_deref()
-                        .and_then(coppice_connectors::get)
-                        .is_some_and(|d| d.reports_usage()),
+                finished: row.try_get("finished")?,
                 usage: run_usage_from_row(row, "usage_status")?,
             });
         }
@@ -392,12 +433,16 @@ impl<'a> UsageService<'a> {
             )
             SELECT
                 (SELECT count(*) FROM tree) AS ticket_count,
-                count(u.run_id) AS runs_with_usage,
+                count(*) FILTER (WHERE u.status <> 'none') AS runs_with_usage,
+                count(*) FILTER (
+                    WHERE u.status = 'partial' AND ar.status NOT IN ('queued', 'running')
+                ) AS partial_runs,
                 sum(u.input_tokens)::int8 AS input_tokens,
                 sum(u.cache_read_tokens)::int8 AS cache_read_tokens,
                 sum(u.cache_write_tokens)::int8 AS cache_write_tokens,
                 sum(u.output_tokens)::int8 AS output_tokens,
-                sum(u.reasoning_tokens)::int8 AS reasoning_tokens
+                sum(u.reasoning_tokens)::int8 AS reasoning_tokens,
+                sum(u.subagent_tokens)::int8 AS subagent_tokens
             FROM tree
             JOIN agent_runs ar ON ar.ticket_id = tree.id
             JOIN run_usage u ON u.run_id = ar.id
@@ -412,7 +457,9 @@ impl<'a> UsageService<'a> {
                 Ok(SubticketUsage {
                     ticket_count,
                     runs_with_usage: subtickets.try_get("runs_with_usage")?,
+                    partial_runs: subtickets.try_get("partial_runs")?,
                     tokens: tokens_from_row(&subtickets)?,
+                    subagent_tokens: subtickets.try_get("subagent_tokens")?,
                 })
             })
             .transpose()?;
@@ -430,6 +477,10 @@ fn rollup(runs: Vec<TicketRunUsage>, subtickets: Option<SubticketUsage>) -> Tick
     let mut by_agent: BTreeMap<String, UsageGroup> = BTreeMap::new();
     let mut by_job_type: BTreeMap<String, UsageGroup> = BTreeMap::new();
     for run in &runs {
+        // Runs Coppice could not read say nothing about tokens.
+        let Some(usage) = &run.usage else {
+            continue;
+        };
         for group in [
             &mut own,
             by_agent
@@ -445,16 +496,12 @@ fn rollup(runs: Vec<TicketRunUsage>, subtickets: Option<SubticketUsage>) -> Tick
                     ..UsageGroup::default()
                 }),
         ] {
-            group.runs += 1;
-            if let Some(usage) = &run.usage {
-                group.runs_with_usage += 1;
-                group.tokens.add(&usage.tokens);
-            }
+            group.add(run, usage);
         }
     }
     let by_total = |groups: BTreeMap<String, UsageGroup>| {
         let mut groups: Vec<_> = groups.into_values().collect();
-        groups.sort_by_key(|g| std::cmp::Reverse(g.tokens.total().unwrap_or(0)));
+        groups.sort_by_key(|g| std::cmp::Reverse(g.total()));
         groups
     };
     TicketUsage {
@@ -488,6 +535,7 @@ fn run_usage_from_row(
     Ok(Some(RunUsage {
         status,
         tokens: tokens_from_row(row)?,
+        subagent_tokens: row.try_get("subagent_tokens")?,
         request_count: row.try_get::<i32, _>("request_count")?.into(),
         subagent_count: row.try_get::<i32, _>("subagent_count")?.into(),
     }))
@@ -539,40 +587,62 @@ async fn save_or_warn(pool: &PgPool, run_id: Uuid, snapshot: &UsageSnapshot) -> 
 mod tests {
     use super::*;
 
-    fn run(agent: Uuid, job_type: &str, output: Option<i64>) -> TicketRunUsage {
+    /// A finished run; `usage` `None` means Coppice could not read it.
+    fn run(agent: Uuid, job_type: &str, usage: Option<RunUsage>) -> TicketRunUsage {
         TicketRunUsage {
             run_id: Uuid::new_v4(),
             agent_id: agent,
             job_type: job_type.into(),
-            tracked: true,
-            usage: output.map(|output| RunUsage {
-                status: UsageStatus::Reported,
-                tokens: TokenCounts {
-                    output: Some(output),
-                    ..TokenCounts::default()
-                },
-                request_count: 1,
-                subagent_count: 0,
-            }),
+            finished: true,
+            usage,
         }
+    }
+
+    fn usage(status: UsageStatus, output: Option<i64>, subagent_tokens: Option<i64>) -> RunUsage {
+        RunUsage {
+            status,
+            tokens: TokenCounts {
+                output,
+                ..TokenCounts::default()
+            },
+            subagent_tokens,
+            request_count: 1,
+            subagent_count: 0,
+        }
+    }
+
+    fn reported(output: i64) -> Option<RunUsage> {
+        Some(usage(UsageStatus::Reported, Some(output), None))
+    }
+
+    fn nothing() -> Option<RunUsage> {
+        Some(usage(UsageStatus::None, None, None))
     }
 
     #[test]
     fn rollup_groups_by_agent_and_job_type() {
         let worker = Uuid::new_v4();
         let planner = Uuid::new_v4();
+        let untracked_agent = Uuid::new_v4();
         let usage = rollup(
             vec![
-                run(worker, "work_on_ticket", Some(100)),
-                run(worker, "work_on_ticket", None),
-                run(worker, "respond_to_mention", Some(10)),
-                run(planner, "plan_ticket", Some(40)),
+                run(worker, "work_on_ticket", reported(100)),
+                run(worker, "work_on_ticket", nothing()),
+                run(worker, "respond_to_mention", reported(10)),
+                run(planner, "plan_ticket", reported(40)),
+                // A connector without a reader, or a run from before tracking.
+                run(untracked_agent, "work_on_ticket", None),
             ],
             None,
         );
         assert_eq!(usage.own.runs, 4);
         assert_eq!(usage.own.runs_with_usage, 3);
+        assert_eq!(usage.own.runs_not_reported, 1);
         assert_eq!(usage.own.tokens.output, Some(150));
+        assert!(usage
+            .by_agent
+            .iter()
+            .all(|group| group.key != untracked_agent.to_string()));
         // Largest first.
         assert_eq!(usage.by_agent[0].key, worker.to_string());
         assert_eq!(usage.by_agent[0].runs, 3);
@@ -658,7 +728,7 @@ mod tests {
             for event in events {
                 tracker.apply(event);
             }
-            tracker.snapshot().unwrap()
+            tracker.snapshot()
         }
 
         fn output(n: i64) -> TokenCounts {
@@ -697,8 +767,21 @@ mod tests {
                     cost_usd: Some(0.01),
                 }),
             ]);
+            // Tracked before anything was reported: version 0, written once.
+            let tracked = UsageTracker::new().snapshot();
+            assert!(service.save_snapshot(run, &tracked).await.unwrap());
+            assert!(!service.save_snapshot(run, &tracked).await.unwrap());
+            let totals = service
+                .run_usage(run)
+                .await
+                .unwrap()
+                .totals
+                .expect("tracked");
+            assert_eq!(totals.status, UsageStatus::None);
+
             assert!(service.save_snapshot(run, &newer).await.unwrap());
             assert!(!service.save_snapshot(run, &older).await.unwrap());
+            assert!(!service.save_snapshot(run, &tracked).await.unwrap());
 
             let detail = service.run_usage(run).await.unwrap();
             let totals = detail.totals.expect("totals");
@@ -728,13 +811,13 @@ mod tests {
             tracker.apply(request("m1", 1));
             tracker.apply(request("m2", 2));
             assert!(service
-                .save_snapshot(run, &tracker.snapshot().unwrap())
+                .save_snapshot(run, &tracker.snapshot())
                 .await
                 .unwrap());
             // Only m2 changes; m1 is not rewritten but stays stored.
             tracker.apply(request("m2", 20));
             tracker.apply(request("m3", 3));
-            let snap = tracker.snapshot().unwrap();
+            let snap = tracker.snapshot();
             assert_eq!(snap.request_versions, [1, 3, 4]);
             assert!(service.save_snapshot(run, &snap).await.unwrap());
 
@@ -762,19 +845,41 @@ mod tests {
                 })]);
                 service.save_snapshot(run, &snap).await.unwrap();
             }
-            // A run that reported nothing still counts as a run.
+            // Tracked but reported nothing: counted as a run, not in the tokens.
+            let silent = insert_run(&pool, parent, agent).await;
+            service
+                .save_snapshot(silent, &UsageTracker::new().snapshot())
+                .await
+                .unwrap();
+            // Untracked (no row): left out.
             insert_run(&pool, parent, agent).await;
+            // A child run that ended before the CLI's total.
+            let cut_short = insert_run(&pool, child, agent).await;
+            let snap = snapshot(vec![
+                UsageEvent::Request(RequestUsage {
+                    tokens: output(4),
+                    ..RequestUsage::default()
+                }),
+                UsageEvent::Subagent(SubagentUsage {
+                    id: "t1".into(),
+                    total_tokens: Some(300),
+                    ..SubagentUsage::default()
+                }),
+            ]);
+            service.save_snapshot(cut_short, &snap).await.unwrap();
 
             let usage = service.ticket_usage(parent).await.unwrap();
+            assert_eq!(usage.runs.len(), 3);
             assert_eq!(usage.own.runs, 2);
             assert_eq!(usage.own.runs_with_usage, 1);
+            assert_eq!(usage.own.runs_not_reported, 1);
             assert_eq!(usage.own.tokens.output, Some(10));
-            // `mock` replays normalized usage, so it counts as tracked.
-            assert!(usage.runs.iter().all(|r| r.tracked));
             let subtickets = usage.subtickets.expect("subtickets");
             assert_eq!(subtickets.ticket_count, 2);
-            assert_eq!(subtickets.runs_with_usage, 2);
-            assert_eq!(subtickets.tokens.output, Some(50));
+            assert_eq!(subtickets.runs_with_usage, 3);
+            assert_eq!(subtickets.partial_runs, 1);
+            assert_eq!(subtickets.tokens.output, Some(54));
+            assert_eq!(subtickets.subagent_tokens, Some(300));
 
             let leaf = service.ticket_usage(grandchild).await.unwrap();
             assert!(leaf.subtickets.is_none());
@@ -782,11 +887,43 @@ mod tests {
     }
 
     #[test]
-    fn rollup_without_usage_keeps_tokens_unreported() {
+    fn rollup_leaves_untracked_runs_out() {
         let usage = rollup(vec![run(Uuid::new_v4(), "work_on_ticket", None)], None);
-        assert_eq!(usage.own.runs, 1);
-        assert_eq!(usage.own.runs_with_usage, 0);
+        assert_eq!(usage.own.runs, 0);
+        assert_eq!(usage.own.runs_not_reported, 0);
         assert_eq!(usage.own.tokens.total(), None);
+        assert!(usage.by_agent.is_empty());
+        assert_eq!(usage.runs.len(), 1);
+    }
+
+    #[test]
+    fn rollup_counts_partial_runs_and_skips_active_ones() {
+        let agent = Uuid::new_v4();
+        let active = |usage| TicketRunUsage {
+            finished: false,
+            ..run(agent, "work_on_ticket", usage)
+        };
+        let usage = rollup(
+            vec![
+                run(
+                    agent,
+                    "work_on_ticket",
+                    Some(usage(UsageStatus::Partial, Some(5), Some(200))),
+                ),
+                // Still running: neither "not reported" nor "partial" yet.
+                active(nothing()),
+                active(Some(usage(UsageStatus::Partial, Some(1), None))),
+            ],
+            None,
+        );
+        let own = &usage.own;
+        assert_eq!(own.runs, 3);
+        assert_eq!(own.runs_with_usage, 2);
+        assert_eq!(own.runs_not_reported, 0);
+        assert_eq!(own.partial_runs, 1);
+        assert_eq!(own.tokens.output, Some(6));
+        assert_eq!(own.subagent_tokens, Some(200));
+        assert_eq!(own.total(), 206);
     }
 
     #[tokio::test]

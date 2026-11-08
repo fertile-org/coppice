@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { TokenCounts } from '../../lib/schemas/usage';
-import { addTokens, formatTokens, tokenSummary, totalTokens } from './tokenUsage';
+import {
+  addTokens,
+  addUsage,
+  formatTokens,
+  partialRunsNote,
+  tokenDetail,
+  tokenSummary,
+  totalTokens,
+  usageSummary,
+  usageTotal,
+} from './tokenUsage';
 
 const none: TokenCounts = {
   input: null,
@@ -50,5 +60,32 @@ describe('totals', () => {
       input: 3,
       output: 3,
     });
+  });
+});
+
+describe('usage with subagents that have no breakdown', () => {
+  const tokens = { ...none, input: 1_000, output: 500 };
+
+  it('adds them to the total and the summary', () => {
+    expect(usageTotal({ tokens, subagentTokens: 200_000 })).toBe(201_500);
+    expect(usageSummary({ tokens, subagentTokens: 200_000 })).toBe('1k in · 500 out · 200k subagents');
+    expect(usageTotal({ tokens, subagentTokens: null })).toBe(1_500);
+    expect(usageSummary({ tokens: none, subagentTokens: null })).toBeNull();
+    expect(usageSummary({ tokens: none, subagentTokens: 3 })).toBe('3 subagents');
+  });
+
+  it('adds amounts and lists them in the tooltip', () => {
+    expect(
+      addUsage({ tokens, subagentTokens: null }, { tokens: none, subagentTokens: 7 }),
+    ).toEqual({ tokens, subagentTokens: 7 });
+    expect(tokenDetail(tokens, 7)).toContain('Subagents, no breakdown: 7');
+    expect(tokenDetail(tokens)).not.toContain('Subagents');
+  });
+
+  it('words the partial-runs note by count', () => {
+    expect(partialRunsNote(1)).toBe(
+      '1 run ended before the CLI reported a total; it counts what was streamed.',
+    );
+    expect(partialRunsNote(2)).toContain('2 runs ended');
   });
 });

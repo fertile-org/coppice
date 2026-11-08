@@ -119,15 +119,15 @@ Coppice records the tokens a run used: one row per LLM request, one row per suba
 
 | Connector | Usage format | What is recorded |
 |-----------|--------------|------------------|
-| Claude Code | `claudeStreamJson` | Each request's final usage (`stream_event` `message_delta`, from `--include-partial-messages`), each subagent's totals (Agent tool result), and the run total from `result.modelUsage` (subagents included). Captures: `fixtures/claude-code/claude-code-2.1.318-usage-*.jsonl`. |
-| Mock | `normalized` | The fixture's `usage` array, replayed through the same path. |
+| Claude Code | `claudeStreamJson` | Each request's final usage (`stream_event` `message_delta`, from `--include-partial-messages`), each subagent's totals (Agent tool result), and the run total from `result.model_usage_since_last_result` (2.1.309+) or `result.modelUsage` (subagents included). On 2.1.277–2.1.308 a resumed process's `modelUsage` covers the whole session, so it is not used and the run total is the sum of its rows (`partial`). Captures: `fixtures/claude-code/claude-code-2.1.3*-usage-*.jsonl`. |
+| Mock | `normalized` | The fixture's `usage` array, replayed through the same path. Without the key the run is untracked; `"usage": []` is tracked with nothing reported. |
 | Others | `none` | Nothing yet; their runs show no usage. |
 
 How it fits together, so a new connector needs no storage, API, or UI change:
 
 1. The descriptor's `usage: UsageFormat` (`connectors/src/lib.rs`) names the wire format the connector's output uses. Connectors that share a protocol share a format.
-2. `server/src/providers/usage/` has one `UsageReader` per format. A reader turns one output event into normalized `UsageEvent`s (`server/src/domain/usage.rs`): `request`, `subagent`, or `runTotal`. Events with the same id update one row.
-3. The adapter calls `stream.track_usage(descriptor.usage)` once and `stream.observe_usage(&event)` for every output event. The run stream handle folds events into a snapshot; the worker writes it as it changes and once more when the run ends (`services/usage_service.rs`).
+2. `server/src/providers/usage/` has one `UsageReader` per format. A reader turns one output event into normalized `UsageEvent`s (`server/src/domain/usage.rs`): `request`, `subagent`, `runTotal`, or `runTotalUnknown` (the CLI's total no longer covers the run). Events with the same id update one row. `start_process(resumed)` tells the reader a new CLI process begins, for CLIs whose totals span a resumed session or several processes.
+3. The adapter calls `stream.track_usage(descriptor.usage, resumed)` before each CLI process it starts and `stream.observe_usage(&event)` for every output event. The run stream handle folds events into a snapshot; the worker writes it as it changes and once more when the run ends (`services/usage_service.rs`). `track_usage` stores a row right away (status `none`), so "tracked" is recorded at run time: a run without a row is one Coppice could not read, and it is left out of every count.
 4. `GET /api/agent-runs/{id}/usage` and `GET /api/tickets/{id}/usage` serve it. A ticket's total covers its own runs; split children are reported separately. Runs without a ticket (knowledge compaction, connector checks) are in no ticket's total.
 
 To add a connector: capture a small real run (a shell call and a subagent where the CLI has them) into `fixtures/<connector>/`, add a `UsageFormat` variant and a reader tested against the capture (or reuse an existing format), set the descriptor's `usage`, and add the two calls in the adapter.

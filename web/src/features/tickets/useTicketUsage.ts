@@ -2,8 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import { ticketUsageSchema, type TicketUsage } from '../../lib/schemas/usage';
 
+/** Every ticket's usage. A parent's includes its subtickets' runs. */
+export const TICKET_USAGE_KEY = ['ticket-usage'] as const;
+
 export function ticketUsageQueryKey(ticketId: string) {
-  return ['ticket-usage', ticketId] as const;
+  return [...TICKET_USAGE_KEY, ticketId] as const;
 }
 
 async function fetchTicketUsage(ticketId: string): Promise<TicketUsage> {

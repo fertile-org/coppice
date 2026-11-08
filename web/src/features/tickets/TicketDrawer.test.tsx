@@ -183,6 +183,14 @@ vi.mock('./TicketCommentsTab', () => ({
   TicketCommentsTab: () => <div>Comments</div>,
 }));
 
+vi.mock('./TicketTokens', () => ({
+  TicketTokens: ({ onViewRuns }: { onViewRuns?: () => void }) => (
+    <button type="button" onClick={onViewRuns}>
+      View runs →
+    </button>
+  ),
+}));
+
 function LocationProbe() {
   const location = useLocation();
   return <output data-testid="location-search">{location.search}</output>;
@@ -262,6 +270,15 @@ describe('TicketDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Live Console' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agent Runs' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Comments' })).toBeNull();
+  });
+
+  it('opens Agent Runs from the Tokens link on the Detail tab', () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'View runs →' }));
+    expect(screen.getByRole('tab', { name: 'Agent Runs' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('drawer panel uses 90% width class', () => {

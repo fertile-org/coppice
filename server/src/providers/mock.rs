@@ -218,7 +218,9 @@ impl AgentProvider for MockProvider {
         let result: AgentRunResult = serde_json::from_value(value)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
         Self::maybe_write_stdout(&input)?;
-        replay_usage(&input, &usage);
+        if let Some(usage) = &usage {
+            replay_usage(&input, usage);
+        }
         let outputs = run_tool_calls(&input, &tool_calls).await?;
         Self::append_tool_output(&input, &outputs)?;
         wait_after_tool_calls(&input, delay_ms).await?;
@@ -295,16 +297,20 @@ fn take_tool_directives(
 }
 
 /// Pull the mock-only `usage` key: normalized usage events, in order.
-fn take_usage(value: &mut serde_json::Value) -> Result<Vec<serde_json::Value>, ProviderError> {
+/// Without the key the run is untracked, like a connector Coppice cannot read;
+/// `"usage": []` is a tracked run that reported nothing.
+fn take_usage(
+    value: &mut serde_json::Value,
+) -> Result<Option<Vec<serde_json::Value>>, ProviderError> {
     let Some(object) = value.as_object_mut() else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     match object.remove("usage") {
-        Some(serde_json::Value::Array(events)) => Ok(events),
+        Some(serde_json::Value::Array(events)) => Ok(Some(events)),
         Some(_) => Err(ProviderError::InvalidFixture(
             "usage must be an array of usage events".into(),
         )),
-        None => Ok(Vec::new()),
+        None => Ok(None),
     }
 }
 
@@ -314,7 +320,7 @@ fn replay_usage(input: &AgentRunInput, events: &[serde_json::Value]) {
         return;
     };
     if let Some(descriptor) = coppice_connectors::get(coppice_connectors::MOCK) {
-        stream.track_usage(descriptor.usage);
+        stream.track_usage(descriptor.usage, false);
     }
     for event in events {
         stream.observe_usage(event);

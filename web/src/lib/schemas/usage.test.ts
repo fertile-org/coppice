@@ -3,21 +3,34 @@ import { runUsageDetailSchema, ticketUsageSchema } from './usage';
 
 // Shaped like the serializers in server/src/services/usage_service.rs.
 const tokens = { input: 4, cacheRead: 182_000, cacheWrite: 24_000, output: 9_100, reasoning: null };
-const totals = { status: 'reported', tokens, requestCount: 12, subagentCount: 1 };
+const totals = { status: 'reported', tokens, subagentTokens: null, requestCount: 12, subagentCount: 1 };
+const group = { runsNotReported: 0, partialRuns: 0, subagentTokens: null, tokens };
 const RUN = '00000000-0000-4000-8000-0000000000a1';
 const AGENT = '00000000-0000-4000-8000-0000000000b1';
 
 describe('usage schemas', () => {
   it('parses a server-shaped ticket usage payload', () => {
     const parsed = ticketUsageSchema.parse({
-      runs: [{ runId: RUN, agentId: AGENT, jobType: 'work', tracked: true, usage: totals }],
-      own: { key: 'ticket', runs: 1, runsWithUsage: 1, tokens },
-      subtickets: { ticketCount: 2, runsWithUsage: 3, tokens },
-      byAgent: [{ key: AGENT, runs: 1, runsWithUsage: 1, tokens }],
-      byJobType: [{ key: 'work', runs: 1, runsWithUsage: 1, tokens }],
+      runs: [
+        { runId: RUN, agentId: AGENT, jobType: 'work', usage: totals },
+        { runId: RUN, agentId: AGENT, jobType: 'work', usage: null },
+      ],
+      own: { ...group, key: 'ticket', runs: 1, runsWithUsage: 1 },
+      subtickets: { ticketCount: 2, runsWithUsage: 3, partialRuns: 1, tokens, subagentTokens: 300 },
+      byAgent: [{ ...group, key: AGENT, runs: 1, runsWithUsage: 1 }],
+      byJobType: [{ ...group, key: 'work', runs: 1, runsWithUsage: 1 }],
     });
     expect(parsed.own.runsWithUsage).toBe(1);
     expect(parsed.runs[0].usage?.requestCount).toBe(12);
+    expect(parsed.runs[1].usage).toBeNull();
+    expect(parsed.subtickets?.subagentTokens).toBe(300);
+    expect(
+      runUsageDetailSchema.parse({
+        totals: { ...totals, status: 'none', subagentTokens: null },
+        requests: [],
+        subagents: [],
+      }).totals?.status,
+    ).toBe('none');
   });
 
   it('parses a server-shaped run usage detail payload', () => {

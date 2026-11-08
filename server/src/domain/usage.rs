@@ -163,11 +163,17 @@ pub enum UsageEvent {
     Request(RequestUsage),
     Subagent(SubagentUsage),
     RunTotal(RunTotalUsage),
+    /// The CLI's total does not cover the whole run (a later process has not
+    /// reported yet, or its total cannot be trusted). Drops any earlier
+    /// `RunTotal`; the run falls back to the sum of its rows.
+    RunTotalUnknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UsageStatus {
+    /// Coppice reads this run's usage, but nothing has been reported yet.
+    None,
     /// The CLI reported its own total.
     Reported,
     /// Only per-request or subagent rows arrived (still running, or the run
@@ -178,6 +184,7 @@ pub enum UsageStatus {
 impl UsageStatus {
     pub fn as_str(self) -> &'static str {
         match self {
+            UsageStatus::None => "none",
             UsageStatus::Reported => "reported",
             UsageStatus::Partial => "partial",
         }
@@ -185,6 +192,7 @@ impl UsageStatus {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "none" => Some(UsageStatus::None),
             "reported" => Some(UsageStatus::Reported),
             "partial" => Some(UsageStatus::Partial),
             _ => None,
@@ -197,6 +205,10 @@ impl UsageStatus {
 pub struct RunUsageTotals {
     pub status: UsageStatus,
     pub tokens: TokenCounts,
+    /// Partial totals only: subagents the CLI gave a total for but no
+    /// breakdown. Counted on top of `tokens`; a reported total already
+    /// includes them.
+    pub subagent_tokens: Option<i64>,
     pub request_count: i64,
     pub subagent_count: i64,
     pub cost_usd: Option<f64>,
@@ -240,11 +252,15 @@ impl UsageTracker {
         if matches!(&event, UsageEvent::RunTotal(total) if total.tokens.is_empty()) {
             return;
         }
+        if matches!(event, UsageEvent::RunTotalUnknown) && self.reported.is_none() {
+            return;
+        }
         self.version += 1;
         match event {
             UsageEvent::Request(request) => self.apply_request(request),
             UsageEvent::Subagent(subagent) => self.apply_subagent(subagent),
             UsageEvent::RunTotal(total) => self.reported = Some(total),
+            UsageEvent::RunTotalUnknown => self.reported = None,
         }
     }
 
@@ -285,39 +301,49 @@ impl UsageTracker {
         }
     }
 
-    /// `None` until the first event.
-    pub fn snapshot(&self) -> Option<UsageSnapshot> {
-        if self.version == 0 {
-            return None;
-        }
-        Some(UsageSnapshot {
+    /// Version 0 (status `none`) before the first event: saving it records
+    /// that the run was tracked.
+    pub fn snapshot(&self) -> UsageSnapshot {
+        UsageSnapshot {
             version: self.version,
             requests: self.requests.clone(),
             request_versions: self.request_versions.clone(),
             subagents: self.subagents.clone(),
             subagent_versions: self.subagent_versions.clone(),
             totals: self.totals(),
-        })
+        }
     }
 
     /// The CLI's own total when it gave one; otherwise the sum of the rows.
     fn totals(&self) -> RunUsageTotals {
-        let (status, tokens, cost_usd) = match &self.reported {
-            Some(total) => (UsageStatus::Reported, total.tokens, total.cost_usd),
+        let (status, tokens, subagent_tokens, cost_usd) = match &self.reported {
+            Some(total) => (UsageStatus::Reported, total.tokens, None, total.cost_usd),
+            None if self.requests.is_empty() && self.subagents.is_empty() => {
+                (UsageStatus::None, TokenCounts::default(), None, None)
+            }
             None => {
                 let mut sum = TokenCounts::default();
+                let mut unbroken: Option<i64> = None;
                 for request in &self.requests {
                     sum.add(&request.tokens);
                 }
                 for subagent in &self.subagents {
-                    sum.add(&subagent.tokens);
+                    if subagent.tokens.is_empty() {
+                        // Only the CLI's total: kept apart, it has no breakdown.
+                        if let Some(total) = subagent.total_tokens {
+                            unbroken = Some(unbroken.unwrap_or(0) + total);
+                        }
+                    } else {
+                        sum.add(&subagent.tokens);
+                    }
                 }
-                (UsageStatus::Partial, sum, None)
+                (UsageStatus::Partial, sum, unbroken, None)
             }
         };
         RunUsageTotals {
             status,
             tokens,
+            subagent_tokens,
             request_count: self.requests.len() as i64,
             subagent_count: self.subagents.len() as i64,
             cost_usd,
@@ -364,8 +390,12 @@ mod tests {
     }
 
     #[test]
-    fn empty_tracker_has_no_snapshot() {
-        assert!(UsageTracker::new().snapshot().is_none());
+    fn empty_tracker_snapshot_says_nothing_reported() {
+        let snap = UsageTracker::new().snapshot();
+        assert_eq!(snap.version, 0);
+        assert_eq!(snap.totals.status, UsageStatus::None);
+        assert!(snap.totals.tokens.is_empty());
+        assert_eq!(snap.totals.subagent_tokens, None);
     }
 
     #[test]
@@ -380,7 +410,7 @@ mod tests {
             },
         ));
         tracker.apply(request(None, counts(3, 3)));
-        let snap = tracker.snapshot().unwrap();
+        let snap = tracker.snapshot();
         assert_eq!(snap.requests.len(), 2);
         assert_eq!(snap.requests[0].tokens, counts(10, 40));
         assert_eq!(snap.totals.status, UsageStatus::Partial);
@@ -406,11 +436,56 @@ mod tests {
             total_tokens: Some(10),
             ..SubagentUsage::default()
         }));
-        let snap = tracker.snapshot().unwrap();
+        let snap = tracker.snapshot();
         assert_eq!(snap.subagents.len(), 1);
         assert_eq!(snap.subagents[0].status.as_deref(), Some("running"));
         assert_eq!(snap.totals.tokens, counts(15, 15));
+        assert_eq!(snap.totals.subagent_tokens, None);
         assert_eq!(snap.totals.subagent_count, 1);
+    }
+
+    #[test]
+    fn partial_totals_keep_subagent_totals_without_a_breakdown_apart() {
+        let mut tracker = UsageTracker::new();
+        tracker.apply(request(Some("m1"), counts(10, 10)));
+        for (id, total) in [("t1", 200_000), ("t2", 5)] {
+            tracker.apply(UsageEvent::Subagent(SubagentUsage {
+                id: id.into(),
+                total_tokens: Some(total),
+                ..SubagentUsage::default()
+            }));
+        }
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Partial);
+        assert_eq!(totals.tokens, counts(10, 10));
+        assert_eq!(totals.subagent_tokens, Some(200_005));
+
+        // A reported total already covers its subagents.
+        tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
+            tokens: counts(500, 500),
+            cost_usd: None,
+        }));
+        assert_eq!(tracker.snapshot().totals.subagent_tokens, None);
+    }
+
+    #[test]
+    fn unknown_run_total_falls_back_to_the_row_sum() {
+        let mut tracker = UsageTracker::new();
+        // Nothing to drop yet: no version bump.
+        tracker.apply(UsageEvent::RunTotalUnknown);
+        assert_eq!(tracker.snapshot().version, 0);
+
+        tracker.apply(request(Some("m1"), counts(10, 10)));
+        tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
+            tokens: counts(100, 100),
+            cost_usd: Some(0.5),
+        }));
+        tracker.apply(UsageEvent::RunTotalUnknown);
+        let snap = tracker.snapshot();
+        assert_eq!(snap.version, 3);
+        assert_eq!(snap.totals.status, UsageStatus::Partial);
+        assert_eq!(snap.totals.tokens, counts(10, 10));
+        assert_eq!(snap.totals.cost_usd, None);
     }
 
     #[test]
@@ -421,7 +496,7 @@ mod tests {
             tokens: counts(100, 100),
             cost_usd: Some(0.5),
         }));
-        let totals = tracker.snapshot().unwrap().totals;
+        let totals = tracker.snapshot().totals;
         assert_eq!(totals.status, UsageStatus::Reported);
         assert_eq!(totals.tokens, counts(100, 100));
         assert_eq!(totals.cost_usd, Some(0.5));
@@ -437,7 +512,7 @@ mod tests {
             tokens: TokenCounts::default(),
             cost_usd: Some(0.5),
         }));
-        let snap = tracker.snapshot().unwrap();
+        let snap = tracker.snapshot();
         assert_eq!(snap.totals.status, UsageStatus::Partial);
         assert_eq!(snap.totals.tokens, counts(11, 12));
         assert_eq!(snap.totals.cost_usd, None);

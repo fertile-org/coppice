@@ -19,9 +19,18 @@
 //!   cannot count it as the subagent's usage; the subagent keeps
 //!   `total_tokens` only. An async launch (`status: async_launched`) carries
 //!   no usage and does not set the status.
-//! - `result`: `modelUsage` is the run total with subagents; `usage` is the
-//!   main thread only. A session with several results also carries
-//!   `model_usage_since_last_result`, which is summed.
+//! - `result`: `modelUsage` is the total with subagents; `usage` is the main
+//!   thread only. Since 2.1.309 every result also carries
+//!   `model_usage_since_last_result`, which covers this process only; the
+//!   reader sums it and prefers it.
+//! - On `--resume`, `modelUsage` covers the whole session, earlier processes
+//!   included, from 2.1.277 on (checked on 2.0.0 through 2.1.318). Without
+//!   `model_usage_since_last_result` (2.1.277–2.1.308) a resumed process's
+//!   total cannot be told apart from the session's, so it is not used and the
+//!   run falls back to the sum of its rows.
+//! - One run can start several processes (connector-check phases). Their
+//!   totals are added up; while a later process has not reported its total,
+//!   the run falls back to the sum of its rows.
 
 use super::UsageReader;
 use crate::domain::usage::{
@@ -36,23 +45,66 @@ pub struct ClaudeStreamJsonReader {
     open: Option<String>,
     /// Requests seen through `stream_event`; their `assistant` copies are skipped.
     streamed: HashSet<String>,
-    /// Sum of `model_usage_since_last_result` across results.
-    since_last: Option<RunTotalUsage>,
     /// `tool_use_id`s whose `task_started` was a `local_agent` task.
     subagent_tasks: HashSet<String>,
+    /// Totals of the processes that already ended.
+    finished: Option<RunTotalUsage>,
+    /// A process reported usage but ended without a total that can be
+    /// trusted, so no CLI total covers the run.
+    total_unknown: bool,
+    process: Process,
+}
+
+/// The CLI process currently writing to the run.
+#[derive(Default)]
+struct Process {
+    started: bool,
+    resumed: bool,
+    /// It sent a request or subagent row.
+    reported_rows: bool,
+    /// Sum of its `model_usage_since_last_result`.
+    since_last: Option<RunTotalUsage>,
+    /// Its own total, once a `result` gave one that can be trusted.
+    total: Option<RunTotalUsage>,
 }
 
 impl UsageReader for ClaudeStreamJsonReader {
+    fn start_process(&mut self, resumed: bool) -> Vec<UsageEvent> {
+        if self.process.started {
+            match self.process.total.take() {
+                Some(total) => add_total(&mut self.finished, &total),
+                None if self.process.reported_rows => self.total_unknown = true,
+                None => {}
+            }
+        }
+        self.open = None;
+        self.process = Process {
+            started: true,
+            resumed,
+            ..Process::default()
+        };
+        Vec::new()
+    }
+
     fn read(&mut self, event: &Value) -> Vec<UsageEvent> {
+        self.process.started = true;
         let main_thread = event.get("parent_tool_use_id").is_none_or(Value::is_null);
-        match event.get("type").and_then(Value::as_str) {
+        let mut events = match event.get("type").and_then(Value::as_str) {
             Some("stream_event") if main_thread => self.stream_event(event),
             Some("assistant") if main_thread => self.assistant(event),
             Some("system") => self.system(event),
             Some("user") => subagent_result(event).into_iter().collect(),
-            Some("result") => self.result(event),
+            Some("result") => return self.result(event),
             _ => Vec::new(),
+        };
+        if !events.is_empty() && !self.process.reported_rows {
+            self.process.reported_rows = true;
+            // The earlier processes' total no longer covers the run.
+            if self.finished.is_some() {
+                events.insert(0, UsageEvent::RunTotalUnknown);
+            }
         }
+        events
     }
 }
 
@@ -148,26 +200,46 @@ impl ClaudeStreamJsonReader {
         vec![UsageEvent::Subagent(subagent)]
     }
 
+    /// The run total: earlier processes' totals plus this one's, or
+    /// `RunTotalUnknown` when some process has no total that can be trusted.
     fn result(&mut self, event: &Value) -> Vec<UsageEvent> {
-        if let Some(delta) = event.get("model_usage_since_last_result") {
-            let delta = model_usage(delta);
-            let total = self.since_last.get_or_insert_with(RunTotalUsage::default);
-            total.tokens.add(&delta.tokens);
-            total.cost_usd = match (total.cost_usd, delta.cost_usd) {
-                (None, None) => None,
-                (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
-            };
-            return vec![UsageEvent::RunTotal(total.clone())];
-        }
-        if let Some(all) = event.get("modelUsage") {
-            let mut total = model_usage(all);
-            if total.cost_usd.is_none() {
-                total.cost_usd = event.get("total_cost_usd").and_then(Value::as_f64);
+        let process_total = if let Some(delta) = event.get("model_usage_since_last_result") {
+            let since_last = &mut self.process.since_last;
+            add_total(since_last, &model_usage(delta));
+            since_last.clone()
+        } else if let Some(all) = event.get("modelUsage") {
+            // On a resumed session this may include earlier processes.
+            (!self.process.resumed).then(|| {
+                let mut total = model_usage(all);
+                if total.cost_usd.is_none() {
+                    total.cost_usd = event.get("total_cost_usd").and_then(Value::as_f64);
+                }
+                total
+            })
+        } else {
+            return Vec::new();
+        };
+        // An empty total (`modelUsage: {}`) reports nothing.
+        self.process.total = process_total.filter(|total| !total.tokens.is_empty());
+        match &self.process.total {
+            Some(total) if !self.total_unknown => {
+                let mut run_total = self.finished.clone();
+                add_total(&mut run_total, total);
+                run_total.map(UsageEvent::RunTotal).into_iter().collect()
             }
-            return vec![UsageEvent::RunTotal(total)];
+            _ => vec![UsageEvent::RunTotalUnknown],
         }
-        Vec::new()
     }
+}
+
+/// Adds tokens and cost; the cost stays `None` only when neither side has one.
+fn add_total(sum: &mut Option<RunTotalUsage>, other: &RunTotalUsage) {
+    let sum = sum.get_or_insert_with(RunTotalUsage::default);
+    sum.tokens.add(&other.tokens);
+    sum.cost_usd = match (sum.cost_usd, other.cost_usd) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
+    };
 }
 
 fn request(id: String, model: Option<String>, tokens: TokenCounts) -> UsageEvent {
@@ -265,14 +337,40 @@ mod tests {
     }
 
     fn track(events: &[Value]) -> crate::domain::usage::UsageSnapshot {
-        let mut reader = ClaudeStreamJsonReader::default();
         let mut tracker = UsageTracker::new();
+        track_processes(
+            &mut tracker,
+            &mut ClaudeStreamJsonReader::default(),
+            false,
+            events,
+        );
+        tracker.snapshot()
+    }
+
+    /// One CLI process: `start_process`, then its output.
+    fn track_processes(
+        tracker: &mut UsageTracker,
+        reader: &mut ClaudeStreamJsonReader,
+        resumed: bool,
+        events: &[Value],
+    ) {
+        for usage in reader.start_process(resumed) {
+            tracker.apply(usage);
+        }
         for event in events {
             for usage in reader.read(event) {
                 tracker.apply(usage);
             }
         }
-        tracker.snapshot().expect("usage")
+    }
+
+    fn assistant(id: &str, output: i64) -> Value {
+        json!({ "type": "assistant", "parent_tool_use_id": null,
+            "message": { "id": id, "usage": { "input_tokens": 1, "output_tokens": output } } })
+    }
+
+    fn result_model_usage(output: i64) -> Value {
+        json!({ "type": "result", "modelUsage": { "m": { "inputTokens": 1, "outputTokens": output } } })
     }
 
     #[test]
@@ -400,5 +498,107 @@ mod tests {
         };
         assert_eq!(total.tokens.output, Some(15));
         assert_eq!(total.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn resumed_process_without_since_last_falls_back_to_its_requests() {
+        // 2.1.300 on --resume: one request with 3 output tokens, while
+        // `modelUsage` reports 6 (the earlier process's 3 as well).
+        let mut tracker = UsageTracker::new();
+        let mut reader = ClaudeStreamJsonReader::default();
+        let events = fixture("claude-code-2.1.300-usage-resume.jsonl");
+        track_processes(&mut tracker, &mut reader, true, &events);
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Partial);
+        assert_eq!(totals.tokens.output, Some(3));
+        assert_eq!(totals.request_count, 1);
+
+        // The same output from a fresh session is its own total.
+        let mut tracker = UsageTracker::new();
+        track_processes(
+            &mut tracker,
+            &mut ClaudeStreamJsonReader::default(),
+            false,
+            &events,
+        );
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Reported);
+        assert_eq!(totals.tokens.output, Some(6));
+    }
+
+    #[test]
+    fn resumed_process_with_since_last_uses_it() {
+        let mut reader = ClaudeStreamJsonReader::default();
+        reader.start_process(true);
+        let result = json!({ "type": "result",
+            "modelUsage": { "m": { "outputTokens": 6 } },
+            "model_usage_since_last_result": { "m": { "outputTokens": 3 } } });
+        let UsageEvent::RunTotal(total) = &reader.read(&result)[0] else {
+            panic!("total");
+        };
+        assert_eq!(total.tokens.output, Some(3));
+    }
+
+    #[test]
+    fn totals_of_several_processes_are_added() {
+        // Connector checks run one process per phase on the same run.
+        let mut tracker = UsageTracker::new();
+        let mut reader = ClaudeStreamJsonReader::default();
+        track_processes(
+            &mut tracker,
+            &mut reader,
+            false,
+            &[assistant("a1", 4), result_model_usage(10)],
+        );
+        assert_eq!(tracker.snapshot().totals.tokens.output, Some(10));
+
+        // While the next process runs, the earlier total no longer covers the run.
+        track_processes(&mut tracker, &mut reader, false, &[assistant("b1", 2)]);
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Partial);
+        assert_eq!(totals.tokens.output, Some(6));
+
+        track_processes(&mut tracker, &mut reader, false, &[]);
+        // `b` ended without a total: no CLI total covers the run any more.
+        track_processes(
+            &mut tracker,
+            &mut reader,
+            false,
+            &[assistant("c1", 1), result_model_usage(5)],
+        );
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Partial);
+        assert_eq!(totals.tokens.output, Some(7));
+    }
+
+    #[test]
+    fn process_without_rows_keeps_the_earlier_total() {
+        let mut tracker = UsageTracker::new();
+        let mut reader = ClaudeStreamJsonReader::default();
+        track_processes(
+            &mut tracker,
+            &mut reader,
+            false,
+            &[assistant("a1", 4), result_model_usage(10)],
+        );
+        track_processes(&mut tracker, &mut reader, false, &[]);
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Reported);
+        assert_eq!(totals.tokens.output, Some(10));
+    }
+
+    #[test]
+    fn empty_model_usage_leaves_the_row_sum() {
+        let mut tracker = UsageTracker::new();
+        let result = json!({ "type": "result", "modelUsage": {} });
+        track_processes(
+            &mut tracker,
+            &mut ClaudeStreamJsonReader::default(),
+            false,
+            &[assistant("a1", 4), result],
+        );
+        let totals = tracker.snapshot().totals;
+        assert_eq!(totals.status, UsageStatus::Partial);
+        assert_eq!(totals.tokens.output, Some(4));
     }
 }
