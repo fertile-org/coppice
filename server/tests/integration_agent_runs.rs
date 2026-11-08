@@ -586,3 +586,473 @@ async fn ten_mock_runs_do_not_grow_server_rss_or_leave_streams() {
         );
     }
 }
+
+async fn get_json(
+    app: &axum::Router,
+    uri: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request("GET", uri, "", cookie, csrf))
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json = if body.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&body).unwrap()
+    };
+    (status, json)
+}
+
+#[tokio::test]
+async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["totals"]["status"], "reported");
+    assert_eq!(run["totals"]["tokens"]["output"], 120);
+    assert_eq!(run["totals"]["tokens"]["cacheRead"], 2200);
+    assert_eq!(run["totals"]["requestCount"], 2);
+    assert_eq!(run["totals"]["subagentCount"], 1);
+    assert!(run["totals"].get("costUsd").is_none(), "cost is not served");
+    let requests = run["requests"].as_array().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["id"], "req-1");
+    assert_eq!(requests[0]["granularity"], "request");
+    assert_eq!(requests[1]["tokens"]["reasoning"], 10);
+    // Two events for one subagent are merged into one row.
+    let subagents = run["subagents"].as_array().unwrap();
+    assert_eq!(subagents.len(), 1);
+    assert_eq!(subagents[0]["agentType"], "explore");
+    assert_eq!(subagents[0]["status"], "completed");
+    assert_eq!(subagents[0]["tokens"]["output"], 40);
+    assert_eq!(subagents[0]["toolUses"], 2);
+
+    let (status, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runsWithUsage"], 1);
+    assert_eq!(ticket["own"]["runsNotReported"], 0);
+    assert_eq!(ticket["own"]["partialRuns"], 0);
+    assert_eq!(ticket["own"]["tokens"]["output"], 120);
+    // The CLI's total already includes its subagents.
+    assert!(ticket["own"]["subagentTokens"].is_null());
+    assert!(ticket["subtickets"].is_null());
+    assert_eq!(ticket["runs"][0]["runId"], run_id.as_str());
+    assert_eq!(ticket["runs"][0]["usage"]["status"], "reported");
+    assert_eq!(ticket["byAgent"][0]["key"], agent_id.as_str());
+    assert_eq!(ticket["byJobType"][0]["key"], "work_on_ticket");
+
+    let missing = uuid::Uuid::new_v4();
+    let (status, _) = get_json(
+        &app,
+        &format!("/api/agent-runs/{missing}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = get_json(
+        &app,
+        &format!("/api/tickets/{missing}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A fixture without `usage` stands for a connector Coppice cannot read:
+/// the run has no usage and is left out of the ticket's counts.
+#[tokio::test]
+async fn untracked_run_reports_nothing_and_is_not_counted() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(run["totals"].is_null());
+    assert_eq!(run["requests"].as_array().unwrap().len(), 0);
+
+    let (_, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["own"]["runs"], 0);
+    assert_eq!(ticket["own"]["runsWithUsage"], 0);
+    assert_eq!(ticket["own"]["runsNotReported"], 0);
+    assert!(ticket["own"]["tokens"]["output"].is_null());
+    assert!(ticket["runs"][0]["usage"].is_null());
+}
+
+/// Waits for an event matching `pick`, or returns None at the deadline.
+async fn drain_events<T>(
+    events: &mut tokio::sync::broadcast::Receiver<coppice_server::events::AppEvent>,
+    timeout: Duration,
+    mut pick: impl FnMut(&coppice_server::events::AppEvent) -> Option<T>,
+) -> Option<T> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(event)) => {
+                if let Some(found) = pick(&event) {
+                    return Some(found);
+                }
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) | Err(_) => return None,
+        }
+    }
+}
+
+/// Stopping a run publishes `agent_run.finished` before the worker saves the
+/// final snapshot, so the worker has to announce the save itself. The test does
+/// not assert which of the two events arrives first.
+#[tokio::test]
+async fn stopped_run_publishes_usage_updated_after_final_save() {
+    use coppice_server::events::AppEvent;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage_hold", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
+
+    let mut events = state.event_bus.subscribe();
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+
+    // The mock replays usage before it holds, and the live writer saves it.
+    // Stopping earlier could cancel the run before any usage exists.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (_, run) = get_json(
+            &app,
+            &format!("/api/agent-runs/{run_id}/usage"),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        // Tracked runs have totals from the start (status `none`); wait for usage.
+        if !run["totals"].is_null() && run["totals"]["status"] != "none" {
+            break;
+        }
+        assert!(Instant::now() < deadline, "usage never reported");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+
+    let mut finished = false;
+    let mut usage_updated = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(finished && usage_updated) {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let seen = drain_events(&mut events, remaining, |event| match event {
+            AppEvent::AgentRunFinished {
+                run_id, status, ..
+            } if *run_id == run_uuid => {
+                assert_eq!(status, "cancelled");
+                Some(true)
+            }
+            AppEvent::UsageUpdated {
+                run_id,
+                ticket_id,
+            } if *run_id == run_uuid => {
+                assert_eq!(*ticket_id, ticket_uuid);
+                Some(false)
+            }
+            _ => None,
+        })
+        .await
+        .expect("timed out waiting for agent_run.finished and usage.updated");
+        if seen {
+            finished = true;
+        } else {
+            usage_updated = true;
+        }
+    }
+
+    let (_, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(run["totals"]["tokens"]["output"], 120);
+}
+
+/// An untracked run (fixture without `usage`) has no snapshot to announce.
+#[tokio::test]
+async fn run_without_usage_publishes_no_usage_updated() {
+    use coppice_server::events::AppEvent;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("done", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let mut events = state.event_bus.subscribe();
+    let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    // The worker commits `succeeded` before it publishes `agent_run.finished`,
+    // so wait for the finish rather than draining what is already queued. A
+    // `usage.updated` would be published before both.
+    drain_events(&mut events, Duration::from_secs(10), |event| match event {
+        AppEvent::UsageUpdated { .. } => panic!("no usage was reported, got usage.updated"),
+        AppEvent::AgentRunFinished { .. } => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("timed out waiting for agent_run.finished");
+}
+
+/// `"usage": []`: Coppice read the run's output but nothing was reported.
+#[tokio::test]
+async fn tracked_run_that_reported_nothing_says_so() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage-empty").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, run) = get_json(
+        &app,
+        &format!("/api/agent-runs/{run_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["totals"]["status"], "none");
+    assert!(run["totals"]["tokens"]["output"].is_null());
+
+    let (_, ticket) = get_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/usage"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ticket["own"]["runs"], 1);
+    assert_eq!(ticket["own"]["runsWithUsage"], 0);
+    assert_eq!(ticket["own"]["runsNotReported"], 1);
+    assert_eq!(ticket["runs"][0]["usage"]["status"], "none");
+}
+
+/// Whether a run counts comes from its stored usage row alone: no connector,
+/// current or past, is consulted.
+#[tokio::test]
+async fn usage_counts_follow_stored_rows_not_connectors() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Usage Tracked Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+
+    let insert_run = |session_connector: Option<&'static str>, usage: Option<&'static str>| async move {
+        let run_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs
+                (id, ticket_id, agent_id, job_type, status, sandbox_profile_id, session_connector)
+            VALUES ($1, $2, $3, 'work_on_ticket', 'succeeded', 'permissive', $4)
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_uuid)
+        .bind(agent_uuid)
+        .bind(session_connector)
+        .execute(pool)
+        .await
+        .unwrap();
+        if let Some(status) = usage {
+            let output = (status == "reported").then_some(5_i64);
+            sqlx::query(
+                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, $2, 1, $3)",
+            )
+            .bind(run_id)
+            .bind(status)
+            .bind(output)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        run_id
+    };
+    // Plan-run shape: a usage row, no session connector.
+    insert_run(None, Some("reported")).await;
+    // Tracked, but nothing reported.
+    insert_run(Some("claude-code"), Some("none")).await;
+    // No row: a Claude run from before tracking, and a Codex run.
+    let old_claude = insert_run(Some("claude-code"), None).await;
+    insert_run(Some("codex"), None).await;
+
+    for connector in ["codex", "claude-code"] {
+        sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
+            .bind(agent_uuid)
+            .bind(connector)
+            .execute(pool)
+            .await
+            .unwrap();
+        let (status, ticket) = get_json(
+            &app,
+            &format!("/api/tickets/{ticket_id}/usage"),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ticket["runs"].as_array().unwrap().len(), 4, "{connector}");
+        assert_eq!(ticket["own"]["runs"], 2, "{connector}");
+        assert_eq!(ticket["own"]["runsWithUsage"], 1, "{connector}");
+        assert_eq!(ticket["own"]["runsNotReported"], 1, "{connector}");
+        assert_eq!(ticket["own"]["tokens"]["output"], 5, "{connector}");
+        let old = ticket["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["runId"] == old_claude.to_string().as_str())
+            .unwrap();
+        assert!(old["usage"].is_null(), "{connector}");
+    }
+}

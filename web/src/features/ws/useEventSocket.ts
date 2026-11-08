@@ -7,6 +7,8 @@ import type { RunStatus } from '../../lib/schemas/agentRun';
 import { designsQueryKey } from '../designs/useDesigns';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
+import { runUsageQueryKey } from '../runs/useRunUsage';
+import { TICKET_USAGE_KEY } from '../tickets/useTicketUsage';
 import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
@@ -87,8 +89,28 @@ function dispatchMessage(raw: string) {
       queryKey: designsQueryKey(payload.ticket_id),
     });
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    // A stopped run publishes the finish before its worker saves the final
+    // snapshot; `usage.updated` covers that case. Every ticket's usage, not
+    // just this one: a parent's total includes its subtickets' runs.
+    void queryClient.invalidateQueries({ queryKey: TICKET_USAGE_KEY });
+    void queryClient.invalidateQueries({
+      queryKey: runUsageQueryKey(payload.run_id),
+    });
     for (const listener of listeners) {
       listener.onRunFinished?.(payload);
+    }
+  }
+
+  if (msg.type === 'usage.updated') {
+    const payload = msg as { ticket_id?: string; run_id?: string };
+    // Every ticket's usage: a parent's total includes this run too.
+    if (payload.ticket_id) {
+      void queryClient.invalidateQueries({ queryKey: TICKET_USAGE_KEY });
+    }
+    if (payload.run_id) {
+      void queryClient.invalidateQueries({
+        queryKey: runUsageQueryKey(payload.run_id),
+      });
     }
   }
 
@@ -132,11 +154,13 @@ function dispatchMessage(raw: string) {
   }
 }
 
-/** Every query an app event can change: tickets, runs, comments, designs, notifications. */
+/** Every query an app event can change: tickets, runs, usage, comments, designs, notifications. */
 export const EVENT_QUERY_FAMILIES = [
   ['tickets'],
   ['ticket'],
   ['agent-runs'],
+  ['ticket-usage'],
+  ['agent-run-usage'],
   ['comments'],
   ['designs'],
   NOTIFICATIONS_QUERY_KEY,

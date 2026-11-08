@@ -1,5 +1,8 @@
+use crate::domain::usage::{UsageSnapshot, UsageTracker};
+use crate::providers::usage::{reader_for, UsageReader};
 use crate::sessions::run_artifact_log::RunArtifactLog;
 use crate::sessions::LiveMessage;
+use coppice_connectors::UsageFormat;
 use dashmap::DashMap;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -16,6 +19,11 @@ pub struct RunStreamHandle {
     /// First non-empty model the CLI reported for this run.
     reported: Mutex<Option<String>>,
     reported_tx: watch::Sender<String>,
+    /// Token usage read from the connector's output, in its declared format.
+    usage: Mutex<UsageState>,
+    /// The latest usage snapshot. Holds no handle, so a writer subscribed to
+    /// it ends when the run's handle is dropped.
+    usage_tx: watch::Sender<Option<Arc<UsageSnapshot>>>,
     /// Appends console events and frames to the run folder as they arrive.
     artifact_log: Option<RunArtifactLog>,
     /// Bumped on every snapshot change, so a checkpoint can wait for idle.
@@ -23,6 +31,12 @@ pub struct RunStreamHandle {
 }
 
 /// Structured console events are typed `<connector>.console.<kind>`.
+#[derive(Default)]
+struct UsageState {
+    reader: Option<Box<dyn UsageReader>>,
+    tracker: UsageTracker,
+}
+
 pub fn is_console_event_type(ty: &str) -> bool {
     let mut parts = ty.split('.');
     matches!(
@@ -151,6 +165,57 @@ impl RunStreamHandle {
     pub fn subscribe_reported_model(&self) -> watch::Receiver<String> {
         self.reported_tx.subscribe()
     }
+
+    /// A CLI process starts writing to this run; read its usage in `format`.
+    /// Call once per process, before its output. The first format with a
+    /// reader wins; a format without one leaves usage off. `resumed` says the
+    /// process continues an earlier session.
+    ///
+    /// Publishes a snapshot right away, so a tracked run that reports nothing
+    /// is still stored as tracked.
+    pub fn track_usage(&self, format: UsageFormat, resumed: bool) {
+        let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
+        if state.reader.is_none() {
+            state.reader = reader_for(format);
+        }
+        let UsageState { reader, tracker } = &mut *state;
+        let Some(reader) = reader.as_mut() else {
+            return;
+        };
+        for usage in reader.start_process(resumed) {
+            tracker.apply(usage);
+        }
+        self.usage_tx
+            .send_replace(Some(Arc::new(tracker.snapshot())));
+    }
+
+    /// One output event from the connector. Ignored until [`Self::track_usage`].
+    pub fn observe_usage(&self, event: &Value) {
+        let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
+        let UsageState { reader, tracker } = &mut *state;
+        let Some(reader) = reader.as_mut() else {
+            return;
+        };
+        let events = reader.read(event);
+        if events.is_empty() {
+            return;
+        }
+        for usage in events {
+            tracker.apply(usage);
+        }
+        // Sent under the lock so snapshots go out in version order.
+        self.usage_tx
+            .send_replace(Some(Arc::new(tracker.snapshot())));
+    }
+
+    /// `None` until usage is tracked ([`Self::track_usage`] with a readable format).
+    pub fn usage_snapshot(&self) -> Option<Arc<UsageSnapshot>> {
+        self.usage_tx.borrow().clone()
+    }
+
+    pub fn subscribe_usage(&self) -> watch::Receiver<Option<Arc<UsageSnapshot>>> {
+        self.usage_tx.subscribe()
+    }
 }
 
 #[derive(Default)]
@@ -179,6 +244,7 @@ impl RunStreamRegistry {
         let (tx, _) = broadcast::channel(2048);
         let (cancel_tx, _) = watch::channel(false);
         let (reported_tx, _) = watch::channel(String::new());
+        let (usage_tx, _) = watch::channel(None);
         let (snapshot_version, _) = watch::channel(0);
         let artifact_log = self.artifacts.as_ref().map(|(dir, max_bytes)| {
             RunArtifactLog::start(
@@ -194,6 +260,8 @@ impl RunStreamRegistry {
             snapshot_source: Mutex::new(None),
             reported: Mutex::new(None),
             reported_tx,
+            usage: Mutex::new(UsageState::default()),
+            usage_tx,
             artifact_log,
             snapshot_version,
         });
@@ -213,6 +281,41 @@ impl RunStreamRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::usage::UsageStatus;
+
+    #[tokio::test]
+    async fn usage_is_read_only_after_track_usage() {
+        let registry = RunStreamRegistry::new();
+        let run_id = Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let event = serde_json::json!({ "kind": "request", "tokens": { "output": 4 } });
+        handle.observe_usage(&event);
+        assert!(handle.usage_snapshot().is_none());
+
+        let mut rx = handle.subscribe_usage();
+        // A format without a reader leaves usage off.
+        handle.track_usage(UsageFormat::None, false);
+        assert!(handle.usage_snapshot().is_none());
+
+        handle.track_usage(UsageFormat::Normalized, false);
+        // Tracked before anything is reported: a version-0 snapshot.
+        let snapshot = handle.usage_snapshot().expect("tracked");
+        assert_eq!(snapshot.version, 0);
+        assert_eq!(snapshot.totals.status, UsageStatus::None);
+
+        // A later format does not replace the first reader.
+        handle.track_usage(UsageFormat::None, true);
+        handle.observe_usage(&event);
+        handle.observe_usage(&serde_json::json!({ "type": "unrelated" }));
+        let snapshot = handle.usage_snapshot().expect("snapshot");
+        assert_eq!(snapshot.version, 1);
+        assert_eq!(snapshot.totals.tokens.output, Some(4));
+        assert!(rx.borrow_and_update().is_some());
+        // The writer's receiver closes once the run's handle is gone.
+        registry.remove(run_id);
+        drop(handle);
+        assert!(rx.changed().await.is_err());
+    }
 
     #[tokio::test]
     async fn registry_broadcasts_live_messages() {

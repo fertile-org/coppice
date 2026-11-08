@@ -83,6 +83,28 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['designs', 'ticket', 'ticket-789'],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
+    // A stopped run's final snapshot can land after the finish. All tickets'
+    // usage: a parent's total includes its subtickets' runs.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket-usage'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-run-usage', 'run-2'],
+    });
+  });
+
+  it('refetches both usage queries on usage.updated', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'usage.updated',
+        ticket_id: 'ticket-789',
+        run_id: 'run-2',
+      }),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket-usage'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-run-usage', 'run-2'],
+    });
   });
 
   it('refetches only the event-driven families on resync', async () => {
@@ -96,6 +118,8 @@ describe('useEventSocket dispatch', () => {
         ['tickets'],
         ['ticket'],
         ['agent-runs'],
+        ['ticket-usage'],
+        ['agent-run-usage'],
         ['comments'],
         ['designs'],
         ['notifications'],

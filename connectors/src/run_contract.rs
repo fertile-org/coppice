@@ -227,6 +227,10 @@ pub const CLAUDE_CODE: RunContract = RunContract {
             &["--verbose"],
             "Already passed with stream-json. Kept so the output shape does not depend on a CLI default.",
         ),
+        flag(
+            &["--include-partial-messages"],
+            "Streams message_start and message_delta, the only events with each request's final token usage.",
+        ),
     ],
     trailing: &[],
     process_cwd_is_worktree: true,
@@ -673,6 +677,7 @@ mod tests {
                 "--output-format",
                 "stream-json",
                 "--verbose",
+                "--include-partial-messages",
                 "--permission-mode",
                 "bypassPermissions",
             ]

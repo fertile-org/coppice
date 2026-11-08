@@ -214,9 +214,13 @@ impl AgentProvider for MockProvider {
         let scratch_files = take_scratch_writes(&mut value)?;
         write_scratch_files(&input, &scratch_files)?;
         let (tool_calls, delay_ms) = take_tool_directives(&mut value)?;
+        let usage = take_usage(&mut value)?;
         let result: AgentRunResult = serde_json::from_value(value)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
         Self::maybe_write_stdout(&input)?;
+        if let Some(usage) = &usage {
+            replay_usage(&input, usage);
+        }
         let outputs = run_tool_calls(&input, &tool_calls).await?;
         Self::append_tool_output(&input, &outputs)?;
         wait_after_tool_calls(&input, delay_ms).await?;
@@ -290,6 +294,37 @@ fn take_tool_directives(
         None => None,
     };
     Ok((calls, delay))
+}
+
+/// Pull the mock-only `usage` key: normalized usage events, in order.
+/// Without the key the run is untracked, like a connector Coppice cannot read;
+/// `"usage": []` is a tracked run that reported nothing.
+fn take_usage(
+    value: &mut serde_json::Value,
+) -> Result<Option<Vec<serde_json::Value>>, ProviderError> {
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    match object.remove("usage") {
+        Some(serde_json::Value::Array(events)) => Ok(Some(events)),
+        Some(_) => Err(ProviderError::InvalidFixture(
+            "usage must be an array of usage events".into(),
+        )),
+        None => Ok(None),
+    }
+}
+
+/// Feed the fixture's usage through the same path a connector's output takes.
+fn replay_usage(input: &AgentRunInput, events: &[serde_json::Value]) {
+    let Some(stream) = &input.stream else {
+        return;
+    };
+    if let Some(descriptor) = coppice_connectors::get(coppice_connectors::MOCK) {
+        stream.track_usage(descriptor.usage, false);
+    }
+    for event in events {
+        stream.observe_usage(event);
+    }
 }
 
 fn mcp_unavailable(err: impl std::fmt::Display) -> ProviderError {

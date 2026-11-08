@@ -340,7 +340,8 @@ async fn execute_job(
     // left a window where wait_for_run_stream polled an empty registry; short
     // runs finished and unregistered before a client could attach.
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
+    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
 
     run_svc
@@ -712,6 +713,9 @@ async fn execute_job(
         })
         .await;
     crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
+    if crate::services::usage_service::record_usage(pool, run.id, &stream).await {
+        crate::events::publish::publish_usage_updated(&state.event_bus, ticket_id, run.id);
+    }
     grant.revoke().await;
     let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
@@ -1059,6 +1063,7 @@ async fn invoke_chat_provider(
         let _ = persisted.await;
     }
     crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
+    crate::services::usage_service::record_usage(pool, run.id, &stream).await;
     result
 }
 
@@ -1098,7 +1103,8 @@ async fn execute_chat_turn(
     let cwd_str = cwd.to_string_lossy().into_owned();
 
     let stream = state.run_streams.register(run.id);
-    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
+    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
     let cancel_rx = stream.cancelled_rx();
 
     run_svc

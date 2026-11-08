@@ -27,6 +27,7 @@ import { openAssigneeCombobox, subscribeAssigneeOpen } from './assigneeShortcut'
 import { useAgentRuns } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { TicketGitActions } from './TicketGitActions';
+import { TicketTokens } from './TicketTokens';
 import {
   useAgents,
   useApproveSplits,
@@ -39,6 +40,8 @@ import {
 
 interface TicketMetadataPanelProps {
   ticket: Ticket;
+  /** Opens the drawer's Runs tab, where token usage is broken down per run. */
+  onViewRuns?: () => void;
 }
 
 function ReviewedCommit({ review }: { review: HumanReview }) {
@@ -60,7 +63,7 @@ function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
   return ticket.substatusMetadata ?? {};
 }
 
-export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
+export function TicketMetadataPanel({ ticket, onViewRuns }: TicketMetadataPanelProps) {
   const toast = useToast();
   const confirm = useConfirm();
   const navigate = useNavigate();
@@ -390,6 +393,8 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
           )}
         </dl>
       )}
+
+      <TicketTokens ticketId={ticket.id} onViewRuns={onViewRuns} />
 
       <TicketGitActions ticket={ticket} />
 

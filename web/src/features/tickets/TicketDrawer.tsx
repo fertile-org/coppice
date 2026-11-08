@@ -469,7 +469,7 @@ function TicketDrawerPanel({
               />
             </div>
             <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">
-              <TicketMetadataPanel ticket={ticket} />
+              <TicketMetadataPanel ticket={ticket} onViewRuns={() => setTab('runs')} />
             </div>
           </div>
         )}

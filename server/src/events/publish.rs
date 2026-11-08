@@ -26,6 +26,13 @@ pub fn publish_ticket_updated(bus: &EventBus, ticket: &TicketWithDisplay) {
     });
 }
 
+/// Announce that a ticket run's final usage snapshot is saved. Call it after
+/// `usage_service::record_usage` returns true; `agent_run.finished` may have
+/// been published earlier, before the final snapshot existed.
+pub fn publish_usage_updated(bus: &EventBus, ticket_id: Uuid, run_id: Uuid) {
+    bus.publish(AppEvent::UsageUpdated { ticket_id, run_id });
+}
+
 /// Announce an active ticket run as `agent_run.started` with its current
 /// status: `queued` right after it is committed (it may wait behind busy
 /// workers; the worker sends `running` on pickup), or `running` when

@@ -39,6 +39,9 @@ pub enum AppEvent {
         comment_id: Uuid,
         mentioned_agent_id: Uuid,
     },
+    /// A ticket run's final usage snapshot was saved by the worker.
+    #[serde(rename = "usage.updated")]
+    UsageUpdated { ticket_id: Uuid, run_id: Uuid },
     #[serde(rename = "notification.changed")]
     NotificationChanged {
         recipient_user_id: Option<Uuid>,

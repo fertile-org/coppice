@@ -15,6 +15,10 @@ vi.mock('./TicketGitActions', () => ({
   TicketGitActions: () => null,
 }));
 
+vi.mock('./TicketTokens', () => ({
+  TicketTokens: () => null,
+}));
+
 vi.mock('../keyboard/useKeyboard', () => ({
   useRegisterShortcut: () => {},
 }));

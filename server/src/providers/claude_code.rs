@@ -202,6 +202,13 @@ impl AgentProvider for ClaudeCodeProvider {
             &args,
             run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
+        if let Some(stream) = &input.stream {
+            let resumed = input
+                .resume_session_id
+                .as_deref()
+                .is_some_and(|sid| !sid.is_empty());
+            stream.track_usage(descriptor.usage, resumed);
+        }
         let invocation = CliInvocation {
             program,
             args,
@@ -421,6 +428,7 @@ impl LineHandler for ClaudeLines {
             {
                 stream.note_reported_model(&model);
             }
+            stream.observe_usage(value);
             self.console.handle_stream_json(stream, value);
         }
 

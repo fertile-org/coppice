@@ -154,6 +154,7 @@ vi.mock('./useAgentRuns', () => ({
   useRunAgent: () => ({ mutateAsync: runMocks.runAgent, isPending: false }),
   useStopRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
   isActiveRunStatus: (status: string) => status === 'running' || status === 'queued',
+  agentRunsRefetchInterval: () => false,
   shouldPollRunForReconciliation: (run: AgentRun) =>
     run.status === 'running' || run.status === 'queued' || run.endedAt == null,
 }));
@@ -180,6 +181,14 @@ vi.mock('../runs/ClaudeLiveConsole', () => ({
 
 vi.mock('./TicketCommentsTab', () => ({
   TicketCommentsTab: () => <div>Comments</div>,
+}));
+
+vi.mock('./TicketTokens', () => ({
+  TicketTokens: ({ onViewRuns }: { onViewRuns?: () => void }) => (
+    <button type="button" onClick={onViewRuns}>
+      View runs →
+    </button>
+  ),
 }));
 
 function LocationProbe() {
@@ -261,6 +270,15 @@ describe('TicketDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Live Console' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agent Runs' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Comments' })).toBeNull();
+  });
+
+  it('opens Agent Runs from the Tokens link on the Detail tab', () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'View runs →' }));
+    expect(screen.getByRole('tab', { name: 'Agent Runs' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('drawer panel uses 90% width class', () => {
