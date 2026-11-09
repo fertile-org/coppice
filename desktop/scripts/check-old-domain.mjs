@@ -5,12 +5,18 @@
 //
 //   node desktop/scripts/check-old-domain.mjs --source [path ...]
 //
-// --source scans every file `git ls-files` lists. Each extra path (a file or a
-// directory, such as the packaged app, updater-mode.json or the Pages CNAME)
-// must exist. Anything that can't be read fails the check instead of passing.
+// --source scans every path `git ls-files` lists. A tracked symlink is always
+// checked by its link text. When that link resolves to a file inside this
+// repository, the file is checked too. A link that resolves to a directory
+// inside the repository is not read; those files are already listed under
+// their own paths. A broken link, or a link that resolves outside the
+// repository, fails the check. Each extra path (a file or a directory, such
+// as the packaged app, updater-mode.json or the Pages CNAME) must exist and
+// is read the same way as before. Anything that should be scanned but can't
+// be read fails the check instead of passing.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const OLD_DOMAIN = ['getcoppice', 'dev'].join('.');
@@ -46,17 +52,74 @@ export function sourceFiles(root) {
   return files.map((file) => join(root, file));
 }
 
+// True when `candidateReal` is `rootReal` or a path under it. Both arguments
+// must already be realpaths, so a symlink can't pretend to stay inside.
+function pathIsInside(rootReal, candidateReal) {
+  const rel = relative(rootReal, candidateReal);
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+}
+
+// Hits for one `git ls-files` entry. A deleted worktree file is skipped: it
+// is not shipped. A symlink is not skipped that way. Its link text is
+// scanned, a file it resolves to inside the repository is scanned, a
+// directory inside the repository is left to its own tracked paths, and a
+// broken or out-of-repo link fails the check.
+function trackedEntryHits(file, root, rootReal) {
+  let info;
+  try {
+    info = lstatSync(file);
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  const label = relative(root, file) || file;
+  if (!info.isSymbolicLink()) return findInBuffer(readFileSync(file), label);
+
+  const target = readlinkSync(file);
+  const hits = findInBuffer(Buffer.from(target), label);
+  let resolved;
+  try {
+    resolved = realpathSync(file);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR' || err.code === 'ELOOP') {
+      throw new Error(`broken symlink: ${label} -> ${target}`);
+    }
+    throw err;
+  }
+  if (!pathIsInside(rootReal, resolved)) {
+    throw new Error(`symlink resolves outside the repository: ${label} -> ${target}`);
+  }
+  const resolvedStat = statSync(resolved);
+  if (resolvedStat.isDirectory()) return hits;
+  if (!resolvedStat.isFile()) {
+    throw new Error(`symlink does not resolve to a file or directory: ${label} -> ${target}`);
+  }
+  const resolvedLabel = relative(rootReal, resolved) || resolved;
+  hits.push(...findInBuffer(readFileSync(resolved), resolvedLabel));
+  return hits;
+}
+
 export function checkOldDomain({ source = false, paths = [], root = process.cwd() } = {}) {
   if (!source && !paths.length) throw new Error('nothing to check: pass --source or a path');
-  const files = source ? sourceFiles(root) : [];
-  for (const path of paths) walk(path, files);
+  const files = [];
   const hits = [];
-  for (const file of files) {
+  if (source) {
+    const rootReal = realpathSync(root);
+    for (const file of sourceFiles(root)) {
+      files.push(file);
+      hits.push(...trackedEntryHits(file, root, rootReal));
+    }
+  }
+  // Extra paths (the packaged app, updater-mode.json, the CNAME) stay on the
+  // original read path. Symlink policy above applies only to tracked entries.
+  const extras = [];
+  for (const path of paths) walk(path, extras);
+  for (const file of extras) {
+    files.push(file);
     let buffer;
     try {
       buffer = readFileSync(file);
     } catch (err) {
-      // A tracked file deleted in the working tree is not shipped.
       if (source && err.code === 'ENOENT' && !paths.includes(file)) continue;
       throw err;
     }
