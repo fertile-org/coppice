@@ -5,7 +5,7 @@ import { LOCALES, type LocalePath } from '../i18n/paths.ts';
 export const BLOG_INDEX = {
   title: 'Blog',
   description:
-    'The Coppice blog publishes notes about the local board, how an agent run changes the work, and the review a person still makes.',
+    'Articles from the Coppice team on coding agents such as Claude Code and Codex, and how to put them to work on real projects.',
   empty: 'No notes are published yet.',
 } as const;
 

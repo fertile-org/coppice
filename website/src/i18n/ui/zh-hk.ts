@@ -8,6 +8,7 @@ export const ui: Ui = {
   skip: '跳到正文',
   nav: {
     docs: '文件',
+    blog: '網誌',
     github: 'GitHub',
     download: '下載',
   },
@@ -21,6 +22,7 @@ export const ui: Ui = {
     concepts: '核心概念',
     providers: '供應商',
     faq: '常見問題',
+    blog: '網誌',
     github: 'GitHub',
     sponsor: '贊助',
   },
