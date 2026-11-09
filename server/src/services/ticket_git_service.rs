@@ -590,7 +590,7 @@ impl<'a> TicketGitService<'a> {
         // The ticket-branch commit that was merged. Written here, with the
         // successful merge, and not derived from the activity comment.
         HumanReviewService::new(self.pool)
-            .record_merge(ticket_id, &head)
+            .record_merge(ticket_id, &head, base_branch)
             .await?;
 
         let head_sha = git_head_sha(&ctx.git_dir).await?;

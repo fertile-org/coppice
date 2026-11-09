@@ -1765,7 +1765,7 @@ async fn final_approve(
     match reviewed {
         Ok(Some(head_sha)) => {
             HumanReviewService::new(pool)
-                .record_acceptance(ticket_id, user.id, &head_sha)
+                .record_acceptance(ticket_id, Some(user.id), &head_sha)
                 .await
                 .map_err(|_| FinalApproveError::Status(StatusCode::INTERNAL_SERVER_ERROR))?;
         }

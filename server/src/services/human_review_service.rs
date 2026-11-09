@@ -10,6 +10,7 @@ use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::domain::git_state::GitOutcome;
 use crate::domain::substatus::TicketStatus;
 use crate::services::workflow_service::WorkflowService;
 
@@ -23,6 +24,10 @@ pub struct HumanReview {
     pub accepted_by: Option<Uuid>,
     pub accepted_at: time::OffsetDateTime,
     pub merged_at: Option<time::OffsetDateTime>,
+    pub accepted_by_coppice: bool,
+    pub merged_base_branch: Option<String>,
+    pub git_outcome: Option<GitOutcome>,
+    pub git_outcome_reason: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,7 +48,8 @@ impl<'a> HumanReviewService<'a> {
     pub async fn get(&self, ticket_id: Uuid) -> Result<Option<HumanReview>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
+            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
+                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
             FROM ticket_human_reviews
             WHERE ticket_id = $1
             "#,
@@ -61,7 +67,8 @@ impl<'a> HumanReviewService<'a> {
     ) -> Result<std::collections::HashMap<Uuid, HumanReview>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
-            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
+            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
+                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
             FROM ticket_human_reviews
             WHERE ticket_id = ANY($1)
             "#,
@@ -80,7 +87,7 @@ impl<'a> HumanReviewService<'a> {
     pub async fn record_acceptance(
         &self,
         ticket_id: Uuid,
-        accepted_by: Uuid,
+        accepted_by: Option<Uuid>,
         head_sha: &str,
     ) -> Result<HumanReview, HumanReviewError> {
         let head_sha = normalize_sha(head_sha);
@@ -90,9 +97,10 @@ impl<'a> HumanReviewService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO ticket_human_reviews (
-                ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, invalidated_at
+                ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, invalidated_at,
+                accepted_by_coppice
             )
-            VALUES ($1, $2, $3, $4, false, $5, now(), NULL)
+            VALUES ($1, $2, $3, $4, false, $5, now(), NULL, $6)
             ON CONFLICT (ticket_id) DO UPDATE SET
                 head_sha = EXCLUDED.head_sha,
                 comment_ids = EXCLUDED.comment_ids,
@@ -101,9 +109,15 @@ impl<'a> HumanReviewService<'a> {
                 accepted_by = EXCLUDED.accepted_by,
                 accepted_at = now(),
                 invalidated_at = NULL,
+                accepted_by_coppice = EXCLUDED.accepted_by_coppice,
                 merged_sha = NULL,
-                merged_at = NULL
-            RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
+                merged_at = NULL,
+                merged_base_branch = NULL,
+                git_outcome = NULL,
+                git_outcome_reason = NULL,
+                git_outcome_at = NULL
+            RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
+                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
             "#,
         )
         .bind(ticket_id)
@@ -111,6 +125,7 @@ impl<'a> HumanReviewService<'a> {
         .bind(&comment_ids)
         .bind(&run_ids)
         .bind(accepted_by)
+        .bind(accepted_by.is_none())
         .fetch_one(self.pool)
         .await?;
 
@@ -123,22 +138,51 @@ impl<'a> HumanReviewService<'a> {
         &self,
         ticket_id: Uuid,
         merged_sha: &str,
+        base_branch: &str,
     ) -> Result<(), HumanReviewError> {
         let merged_sha = normalize_sha(merged_sha);
         sqlx::query(
             r#"
             UPDATE ticket_human_reviews
-            SET merged_sha = $2, merged_at = now()
+            SET merged_sha = $2, merged_at = now(), merged_base_branch = $3
             WHERE ticket_id = $1
             RETURNING ticket_id
             "#,
         )
         .bind(ticket_id)
         .bind(&merged_sha)
+        .bind(base_branch)
         .fetch_one(self.pool)
         .await?;
         self.advance_split_after_merge(ticket_id).await;
         Ok(())
+    }
+
+    /// Store (or clear, with `None`) the outcome of a failed git step.
+    /// Returns `true` when the stored outcome changed, so callers notify only then.
+    pub async fn set_git_outcome(
+        &self,
+        ticket_id: Uuid,
+        outcome: Option<GitOutcome>,
+        reason: Option<&str>,
+    ) -> Result<bool, HumanReviewError> {
+        let outcome_str = outcome.map(GitOutcome::as_str);
+        let result = sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET git_outcome = $2,
+                git_outcome_reason = $3,
+                git_outcome_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END
+            WHERE ticket_id = $1
+              AND git_outcome IS DISTINCT FROM $2::text
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(outcome_str)
+        .bind(reason)
+        .execute(self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Record a remote merge only while this acceptance is still the live one.
@@ -377,6 +421,12 @@ fn row_to_review(row: &sqlx::postgres::PgRow) -> HumanReview {
         accepted_by: row.get("accepted_by"),
         accepted_at: row.get("accepted_at"),
         merged_at: row.get("merged_at"),
+        accepted_by_coppice: row.get("accepted_by_coppice"),
+        merged_base_branch: row.get("merged_base_branch"),
+        git_outcome: row
+            .get::<Option<String>, _>("git_outcome")
+            .and_then(|s| GitOutcome::parse_str(&s)),
+        git_outcome_reason: row.get("git_outcome_reason"),
     }
 }
 

@@ -146,8 +146,20 @@ impl<'a> SplitAutopilot<'a> {
             .get(child.id)
             .await?
             .ok_or_else(|| PlanError::Validation(NOTHING_TO_MARK_MERGED.into()))?;
+        let base_branch: String = sqlx::query_scalar(
+            r#"
+            SELECT COALESCE(repos.default_branch, 'main')
+            FROM tickets
+            LEFT JOIN repos ON repos.id = tickets.repo_id
+            WHERE tickets.id = $1
+            "#,
+        )
+        .bind(child.id)
+        .fetch_optional(self.pool)
+        .await?
+        .unwrap_or_else(|| "main".to_string());
         HumanReviewService::new(self.pool)
-            .record_merge(child.id, &review.head_sha)
+            .record_merge(child.id, &review.head_sha, &base_branch)
             .await
             .map_err(review_error)?;
         Ok(())

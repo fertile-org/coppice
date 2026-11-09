@@ -322,7 +322,7 @@ async fn pause_blocked_and_merged_elsewhere_control_auto_start() {
         .unwrap();
     assert_eq!(blocked.status(), StatusCode::OK, "block child 2");
     HumanReviewService::new(&pool)
-        .record_merge(split.children[0], "abc123")
+        .record_merge(split.children[0], "abc123", "main")
         .await
         .unwrap();
     assert_eq!(child_status(&split, split.children[2]).await, "backlog");
@@ -358,7 +358,7 @@ async fn an_archived_child_is_skipped() {
     assert_eq!(archived.status(), StatusCode::OK);
     mark_accepted(&split, split.children[0]).await;
     HumanReviewService::new(split.state.db.as_ref().unwrap())
-        .record_merge(split.children[0], "abc123")
+        .record_merge(split.children[0], "abc123", "main")
         .await
         .unwrap();
     assert_eq!(child_status(&split, split.children[2]).await, "ready");
