@@ -14,6 +14,7 @@ export const ui = {
   skip: 'Skip to content',
   nav: {
     docs: 'Docs',
+    blog: 'Blog',
     github: 'GitHub',
     download: 'Download',
   },
@@ -27,6 +28,7 @@ export const ui = {
     concepts: 'Concepts',
     providers: 'Providers',
     faq: 'FAQ',
+    blog: 'Blog',
     github: 'GitHub',
     sponsor: 'Sponsor',
   },

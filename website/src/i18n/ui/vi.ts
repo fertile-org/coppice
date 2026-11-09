@@ -8,6 +8,7 @@ export const ui: Ui = {
   skip: 'Chuyển đến nội dung',
   nav: {
     docs: 'Tài liệu',
+    blog: 'Blog',
     github: 'GitHub',
     download: 'Tải xuống',
   },
@@ -21,6 +22,7 @@ export const ui: Ui = {
     concepts: 'Khái niệm',
     providers: 'Nhà cung cấp',
     faq: 'Hỏi đáp',
+    blog: 'Blog',
     github: 'GitHub',
     sponsor: 'Tài trợ',
   },

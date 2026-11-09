@@ -7,6 +7,7 @@ const ctx = useI18n(Astro);
 const docsActive = ctx.englishPath === '/docs' || ctx.englishPath.startsWith('/docs/');
 const homeActive = ctx.englishPath === '/';
 const downloadActive = ctx.englishPath === '/download';
+const blogActive = ctx.englishPath === '/blog' || ctx.englishPath.startsWith('/blog/');
 ---
 
 <header class="site-header" data-pagefind-ignore>
@@ -24,6 +25,7 @@ const downloadActive = ctx.englishPath === '/download';
     </a>
     <nav class="primary-nav" data-pagefind-ignore aria-label="Primary">
       <a href={hrefFor(ctx.locale, '/docs')} aria-current={docsActive ? 'page' : undefined}>{ctx.ui.nav.docs}</a>
+      <a href={hrefFor(ctx.locale, '/blog')} aria-current={blogActive ? 'page' : undefined}>{ctx.ui.nav.blog}</a>
       <a href="https://github.com/fertile-org/coppice">{ctx.ui.nav.github}</a>
       <a class="btn btn-small" href={hrefFor(ctx.locale, '/download')} aria-current={downloadActive ? 'page' : undefined}>{ctx.ui.nav.download}</a>
       <LanguageSwitch />

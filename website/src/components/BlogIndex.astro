@@ -13,7 +13,6 @@ const posts = englishEntries().map((entry) => entry.post);
   <div class="shell landing">
     <header class="promise">
       <h1>{BLOG_INDEX.title}</h1>
-      <p class="lede">{BLOG_INDEX.description}</p>
     </header>
     {
       posts.length === 0 ? (
@@ -22,8 +21,8 @@ const posts = englishEntries().map((entry) => entry.post);
         <ul class="blog-list">
           {posts.map((post) => (
             <li>
-              <a href={hrefFor(ctx.locale, post.englishPath)}>{post.title}</a>
-              <time datetime={post.updated ?? post.published}>{formatBlogDate(post.updated ?? post.published)}</time>
+              <a class="blog-list-title" href={hrefFor(ctx.locale, post.englishPath)}>{post.title}</a>
+              <time class="blog-list-date" datetime={post.updated ?? post.published}>{formatBlogDate(post.updated ?? post.published)}</time>
               <p>{post.description}</p>
             </li>
           ))}
