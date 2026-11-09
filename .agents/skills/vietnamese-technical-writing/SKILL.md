@@ -23,7 +23,7 @@ Dùng skill này khi sửa tiếng Việt trong repo này:
 - Tài liệu tiếng Việt trong [website/src/content/docs/vi/](../../../website/src/content/docs/vi/)
 - Chuỗi giao diện tiếng Việt trong [website/src/i18n/pages/vi.ts](../../../website/src/i18n/pages/vi.ts) và [website/src/i18n/ui/vi.ts](../../../website/src/i18n/ui/vi.ts)
 
-Cursor nạp skill từ `.cursor/skills/vietnamese-technical-writing/`. Không chép sang `.agents/skills/`, `.claude/skills/`, thư mục `skills/` ở gốc repo, `server/builtin-plugins/` hay `server/marketplace/`. Đó là layout skill mà server có thể đưa vào agent của người dùng cuối.
+Skill nằm ở `.agents/skills/vietnamese-technical-writing/`. `.claude/skills` trỏ tới cùng thư mục, nên agent nào làm việc trong repo này cũng nạp được. Không chép sang thư mục `skills/` ở gốc repo, `server/builtin-plugins/` hay `server/marketplace/`. Đó là layout skill mà server có thể đưa vào agent của người dùng cuối.
 
 Skill tiếng Anh là [english-technical-writing](../english-technical-writing/SKILL.md). Không áp thói quen tiếng Anh sang tiếng Việt, và không dùng skill này để sửa văn tiếng Anh. Tiếng Trung giản thể có skill riêng: [zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md). Tiếng Trung phồn thể Đài Loan có skill riêng: [zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md). Tiếng Trung phồn thể Hồng Kông có skill riêng: [zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md). Tiếng Nhật có skill riêng: [ja-technical-writing](../ja-technical-writing/SKILL.md). Tiếng Pháp có skill riêng: [fr-technical-writing](../fr-technical-writing/SKILL.md). Các ngôn ngữ khác vẫn chờ vòng nghiên cứu riêng; không phác chúng từ skill này.
 

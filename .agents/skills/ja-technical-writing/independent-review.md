@@ -8,7 +8,7 @@ Review completed 2026-11-07 (Asia/Saigon). **Verdict: accepted with specified fi
 
 This is a finite evidence review, **not exhaustive certification**, demographic/native-biography proof, a quantitative popularity audit, current technical validation, or a frozen historical language corpus. External publishing/award/conference standing is the operational recognition test. It does not show every author is equally famous or every article was popular at publication. The original user's popular-writer requirement was not an authorization to invent an alternative recognized-outlet-only option: that first-pass wording is corrected by adding actual external author/community recognition for JA18.
 
-The review itself did not edit the repository. The repository copy is now `.cursor/skills/ja-technical-writing/` for Coppice authoring only—not global/shared/marketplace/runtime plugins. Files here: [SKILL.md](SKILL.md), [references.md](references.md), [source-manifest.json](source-manifest.json), [tests.md](tests.md). Complete copyrighted sources and recognition copies stay private. `review-primary-evidence.md`, `review-version.json`, and `reviewer-evidence/` are not in this repository.
+The review itself did not edit the repository. The repository copy is now `.agents/skills/ja-technical-writing/` for Coppice authoring only—not global/shared/marketplace/runtime plugins. Files here: [SKILL.md](SKILL.md), [references.md](references.md), [source-manifest.json](source-manifest.json), [tests.md](tests.md). Complete copyrighted sources and recognition copies stay private. `review-primary-evidence.md`, `review-version.json`, and `reviewer-evidence/` are not in this repository.
 
 ## Version and reading boundary
 
@@ -164,7 +164,7 @@ No article replacement was required. JA18 evidence supplemented without changing
 
 ### Deliverables
 
-Repository files under `.cursor/skills/ja-technical-writing/`:
+Repository files under `.agents/skills/ja-technical-writing/`:
 
 - [SKILL.md](SKILL.md)
 - [references.md](references.md)

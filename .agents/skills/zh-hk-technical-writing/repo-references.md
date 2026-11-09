@@ -1,6 +1,6 @@
 # Final derived references — exactly 30 substantive sources
 
-**Scope:** repository guidance beside [SKILL.md](SKILL.md) at `.cursor/skills/zh-hk-technical-writing/`. Not a marketplace, runtime, or global skill. Full copyrighted bodies, HTML, illustrations, reading views and comparison copies stay private. This document contains citation metadata and derived analysis only. Machine-readable statuses are in [repo-reference-manifest.json](repo-reference-manifest.json). The review is [independent-review.md](independent-review.md).
+**Scope:** repository guidance beside [SKILL.md](SKILL.md) at `.agents/skills/zh-hk-technical-writing/`. Not a marketplace, runtime, or global skill. Full copyrighted bodies, HTML, illustrations, reading views and comparison copies stay private. This document contains citation metadata and derived analysis only. Machine-readable statuses are in [repo-reference-manifest.json](repo-reference-manifest.json). The review is [independent-review.md](independent-review.md).
 
 ## Count / severe concentration
 

@@ -1,6 +1,6 @@
 # 台灣繁體中文技術寫作：獨立複核後的來源
 
-供本倉庫 [SKILL.md](SKILL.md) 使用，放在 `.cursor/skills/zh-tw-technical-writing/`。不是執行階段外掛、市集內容或跨專案技能。只列公開來源與簡述，不含文章全文。逐條元數據見 [repo-reference-manifest.json](repo-reference-manifest.json)。審查與語義測試見 [independent-review.md](independent-review.md) 與 [reviewed-rewrite-tests.md](reviewed-rewrite-tests.md)。
+供本倉庫 [SKILL.md](SKILL.md) 使用，放在 `.agents/skills/zh-tw-technical-writing/`。不是執行階段外掛、市集內容或跨專案技能。只列公開來源與簡述，不含文章全文。逐條元數據見 [repo-reference-manifest.json](repo-reference-manifest.json)。審查與語義測試見 [independent-review.md](independent-review.md) 與 [reviewed-rewrite-tests.md](reviewed-rewrite-tests.md)。
 
 **30 篇、8 位作者、8 個來源網域。** 第一輪的 TechBridge 數量應為 8 篇，不是 9 篇；替換後為 7 篇。huli 與高見龍各 5 篇；Heresy 同系列 4 篇，huli 的教學系統文章也互相關聯，不能當作 30 份獨立風格證據。
 

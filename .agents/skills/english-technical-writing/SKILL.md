@@ -20,7 +20,7 @@ Use this skill for English in this repository:
 - Contributor docs under [docs/](../../../docs/)
 - English UI strings under [web/](../../../web/)
 
-Cursor loads it from `.cursor/skills/english-technical-writing/` for agents working in this checkout. Do not copy it into `.agents/skills/`, `.claude/skills/`, a root `skills/` directory, `server/builtin-plugins/`, or `server/marketplace/`. Those paths are Coppice runtime skill layouts. This skill must not be injected into end-user agents.
+It lives in `.agents/skills/english-technical-writing/`, and `.claude/skills` links to the same folder, so any agent working in this checkout can load it. Do not copy it into a root `skills/` directory, `server/builtin-plugins/`, or `server/marketplace/`. Those paths are Coppice runtime skill layouts. This skill must not be injected into end-user agents.
 
 Do not apply these English habits to Vietnamese, Simplified Chinese, Taiwan Traditional Chinese, Hong Kong Traditional Chinese, Japanese, or French pages. Those languages have their own skills: [vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md), [zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md), [zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md), [zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md), [ja-technical-writing](../ja-technical-writing/SKILL.md), and [fr-technical-writing](../fr-technical-writing/SKILL.md). A translation edit still preserves literals, but the prose rules below are English-only. Other languages still need their own reviewed skills. Do not draft those from this file.
 

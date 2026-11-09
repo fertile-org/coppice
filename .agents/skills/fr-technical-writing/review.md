@@ -62,4 +62,4 @@ Pour cette passe, j'ai fait des lectures supplémentaires. Ce n'est pas une nouv
 - Tests : T2 devient ambigu, T8 est affaibli, ajout de T16–T33 (voir [tests.md](tests.md)).
 
 ## Intégration
-Ces fichiers sont dans `.cursor/skills/fr-technical-writing/` : [SKILL.md](SKILL.md), [sources.md](sources.md), [sources.json](sources.json), [tests.md](tests.md), [review.md](review.md). Aucun texte intégral. `evidence/review2/`, `review-history/` et les copies d'articles ne sont pas dans le dépôt. Ce n'est pas un plugin de marketplace ni une compétence d'exécution.
+Ces fichiers sont dans `.agents/skills/fr-technical-writing/` : [SKILL.md](SKILL.md), [sources.md](sources.md), [sources.json](sources.json), [tests.md](tests.md), [review.md](review.md). Aucun texte intégral. `evidence/review2/`, `review-history/` et les copies d'articles ne sont pas dans le dépôt. Ce n'est pas un plugin de marketplace ni une compétence d'exécution.

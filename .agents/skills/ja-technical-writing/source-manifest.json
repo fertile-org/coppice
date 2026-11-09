@@ -1,7 +1,7 @@
 {
   "language": "ja",
   "scope": "Coppice repository authoring only; not global/shared/marketplace/runtime",
-  "intended_directory": ".cursor/skills/ja-technical-writing/",
+  "intended_directory": ".agents/skills/ja-technical-writing/",
   "reviewed_on_Asia_Saigon": "2026-11-07",
   "cutoff_exclusive": "2020-11-07",
   "accepted_count": 30,

@@ -7,7 +7,7 @@ description: Coppiceリポジトリ内で日本語の技術説明・手順・設
 
 **独立審査の修正を反映した、このリポジトリ内の執筆案内。**
 
-配置先は `.cursor/skills/ja-technical-writing/SKILL.md`。グローバル、共有、marketplace、実行環境のskillにはしない。この文書は製品文章の書き換えや機能の追加を許可しない。他の言語にはそれぞれのskillを使う：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)、[fr-technical-writing](../fr-technical-writing/SKILL.md)。
+配置先は `.agents/skills/ja-technical-writing/SKILL.md`。グローバル、共有、marketplace、実行環境のskillにはしない。この文書は製品文章の書き換えや機能の追加を許可しない。他の言語にはそれぞれのskillを使う：[english-technical-writing](../english-technical-writing/SKILL.md)、[vietnamese-technical-writing](../vietnamese-technical-writing/SKILL.md)、[zh-cn-technical-writing](../zh-cn-technical-writing/SKILL.md)、[zh-tw-technical-writing](../zh-tw-technical-writing/SKILL.md)、[zh-hk-technical-writing](../zh-hk-technical-writing/SKILL.md)、[fr-technical-writing](../fr-technical-writing/SKILL.md)。
 
 ## まず用途と事実を確かめる
 

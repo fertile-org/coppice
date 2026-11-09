@@ -237,4 +237,4 @@ Y1–Y3通过无www原站渲染全文逐段/逐代码核对；www版本轮只返
 
 ## 文件与安装范围
 
-这些文件在 `.cursor/skills/zh-cn-technical-writing/`：`SKILL.md`，以及本目录的 `repo-references.md`、`repo-reference-manifest.json`、`independent-review.md`。仓库不附 sources/、原始 HTML、article.md 或抓取脚本，也不附未经审后的 analysis.md、source-index.md、provenance-notes.md。全文不入库。
+这些文件在 `.agents/skills/zh-cn-technical-writing/`：`SKILL.md`，以及本目录的 `repo-references.md`、`repo-reference-manifest.json`、`independent-review.md`。仓库不附 sources/、原始 HTML、article.md 或抓取脚本，也不附未经审后的 analysis.md、source-index.md、provenance-notes.md。全文不入库。

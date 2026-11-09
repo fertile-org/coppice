@@ -4,7 +4,7 @@
   "reviewer": "Independent second reviewer B, resumed after corpus repair",
   "review_date_asia_saigon": "2026-11-07",
   "destination_repository": "fertile-org/coppice",
-  "destination_only": ".cursor/skills/zh-hk-technical-writing",
+  "destination_only": ".agents/skills/zh-hk-technical-writing",
   "not_marketplace_runtime_or_global": true,
   "integration_performed": true,
   "cutoff": "Initial publication strictly before 2020-11-07; revisions disclosed, not an immutable snapshot requirement; explicitly later material excluded from historical style evidence.",

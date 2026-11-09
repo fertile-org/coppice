@@ -1,5 +1,7 @@
 # Blog
 
+Before you plan or write a post, read [.agents/skills/blog-writing/SKILL.md](../.agents/skills/blog-writing/SKILL.md). It covers the topic, the structure, and how much Coppice detail to include. This file covers the mechanics.
+
 English articles live in `src/content/blog/en/`. The index at `/blog` and each article page are built from those files. Adding a note does not require an edit to the index, the sitemap, or the layout.
 
 This directory ships with no articles. The example below is the schema, not a post.

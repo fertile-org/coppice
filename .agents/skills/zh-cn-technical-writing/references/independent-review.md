@@ -142,6 +142,6 @@ www地址本轮WebFetch空结果，curl得到1083字节SPA壳，旧blog-cn路径
 
 交付四个独立文件：independent-review.md、reviewed-draft-skill.md、repo-reference-manifest.json、repo-references.md。私有补证在 reviewer-evidence/；corrected-source-audit.json保留原30+替换1的每篇判定与哈希，不覆盖研究者清单。
 
-这些文件现位于 `.cursor/skills/zh-cn-technical-writing/`：`SKILL.md`，以及 `references/repo-references.md`、`references/repo-reference-manifest.json`、`references/independent-review.md`。保持仅 Coppice 内容作者使用，不接 marketplace、不进入 app runtime，不安装全局技能。本报告的私有 source 行号是审计定位。reviewer-evidence/、corrected-source-audit.json 和全文档案不在仓库里。
+这些文件现位于 `.agents/skills/zh-cn-technical-writing/`：`SKILL.md`，以及 `references/repo-references.md`、`references/repo-reference-manifest.json`、`references/independent-review.md`。保持仅 Coppice 内容作者使用，不接 marketplace、不进入 app runtime，不安装全局技能。本报告的私有 source 行号是审计定位。reviewer-evidence/、corrected-source-audit.json 和全文档案不在仓库里。
 
 集成者仍应检查相对链接、术语表、既有中文排版约定，以及仓库范围。后续实际改写必须另外验证产品事实和安全承诺；本报告不批准任何未看过的README/网站/文档/UI改稿。没有证据可保证“更像人”必然提高SEO或绕过机器检测；此技能只追求清楚、自然与等义。

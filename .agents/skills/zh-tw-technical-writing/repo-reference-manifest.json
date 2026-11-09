@@ -1,6 +1,6 @@
 {
-  "scope": "fertile-org/coppice authoring only; .cursor/skills/zh-tw-technical-writing; NOT marketplace/runtime/global",
-  "status": "repository authoring guidance in .cursor/skills/zh-tw-technical-writing; not a marketplace, runtime, or global skill",
+  "scope": "fertile-org/coppice authoring only; .agents/skills/zh-tw-technical-writing; NOT marketplace/runtime/global",
+  "status": "repository authoring guidance in .agents/skills/zh-tw-technical-writing; not a marketplace, runtime, or global skill",
   "cutoff_strictly_before": "2020-11-07",
   "accepted_article_count": 30,
   "authors": {
