@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +66,26 @@ test('--source reads tracked files and fails on a tracked match', () => {
     const bad = run(['--source'], dir);
     assert.equal(bad.status, 1);
     assert.match(bad.stderr, /bad\.md:2/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--source checks a tracked symlink by its target, not by following it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coppice-old-domain-link-'));
+  try {
+    const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+    assert.equal(git('init', '-q').status, 0);
+    mkdirSync(join(dir, 'skills'));
+    writeFileSync(join(dir, 'skills', 'ok.md'), 'fine\n');
+    symlinkSync('skills', join(dir, 'linked'));
+    git('add', '.');
+    assert.equal(run(['--source'], dir).status, 0);
+    symlinkSync(`${OLD_DOMAIN}.txt`, join(dir, 'bad-link'));
+    git('add', 'bad-link');
+    const bad = run(['--source'], dir);
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /bad-link:1/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

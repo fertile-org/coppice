@@ -8,8 +8,10 @@
 // --source scans every file `git ls-files` lists. Each extra path (a file or a
 // directory, such as the packaged app, updater-mode.json or the Pages CNAME)
 // must exist. Anything that can't be read fails the check instead of passing.
+// A tracked symlink is checked by its target text, which is what git stores,
+// so a link to a directory (such as .claude/skills) is not read as a file.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,13 +50,16 @@ export function sourceFiles(root) {
 
 export function checkOldDomain({ source = false, paths = [], root = process.cwd() } = {}) {
   if (!source && !paths.length) throw new Error('nothing to check: pass --source or a path');
-  const files = source ? sourceFiles(root) : [];
+  const tracked = new Set(source ? sourceFiles(root) : []);
+  const files = [...tracked];
   for (const path of paths) walk(path, files);
   const hits = [];
   for (const file of files) {
     let buffer;
     try {
-      buffer = readFileSync(file);
+      buffer = tracked.has(file) && lstatSync(file).isSymbolicLink()
+        ? Buffer.from(readlinkSync(file))
+        : readFileSync(file);
     } catch (err) {
       // A tracked file deleted in the working tree is not shipped.
       if (source && err.code === 'ENOENT' && !paths.includes(file)) continue;
