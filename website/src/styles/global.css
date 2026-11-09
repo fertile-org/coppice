@@ -180,38 +180,6 @@ a:hover {
   border-color: var(--color-bark-700);
 }
 
-.beta-banner {
-  background: var(--color-wheat);
-  border-bottom: 1px solid var(--color-wheat-line);
-}
-
-.beta-banner-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.45rem 0.75rem;
-  margin: 0;
-  padding-block: 0.7rem;
-  color: var(--color-bark-900);
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-.beta-banner-inner span {
-  flex: 1 1 18rem;
-  min-width: min(100%, 16rem);
-}
-
-.beta-banner strong {
-  display: inline-block;
-  padding: 0.05rem 0.45rem;
-  border: 1px solid var(--color-bark-900);
-  border-radius: 999px;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .landing {
   padding-block: 2.75rem 4.5rem;
 }

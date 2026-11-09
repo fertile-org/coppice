@@ -1,6 +1,5 @@
 ---
 import '../styles/global.css';
-import BetaBanner from '../components/BetaBanner.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 import VercelAnalytics from '../components/VercelAnalytics.astro';
@@ -104,7 +103,6 @@ const vercelAnalytics = process.env.VERCEL === '1';
   <body>
     <a class="skip" href="#content">{ctx.ui.skip}</a>
     <SiteHeader />
-    <BetaBanner />
     <main id="content" lang={ctx.translated ? undefined : 'en'}>
       <slot />
     </main>
