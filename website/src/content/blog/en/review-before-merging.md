@@ -51,9 +51,13 @@ Its review is a second opinion, not a sign-off. You still read the diff and deci
 4. When the ticket reaches **Wait for Human Review**, click **Review code**. Comment on lines, or accept the work.
 5. Click **Merge…** when you're ready.
 
-![A ticket in Plan Review. The proposed plan says to add docs/greeting.md, with Approve plan and Ask for changes below it.](/blog/review-before-merging/plan-review.png "You approve the plan before any code is written.")
+Here is what that looks like. The ticket asks for a dark mode toggle in Settings. The PM agent's plan has three steps: add the toggle, use the existing theme hook, and add a settings test.
 
-![Code review page with the changed files on the left and the diff for docs/greeting.md on the right.](/blog/review-before-merging/diff-before-accept.png "The diff you review before you accept the work.")
+![A ticket titled Add a dark mode toggle to Settings in Plan Review. The proposed plan builds a switch in the Settings row, with three steps: add the Settings toggle, use the existing theme hook, and add a settings test.](/blog/review-before-merging/plan-review.png "The plan, before any code is written.")
+
+When the work comes back, the approved plan sits next to the diff. Two things stand out. The new component keeps its own theme state instead of using the existing theme hook, and only one file changed, so there is no settings test. Both are worth a comment before you accept.
+
+![Code review for the same ticket. The approved plan is on the left, src/settings/ThemeToggle.tsx is the only changed file, and a comment under the useState line says to use the existing theme hook.](/blog/review-before-merging/diff-before-accept.png "The diff next to the approved plan, with a comment on the line that skips the theme hook.")
 
 [Concepts](/docs/concepts) explains each step a ticket goes through.
 
