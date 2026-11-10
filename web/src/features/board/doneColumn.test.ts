@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { Ticket } from './useTickets';
 import {
   DONE_COLUMN_PAGE_SIZE,
+  filterNeedsAction,
+  needsAction,
   sortDoneTickets,
   visibleDoneTickets,
 } from './doneColumn';
@@ -52,5 +55,36 @@ describe('visibleDoneTickets', () => {
 
   it('does not extend past the list when the page limit is larger', () => {
     expect(visibleDoneTickets(tickets, 40, -1)).toHaveLength(32);
+  });
+});
+
+function withState(gitState?: string): Ticket {
+  return {
+    id: gitState ?? 'none',
+    humanReview: gitState ? { gitState } : undefined,
+  } as unknown as Ticket;
+}
+
+describe('needsAction', () => {
+  it.each([
+    ['not_merged', true],
+    ['conflict', true],
+    ['main_dirty', true],
+    ['changed_after_review', true],
+    ['not_pushed', true],
+    ['worktree_kept', true],
+    ['in_review', false],
+    ['merged', false],
+  ])('%s -> %s', (state, expected) => {
+    expect(needsAction(withState(state))).toBe(expected);
+  });
+
+  it('is false without a human review', () => {
+    expect(needsAction(withState())).toBe(false);
+  });
+
+  it('filterNeedsAction keeps only flagged tickets', () => {
+    const list = [withState('merged'), withState('conflict'), withState()];
+    expect(filterNeedsAction(list).map((t) => t.id)).toEqual(['conflict']);
   });
 });

@@ -1,3 +1,5 @@
+import type { Ticket } from './useTickets';
+
 export const DONE_COLUMN_PAGE_SIZE = 10;
 
 function updatedAtMs(value: string): number {
@@ -34,4 +36,14 @@ export function visibleDoneTickets<T>(
   focusedIndex: number,
 ): T[] {
   return sorted.slice(0, visibleDoneCount(sorted.length, pageLimit, focusedIndex));
+}
+
+/** Mirrors the server's `needs_action()`: every git state except in_review and merged. */
+export function needsAction(ticket: Ticket): boolean {
+  const state = ticket.humanReview?.gitState;
+  return state != null && state !== 'in_review' && state !== 'merged';
+}
+
+export function filterNeedsAction<T extends Ticket>(tickets: readonly T[]): T[] {
+  return tickets.filter(needsAction);
 }

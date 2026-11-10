@@ -57,6 +57,7 @@ import { useReviewCapacity } from './useReviewCapacity';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import {
   DONE_COLUMN_PAGE_SIZE,
+  filterNeedsAction,
   sortDoneTickets,
   visibleDoneTickets,
 } from './doneColumn';
@@ -128,6 +129,11 @@ export function BoardPage() {
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
   const [doneLimit, setDoneLimit] = useState(DONE_COLUMN_PAGE_SIZE);
+  const [needsActionOnly, setNeedsActionOnly] = useState(false);
+  const toggleNeedsAction = useCallback(() => {
+    setNeedsActionOnly((current) => !current);
+    setDoneLimit(DONE_COLUMN_PAGE_SIZE);
+  }, []);
   const [collapsedLaneIds, setCollapsedLaneIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -216,18 +222,28 @@ export function BoardPage() {
     return grouped;
   }, [ungroupedTickets]);
 
+  const needsActionCount = useMemo(
+    () => filterNeedsAction(ticketsByStatus.get('done') ?? []).length,
+    [ticketsByStatus],
+  );
+  // The filter lapses on its own once nothing needs action.
+  const doneNeedsActionOnly = needsActionOnly && needsActionCount > 0;
+  const doneList = useMemo(() => {
+    const done = ticketsByStatus.get('done') ?? [];
+    return doneNeedsActionOnly ? filterNeedsAction(done) : done;
+  }, [doneNeedsActionOnly, ticketsByStatus]);
+
   const focusedDoneIndex = useMemo(() => {
     if (focusState?.type !== 'card') return -1;
-    const done = ticketsByStatus.get('done') ?? [];
-    return done.findIndex((ticket) => ticket.id === focusState.ticketId);
-  }, [focusState, ticketsByStatus]);
+    return doneList.findIndex((ticket) => ticket.id === focusState.ticketId);
+  }, [focusState, doneList]);
 
   const visibleTicketsByStatus = useMemo(() => {
-    const done = ticketsByStatus.get('done') ?? [];
+    const done = doneList;
     const next = new Map(ticketsByStatus);
     next.set('done', visibleDoneTickets(done, doneLimit, focusedDoneIndex));
     return next;
-  }, [doneLimit, focusedDoneIndex, ticketsByStatus]);
+  }, [doneLimit, focusedDoneIndex, ticketsByStatus, doneList]);
 
   const columnSnapshots = useMemo<BoardColumnSnapshot[]>(
     () =>
@@ -291,7 +307,7 @@ export function BoardPage() {
   }
 
   const handleShowMoreDone = useStableCallback(() => {
-    const sorted = ticketsByStatus.get('done') ?? [];
+    const sorted = doneList;
     const currentVisible = visibleDoneTickets(sorted, doneLimit, focusedDoneIndex);
     const nextLimit = Math.max(doneLimit, currentVisible.length) + DONE_COLUMN_PAGE_SIZE;
     const nextVisible = visibleDoneTickets(sorted, nextLimit, focusedDoneIndex);
@@ -559,8 +575,17 @@ export function BoardPage() {
                   column={column}
                   columnIndex={columnIndex}
                   tickets={visibleTicketsByStatus.get(column.status) ?? []}
-                  totalCount={(ticketsByStatus.get(column.status) ?? []).length}
+                  totalCount={
+                    column.status === 'done'
+                      ? doneList.length
+                      : (ticketsByStatus.get(column.status) ?? []).length
+                  }
                   onShowMore={column.status === 'done' ? handleShowMoreDone : undefined}
+                  needsActionCount={column.status === 'done' ? needsActionCount : 0}
+                  needsActionOnly={column.status === 'done' && doneNeedsActionOnly}
+                  onToggleNeedsAction={
+                    column.status === 'done' ? toggleNeedsAction : undefined
+                  }
                   hierarchyIndex={hierarchyIndex}
                   agentsById={agentsById}
                   showQuickAdd={column.status === 'backlog'}

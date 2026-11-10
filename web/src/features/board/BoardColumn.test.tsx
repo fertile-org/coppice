@@ -128,7 +128,13 @@ function makeTicket(
 function renderTickets(
   column: (typeof BOARD_COLUMNS)[number],
   tickets: Ticket[],
-  extras: { totalCount?: number; onShowMore?: () => void } = {},
+  extras: {
+    totalCount?: number;
+    onShowMore?: () => void;
+    needsActionCount?: number;
+    needsActionOnly?: boolean;
+    onToggleNeedsAction?: () => void;
+  } = {},
 ) {
   return render(
     <MemoryRouter>
@@ -142,6 +148,9 @@ function renderTickets(
             onOpenTicket={() => {}}
             totalCount={extras.totalCount}
             onShowMore={extras.onShowMore}
+            needsActionCount={extras.needsActionCount}
+            needsActionOnly={extras.needsActionOnly}
+            onToggleNeedsAction={extras.onToggleNeedsAction}
           />
         </DndContext>
       </ToastProvider>
@@ -259,5 +268,52 @@ describe('BoardColumn show more', () => {
     expect(within(column).queryByText(/Showing \d+ of \d+/)).toBeNull();
     expect(within(column).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
     expect(within(column).getAllByText(/^Ready \d+$/)).toHaveLength(10);
+  });
+});
+
+describe('BoardColumn needs-action badge', () => {
+  const tickets = [makeTicket({ id: 'd1', title: 'Done 1', status: 'done' })];
+
+  it('shows the count and toggles the filter on click', () => {
+    const onToggle = vi.fn();
+    const { rerender } = renderTickets(done, tickets, {
+      needsActionCount: 3,
+      onToggleNeedsAction: onToggle,
+    });
+    const badge = screen.getByRole('button', { name: '3 need action' });
+    expect(badge).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(badge);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MemoryRouter>
+        <ToastProvider>
+          <DndContext>
+            <BoardColumn
+              column={done}
+              tickets={tickets}
+              hierarchyIndex={new Map()}
+              agentsById={new Map()}
+              onOpenTicket={() => {}}
+              needsActionCount={3}
+              needsActionOnly
+              onToggleNeedsAction={onToggle}
+            />
+          </DndContext>
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: '3 need action' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('is hidden at zero', () => {
+    renderTickets(done, tickets, {
+      needsActionCount: 0,
+      onToggleNeedsAction: vi.fn(),
+    });
+    expect(screen.queryByRole('button', { name: /need action/ })).toBeNull();
   });
 });

@@ -1,11 +1,16 @@
 import '@testing-library/jest-dom/vitest';
 import { DndContext } from '@dnd-kit/core';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import { PLAN_COPY } from '../plan/copy';
 import type { TicketHierarchy } from './ticketHierarchy';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { Ticket } from './useTickets';
+
+vi.mock('../tickets/GitStatusRow', () => ({
+  GitStatusRow: () => <div data-testid="git-status-row" />,
+}));
 
 const ticket: Ticket = {
   id: 'ticket-1',
@@ -310,5 +315,55 @@ describe('TicketCard archived affordance', () => {
 
     expect(screen.getByText('Archived')).toBeVisible();
     expect(screen.getByRole('button').parentElement).toHaveClass('opacity-60');
+  });
+});
+
+describe('TicketCard Done git flags', () => {
+  function renderDone(overrides: Partial<Ticket>) {
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <DndContext>
+          <TicketCard ticket={{ ...ticket, ...overrides }} onOpen={vi.fn()} />
+        </DndContext>
+      </QueryClientProvider>,
+    );
+  }
+  const doneBase = { status: 'done' as const, repoId: 'repo-1' };
+  const review = (gitState: string, acceptedByCoppice = false) =>
+    ({ gitState, acceptedByCoppice }) as unknown as Ticket['humanReview'];
+
+  it('flags a needs-action card amber and a conflict red', () => {
+    const { container, unmount } = renderDone({
+      ...doneBase,
+      humanReview: review('not_merged'),
+    });
+    const card = container.querySelector('[data-needs-action]')!;
+    expect(card.className).toContain('border-l-warning');
+    unmount();
+    const conflict = renderDone({
+      ...doneBase,
+      humanReview: review('conflict'),
+    });
+    expect(conflict.container.querySelector('[data-needs-action]')!.className).toContain(
+      'border-l-danger',
+    );
+  });
+
+  it('does not flag a merged card', () => {
+    const { container } = renderDone({
+      ...doneBase,
+      humanReview: review('merged'),
+    });
+    expect(container.querySelector('[data-needs-action]')).toBeNull();
+  });
+
+  it('shows "review skipped" when Coppice accepted the ticket', () => {
+    renderDone({ ...doneBase, humanReview: review('merged', true) });
+    expect(screen.getByText('review skipped')).toBeVisible();
+  });
+
+  it('omits "review skipped" otherwise', () => {
+    renderDone({ ...doneBase, humanReview: review('merged') });
+    expect(screen.queryByText('review skipped')).toBeNull();
   });
 });

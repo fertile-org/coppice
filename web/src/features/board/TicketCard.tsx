@@ -5,6 +5,7 @@ import { memo, type CSSProperties } from 'react';
 import { PLAN_COPY } from '../plan/copy';
 import { planCardState } from '../plan/planCardState';
 import { CreatePrButton } from '../tickets/GitBranchDialogs';
+import { needsAction } from './doneColumn';
 import { GitStatusRow } from '../tickets/GitStatusRow';
 import { useTicketGitInfo } from '../tickets/useTicket';
 import { splitChildLabel } from './swimlanes';
@@ -103,6 +104,8 @@ export const TicketCard = memo(function TicketCard({
     Boolean(ticket.repoId) &&
     !isArchived &&
     ticket.humanReview != null;
+  const flagged = showGitStatus && needsAction(ticket);
+  const conflicted = ticket.humanReview?.gitState === 'conflict';
   const suggested = ticket.suggestedAssignee;
   const splitLabel = splitChildLabel(ticket.splitProgress);
   const showHierarchy = !ticket.splitProgress;
@@ -111,8 +114,11 @@ export const TicketCard = memo(function TicketCard({
     <div
       ref={setNodeRef}
       style={style}
+      data-needs-action={flagged ? 'true' : undefined}
       className={[
         'rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
+        flagged ? 'border-l-4' : '',
+        flagged ? (conflicted ? 'border-l-danger' : 'border-l-warning') : '',
         'hover:shadow-md',
         isArchived ? 'cursor-pointer opacity-60' : 'cursor-grab',
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
@@ -273,6 +279,11 @@ export const TicketCard = memo(function TicketCard({
       </div>
       {showGitStatus && (
         <GitStatusRow ticket={ticket} variant="card" shortcutActive={boardTabStop} />
+      )}
+      {showGitStatus && ticket.humanReview?.acceptedByCoppice && (
+        <span className="mt-1.5 inline-flex rounded-full border border-border bg-paper-200 px-2 py-0.5 font-body text-xs text-text-secondary">
+          review skipped
+        </span>
       )}
       {ticket.status === 'done' && ticket.repoId && !isArchived && (
         <DoneCardPullRequest ticketId={ticket.id} />

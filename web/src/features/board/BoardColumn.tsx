@@ -51,6 +51,10 @@ interface BoardColumnProps {
   /** Full matching count; defaults to the tickets rendered in this column. */
   totalCount?: number;
   onShowMore?: () => void;
+  /** Done only: tickets whose git state needs the human. Badge hidden at 0. */
+  needsActionCount?: number;
+  needsActionOnly?: boolean;
+  onToggleNeedsAction?: () => void;
 }
 
 /**
@@ -78,6 +82,9 @@ export const BoardColumn = memo(function BoardColumn({
   onHeadingFocus,
   totalCount,
   onShowMore,
+  needsActionCount = 0,
+  needsActionOnly = false,
+  onToggleNeedsAction,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const [skipReview, setSkipReview] = useState(false);
@@ -146,6 +153,19 @@ export const BoardColumn = memo(function BoardColumn({
         >
           {column.label}
         </h2>
+        {onToggleNeedsAction && needsActionCount > 0 && (
+          <button
+            type="button"
+            aria-pressed={needsActionOnly}
+            onClick={onToggleNeedsAction}
+            className={[
+              'keyboard-focus ml-auto rounded-full border border-warning px-2 py-0.5 font-body text-xs text-warning',
+              needsActionOnly ? 'bg-warning-muted' : 'bg-transparent',
+            ].join(' ')}
+          >
+            {needsActionCount} need action
+          </button>
+        )}
         <span
           className={[
             'rounded-full px-2 py-0.5 font-mono text-xs',
