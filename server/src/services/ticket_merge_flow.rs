@@ -149,9 +149,10 @@ impl<'a> TicketMergeFlow<'a> {
             "**Merge:** {} (`{short_sha}` on `{}`)",
             merge.message, merge.base_branch
         );
-        create_git_action_comment(self.state, self.pool, ticket_id, actor, &comment_body)
-            .await
-            .map_err(TicketGitError::MergeComment)?;
+        // The merge commit exists and is recorded: a failed comment must not
+        // skip the cleanup or the push. Its error is returned at the end.
+        let comment =
+            create_git_action_comment(self.state, self.pool, ticket_id, actor, &comment_body).await;
         // The merged work is on the base branch now.
         crate::services::worktree_cleanup::spawn_cleanup(self.state, ticket_id);
 
@@ -168,6 +169,7 @@ impl<'a> TicketMergeFlow<'a> {
             }
         }
 
+        comment.map_err(TicketGitError::MergeComment)?;
         Ok(merge)
     }
 }

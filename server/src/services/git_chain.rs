@@ -85,21 +85,11 @@ pub async fn run_after_accept(state: &Arc<AppState>, ticket_id: Uuid) -> ChainOu
         .await;
     match merged {
         Ok(None) => ChainOutcome::Skipped,
-        Ok(Some(_)) => {
-            let not_pushed = match HumanReviewService::new(pool).get(ticket_id).await {
-                Ok(review) => review.and_then(|r| r.git_outcome) == Some(GitOutcome::NotPushed),
-                Err(err) => {
-                    tracing::warn!(%ticket_id, error = %err, "git chain: could not read outcome");
-                    false
-                }
-            };
-            if not_pushed {
-                ChainOutcome::Stopped(GitOutcome::NotPushed)
-            } else if repo.push_after_merge {
-                ChainOutcome::MergedAndPushed
-            } else {
-                ChainOutcome::Merged
-            }
+        Ok(Some(_)) => after_merge(pool, ticket_id, &repo).await,
+        // Merged, cleaned up and pushed; only the activity comment failed.
+        Err(TicketGitError::MergeComment(err)) => {
+            tracing::warn!(%ticket_id, error = %err, "git chain: merge comment failed");
+            after_merge(pool, ticket_id, &repo).await
         }
         Err(TicketGitError::Conflict { .. }) => ChainOutcome::Stopped(GitOutcome::Conflict),
         Err(TicketGitError::MainCheckoutDirty) => ChainOutcome::Stopped(GitOutcome::MainDirty),
@@ -107,6 +97,24 @@ pub async fn run_after_accept(state: &Arc<AppState>, ticket_id: Uuid) -> ChainOu
             tracing::warn!(%ticket_id, error = %err, "git chain: merge failed");
             ChainOutcome::Skipped
         }
+    }
+}
+
+/// The outcome once the merge succeeded: the push may still have failed.
+async fn after_merge(pool: &sqlx::PgPool, ticket_id: Uuid, repo: &Repo) -> ChainOutcome {
+    let not_pushed = match HumanReviewService::new(pool).get(ticket_id).await {
+        Ok(review) => review.and_then(|r| r.git_outcome) == Some(GitOutcome::NotPushed),
+        Err(err) => {
+            tracing::warn!(%ticket_id, error = %err, "git chain: could not read outcome");
+            false
+        }
+    };
+    if not_pushed {
+        ChainOutcome::Stopped(GitOutcome::NotPushed)
+    } else if repo.push_after_merge {
+        ChainOutcome::MergedAndPushed
+    } else {
+        ChainOutcome::Merged
     }
 }
 

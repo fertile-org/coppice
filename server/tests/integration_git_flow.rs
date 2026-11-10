@@ -1095,3 +1095,141 @@ async fn chain_restores_checked_out_branch() {
     wait_for_detail_state(fx, "merged").await;
     assert_eq!(current_branch(&fx.local_path), "dev");
 }
+
+/// Done with an acceptance row, without `AcceptService::accept`, so no chain
+/// is spawned and the test sees `run_after_accept`'s own outcome.
+async fn done_without_spawned_chain(fx: &MergeFixture) {
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let res = post(
+        fx,
+        "PATCH",
+        &format!("/api/tickets/{}/status", fx.ticket_id),
+        r#"{"status":"wait_for_final_review"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let head = rev(&fx.worktree_path, "HEAD");
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .expect("user");
+    HumanReviewService::new(&pool)
+        .record_acceptance(id, Some(user_id), &head)
+        .await
+        .unwrap();
+    coppice_server::services::ticket_service::TicketService::new(&pool)
+        .accept_to_done(id)
+        .await
+        .unwrap();
+    assert_eq!(ticket_status(fx).await, "done");
+}
+
+#[tokio::test]
+async fn chain_outcome_merged_and_pushed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, true).await;
+    done_without_spawned_chain(&cf.fx).await;
+    assert_eq!(run_chain(&cf.fx).await, ChainOutcome::MergedAndPushed);
+    assert_eq!(rev(&cf.bare_path, "main"), rev(&cf.fx.local_path, "main"));
+    // A second run is a no-op.
+    assert_eq!(run_chain(&cf.fx).await, ChainOutcome::Skipped);
+    assert_eq!(merge_comment_count(&cf.fx).await, 1);
+}
+
+#[tokio::test]
+async fn chain_outcome_not_pushed_when_gate_is_off() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(false, true, false).await;
+    let pool = cf.fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE repos SET push_after_merge = true WHERE id = $1")
+        .bind(Uuid::parse_str(&cf.repo_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let remote_before = rev(&cf.bare_path, "main");
+    done_without_spawned_chain(&cf.fx).await;
+    assert_eq!(
+        run_chain(&cf.fx).await,
+        ChainOutcome::Stopped(GitOutcome::NotPushed)
+    );
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    assert_eq!(
+        review_of(&cf.fx).await.git_outcome_reason.as_deref(),
+        Some("git.push_enabled is false in server config")
+    );
+}
+
+#[tokio::test]
+async fn manual_merge_into_default_branch_pushes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    // Merge after accept off, so the merge is the manual one.
+    let cf = chain_fixture(true, false, true).await;
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(&cf.fx).await;
+    assert_eq!(merge_main(&cf.fx).await.status(), StatusCode::OK);
+    let local = rev(&cf.fx.local_path, "main");
+    assert_ne!(local, remote_before);
+    assert_eq!(rev(&cf.bare_path, "main"), local);
+    wait_for_worktree_gone(&cf.fx.worktree_path).await;
+    wait_for_detail_state(&cf.fx, "merged").await;
+}
+
+#[tokio::test]
+async fn merge_comment_failure_still_cleans_up_and_pushes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, true).await;
+    let pool = cf.fx.state.db.clone().expect("pool");
+    // Fail only this ticket's merge comment.
+    sqlx::query(
+        r#"
+        CREATE OR REPLACE FUNCTION fail_merge_comment() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'merge comment refused';
+        END;
+        $$ LANGUAGE plpgsql
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER fail_merge_comment BEFORE INSERT ON ticket_comments FOR EACH ROW \
+         WHEN (NEW.ticket_id = '{}' AND NEW.body LIKE '**Merge:**%') \
+         EXECUTE FUNCTION fail_merge_comment()",
+        cf.fx.ticket_id
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    done_without_spawned_chain(&cf.fx).await;
+    let outcome = run_chain(&cf.fx).await;
+
+    sqlx::query("DROP TRIGGER fail_merge_comment ON ticket_comments")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION fail_merge_comment()")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, ChainOutcome::MergedAndPushed);
+    assert_eq!(merge_comment_count(&cf.fx).await, 0);
+    assert_eq!(rev(&cf.bare_path, "main"), rev(&cf.fx.local_path, "main"));
+    wait_for_worktree_gone(&cf.fx.worktree_path).await;
+    wait_for_detail_state(&cf.fx, "merged").await;
+}
