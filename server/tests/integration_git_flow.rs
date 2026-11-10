@@ -470,6 +470,26 @@ async fn wait_for_detail_state(fx: &MergeFixture, want: &str) {
     );
 }
 
+/// Wait for `count` `ticket.updated` events for the fixture's ticket. The merge
+/// publishes one; its cleanup publishes another after recording its outcome.
+async fn wait_for_ticket_updates(
+    rx: &mut tokio::sync::broadcast::Receiver<coppice_server::events::bus::AppEvent>,
+    fx: &MergeFixture,
+    count: usize,
+) {
+    use coppice_server::events::bus::AppEvent;
+    let want = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut seen = 0;
+    while seen < count {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Ok(AppEvent::TicketUpdated { ticket_id, .. })) if ticket_id == want => seen += 1,
+            Ok(Ok(_)) => {}
+            other => panic!("expected {count} ticket updates, saw {seen}: {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn board_list_exposes_git_state() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -537,18 +557,12 @@ async fn cleanup_kept_worktree_sets_outcome() {
     }
     let fx = accepted_ticket_with_worktree().await;
     accept(&fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
     assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
-    // The merge's own cleanup removes the worktree. Bring one back with
-    // uncommitted work, then clean up again.
-    for _ in 0..100 {
-        if !fx.worktree_path.exists() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    // The merge's own cleanup removes the worktree and then publishes. Bring
+    // one back with uncommitted work, then clean up again.
+    wait_for_ticket_updates(&mut rx, &fx, 2).await;
     assert!(!fx.worktree_path.exists());
-    // Let that cleanup finish recording its outcome.
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let worktrees_root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
     common::setup_worktree_with_commit(&fx.local_path, &worktrees_root, "test-repo", &fx.ticket_id);
     std::fs::write(fx.worktree_path.join("scratch.txt"), "uncommitted\n").unwrap();
@@ -629,17 +643,10 @@ async fn sync_push_clears_not_pushed() {
         worktree_path,
     };
     accept(&fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
     // The merge leaves main ahead of origin/main.
     assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
-    // Let the merge's own cleanup finish, so it can't race the outcome below.
-    for _ in 0..100 {
-        if !fx.worktree_path.exists() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    assert!(!fx.worktree_path.exists());
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    wait_for_ticket_updates(&mut rx, &fx, 2).await;
 
     let pool = fx.state.db.clone().expect("pool");
     let id = Uuid::parse_str(&fx.ticket_id).unwrap();
@@ -659,4 +666,60 @@ async fn sync_push_clears_not_pushed() {
     assert_eq!(res.status(), StatusCode::OK, "push");
     assert_eq!(detail_git_state(&fx).await.as_deref(), Some("merged"));
     assert_eq!(review_of(&fx).await.git_outcome, None);
+}
+
+#[tokio::test]
+async fn not_pushed_is_kept_without_a_remote_tracking_ref() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    // This checkout has no `origin`, so there is no refs/remotes/origin/main.
+    let fx = accepted_ticket_with_worktree().await;
+    accept(&fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
+    assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
+    wait_for_ticket_updates(&mut rx, &fx, 2).await;
+
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    HumanReviewService::new(&pool)
+        .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
+        .await
+        .unwrap();
+    assert_eq!(info_git_state(&fx).await, "not_pushed");
+    assert_eq!(
+        review_of(&fx).await.git_outcome,
+        Some(GitOutcome::NotPushed)
+    );
+}
+
+#[tokio::test]
+async fn cleanup_does_not_clear_other_outcomes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = accepted_ticket_with_worktree().await;
+    accept(&fx).await;
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    HumanReviewService::new(&pool)
+        .set_git_outcome(
+            id,
+            Some(GitOutcome::Conflict),
+            Some("1 file conflicts with main"),
+        )
+        .await
+        .unwrap();
+    let root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
+    coppice_server::services::worktree_cleanup::cleanup_ticket(
+        &pool,
+        &fx.state.event_bus,
+        root,
+        id,
+        false,
+    )
+    .await;
+    assert_eq!(review_of(&fx).await.git_outcome, Some(GitOutcome::Conflict));
 }

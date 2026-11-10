@@ -289,13 +289,6 @@ async fn after_recorded_merge(
         true,
     )
     .await;
-
-    match TicketService::new(pool).get(ticket_id).await {
-        Ok(ticket) => publish_ticket_updated(&state.event_bus, &ticket),
-        Err(err) => {
-            tracing::warn!(%ticket_id, error = %err, "pr merge sync: could not publish ticket update");
-        }
-    }
 }
 
 async fn local_work_would_be_lost(

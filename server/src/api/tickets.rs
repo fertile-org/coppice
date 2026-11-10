@@ -361,7 +361,9 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
             .map(|ts| ts.format(&Rfc3339).unwrap_or_default()),
         human_review: item.human_review.map(|review| {
             let short_sha = short_commit_sha(&review.head_sha).to_string();
-            let git_state = state_from_review(Some(&review)).as_str().to_string();
+            let git_state = state_from_review(Some(&review), ticket.status)
+                .as_str()
+                .to_string();
             HumanReviewResponse {
                 git_state,
                 git_state_reason: review.git_outcome_reason,

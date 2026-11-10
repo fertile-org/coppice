@@ -39,13 +39,19 @@ pub async fn cleanup_ticket(
         Ok(outcome) => outcome,
         Err(err) => {
             tracing::warn!(%ticket_id, error = %err, "ticket worktree cleanup failed");
+            crate::events::publish_ticket_state(bus, pool, ticket_id).await;
             return WorktreeCleanup::NothingToDo;
         }
     };
     match &outcome {
         WorktreeCleanup::Removed => {
             tracing::info!(%ticket_id, "removed finished ticket worktree and branch");
-            set_outcome(pool, ticket_id, None, None).await;
+            if let Err(err) = HumanReviewService::new(pool)
+                .clear_git_outcome_if(ticket_id, GitOutcome::WorktreeKept)
+                .await
+            {
+                tracing::warn!(%ticket_id, error = %err, "could not clear worktree cleanup outcome");
+            }
         }
         WorktreeCleanup::SkippedUncommitted { worktree_path } => {
             tracing::warn!(%ticket_id, worktree_path, "kept ticket worktree with uncommitted changes");

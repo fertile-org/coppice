@@ -297,7 +297,14 @@ impl<'a> TicketGitService<'a> {
         );
 
         let review = HumanReviewService::new(self.pool).get(ticket_id).await?;
-        let git_state = state_from_review(review.as_ref()).as_str().to_string();
+        let status = TicketService::new(self.pool)
+            .get(ticket_id)
+            .await?
+            .ticket
+            .status;
+        let git_state = state_from_review(review.as_ref(), status)
+            .as_str()
+            .to_string();
         let git_state_reason = review.and_then(|r| r.git_outcome_reason);
 
         Ok(TicketGitInfo {

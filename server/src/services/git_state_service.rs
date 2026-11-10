@@ -5,15 +5,20 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::git_state::{derive_git_state, GitOutcome, GitStateInput, TicketGitState};
+use crate::domain::substatus::TicketStatus;
 use crate::services::git_ops::{ahead_behind, git_rev_parse};
 use crate::services::human_review_service::{HumanReview, HumanReviewService};
 use crate::services::ticket_git_service::{TicketGitError, TicketGitService};
+use crate::services::ticket_service::TicketService;
 use crate::AppState;
 
 /// State from stored facts only. Runs no git command, so the board list can
 /// use it for every ticket.
-pub fn state_from_review(review: Option<&HumanReview>) -> TicketGitState {
-    let Some(review) = review else {
+///
+/// A ticket that is not Done is in review whatever its review row says: a
+/// reopened ticket keeps its old (stale) row.
+pub fn state_from_review(review: Option<&HumanReview>, status: TicketStatus) -> TicketGitState {
+    let Some(review) = review.filter(|_| status == TicketStatus::Done) else {
         return TicketGitState::InReview;
     };
     derive_git_state(&GitStateInput {
@@ -41,7 +46,13 @@ impl<'a> GitStateService<'a> {
         let Some(review) = reviews.get(ticket_id).await? else {
             return Ok(TicketGitState::InReview);
         };
-        let resolved = match review.git_outcome {
+        let status = TicketService::new(self.pool)
+            .get(ticket_id)
+            .await?
+            .ticket
+            .status;
+        let checked = review.git_outcome;
+        let resolved = match checked {
             Some(GitOutcome::NotPushed) => self.not_pushed_resolved(ticket_id).await?,
             Some(GitOutcome::WorktreeKept) => {
                 let ctx = TicketGitService::from_state(self.state, self.pool)
@@ -52,12 +63,16 @@ impl<'a> GitStateService<'a> {
             _ => false,
         };
         if !resolved {
-            return Ok(state_from_review(Some(&review)));
+            return Ok(state_from_review(Some(&review), status));
         }
-        reviews.set_git_outcome(ticket_id, None, None).await?;
-        crate::events::publish_ticket_state(&self.state.event_bus, self.pool, ticket_id).await;
+        if let Some(checked) = checked {
+            if reviews.clear_git_outcome_if(ticket_id, checked).await? {
+                crate::events::publish_ticket_state(&self.state.event_bus, self.pool, ticket_id)
+                    .await;
+            }
+        }
         let after = reviews.get(ticket_id).await?;
-        Ok(state_from_review(after.as_ref()))
+        Ok(state_from_review(after.as_ref(), status))
     }
 
     /// Recheck every ticket of a repo that is waiting on a push, for example
@@ -94,5 +109,52 @@ impl<'a> GitStateService<'a> {
         }
         let (ahead, _behind) = ahead_behind(&ctx.git_dir, &local_ref, &remote_ref).await?;
         Ok(ahead == 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn review(stale: bool) -> HumanReview {
+        HumanReview {
+            ticket_id: Uuid::nil(),
+            head_sha: "abc".into(),
+            comment_ids: vec![],
+            run_ids: vec![],
+            stale,
+            accepted_by: None,
+            accepted_at: time::OffsetDateTime::now_utc(),
+            merged_at: None,
+            accepted_by_coppice: false,
+            merged_base_branch: None,
+            merged_sha: None,
+            git_outcome: None,
+            git_outcome_reason: None,
+        }
+    }
+
+    #[test]
+    fn done_ticket_with_review_is_not_merged() {
+        assert_eq!(
+            state_from_review(Some(&review(false)), TicketStatus::Done),
+            TicketGitState::NotMerged
+        );
+    }
+
+    #[test]
+    fn reopened_ticket_with_stale_row_is_in_review() {
+        assert_eq!(
+            state_from_review(Some(&review(true)), TicketStatus::InProgress),
+            TicketGitState::InReview
+        );
+    }
+
+    #[test]
+    fn no_review_row_is_in_review() {
+        assert_eq!(
+            state_from_review(None, TicketStatus::Done),
+            TicketGitState::InReview
+        );
     }
 }

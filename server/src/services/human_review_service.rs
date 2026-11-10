@@ -198,6 +198,28 @@ impl<'a> HumanReviewService<'a> {
         Ok(changed.unwrap_or(false))
     }
 
+    /// Clear the outcome only while it is still `expected`, so a slower writer
+    /// cannot erase an outcome another step recorded meanwhile. Returns `true`
+    /// when it cleared.
+    pub async fn clear_git_outcome_if(
+        &self,
+        ticket_id: Uuid,
+        expected: GitOutcome,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET git_outcome = NULL, git_outcome_reason = NULL, git_outcome_at = NULL
+            WHERE ticket_id = $1 AND git_outcome = $2
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(expected.as_str())
+        .execute(self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Record a remote merge only while this acceptance is still the live one.
     ///
     /// Returns `true` when a row changed. A racing local merge, a re-accept,
