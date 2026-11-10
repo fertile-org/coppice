@@ -316,17 +316,14 @@ fn take_usage(
 
 /// Feed the fixture's usage through the same path a connector's output takes.
 fn replay_usage(input: &AgentRunInput, events: &[serde_json::Value]) {
-    let Some(stream) = &input.stream else {
+    let Some(usage) =
+        crate::providers::usage::UsageHook::for_connector(input, coppice_connectors::MOCK, None)
+    else {
         return;
     };
-    if let Some(descriptor) = coppice_connectors::get(coppice_connectors::MOCK) {
-        stream.track_usage(
-            descriptor.usage,
-            &crate::providers::usage::ProcessContext::default(),
-        );
-    }
+    usage.start();
     for event in events {
-        stream.observe_usage(event);
+        usage.observe(event);
     }
 }
 

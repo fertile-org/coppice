@@ -2,6 +2,7 @@ use super::cli_runner::{
     log_launch, run_cli, run_log_dir, CliError, CliExit, CliInvocation, LineHandler, LineStep,
     RunIo,
 };
+use super::usage::UsageHook;
 use super::cli_version;
 use super::cursor_console::CursorConsolePublisher;
 use super::{
@@ -40,9 +41,9 @@ impl AgentProvider for CursorProvider {
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let command = self.config.command.as_str();
-        let descriptor = coppice_connectors::get(coppice_connectors::CURSOR)
-            .expect("cursor descriptor");
-        let contract = descriptor.run_contract;
+        let contract = coppice_connectors::get(coppice_connectors::CURSOR)
+            .expect("cursor descriptor")
+            .run_contract;
         let version = cli_version::detect(command).await.map_err(|err| {
             ProviderError::InvalidFixture(cli_version::version_unavailable(command, &err))
         })?;
@@ -98,12 +99,6 @@ impl AgentProvider for CursorProvider {
             &args,
             run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
-        if let Some(stream) = &input.stream {
-            stream.track_usage(
-                descriptor.usage,
-                &super::usage::ProcessContext::new(input.resume_session_id.as_deref(), Some(&version)),
-            );
-        }
 
         let invocation = CliInvocation {
             program: command.to_string(),
@@ -121,6 +116,7 @@ impl AgentProvider for CursorProvider {
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
             stall_limits: None,
+            usage: UsageHook::for_connector(&input, coppice_connectors::CURSOR, Some(&version)),
         };
         let mut handler = CursorLines {
             stream: input.stream.clone(),
@@ -242,7 +238,6 @@ impl LineHandler for CursorLines {
             if let Some(model) = crate::providers::reported_model::reported_model("cursor", value) {
                 stream.note_reported_model(&model);
             }
-            stream.observe_usage(value);
             self.console.handle_stream_json(stream, value);
         }
 

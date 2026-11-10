@@ -5,6 +5,7 @@
 //! the console, and how the run ends are the same for all of them.
 
 use super::acp::{self, AcpLaunch, AcpLimits, AcpObserver, AcpTurn, ToolPolicy};
+use super::usage::UsageHook;
 use super::{AgentRunInput, AgentRunResult, ProviderError};
 use crate::sessions::opencode_events::extract_result_from_text;
 use crate::sessions::run_registry::RunStreamHandle;
@@ -36,6 +37,9 @@ pub struct AcpRun<'a> {
     pub sign_in_hint: Option<String>,
     /// A `mode` session option to set, when the connector needs one.
     pub session_mode: Option<&'static str>,
+    /// The connector id; its descriptor says how to read token usage.
+    pub connector: &'static str,
+    pub cli_version: Option<&'a str>,
 }
 
 pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult, ProviderError> {
@@ -66,7 +70,11 @@ pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult
         },
         session_mode: run.session_mode,
     };
-    let mut console = AcpConsole::new(run.console_prefix, input.stream.clone());
+    let usage = UsageHook::for_connector(&input, run.connector, run.cli_version);
+    if let Some(usage) = &usage {
+        usage.start();
+    }
+    let mut console = AcpConsole::new(run.console_prefix, input.stream.clone()).with_usage(usage);
     let outcome = acp::run_turn(
         launch,
         turn,
@@ -92,6 +100,8 @@ pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult
 pub struct AcpConsole {
     prefix: &'static str,
     stream: Option<Arc<RunStreamHandle>>,
+    /// Gets every update and the prompt result, for the connector's reader.
+    usage: Option<UsageHook>,
     text: String,
     thinking: String,
     result_published: bool,
@@ -102,10 +112,16 @@ impl AcpConsole {
         Self {
             prefix,
             stream,
+            usage: None,
             text: String::new(),
             thinking: String::new(),
             result_published: false,
         }
+    }
+
+    pub fn with_usage(mut self, usage: Option<UsageHook>) -> Self {
+        self.usage = usage;
+        self
     }
 
     fn emit(&self, kind: &str, mut event: Value) {
@@ -155,6 +171,9 @@ impl AcpObserver for AcpConsole {
     }
 
     fn on_update(&mut self, update: &Value) {
+        if let Some(usage) = &self.usage {
+            usage.observe(update);
+        }
         match update
             .get("sessionUpdate")
             .and_then(Value::as_str)
@@ -197,6 +216,12 @@ impl AcpObserver for AcpConsole {
 
     fn on_end(&mut self) {
         self.flush();
+    }
+
+    fn on_prompt_result(&mut self, result: &Value) {
+        if let Some(usage) = &self.usage {
+            usage.observe(result);
+        }
     }
 }
 

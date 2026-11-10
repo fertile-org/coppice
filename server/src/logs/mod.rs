@@ -393,6 +393,7 @@ mod tests {
                     result_before_exit: false,
                     result_exit_grace: None,
                     stall_limits: None,
+                    usage: None,
                     ticket_id: None,
                 };
                 crate::providers::cli_runner::run_cli(

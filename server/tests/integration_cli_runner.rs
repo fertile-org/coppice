@@ -25,6 +25,7 @@ fn fake_cli(env: &[(&str, &str)], timeout: Duration) -> CliInvocation {
         result_before_exit: false,
         result_exit_grace: None,
         stall_limits: None,
+        usage: None,
     }
 }
 

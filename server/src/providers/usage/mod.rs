@@ -9,11 +9,59 @@ mod claude_stream_json;
 mod cursor_stream_json;
 
 use crate::domain::usage::UsageEvent;
+use crate::providers::AgentRunInput;
+use crate::sessions::run_registry::RunStreamHandle;
 use coppice_connectors::UsageFormat;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub use claude_stream_json::ClaudeStreamJsonReader;
 pub use cursor_stream_json::CursorStreamJsonReader;
+
+/// Sends one CLI process's output to its run's usage tracking. The shared
+/// runners (`cli_runner`, `acp_connector`) hold it and call it, so an adapter
+/// only names its connector: the format comes from the connector descriptor.
+#[derive(Clone)]
+pub struct UsageHook {
+    stream: Arc<RunStreamHandle>,
+    format: UsageFormat,
+    process: ProcessContext,
+}
+
+impl UsageHook {
+    pub fn new(stream: Arc<RunStreamHandle>, format: UsageFormat, process: ProcessContext) -> Self {
+        Self {
+            stream,
+            format,
+            process,
+        }
+    }
+
+    /// The hook for `connector`'s run, or `None` when the run has no stream.
+    /// A connector without a reader still gets a hook; it records nothing.
+    pub fn for_connector(
+        input: &AgentRunInput,
+        connector: &str,
+        cli_version: Option<&str>,
+    ) -> Option<Self> {
+        let format = coppice_connectors::get(connector).map_or(UsageFormat::None, |d| d.usage);
+        Some(Self::new(
+            input.stream.clone()?,
+            format,
+            ProcessContext::new(input.resume_session_id.as_deref(), cli_version),
+        ))
+    }
+
+    /// The process is about to start. Call once per process, before its output.
+    pub fn start(&self) {
+        self.stream.track_usage(self.format, &self.process);
+    }
+
+    /// One event of the process's output.
+    pub fn observe(&self, event: &Value) {
+        self.stream.observe_usage(event);
+    }
+}
 
 /// What a reader knows about the CLI process whose output follows. New facts
 /// a format needs become fields here, so the reader trait keeps its shape.

@@ -5,7 +5,7 @@ use super::cli_runner::{
 };
 use super::cli_version;
 use super::terminal;
-use super::usage::ProcessContext;
+use super::usage::UsageHook;
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
@@ -203,12 +203,6 @@ impl AgentProvider for ClaudeCodeProvider {
             &args,
             run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
-        if let Some(stream) = &input.stream {
-            stream.track_usage(
-                descriptor.usage,
-                &ProcessContext::new(input.resume_session_id.as_deref(), Some(&version)),
-            );
-        }
         let invocation = CliInvocation {
             program,
             args,
@@ -225,6 +219,7 @@ impl AgentProvider for ClaudeCodeProvider {
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
             stall_limits: None,
+            usage: UsageHook::for_connector(&input, coppice_connectors::CLAUDE_CODE, Some(&version)),
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),
@@ -428,7 +423,6 @@ impl LineHandler for ClaudeLines {
             {
                 stream.note_reported_model(&model);
             }
-            stream.observe_usage(value);
             self.console.handle_stream_json(stream, value);
         }
 

@@ -1,6 +1,7 @@
 use super::cli_runner::{
     log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
 };
+use super::usage::UsageHook;
 use super::cli_version;
 use super::kilo_console::KiloConsolePublisher;
 use super::{
@@ -172,6 +173,7 @@ impl AgentProvider for KiloCodeProvider {
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
             stall_limits: None,
+            usage: UsageHook::for_connector(&input, coppice_connectors::KILO_CODE, Some(&version)),
         };
         let mut handler = KiloLines {
             stream: input.stream.clone(),
