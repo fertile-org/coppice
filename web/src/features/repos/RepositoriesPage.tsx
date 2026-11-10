@@ -13,7 +13,7 @@ import {
 } from '../../lib/schemas/repo';
 import { useSession } from '../auth/useSession';
 import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
-import { RepoDrawer } from './RepoDrawer';
+import { RepoDrawer, RepoGitFlowSection } from './RepoDrawer';
 import {
   useCreateRepo,
   useDeleteRepo,
@@ -266,6 +266,7 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
         </button>
       </form>
     )}
+    <RepoGitFlowSection repo={repo} />
     </div>
   );
 }

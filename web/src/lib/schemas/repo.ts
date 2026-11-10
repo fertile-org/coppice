@@ -20,6 +20,9 @@ export const repoSchema = z.object({
   lastVerifiedAt: z.string().nullable(),
   forgeTokenConfigured: z.boolean().optional().default(false),
   forgeTokenNeedsReentry: z.boolean().optional(),
+  mergeAfterAccept: z.boolean().optional().default(false),
+  pushAfterMerge: z.boolean().optional().default(false),
+  pushAfterMergeDisabledReason: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -40,6 +43,8 @@ export const updateRepoSchema = z.object({
   localPath: z.string().min(1, 'Local path is required').optional(),
   remoteUrl: z.string().nullable().optional(),
   defaultBranch: z.string().min(1, 'Default branch is required').optional(),
+  mergeAfterAccept: z.boolean().optional(),
+  pushAfterMerge: z.boolean().optional(),
 });
 
 export type UpdateRepoInput = z.infer<typeof updateRepoSchema>;

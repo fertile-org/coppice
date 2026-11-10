@@ -21,6 +21,8 @@ pub struct Repo {
     pub last_verified_at: Option<OffsetDateTime>,
     pub forge_token_secret_id: Option<Uuid>,
     pub forge_token_needs_reentry: bool,
+    pub merge_after_accept: bool,
+    pub push_after_merge: bool,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

@@ -12,7 +12,8 @@ use uuid::Uuid;
 const REPO_COLUMNS: &str = r#"
     id, name, local_path, remote_url, default_branch,
     verification_status, verification_error, last_verified_at,
-    forge_token_secret_id, created_at, updated_at,
+    forge_token_secret_id, merge_after_accept, push_after_merge,
+    created_at, updated_at,
     COALESCE((
         SELECT needs_reentry FROM secrets
         WHERE secrets.id = forge_token_secret_id
@@ -181,6 +182,33 @@ impl<'a> RepoService<'a> {
         Ok(row_to_repo(&row))
     }
 
+    /// Set the per-repo git-flow switches; `None` leaves a switch unchanged.
+    pub async fn set_git_flow(
+        &self,
+        id: Uuid,
+        merge_after_accept: Option<bool>,
+        push_after_merge: Option<bool>,
+    ) -> Result<Repo, RepoError> {
+        let query = format!(
+            r#"
+            UPDATE repos
+            SET merge_after_accept = COALESCE($2, merge_after_accept),
+                push_after_merge = COALESCE($3, push_after_merge),
+                updated_at = now()
+            WHERE id = $1
+            RETURNING {REPO_COLUMNS}
+            "#
+        );
+        let row = sqlx::query(&query)
+            .bind(id)
+            .bind(merge_after_accept)
+            .bind(push_after_merge)
+            .fetch_optional(self.pool)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+        Ok(row_to_repo(&row))
+    }
+
     pub async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         let in_use: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tickets WHERE repo_id = $1)")
@@ -282,6 +310,8 @@ fn row_to_repo(row: &sqlx::postgres::PgRow) -> Repo {
         last_verified_at: row.get("last_verified_at"),
         forge_token_secret_id: row.get("forge_token_secret_id"),
         forge_token_needs_reentry: row.get("forge_token_needs_reentry"),
+        merge_after_accept: row.get("merge_after_accept"),
+        push_after_merge: row.get("push_after_merge"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }

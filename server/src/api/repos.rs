@@ -6,6 +6,7 @@ use crate::middleware::admin::AdminUser;
 use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FileContent, FilePatch,
 };
+use crate::services::git_ops;
 use crate::services::planning_service::PlanningService;
 use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
@@ -107,6 +108,9 @@ struct RepoResponse {
     last_verified_at: Option<String>,
     forge_token_configured: bool,
     forge_token_needs_reentry: bool,
+    merge_after_accept: bool,
+    push_after_merge: bool,
+    push_after_merge_disabled_reason: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -128,6 +132,8 @@ struct UpdateRepoBody {
     local_path: Option<String>,
     remote_url: Option<String>,
     default_branch: Option<String>,
+    merge_after_accept: Option<bool>,
+    push_after_merge: Option<bool>,
 }
 
 fn default_branch() -> String {
@@ -168,8 +174,10 @@ async fn inspect_path(
     }))
 }
 
-fn repo_to_response(repo: Repo) -> RepoResponse {
+fn repo_to_response(state: &AppState, repo: Repo) -> RepoResponse {
     let forge_token_configured = repo.forge_token_configured();
+    let (_, push_after_merge_disabled_reason) =
+        git_ops::push_gate(state.config.git.push_enabled, repo.remote_url.as_deref());
     RepoResponse {
         id: repo.id,
         name: repo.name,
@@ -183,6 +191,9 @@ fn repo_to_response(repo: Repo) -> RepoResponse {
             .map(|t| t.format(&Rfc3339).unwrap_or_default()),
         forge_token_configured,
         forge_token_needs_reentry: repo.forge_token_needs_reentry,
+        merge_after_accept: repo.merge_after_accept,
+        push_after_merge: repo.push_after_merge,
+        push_after_merge_disabled_reason,
         created_at: repo.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: repo.updated_at.format(&Rfc3339).unwrap_or_default(),
     }
@@ -204,7 +215,12 @@ async fn list_repos(
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
     let repos = service.list_all().await.map_err(map_error)?;
-    Ok(Json(repos.into_iter().map(repo_to_response).collect()))
+    Ok(Json(
+        repos
+            .into_iter()
+            .map(|repo| repo_to_response(&state, repo))
+            .collect(),
+    ))
 }
 
 async fn create_repo(
@@ -223,7 +239,7 @@ async fn create_repo(
         )
         .await
         .map_err(map_error)?;
-    Ok((StatusCode::CREATED, Json(repo_to_response(repo))))
+    Ok((StatusCode::CREATED, Json(repo_to_response(&state, repo))))
 }
 
 async fn get_repo(
@@ -234,7 +250,7 @@ async fn get_repo(
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
     let repo = service.get(repo_id).await.map_err(map_error)?;
-    Ok(Json(repo_to_response(repo)))
+    Ok(Json(repo_to_response(&state, repo)))
 }
 
 async fn update_repo(
@@ -242,11 +258,25 @@ async fn update_repo(
     AdminUser(_): AdminUser,
     Path(repo_id): Path<Uuid>,
     Json(body): Json<UpdateRepoBody>,
-) -> Result<Json<RepoResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<RepoResponse>, (StatusCode, String)> {
+    let pool = pool_from_state(&state).map_err(|s| (s, String::new()))?;
     let service = RepoService::new(pool);
     let remote_url = body.remote_url.as_ref().map(|url| Some(url.as_str()));
-    let repo = service
+    if body.push_after_merge == Some(true) {
+        let current = service
+            .get(repo_id)
+            .await
+            .map_err(|e| (map_error(e), String::new()))?;
+        let effective_remote = match remote_url {
+            Some(url) => url,
+            None => current.remote_url.as_deref(),
+        };
+        let (open, reason) = git_ops::push_gate(state.config.git.push_enabled, effective_remote);
+        if !open {
+            return Err((StatusCode::BAD_REQUEST, reason.unwrap_or_default()));
+        }
+    }
+    let mut repo = service
         .update(
             repo_id,
             body.name.as_deref(),
@@ -255,8 +285,14 @@ async fn update_repo(
             body.default_branch.as_deref(),
         )
         .await
-        .map_err(map_error)?;
-    Ok(Json(repo_to_response(repo)))
+        .map_err(|e| (map_error(e), String::new()))?;
+    if body.merge_after_accept.is_some() || body.push_after_merge.is_some() {
+        repo = service
+            .set_git_flow(repo_id, body.merge_after_accept, body.push_after_merge)
+            .await
+            .map_err(|e| (map_error(e), String::new()))?;
+    }
+    Ok(Json(repo_to_response(&state, repo)))
 }
 
 async fn delete_repo(
@@ -278,7 +314,7 @@ async fn verify_repo(
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
     let repo = service.verify(repo_id).await.map_err(map_error)?;
-    Ok(Json(repo_to_response(repo)))
+    Ok(Json(repo_to_response(&state, repo)))
 }
 
 #[derive(Deserialize)]
@@ -308,7 +344,7 @@ async fn set_forge_token(
         .set_forge_token_secret(repo_id, Some(secret_id))
         .await
         .map_err(map_error)?;
-    Ok(Json(repo_to_response(repo)))
+    Ok(Json(repo_to_response(&state, repo)))
 }
 
 async fn clear_forge_token(
@@ -329,7 +365,7 @@ async fn clear_forge_token(
             .delete_by_id(secret_id)
             .await;
     }
-    Ok(Json(repo_to_response(repo)))
+    Ok(Json(repo_to_response(&state, repo)))
 }
 
 #[derive(Serialize)]
