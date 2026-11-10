@@ -1,3 +1,4 @@
+pub mod accept_service;
 pub mod agent_health;
 pub mod agent_request;
 pub mod agent_service;
@@ -56,6 +57,7 @@ pub mod stage_owner_service;
 pub mod ticket_attachments;
 pub mod ticket_file_service;
 pub mod ticket_git_service;
+pub mod ticket_merge_flow;
 pub mod ticket_service;
 pub mod ticket_thread;
 pub mod uncovered_model_service;

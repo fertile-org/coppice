@@ -14,11 +14,12 @@ use crate::domain::ticket::{
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::events::bus::AppEvent;
+use crate::services::accept_service::{AcceptError, AcceptService, Actor};
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::conflict_resolve::{self, ConflictResolveError, GitConflictHttp};
-use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
+use crate::services::human_review_service::short_commit_sha;
 use crate::services::planning_service::{
     planner_for_ticket, suggested_assignee, PlanningService, StartOutcome, SuggestedAssignee,
 };
@@ -30,10 +31,11 @@ use crate::services::stage_owner_service::StageOwnerService;
 use crate::services::ticket_git_service::{
     GitConflictKind, TicketGitError, TicketGitInfo, TicketGitService,
 };
+use crate::services::ticket_merge_flow::TicketMergeFlow;
 use crate::services::ticket_service::{
     TicketError, TicketFilters, TicketService, TicketWithDisplay,
 };
-use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
+use crate::services::workflow_service::DONE_REQUIRES_ACCEPT;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -618,6 +620,14 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::CONFLICT,
             "Not merged. Accept again so Coppice knows which commit you reviewed.".into(),
         ),
+        TicketGitError::MainCheckoutDirty => (
+            StatusCode::BAD_REQUEST,
+            "main repository has uncommitted changes — commit or stash before merging".into(),
+        ),
+        TicketGitError::MergeComment(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to record merge comment.".into(),
+        ),
         TicketGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
         TicketGitError::GitHubApi(msg) => (StatusCode::BAD_REQUEST, format!("GitHub API: {msg}")),
         TicketGitError::Ticket(e) => {
@@ -717,16 +727,7 @@ impl IntoResponse for TicketGitApiError {
 }
 
 fn ticket_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> TicketGitService<'a> {
-    TicketGitService::with_forge(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-        state.config.git.push_enabled,
-        &state.secret_store,
-        crate::services::worktree_service::GitAuthor {
-            name: state.config.git.author_name.clone(),
-            email: state.config.git.author_email.clone(),
-        },
-    )
+    TicketGitService::from_state(state, pool)
 }
 
 async fn create_git_action_comment(
@@ -1744,54 +1745,19 @@ async fn final_approve(
     Path(ticket_id): Path<Uuid>,
 ) -> Result<Json<TicketResponse>, FinalApproveError> {
     let pool = pool_from_state(&state).map_err(FinalApproveError::Status)?;
-    let ticket_svc = TicketService::new(pool);
-    let ticket = ticket_svc
-        .get(ticket_id)
+    let updated = AcceptService::new(&state, pool)
+        .accept(ticket_id, Actor::User(user.id))
         .await
-        .map_err(map_error)
-        .map_err(FinalApproveError::Status)?;
-    WorkflowService::final_approve(ticket.ticket.status)
-        .map_err(|_| FinalApproveError::Status(StatusCode::BAD_REQUEST))?;
-
-    // A split parent has no branch of its own: its work merged with the
-    // sub-tickets, so there is no commit to bind the acceptance to.
-    let reviewed = if ticket.split_parent {
-        Ok(None)
-    } else {
-        ticket_git_service(&state, pool)
-            .reviewed_head_sha(ticket_id)
-            .await
-    };
-    match reviewed {
-        Ok(Some(head_sha)) => {
-            HumanReviewService::new(pool)
-                .record_acceptance(ticket_id, Some(user.id), &head_sha)
-                .await
-                .map_err(|_| FinalApproveError::Status(StatusCode::INTERNAL_SERVER_ERROR))?;
-        }
-        Ok(None) => {}
-        Err(err) => return Err(map_ticket_git_error_response(err).into()),
-    }
-
-    // Staged attachment copies stay until a successful merge or ticket delete.
-    // A failed merge sends this ticket back to In Progress.
-    let updated = ticket_svc
-        .accept_to_done(ticket_id)
-        .await
-        .map_err(map_error)
-        .map_err(FinalApproveError::Status)?;
-
-    create_git_action_comment(
-        pool,
-        &state,
-        ticket_id,
-        user.id,
-        "Accepted: ticket moved to **Done**.",
-    )
-    .await
-    .map_err(FinalApproveError::Status)?;
-
-    crate::events::publish_ticket_updated(&state.event_bus, &updated);
+        .map_err(|err| match err {
+            AcceptError::Ticket(err) => FinalApproveError::Status(map_error(err)),
+            AcceptError::NotWaitingForFinalReview => {
+                FinalApproveError::Status(StatusCode::BAD_REQUEST)
+            }
+            AcceptError::Git(err) => map_ticket_git_error_response(err).into(),
+            AcceptError::Review(_) | AcceptError::Comment(_) => {
+                FinalApproveError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        })?;
     Ok(Json(ticket_to_response(updated)))
 }
 
@@ -1846,43 +1812,13 @@ async fn merge_ticket_branch(
 ) -> Result<Json<MergeBranchResponse>, TicketGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
-    let merge = ticket_git_service(&state, pool)
-        .merge_ticket_branch(ticket_id, body.base_branch.trim())
-        .await;
-    publish_ticket_state(&state, pool, ticket_id).await;
-    let merge = match merge {
-        Ok(merge) => merge,
-        Err(err) => return Err(git_failure_response(&state, pool, ticket_id, err).await),
-    };
-
-    // Accept does not remove these copies. A failed merge (the Err arm above)
-    // returns the ticket to In Progress and leaves them in place.
-    if let Err(err) = crate::services::ticket_attachments::clear_if_ended(
-        &state.config.storage.artifacts_dir,
-        ticket_id,
-        crate::services::ticket_attachments::AttachmentFolderEnd::MergeSucceeded,
-    ) {
-        tracing::warn!(
-            error = %err,
-            %ticket_id,
-            "could not remove staged ticket attachments after merge"
-        );
-    }
-
-    let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
-    let comment_body = format!(
-        "**Merge:** {} (`{short_sha}` on `{}`)",
-        merge.message, merge.base_branch
-    );
-    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+    match TicketMergeFlow::new(&state, pool)
+        .merge(ticket_id, body.base_branch.trim(), Actor::User(user.id))
         .await
-        .map_err(|code| {
-            TicketGitApiError::Message(code, "Unable to record merge comment.".into())
-        })?;
-    // The merged work is on the base branch now.
-    crate::services::worktree_cleanup::spawn_cleanup(&state, ticket_id);
-
-    Ok(Json(MergeBranchResponse { merge }))
+    {
+        Ok(merge) => Ok(Json(MergeBranchResponse { merge })),
+        Err(err) => Err(git_failure_response(&state, pool, ticket_id, err).await),
+    }
 }
 
 #[derive(Deserialize)]

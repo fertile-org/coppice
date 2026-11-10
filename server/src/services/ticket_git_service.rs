@@ -136,6 +136,8 @@ pub enum TicketGitError {
     NoForgeToken,
     #[error("remote is not a GitHub repository")]
     NotGitHub,
+    #[error("main repository has uncommitted changes — commit or stash before merging")]
+    MainCheckoutDirty,
     #[error("git error: {0}")]
     Git(String),
     #[error("github api error: {0}")]
@@ -154,6 +156,8 @@ pub enum TicketGitError {
     Database(#[from] sqlx::Error),
     #[error(transparent)]
     Secret(#[from] crate::services::secret_service::SecretError),
+    #[error("could not record merge comment: {0}")]
+    MergeComment(crate::services::comment_service::CommentError),
 }
 
 impl From<HumanReviewError> for TicketGitError {
@@ -190,6 +194,21 @@ impl<'a> TicketGitService<'a> {
             secret_store: None,
             git_author: None,
         }
+    }
+
+    /// Forge-capable service built from server config: push gate, secret
+    /// store and git author.
+    pub fn from_state(state: &'a crate::AppState, pool: &'a PgPool) -> Self {
+        Self::with_forge(
+            pool,
+            state.config.agent.worktrees_path.clone().into(),
+            state.config.git.push_enabled,
+            &state.secret_store,
+            GitAuthor {
+                name: state.config.git.author_name.clone(),
+                email: state.config.git.author_email.clone(),
+            },
+        )
     }
 
     pub fn with_forge(
@@ -551,9 +570,7 @@ impl<'a> TicketGitService<'a> {
         self.ensure_merge_matches_review(ticket_id, &head).await?;
 
         if !git_status_clean(&ctx.git_dir).await? {
-            return Err(TicketGitError::Git(
-                "main repository has uncommitted changes — commit or stash before merging".into(),
-            ));
+            return Err(TicketGitError::MainCheckoutDirty);
         }
 
         let previous_branch = checked_out_branch(&ctx.git_dir).await;
