@@ -392,6 +392,7 @@ pub async fn serve(
         ),
         connector_slots: Arc::new(crate::workers::connector_slots::ConnectorSlots::new()),
         marketplace: Arc::new(crate::services::marketplace_service::MarketplaceCatalog::new()),
+        git_chain_locks: Default::default(),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(db),

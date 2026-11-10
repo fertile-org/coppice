@@ -723,3 +723,375 @@ async fn cleanup_does_not_clear_other_outcomes() {
     .await;
     assert_eq!(review_of(&fx).await.git_outcome, Some(GitOutcome::Conflict));
 }
+
+// --- The chain: merge → cleanup → push after accept ---
+
+use coppice_server::services::git_chain::{self, ChainOutcome};
+
+/// A repo whose checkout pushes to a bare sibling, plus one ticket with a
+/// worktree commit. `remoteUrl` is metadata only; `origin` is the bare repo.
+struct ChainFixture {
+    fx: MergeFixture,
+    _bare: tempfile::TempDir,
+    bare_path: std::path::PathBuf,
+    repo_id: String,
+}
+
+async fn chain_fixture(
+    push_enabled: bool,
+    merge_after_accept: bool,
+    push_after_merge: bool,
+) -> ChainFixture {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let bare = tempfile::tempdir().expect("bare");
+    git(bare.path(), &["init", "--bare", "-b", "main"]);
+    git(
+        &local_path,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
+    git(&local_path, &["push", "-u", "origin", "main"]);
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = path;
+        config.git.push_enabled = push_enabled;
+    })
+    .await;
+    let worktrees_root = std::path::PathBuf::from(&state.config.agent.worktrees_path);
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let res = patch_repo(
+        &app,
+        &repo_id,
+        serde_json::json!({ "remoteUrl": "https://github.com/example/repo.git" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = patch_repo(
+        &app,
+        &repo_id,
+        serde_json::json!({
+            "mergeAfterAccept": merge_after_accept,
+            "pushAfterMerge": push_after_merge,
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "set git flow switches");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let worktree_path =
+        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    ChainFixture {
+        fx: MergeFixture {
+            _git_keep: git_dir,
+            _worktrees: worktrees,
+            state,
+            app,
+            cookie,
+            csrf,
+            board_id,
+            ticket_id,
+            local_path,
+            worktree_path,
+        },
+        bare_path: bare.path().to_path_buf(),
+        _bare: bare,
+        repo_id,
+    }
+}
+
+fn rev(dir: &std::path::Path, rev: &str) -> String {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", rev])
+        .current_dir(dir)
+        .output()
+        .expect("git rev-parse");
+    assert!(output.status.success(), "rev-parse {rev} failed");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn current_branch(dir: &std::path::Path) -> String {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .expect("git rev-parse");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+async fn run_chain(fx: &MergeFixture) -> ChainOutcome {
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    git_chain::run_after_accept(&fx.state, id).await
+}
+
+async fn wait_for_worktree_gone(path: &std::path::Path) {
+    for _ in 0..200 {
+        if !path.exists() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("worktree was never removed: {}", path.display());
+}
+
+async fn merge_comment_count(fx: &MergeFixture) -> i64 {
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ticket_comments WHERE ticket_id = $1 AND body LIKE '**Merge:**%'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("count")
+}
+
+#[tokio::test]
+async fn accept_with_switches_off_does_nothing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, false, false).await;
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(&cf.fx).await;
+    assert_eq!(run_chain(&cf.fx).await, ChainOutcome::Skipped);
+    assert_eq!(
+        detail_git_state(&cf.fx).await.as_deref(),
+        Some("not_merged")
+    );
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    assert!(cf.fx.worktree_path.exists());
+    assert_eq!(merge_comment_count(&cf.fx).await, 0);
+}
+
+#[tokio::test]
+async fn accept_merges_and_pushes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, true).await;
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(&cf.fx).await;
+    let outcome = run_chain(&cf.fx).await;
+    // The chain spawned by accept may have run first; either way the work is done.
+    assert!(
+        matches!(
+            outcome,
+            ChainOutcome::MergedAndPushed | ChainOutcome::Skipped
+        ),
+        "{outcome:?}"
+    );
+    wait_for_worktree_gone(&cf.fx.worktree_path).await;
+    wait_for_detail_state(&cf.fx, "merged").await;
+    let local = rev(&cf.fx.local_path, "main");
+    assert_ne!(local, remote_before);
+    assert_eq!(rev(&cf.bare_path, "main"), local);
+    assert_eq!(ticket_status(&cf.fx).await, "done");
+    assert_eq!(merge_comment_count(&cf.fx).await, 1);
+}
+
+#[tokio::test]
+async fn accept_merge_only() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, false).await;
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(&cf.fx).await;
+    let outcome = run_chain(&cf.fx).await;
+    assert!(
+        matches!(outcome, ChainOutcome::Merged | ChainOutcome::Skipped),
+        "{outcome:?}"
+    );
+    wait_for_worktree_gone(&cf.fx.worktree_path).await;
+    wait_for_detail_state(&cf.fx, "merged").await;
+    assert_ne!(rev(&cf.fx.local_path, "main"), remote_before);
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+}
+
+#[tokio::test]
+async fn chain_conflict_leaves_done_flagged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, true).await;
+    let fx = &cf.fx;
+    let remote_before = rev(&cf.bare_path, "main");
+    std::fs::write(fx.local_path.join("README.md"), "# test\nmain side\n").unwrap();
+    git(&fx.local_path, &["add", "README.md"]);
+    git(&fx.local_path, &["commit", "-m", "main conflict"]);
+    std::fs::write(fx.worktree_path.join("README.md"), "# test\nfeature side\n").unwrap();
+    git(&fx.worktree_path, &["add", "README.md"]);
+    git(&fx.worktree_path, &["commit", "-m", "feature conflict"]);
+    accept(fx).await;
+    let outcome = run_chain(fx).await;
+    assert!(
+        matches!(
+            outcome,
+            ChainOutcome::Stopped(GitOutcome::Conflict) | ChainOutcome::Skipped
+        ),
+        "{outcome:?}"
+    );
+    wait_for_detail_state(fx, "conflict").await;
+    assert_eq!(ticket_status(fx).await, "done");
+    assert_eq!(
+        review_of(fx).await.git_outcome_reason.as_deref(),
+        Some("1 file conflicts with main")
+    );
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    assert!(fx.worktree_path.exists());
+}
+
+#[tokio::test]
+async fn push_gate_off_records_not_pushed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(false, true, false).await;
+    let fx = &cf.fx;
+    // The API refuses this switch while push is off; a config change can
+    // still close the gate after it was turned on.
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE repos SET push_after_merge = true WHERE id = $1")
+        .bind(Uuid::parse_str(&cf.repo_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(fx).await;
+    let outcome = run_chain(fx).await;
+    assert!(
+        matches!(
+            outcome,
+            ChainOutcome::Stopped(GitOutcome::NotPushed) | ChainOutcome::Skipped
+        ),
+        "{outcome:?}"
+    );
+    wait_for_detail_state(fx, "not_pushed").await;
+    let review = review_of(fx).await;
+    assert_eq!(review.git_outcome, Some(GitOutcome::NotPushed));
+    assert!(review
+        .git_outcome_reason
+        .as_deref()
+        .is_some_and(|r| !r.is_empty()));
+    assert!(review.merged_at.is_some());
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    assert_eq!(ticket_status(fx).await, "done");
+}
+
+#[tokio::test]
+async fn manual_merge_into_other_branch_never_pushes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, false, true).await;
+    let fx = &cf.fx;
+    git(&fx.local_path, &["branch", "feature-x", "main"]);
+    let remote_before = rev(&cf.bare_path, "main");
+    accept(fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
+    let res = post(
+        fx,
+        "POST",
+        &format!("/api/tickets/{}/merge-branch", fx.ticket_id),
+        r#"{"baseBranch":"feature-x"}"#,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    wait_for_ticket_updates(&mut rx, fx, 2).await;
+    assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--verify", "--quiet", "refs/heads/feature-x"])
+        .current_dir(&cf.bare_path)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "feature-x must not reach the remote");
+    assert_eq!(detail_git_state(fx).await.as_deref(), Some("merged"));
+    assert_eq!(review_of(fx).await.git_outcome, None);
+}
+
+#[tokio::test]
+async fn chain_is_serialized_per_repo() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, true).await;
+    let fx = &cf.fx;
+    let worktrees_root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
+    let second_id = common::create_test_ticket(&fx.app, &fx.board_id, &fx.cookie, &fx.csrf).await;
+    common::set_ticket_repo(&fx.app, &second_id, &cf.repo_id, &fx.cookie, &fx.csrf).await;
+    let second_worktree = common::setup_worktree_with_commit(
+        &fx.local_path,
+        &worktrees_root,
+        "test-repo",
+        &second_id,
+    );
+    std::fs::write(second_worktree.join("second.txt"), "second\n").unwrap();
+    git(&second_worktree, &["add", "second.txt"]);
+    git(&second_worktree, &["commit", "-m", "second"]);
+    let second = MergeFixture {
+        _git_keep: tempfile::tempdir().unwrap(),
+        _worktrees: tempfile::tempdir().unwrap(),
+        state: fx.state.clone(),
+        app: fx.app.clone(),
+        cookie: fx.cookie.clone(),
+        csrf: fx.csrf.clone(),
+        board_id: fx.board_id.clone(),
+        ticket_id: second_id.clone(),
+        local_path: fx.local_path.clone(),
+        worktree_path: second_worktree.clone(),
+    };
+    accept(fx).await;
+    accept(&second).await;
+
+    let first_id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let second_uuid = Uuid::parse_str(&second_id).unwrap();
+    let (a, b) = tokio::join!(
+        tokio::spawn({
+            let state = fx.state.clone();
+            async move { git_chain::run_after_accept(&state, first_id).await }
+        }),
+        tokio::spawn({
+            let state = fx.state.clone();
+            async move { git_chain::run_after_accept(&state, second_uuid).await }
+        }),
+    );
+    a.unwrap();
+    b.unwrap();
+
+    wait_for_detail_state(fx, "merged").await;
+    wait_for_detail_state(&second, "merged").await;
+    assert_eq!(merge_comment_count(fx).await, 1);
+    assert_eq!(merge_comment_count(&second).await, 1);
+    let local = rev(&fx.local_path, "main");
+    assert_eq!(rev(&cf.bare_path, "main"), local);
+    assert!(fx.local_path.join("second.txt").exists());
+    assert!(fx.local_path.join("feature.txt").exists());
+}
+
+#[tokio::test]
+async fn chain_restores_checked_out_branch() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, false).await;
+    let fx = &cf.fx;
+    git(&fx.local_path, &["checkout", "-b", "dev"]);
+    accept(fx).await;
+    run_chain(fx).await;
+    wait_for_detail_state(fx, "merged").await;
+    assert_eq!(current_branch(&fx.local_path), "dev");
+}

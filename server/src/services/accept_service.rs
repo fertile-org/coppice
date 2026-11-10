@@ -75,6 +75,7 @@ impl<'a> AcceptService<'a> {
         create_git_action_comment(self.state, self.pool, ticket_id, actor, body).await?;
 
         crate::events::publish_ticket_updated(&self.state.event_bus, &updated);
+        crate::services::git_chain::spawn_after_accept(self.state, ticket_id);
         Ok(updated)
     }
 }

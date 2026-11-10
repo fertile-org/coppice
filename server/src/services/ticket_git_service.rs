@@ -627,6 +627,8 @@ impl<'a> TicketGitService<'a> {
             .await?;
 
         let head_sha = git_head_sha(&ctx.git_dir).await?;
+        // Leave the main checkout on the branch the person had checked out.
+        restore_checked_out_branch(&ctx.git_dir, previous_branch.as_deref(), base_branch).await;
 
         Ok(MergeBranchResult {
             base_branch: base_branch.to_string(),
@@ -1078,7 +1080,7 @@ async fn restore_checked_out_branch(dir: &Path, previous: Option<&str>, current:
         return;
     }
     if let Err(err) = run_git(dir, &["checkout", previous]).await {
-        tracing::warn!(error = %err, "failed to restore the previous branch after merge abort");
+        tracing::warn!(error = %err, "failed to restore the previous branch after merge");
     }
 }
 

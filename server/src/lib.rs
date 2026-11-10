@@ -60,6 +60,8 @@ pub struct AppState {
     pub connector_slots: Arc<crate::workers::connector_slots::ConnectorSlots>,
     /// Parsed marketplace catalogs, shared across list/refresh.
     pub marketplace: Arc<crate::services::marketplace_service::MarketplaceCatalog>,
+    /// One lock per repo id, held across a ticket merge and the push after it.
+    pub git_chain_locks: crate::services::git_chain::GitChainLocks,
 }
 
 impl AppState {
@@ -282,6 +284,7 @@ pub async fn test_state() -> Arc<AppState> {
         ),
         connector_slots: Arc::new(crate::workers::connector_slots::ConnectorSlots::new()),
         marketplace: Arc::new(crate::services::marketplace_service::MarketplaceCatalog::new()),
+        git_chain_locks: Default::default(),
         config: config.clone(),
         database_url: AppState::share_database_url(&config.database.url),
         db: None,

@@ -251,6 +251,7 @@ where
         marketplace: Arc::new(
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
+        git_chain_locks: Default::default(),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -307,6 +308,7 @@ where
         marketplace: Arc::new(
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
+        git_chain_locks: Default::default(),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -361,6 +363,7 @@ where
         marketplace: Arc::new(
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
+        git_chain_locks: Default::default(),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
