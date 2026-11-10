@@ -8,6 +8,7 @@ import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
 import { ticketsQueryKey, type Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
+import type { TicketGitState } from './gitStateCopy';
 import { PLAN_COPY } from '../plan/copy';
 import { agentRunsQueryKey, upsertAgentRunInCache } from './useAgentRuns';
 import type { AgentRun } from '../../lib/schemas/agentRun';
@@ -83,6 +84,9 @@ export interface TicketGitInfo {
   canCreatePr?: boolean;
   pushDisabledReason?: string | null;
   createPrDisabledReason?: string | null;
+  /** Rechecked server-side on every read, so fresher than the ticket's. */
+  gitState?: TicketGitState;
+  gitStateReason?: string | null;
 }
 
 export interface MergeBranchResponse {

@@ -6,6 +6,7 @@ import type {
   PendingSplitRecommendation,
 } from '../../lib/schemas/ticket';
 import type { TicketStatus } from './columns';
+import type { TicketGitState } from '../tickets/gitStateCopy';
 
 export interface SubstatusDisplay {
   label: string;
@@ -18,6 +19,12 @@ export interface HumanReview {
   stale: boolean;
   /** True after the accepted commit has been merged. */
   merged?: boolean;
+  /** Where the ticket's branch stands, from accept to merge and push. */
+  gitState: TicketGitState;
+  gitStateReason?: string | null;
+  /** The merge happened automatically after a clean agent review. */
+  acceptedByCoppice: boolean;
+  mergedSha?: string | null;
   commentIds: string[];
   runIds: string[];
 }

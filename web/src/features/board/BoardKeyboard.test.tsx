@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
+import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { SkipToBoard } from '../keyboard/SkipToBoard';
 import { BoardPage } from './BoardPage';
@@ -117,6 +118,7 @@ vi.mock('../agents/useAgents', () => ({
 
 vi.mock('../repos/useRepos', () => ({
   useRepos: () => ({ data: reposState.data }),
+  usePushDefaultBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../plan/approvePlan', () => ({
@@ -211,6 +213,7 @@ function renderBoard(entry = '/boards/board-1') {
       <KeyboardProvider>
         <QueryClientProvider client={client}>
           <ToastProvider>
+           <ConfirmProvider>
             <SkipToBoard />
             <LocationProbe />
             <OpenTicketViaUrl ticketId="done-20" />
@@ -218,6 +221,7 @@ function renderBoard(entry = '/boards/board-1') {
               <Route path="/boards/:boardId" element={<BoardPage />} />
               <Route path="*" element={null} />
             </Routes>
+           </ConfirmProvider>
           </ToastProvider>
         </QueryClientProvider>
       </KeyboardProvider>
@@ -561,6 +565,8 @@ describe('board keyboard navigation', () => {
           shortSha: 'abc1234',
           stale: false,
           merged: false,
+          gitState: 'not_merged',
+          acceptedByCoppice: false,
           commentIds: [],
           runIds: [],
         },

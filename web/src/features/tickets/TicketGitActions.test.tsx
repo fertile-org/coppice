@@ -43,6 +43,10 @@ vi.mock('./useTicket', () => ({
   useCreateTicketPr: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+vi.mock('../repos/useRepos', () => ({
+  usePushDefaultBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 const baseGitInfo: TicketGitInfo = {
   ticketBranch: 'agent/TICKET-abc',
   worktreePath: '/tmp/worktrees/TICKET-abc-test-repo',
@@ -51,7 +55,12 @@ const baseGitInfo: TicketGitInfo = {
   branches: ['main', 'agent/TICKET-abc'],
   canPush: true,
   canCreatePr: true,
+  gitState: 'in_review',
 };
+
+function openMenu() {
+  fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
+}
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -131,7 +140,7 @@ describe('TicketGitActions', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows Merge and other final actions only in wait_for_final_review', () => {
+  it('lists the final actions in the menu and hides Merge until accepted', () => {
     gitInfoState.data = {
       ...baseGitInfo,
       canCreatePr: false,
@@ -140,28 +149,31 @@ describe('TicketGitActions', () => {
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
 
     expect(screen.getByRole('button', { name: 'Rebase…' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Merge…' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Push branch' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
+    openMenu();
+    expect(screen.getByRole('menuitem', { name: 'Push branch' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remove worktree' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Merge/ })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Create PR via API' }),
+      screen.queryByRole('menuitem', { name: 'Create PR via API' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeInTheDocument();
   });
 
   it('keeps Remove worktree off while an agent run is active', () => {
-    gitInfoState.data = { ...baseGitInfo };
     renderActions(makeTicket({ status: 'wait_for_final_review', hasActiveRun: true }));
+    openMenu();
 
-    expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Remove worktree' })).toBeDisabled();
   });
 
-  it('shows Merge and Create PR for a Done ticket', () => {
-    gitInfoState.data = { ...baseGitInfo, canCreatePr: true };
+  it('shows Merge and Create PR for a Done ticket that is not merged', () => {
+    gitInfoState.data = { ...baseGitInfo, canCreatePr: true, gitState: 'not_merged' };
     renderActions(makeTicket({ status: 'done' }));
 
-    expect(screen.getByRole('button', { name: 'Merge…' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeInTheDocument();
+    openMenu();
+    expect(screen.getByRole('menuitem', { name: 'Create PR via API' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Rebase…' })).toBeInTheDocument();
   });
 
   it('shows API Create PR only when canCreatePr is true', () => {
@@ -171,9 +183,10 @@ describe('TicketGitActions', () => {
       prCreateUrl: 'https://github.com/org/repo/compare/main...agent/TICKET-abc?expand=1',
     };
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
+    openMenu();
 
-    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Create PR via API' })).toBeInTheDocument();
   });
 
   it('disables Rebase when worktree is missing', () => {
@@ -185,7 +198,7 @@ describe('TicketGitActions', () => {
 
   it('renders nothing without a linked repo', () => {
     renderActions(makeTicket({ repoId: undefined, status: 'in_progress' }));
-    expect(screen.queryByText('Git actions')).not.toBeInTheDocument();
+    expect(screen.queryByText('Git')).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
@@ -196,10 +209,11 @@ describe('TicketGitActions', () => {
       new ApiError(409, JSON.stringify({ message })),
     );
 
+    gitInfoState.data = { ...baseGitInfo, gitState: 'not_merged' };
     renderActions(makeTicket({ status: 'done' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
-    fireEvent.click(screen.getByRole('button', { name: /^Merge$/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
 
     await waitFor(() => {
       expect(dialog).toHaveTextContent(message);
@@ -355,8 +369,9 @@ describe('TicketGitActions', () => {
       ),
     );
 
+    gitInfoState.data = { ...baseGitInfo, gitState: 'not_merged' };
     const view = renderActions(makeTicket({ status: 'done' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
 
@@ -380,6 +395,7 @@ describe('TicketGitActions', () => {
     await expectResolveToast('Ada');
     expect(screen.queryByRole('dialog', { name: 'Merge ticket branch' })).not.toBeInTheDocument();
 
+    gitInfoState.data = { ...baseGitInfo, gitState: 'in_review' };
     view.rerenderTicket(makeTicket({ status: 'in_progress' }));
     fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
     const rebase = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
@@ -474,6 +490,7 @@ describe('TicketGitActions', () => {
   });
 
   it('cancels remove worktree without calling the API', async () => {
+    gitInfoState.data = { ...baseGitInfo, gitState: 'worktree_kept' };
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));
@@ -487,6 +504,7 @@ describe('TicketGitActions', () => {
   });
 
   it('removes the worktree after confirm', async () => {
+    gitInfoState.data = { ...baseGitInfo, gitState: 'worktree_kept' };
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove worktree' }));

@@ -98,6 +98,7 @@ const gitInfoState = vi.hoisted(() => ({
         worktreeExists: boolean;
         defaultBranch: string;
         branches: string[];
+        gitState?: string;
       }
     | undefined,
 }));
@@ -161,6 +162,7 @@ vi.mock('./useAgentRuns', () => ({
 
 vi.mock('../repos/useRepos', () => ({
   useRepos: () => ({ data: reposState.data }),
+  usePushDefaultBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../plan/approvePlan', () => ({
@@ -295,6 +297,8 @@ describe('TicketDrawer', () => {
         headSha: 'abc1234deadbeef',
         shortSha: 'abc1234',
         stale: false,
+        gitState: 'not_merged' as const,
+        acceptedByCoppice: false,
         commentIds: [],
         runIds: [],
       },
@@ -319,6 +323,8 @@ describe('TicketDrawer', () => {
         headSha: 'abc1234deadbeef',
         shortSha: 'abc1234',
         stale: true,
+        gitState: 'changed_after_review' as const,
+        acceptedByCoppice: false,
         commentIds: [],
         runIds: [],
       },
@@ -902,6 +908,7 @@ describe('TicketDrawer keyboard sections', () => {
       worktreeExists: true,
       defaultBranch: 'main',
       branches: ['main'],
+      gitState: 'not_merged',
     };
     renderKeyboardDrawer();
 

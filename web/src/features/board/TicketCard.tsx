@@ -4,10 +4,9 @@ import { Bot, GitBranch, Network } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import { PLAN_COPY } from '../plan/copy';
 import { planCardState } from '../plan/planCardState';
-import { CreatePrButton } from '../tickets/TicketGitActions';
+import { CreatePrButton } from '../tickets/GitBranchDialogs';
+import { GitStatusRow } from '../tickets/GitStatusRow';
 import { useTicketGitInfo } from '../tickets/useTicket';
-import { AcceptedNotMerged } from './AcceptedNotMerged';
-import { showsAcceptedNotMerged } from './showsAcceptedNotMerged';
 import { splitChildLabel } from './swimlanes';
 import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
@@ -99,7 +98,7 @@ export const TicketCard = memo(function TicketCard({
             ? PLAN_COPY.planNeedsRun
             : null;
 
-  const showMerge = showsAcceptedNotMerged(ticket);
+  const showGitStatus = ticket.status === 'done' && Boolean(ticket.repoId) && !isArchived;
   const suggested = ticket.suggestedAssignee;
   const splitLabel = splitChildLabel(ticket.splitProgress);
   const showHierarchy = !ticket.splitProgress;
@@ -268,8 +267,8 @@ export const TicketCard = memo(function TicketCard({
         </div>
       )}
       </div>
-      {showMerge && (
-        <AcceptedNotMerged ticket={ticket} shortcutActive={boardTabStop} />
+      {showGitStatus && (
+        <GitStatusRow ticket={ticket} variant="card" shortcutActive={boardTabStop} />
       )}
       {ticket.status === 'done' && ticket.repoId && !isArchived && (
         <DoneCardPullRequest ticketId={ticket.id} />
