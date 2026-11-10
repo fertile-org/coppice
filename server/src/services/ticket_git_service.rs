@@ -10,6 +10,7 @@ use crate::services::git_ops::{
     list_local_branches, network_remote, push_argv, push_gate, push_refspec, run_git,
     run_git_capture, sanitize_token, GitOpsError,
 };
+use crate::services::git_state_service::state_from_review;
 use crate::services::human_review_service::{
     normalize_sha, reviewed_sha_matches, HumanReviewError, HumanReviewService,
 };
@@ -39,6 +40,8 @@ pub struct TicketGitInfo {
     pub can_create_pr: bool,
     pub push_disabled_reason: Option<String>,
     pub create_pr_disabled_reason: Option<String>,
+    pub git_state: String,
+    pub git_state_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -293,6 +296,10 @@ impl<'a> TicketGitService<'a> {
             forge_token_configured,
         );
 
+        let review = HumanReviewService::new(self.pool).get(ticket_id).await?;
+        let git_state = state_from_review(review.as_ref()).as_str().to_string();
+        let git_state_reason = review.and_then(|r| r.git_outcome_reason);
+
         Ok(TicketGitInfo {
             ticket_branch: ctx.ticket_branch.clone(),
             worktree_path: ctx.worktree_dir.to_string_lossy().into_owned(),
@@ -308,6 +315,8 @@ impl<'a> TicketGitService<'a> {
             can_create_pr,
             push_disabled_reason,
             create_pr_disabled_reason,
+            git_state,
+            git_state_reason,
         })
     }
 

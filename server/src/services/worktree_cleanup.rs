@@ -9,7 +9,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::comment::{AuthorType, CommentIntent};
+use crate::domain::git_state::GitOutcome;
+use crate::events::bus::EventBus;
 use crate::services::comment_service::CommentService;
+use crate::services::git_state_service::GitStateService;
+use crate::services::human_review_service::HumanReviewService;
 use crate::services::ticket_git_service::{TicketGitService, WorktreeCleanup};
 use crate::services::worktree_service::compute_paths;
 
@@ -23,6 +27,7 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// is kept; the hourly sweep only logs.
 pub async fn cleanup_ticket(
     pool: &PgPool,
+    bus: &EventBus,
     worktrees_root: PathBuf,
     ticket_id: Uuid,
     announce: bool,
@@ -40,9 +45,17 @@ pub async fn cleanup_ticket(
     match &outcome {
         WorktreeCleanup::Removed => {
             tracing::info!(%ticket_id, "removed finished ticket worktree and branch");
+            set_outcome(pool, ticket_id, None, None).await;
         }
         WorktreeCleanup::SkippedUncommitted { worktree_path } => {
             tracing::warn!(%ticket_id, worktree_path, "kept ticket worktree with uncommitted changes");
+            set_outcome(
+                pool,
+                ticket_id,
+                Some(GitOutcome::WorktreeKept),
+                Some("It has uncommitted changes"),
+            )
+            .await;
             if announce {
                 if let Err(err) = CommentService::new(pool)
                     .create(
@@ -65,7 +78,23 @@ pub async fn cleanup_ticket(
         }
         WorktreeCleanup::NothingToDo => {}
     }
+    // Always: the panel shows the git state, which this may have changed.
+    crate::events::publish_ticket_state(bus, pool, ticket_id).await;
     outcome
+}
+
+async fn set_outcome(
+    pool: &PgPool,
+    ticket_id: Uuid,
+    outcome: Option<GitOutcome>,
+    reason: Option<&str>,
+) {
+    if let Err(err) = HumanReviewService::new(pool)
+        .set_git_outcome(ticket_id, outcome, reason)
+        .await
+    {
+        tracing::warn!(%ticket_id, error = %err, "could not record worktree cleanup outcome");
+    }
 }
 
 /// Clean up in the background, for example after archive or merge.
@@ -74,8 +103,9 @@ pub fn spawn_cleanup(state: &Arc<crate::AppState>, ticket_id: Uuid) {
         return;
     };
     let root = PathBuf::from(&state.config.agent.worktrees_path);
+    let state = state.clone();
     tokio::spawn(async move {
-        cleanup_ticket(&pool, root, ticket_id, true).await;
+        cleanup_ticket(&pool, &state.event_bus, root, ticket_id, true).await;
     });
 }
 
@@ -88,14 +118,21 @@ pub fn spawn_sweep(state: Arc<crate::AppState>) {
         loop {
             tokio::time::sleep(SWEEP_INTERVAL).await;
             let root = PathBuf::from(&state.config.agent.worktrees_path);
-            if let Err(err) = sweep(&pool, root).await {
+            if let Err(err) = sweep(&pool, &state.event_bus, root).await {
                 tracing::warn!(error = %err, "ticket worktree sweep failed");
+            }
+            if let Err(err) = recheck_pending(&state, &pool).await {
+                tracing::warn!(error = %err, "ticket git state recheck failed");
             }
         }
     });
 }
 
-pub async fn sweep(pool: &PgPool, worktrees_root: PathBuf) -> Result<usize, sqlx::Error> {
+pub async fn sweep(
+    pool: &PgPool,
+    bus: &EventBus,
+    worktrees_root: PathBuf,
+) -> Result<usize, sqlx::Error> {
     let rows: Vec<(Uuid, String)> = sqlx::query_as(
         r#"
         SELECT ticket.id, repo.name
@@ -115,11 +152,28 @@ pub async fn sweep(pool: &PgPool, worktrees_root: PathBuf) -> Result<usize, sqlx
         {
             continue;
         }
-        if cleanup_ticket(pool, worktrees_root.clone(), ticket_id, false).await
+        if cleanup_ticket(pool, bus, worktrees_root.clone(), ticket_id, false).await
             == WorktreeCleanup::Removed
         {
             removed += 1;
         }
     }
     Ok(removed)
+}
+
+/// Tickets waiting on a push or a kept worktree may have been resolved by
+/// hand since. Local git only.
+async fn recheck_pending(state: &crate::AppState, pool: &PgPool) -> Result<(), sqlx::Error> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT ticket_id FROM ticket_human_reviews WHERE git_outcome IN ('not_pushed', 'worktree_kept')",
+    )
+    .fetch_all(pool)
+    .await?;
+    let service = GitStateService::new(state, pool);
+    for ticket_id in ids {
+        if let Err(err) = service.recheck(ticket_id).await {
+            tracing::warn!(%ticket_id, error = %err, "git state recheck failed");
+        }
+    }
+    Ok(())
 }

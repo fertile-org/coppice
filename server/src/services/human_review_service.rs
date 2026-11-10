@@ -26,6 +26,7 @@ pub struct HumanReview {
     pub merged_at: Option<time::OffsetDateTime>,
     pub accepted_by_coppice: bool,
     pub merged_base_branch: Option<String>,
+    pub merged_sha: Option<String>,
     pub git_outcome: Option<GitOutcome>,
     pub git_outcome_reason: Option<String>,
 }
@@ -49,7 +50,7 @@ impl<'a> HumanReviewService<'a> {
         let row = sqlx::query(
             r#"
             SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
-                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
+                   accepted_by_coppice, merged_base_branch, merged_sha, git_outcome, git_outcome_reason
             FROM ticket_human_reviews
             WHERE ticket_id = $1
             "#,
@@ -68,7 +69,7 @@ impl<'a> HumanReviewService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
-                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
+                   accepted_by_coppice, merged_base_branch, merged_sha, git_outcome, git_outcome_reason
             FROM ticket_human_reviews
             WHERE ticket_id = ANY($1)
             "#,
@@ -117,7 +118,7 @@ impl<'a> HumanReviewService<'a> {
                 git_outcome_reason = NULL,
                 git_outcome_at = NULL
             RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
-                   accepted_by_coppice, merged_base_branch, git_outcome, git_outcome_reason
+                   accepted_by_coppice, merged_base_branch, merged_sha, git_outcome, git_outcome_reason
             "#,
         )
         .bind(ticket_id)
@@ -435,6 +436,7 @@ fn row_to_review(row: &sqlx::postgres::PgRow) -> HumanReview {
         merged_at: row.get("merged_at"),
         accepted_by_coppice: row.get("accepted_by_coppice"),
         merged_base_branch: row.get("merged_base_branch"),
+        merged_sha: row.get("merged_sha"),
         git_outcome: row
             .get::<Option<String>, _>("git_outcome")
             .and_then(|s| GitOutcome::parse_str(&s)),

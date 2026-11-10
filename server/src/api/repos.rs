@@ -7,6 +7,7 @@ use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FileContent, FilePatch,
 };
 use crate::services::git_ops;
+use crate::services::git_state_service::GitStateService;
 use crate::services::planning_service::PlanningService;
 use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
@@ -464,6 +465,12 @@ async fn push_default_branch(
         .push_default_branch(repo_id)
         .await
         .map_err(map_repo_git_error)?;
+    if let Err(err) = GitStateService::new(&state, pool)
+        .recheck_repo_not_pushed(repo_id)
+        .await
+    {
+        tracing::warn!(%repo_id, error = %err, "git state recheck failed");
+    }
     Ok(Json(result))
 }
 

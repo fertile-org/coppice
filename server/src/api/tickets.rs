@@ -19,6 +19,7 @@ use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::conflict_resolve::{self, ConflictResolveError, GitConflictHttp};
 use crate::services::git_flow::{self, Actor};
+use crate::services::git_state_service::{state_from_review, GitStateService};
 use crate::services::human_review_service::short_commit_sha;
 use crate::services::planning_service::{
     planner_for_ticket, suggested_assignee, PlanningService, StartOutcome, SuggestedAssignee,
@@ -254,6 +255,10 @@ pub(crate) struct HumanReviewResponse {
     short_sha: String,
     stale: bool,
     merged: bool,
+    git_state: String,
+    git_state_reason: Option<String>,
+    accepted_by_coppice: bool,
+    merged_sha: Option<String>,
     comment_ids: Vec<Uuid>,
     run_ids: Vec<Uuid>,
 }
@@ -356,7 +361,12 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
             .map(|ts| ts.format(&Rfc3339).unwrap_or_default()),
         human_review: item.human_review.map(|review| {
             let short_sha = short_commit_sha(&review.head_sha).to_string();
+            let git_state = state_from_review(Some(&review)).as_str().to_string();
             HumanReviewResponse {
+                git_state,
+                git_state_reason: review.git_outcome_reason,
+                accepted_by_coppice: review.accepted_by_coppice,
+                merged_sha: review.merged_sha,
                 head_sha: review.head_sha,
                 short_sha,
                 stale: review.stale,
@@ -1764,6 +1774,9 @@ async fn ticket_git_info(
 ) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
+    if let Err(err) = GitStateService::new(&state, pool).recheck(ticket_id).await {
+        tracing::warn!(%ticket_id, error = %err, "git state recheck failed");
+    }
     let info = ticket_git_service(&state, pool)
         .git_info(ticket_id)
         .await

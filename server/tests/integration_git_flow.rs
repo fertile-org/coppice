@@ -263,6 +263,7 @@ struct MergeFixture {
     app: axum::Router,
     cookie: String,
     csrf: String,
+    board_id: String,
     ticket_id: String,
     local_path: std::path::PathBuf,
     worktree_path: std::path::PathBuf,
@@ -292,6 +293,7 @@ async fn accepted_ticket_with_worktree() -> MergeFixture {
         app,
         cookie,
         csrf,
+        board_id,
         ticket_id,
         local_path,
         worktree_path,
@@ -430,5 +432,231 @@ async fn manual_merge_dirty_main_records_outcome() {
     git(&fx.local_path, &["checkout", "--", "README.md"]);
     let res = merge_main(&fx).await;
     assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(review_of(&fx).await.git_outcome, None);
+}
+
+/// `humanReview.gitState` from the ticket detail, or None before acceptance.
+async fn detail_git_state(fx: &MergeFixture) -> Option<String> {
+    let res = post(fx, "GET", &format!("/api/tickets/{}", fx.ticket_id), "").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    body["humanReview"]["gitState"].as_str().map(str::to_string)
+}
+
+/// `gitState` from git-info, which rechecks first.
+async fn info_git_state(fx: &MergeFixture) -> String {
+    let res = post(
+        fx,
+        "GET",
+        &format!("/api/tickets/{}/git-info", fx.ticket_id),
+        "",
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    body["gitState"].as_str().unwrap_or_default().to_string()
+}
+
+async fn wait_for_detail_state(fx: &MergeFixture, want: &str) {
+    for _ in 0..100 {
+        if detail_git_state(fx).await.as_deref() == Some(want) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!(
+        "git state never became {want}: {:?}",
+        detail_git_state(fx).await
+    );
+}
+
+#[tokio::test]
+async fn board_list_exposes_git_state() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = accepted_ticket_with_worktree().await;
+    accept(&fx).await;
+
+    let res = post(
+        &fx,
+        "GET",
+        &format!("/api/boards/{}/tickets", fx.board_id),
+        "",
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    let items = body
+        .as_array()
+        .or_else(|| body["tickets"].as_array())
+        .expect("list");
+    let item = items
+        .iter()
+        .find(|t| t["id"] == fx.ticket_id.as_str())
+        .expect("ticket in list");
+    assert_eq!(item["humanReview"]["gitState"], "not_merged");
+    assert_eq!(item["humanReview"]["acceptedByCoppice"], false);
+}
+
+#[tokio::test]
+async fn cleanup_publishes_ticket_update() {
+    use coppice_server::events::bus::AppEvent;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = accepted_ticket_with_worktree().await;
+    accept(&fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
+
+    assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
+
+    // One update comes from the merge itself, a second from the cleanup.
+    let want = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let mut updates = 0;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while updates < 2 {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Ok(AppEvent::TicketUpdated { ticket_id, .. })) if ticket_id == want => {
+                updates += 1;
+            }
+            Ok(Ok(_)) => {}
+            other => panic!("no ticket update after cleanup: {other:?}"),
+        }
+    }
+    assert!(!fx.worktree_path.exists());
+}
+
+#[tokio::test]
+async fn cleanup_kept_worktree_sets_outcome() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = accepted_ticket_with_worktree().await;
+    accept(&fx).await;
+    assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
+    // The merge's own cleanup removes the worktree. Bring one back with
+    // uncommitted work, then clean up again.
+    for _ in 0..100 {
+        if !fx.worktree_path.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!fx.worktree_path.exists());
+    // Let that cleanup finish recording its outcome.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let worktrees_root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
+    common::setup_worktree_with_commit(&fx.local_path, &worktrees_root, "test-repo", &fx.ticket_id);
+    std::fs::write(fx.worktree_path.join("scratch.txt"), "uncommitted\n").unwrap();
+
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    coppice_server::services::worktree_cleanup::cleanup_ticket(
+        &pool,
+        &fx.state.event_bus,
+        worktrees_root,
+        id,
+        false,
+    )
+    .await;
+    assert_eq!(
+        detail_git_state(&fx).await.as_deref(),
+        Some("worktree_kept")
+    );
+    assert_eq!(info_git_state(&fx).await, "worktree_kept");
+
+    std::fs::remove_dir_all(&fx.worktree_path).unwrap();
+    assert_eq!(info_git_state(&fx).await, "merged");
+    assert_eq!(detail_git_state(&fx).await.as_deref(), Some("merged"));
+}
+
+#[tokio::test]
+async fn sync_push_clears_not_pushed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let bare = tempfile::tempdir().expect("bare");
+    git(bare.path(), &["init", "--bare", "-b", "main"]);
+    git(
+        &local_path,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
+    git(&local_path, &["push", "-u", "origin", "main"]);
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = path;
+        config.git.push_enabled = true;
+    })
+    .await;
+    let worktrees_root = std::path::PathBuf::from(&state.config.agent.worktrees_path);
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    // Metadata only: the checkout's own `origin` is the bare sibling.
+    let patched = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/repos/{repo_id}"),
+            r#"{"remoteUrl":"https://github.com/example/repo.git"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patched.status(), StatusCode::OK);
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let worktree_path =
+        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    let fx = MergeFixture {
+        _git_keep: git_dir,
+        _worktrees: worktrees,
+        state,
+        app,
+        cookie,
+        csrf,
+        board_id,
+        ticket_id,
+        local_path,
+        worktree_path,
+    };
+    accept(&fx).await;
+    // The merge leaves main ahead of origin/main.
+    assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
+    // Let the merge's own cleanup finish, so it can't race the outcome below.
+    for _ in 0..100 {
+        if !fx.worktree_path.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!fx.worktree_path.exists());
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    HumanReviewService::new(&pool)
+        .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
+        .await
+        .unwrap();
+    assert_eq!(info_git_state(&fx).await, "not_pushed");
+
+    let res = post(
+        &fx,
+        "POST",
+        &format!("/api/repos/{repo_id}/push-default-branch"),
+        "",
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "push");
+    assert_eq!(detail_git_state(&fx).await.as_deref(), Some("merged"));
     assert_eq!(review_of(&fx).await.git_outcome, None);
 }

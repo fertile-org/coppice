@@ -26,6 +26,7 @@ pub mod design_service;
 pub mod git_cmd;
 pub mod git_flow;
 pub mod git_ops;
+pub mod git_state_service;
 pub mod human_review_service;
 pub mod init_wizard;
 pub mod job_service;

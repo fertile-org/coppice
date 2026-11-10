@@ -689,6 +689,7 @@ async fn an_active_run_blocks_cleanup_and_manual_remove() {
 
     let outcome = coppice_server::services::worktree_cleanup::cleanup_ticket(
         &pool,
+        &state.event_bus,
         env.worktrees.path().to_path_buf(),
         ticket_id,
         false,
@@ -719,6 +720,7 @@ async fn the_sweep_cleans_merged_tickets_and_repeats_safely() {
 
     let removed = coppice_server::services::worktree_cleanup::sweep(
         &pool,
+        &state.event_bus,
         env.worktrees.path().to_path_buf(),
     )
     .await
@@ -729,6 +731,7 @@ async fn the_sweep_cleans_merged_tickets_and_repeats_safely() {
 
     let again = coppice_server::services::worktree_cleanup::cleanup_ticket(
         &pool,
+        &state.event_bus,
         env.worktrees.path().to_path_buf(),
         ticket_id,
         true,

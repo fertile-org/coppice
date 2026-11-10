@@ -281,7 +281,14 @@ async fn after_recorded_merge(
         );
     }
 
-    worktree_cleanup::cleanup_ticket(pool, worktrees_root.to_path_buf(), ticket_id, true).await;
+    worktree_cleanup::cleanup_ticket(
+        pool,
+        &state.event_bus,
+        worktrees_root.to_path_buf(),
+        ticket_id,
+        true,
+    )
+    .await;
 
     match TicketService::new(pool).get(ticket_id).await {
         Ok(ticket) => publish_ticket_updated(&state.event_bus, &ticket),
