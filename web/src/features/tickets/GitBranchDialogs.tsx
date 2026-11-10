@@ -161,7 +161,6 @@ export function CreatePrButton({
     return (
       <button
         type="button"
-        role="menuitem"
         disabled={disabled || createPr.isPending}
         title="Push the ticket branch (if needed) and create a GitHub pull request via API"
         onClick={() => void handleCreatePr()}

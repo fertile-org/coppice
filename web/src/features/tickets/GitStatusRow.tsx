@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
@@ -18,6 +19,8 @@ import {
 import { selectedConflictAgent, type GitConflict } from './conflictOffer';
 import { gitStateCopy, type GitStateTone, type TicketGitState } from './gitStateCopy';
 import {
+  gitInfoQueryKey,
+  ticketQueryKey,
   usePushTicketBranch,
   useRemoveWorktree,
   useResolveConflict,
@@ -64,6 +67,7 @@ export function GitStatusRow({
   shortcutActive?: boolean;
 }) {
   const toast = useToast();
+  const queryClient = useQueryClient();
   const confirm = useConfirm();
   const isPanel = variant === 'panel';
   const repoId = ticket.repoId ?? '';
@@ -111,9 +115,10 @@ export function GitStatusRow({
 
   const mainIsMerge = state === 'not_merged' || state === 'main_dirty';
   const mergeShortcutEnabled = isPanel
-    ? mainIsMerge && Boolean(gitInfo) && !blocked
+    ? showFinalActions && mainIsMerge && Boolean(gitInfo) && !blocked
     : () =>
         shortcutActive &&
+        showFinalActions &&
         mainIsMerge &&
         Boolean(gitInfo) &&
         !blocked &&
@@ -193,6 +198,9 @@ export function GitStatusRow({
     try {
       const result = await pushMain.mutateAsync();
       toast.success(result.message);
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticket.id) });
+      void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticket.id) });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     } catch (err) {
       const message = parseApiErrorMessage(err, 'Push failed.');
       setGitError(message);
@@ -261,7 +269,7 @@ export function GitStatusRow({
       node: (
         <button
           type="button"
-          role="menuitem"
+         
           className={menuItemClass}
           disabled={blocked || !gitInfo}
           onClick={() => pick(() => setMergeOpen(true))}
@@ -276,7 +284,7 @@ export function GitStatusRow({
     node: (
       <button
         type="button"
-        role="menuitem"
+       
         className={menuItemClass}
         disabled={blocked || !worktreeExists}
         title={worktreeExists ? undefined : 'Rebase requires an existing worktree'}
@@ -292,7 +300,7 @@ export function GitStatusRow({
       node: (
         <button
           type="button"
-          role="menuitem"
+         
           className={menuItemClass}
           disabled={blocked || !gitInfo?.canPush}
           title={
@@ -313,7 +321,7 @@ export function GitStatusRow({
         node: (
           <button
             type="button"
-            role="menuitem"
+           
             className={menuItemClass}
             disabled={blocked}
             title="Open compare / new PR page on the git host (push the branch first)"
@@ -348,7 +356,7 @@ export function GitStatusRow({
       node: (
         <button
           type="button"
-          role="menuitem"
+         
           className={menuItemClass}
           disabled={blocked || Boolean(ticket.hasActiveRun) || !worktreeExists}
           onClick={() => pick(() => void handleRemoveWorktree())}
@@ -415,7 +423,7 @@ export function GitStatusRow({
                   <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" role="menu" className="w-52 p-1">
+              <PopoverContent align="end" role="group" aria-label="Git actions" className="w-52 p-1">
                 {visibleItems.map((item) => (
                   <div key={item.key}>{item.node}</div>
                 ))}
@@ -485,6 +493,11 @@ export function GitStatusRow({
           className={cn('font-body text-xs', reasonTone[copy.tone])}
         >
           {reason}
+        </p>
+      )}
+      {state === 'conflict' && !conflict && (
+        <p className="font-body text-xs text-text-secondary">
+          Retry the merge to load the conflicting files.
         </p>
       )}
       {isLoading && <p className="font-body text-xs text-text-muted">Loading git info…</p>}

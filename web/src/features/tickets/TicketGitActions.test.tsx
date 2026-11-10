@@ -150,12 +150,12 @@ describe('TicketGitActions', () => {
 
     expect(screen.getByRole('button', { name: 'Rebase…' })).toBeInTheDocument();
     openMenu();
-    expect(screen.getByRole('menuitem', { name: 'Push branch' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Open compare URL' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Remove worktree' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /^Merge/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Push branch' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Merge/ })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('menuitem', { name: 'Create PR via API' }),
+      screen.queryByRole('button', { name: 'Create PR via API' }),
     ).not.toBeInTheDocument();
   });
 
@@ -163,7 +163,7 @@ describe('TicketGitActions', () => {
     renderActions(makeTicket({ status: 'wait_for_final_review', hasActiveRun: true }));
     openMenu();
 
-    expect(screen.getByRole('menuitem', { name: 'Remove worktree' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeDisabled();
   });
 
   it('shows Merge and Create PR for a Done ticket that is not merged', () => {
@@ -172,8 +172,8 @@ describe('TicketGitActions', () => {
 
     expect(screen.getByRole('button', { name: 'Merge' })).toBeInTheDocument();
     openMenu();
-    expect(screen.getByRole('menuitem', { name: 'Create PR via API' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Rebase…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rebase…' })).toBeInTheDocument();
   });
 
   it('shows API Create PR only when canCreatePr is true', () => {
@@ -185,8 +185,8 @@ describe('TicketGitActions', () => {
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
     openMenu();
 
-    expect(screen.getByRole('menuitem', { name: 'Open compare URL' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Create PR via API' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
   });
 
   it('disables Rebase when worktree is missing', () => {

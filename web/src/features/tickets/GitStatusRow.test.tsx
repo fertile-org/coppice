@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
@@ -10,9 +10,12 @@ import { gitStateCopy, type TicketGitState } from './gitStateCopy';
 import type { TicketGitInfo } from './useTicket';
 
 const pushMainMutateAsync = vi.fn();
+const invalidated: unknown[][] = [];
 const gitInfoState: { data: TicketGitInfo | undefined } = { data: undefined };
 
 vi.mock('./useTicket', () => ({
+  ticketQueryKey: (id: string) => ['ticket', id],
+  gitInfoQueryKey: (id: string) => ['ticket-git-info', id],
   useTicketGitInfo: () => ({ data: gitInfoState.data, isLoading: false }),
   useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRebaseTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -64,6 +67,10 @@ function makeTicket(state: TicketGitState, overrides: Partial<Ticket> = {}): Tic
 
 function renderRow(ticket: Ticket, variant: 'panel' | 'card' = 'panel') {
   const client = new QueryClient();
+  vi.spyOn(client, 'invalidateQueries').mockImplementation((filters) => {
+    invalidated.push([...(filters?.queryKey ?? [])]);
+    return Promise.resolve();
+  });
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -87,6 +94,7 @@ const withButton: TicketGitState[] = [
 describe('GitStatusRow', () => {
   beforeEach(() => {
     pushMainMutateAsync.mockReset();
+    invalidated.length = 0;
     gitInfoState.data = { ...gitInfo };
   });
 
@@ -109,14 +117,14 @@ describe('GitStatusRow', () => {
   it('keeps Merge out of the dropdown while in review', () => {
     renderRow(makeTicket('in_review'));
     fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Push branch' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /^Merge/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Push branch' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Merge/ })).not.toBeInTheDocument();
   });
 
   it('offers Merge into… in the dropdown once accepted', () => {
     renderRow(makeTicket('not_merged'));
     fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Merge into…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into…' })).toBeInTheDocument();
   });
 
   it('shows the short SHA and no button once merged', () => {
@@ -131,6 +139,46 @@ describe('GitStatusRow', () => {
     renderRow(makeTicket('not_pushed'));
     fireEvent.click(screen.getByRole('button', { name: 'Push main' }));
     expect(pushMainMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes the ticket, git info and board after Push main', async () => {
+    pushMainMutateAsync.mockResolvedValue({ message: 'Pushed main' });
+    const ticket = makeTicket('not_pushed');
+    renderRow(ticket);
+    fireEvent.click(screen.getByRole('button', { name: 'Push main' }));
+    await waitFor(() => expect(invalidated).toHaveLength(3));
+    expect(invalidated).toEqual(
+      expect.arrayContaining([
+        ['ticket', ticket.id],
+        ['ticket-git-info', ticket.id],
+        ['tickets'],
+      ]),
+    );
+  });
+
+  it('opens the menu from the keyboard, reaches an item, and Escape returns focus', async () => {
+    renderRow(makeTicket('not_merged'));
+    const trigger = screen.getByRole('button', { name: 'More git actions' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    fireEvent.click(trigger);
+    const group = await screen.findByRole('group', { name: 'Git actions' });
+    const item = within(group).getByRole('button', { name: 'Rebase…' });
+    item.focus();
+    expect(item).toHaveFocus();
+    fireEvent.keyDown(item, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Git actions' })).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('disables the menu trigger when the ticket is archived', () => {
+    renderRow(makeTicket('not_merged', { archivedAt: '2026-06-09T00:00:00.000Z' }));
+    expect(screen.getByRole('button', { name: 'More git actions' })).toBeDisabled();
+  });
+
+  it('hints how to load a conflict when none is known', () => {
+    renderRow(makeTicket('conflict'));
+    expect(screen.getByText('Retry the merge to load the conflicting files.')).toBeInTheDocument();
   });
 
   it('prefers the fresher git-info state in the panel and the ticket state on the card', () => {

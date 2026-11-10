@@ -53,7 +53,7 @@ const SHOTS = [
   {
     file: 'done-card.png',
     article: 'website/src/content/blog/en/claude-code-and-codex.md',
-    alt: 'Done card marked Accepted, not merged, with a separate Merge button.',
+    alt: 'Done card marked Not merged, with a separate Merge button.',
     caption: 'Demo: Accept and Merge are separate. Not a Claude Code or Codex result.',
   },
 ];
@@ -437,8 +437,8 @@ async function captureDone(page, scene) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   const done = page.getByRole('region', { name: 'Done' });
   await done.getByText(TICKET_TITLE).waitFor({ timeout: 15_000 });
-  await done.getByText('Accepted, not merged').waitFor({ timeout: 15_000 });
-  await done.getByRole('button', { name: 'Merge…' }).waitFor();
+  await done.getByText('Not merged', { exact: true }).waitFor({ timeout: 15_000 });
+  await done.getByRole('button', { name: 'Merge', exact: true }).waitFor();
   await showDone(page);
   await preparePage(page, 'done card');
   await shoot(page, 'done-card.png');

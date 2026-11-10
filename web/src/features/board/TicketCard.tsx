@@ -98,7 +98,11 @@ export const TicketCard = memo(function TicketCard({
             ? PLAN_COPY.planNeedsRun
             : null;
 
-  const showGitStatus = ticket.status === 'done' && Boolean(ticket.repoId) && !isArchived;
+  const showGitStatus =
+    ticket.status === 'done' &&
+    Boolean(ticket.repoId) &&
+    !isArchived &&
+    ticket.humanReview != null;
   const suggested = ticket.suggestedAssignee;
   const splitLabel = splitChildLabel(ticket.splitProgress);
   const showHierarchy = !ticket.splitProgress;

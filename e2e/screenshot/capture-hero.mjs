@@ -1186,9 +1186,9 @@ for offset in (0, 0.8, 1.6, 2.2):
     text = text.lower()
     folded = " ".join(text.replace(",", " ").split())
     folded = folded.replace("accented", "accepted").replace("accepted", "accept")
-    if "nothing is done" not in folded or "accept not merged" not in folded:
+    if "nothing is done" not in folded or "not merged" not in folded:
         raise SystemExit(f"accept +{offset:.1f}s missing caption or accepted state:\\n{text}")
-    print(f"accept +{offset:.1f}s caption overlaps Accepted, not merged")
+    print(f"accept +{offset:.1f}s caption overlaps Not merged")
 span = accept_times[-1] - accept_times[0]
 print(f"captions stay centered ({index} frames, accept hold {span:.2f}s)")
 `;
@@ -1984,7 +1984,7 @@ async function record(scene) {
       await doneCard.waitFor({ timeout: 15_000 });
       columnScroll = await showColumn(page, 'Done');
       await page
-        .getByText('Accepted, not merged', { exact: true })
+        .getByText('Not merged', { exact: true })
         .waitFor({ timeout: 6_000 })
         .catch(() => {});
       const cardText = await doneCard.evaluate((el) => el.parentElement.innerText);

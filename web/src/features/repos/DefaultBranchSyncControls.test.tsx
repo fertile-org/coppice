@@ -49,6 +49,8 @@ const repo: Repo = {
   verificationError: null,
   lastVerifiedAt: '2026-09-04T00:00:00Z',
   forgeTokenConfigured: true,
+  mergeAfterAccept: false,
+  pushAfterMerge: false,
   createdAt: '2026-09-04T00:00:00Z',
   updatedAt: '2026-09-04T00:00:00Z',
 };
