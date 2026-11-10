@@ -6,6 +6,7 @@ pub enum NotificationType {
     AgentRunFinished,
     AgentMentioned,
     KnowledgeCompactionFailed,
+    GitNeedsAction,
 }
 
 impl NotificationType {
@@ -14,6 +15,7 @@ impl NotificationType {
             NotificationType::AgentRunFinished => "agent_run_finished",
             NotificationType::AgentMentioned => "agent_mentioned",
             NotificationType::KnowledgeCompactionFailed => "knowledge_compaction_failed",
+            NotificationType::GitNeedsAction => "git_needs_action",
         }
     }
 
@@ -22,6 +24,7 @@ impl NotificationType {
             "agent_run_finished" => Some(NotificationType::AgentRunFinished),
             "agent_mentioned" => Some(NotificationType::AgentMentioned),
             "knowledge_compaction_failed" => Some(NotificationType::KnowledgeCompactionFailed),
+            "git_needs_action" => Some(NotificationType::GitNeedsAction),
             _ => None,
         }
     }

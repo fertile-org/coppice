@@ -21,8 +21,16 @@ interface NotificationBellProps {
 }
 
 
+function isUnreadNeedsAction(item: NotificationItem): boolean {
+  return item.type === 'git_needs_action' && item.readAt === null;
+}
+
+/** Unread needs-action items first, then newest first. */
 function newestFirst(items: NotificationItem[]): NotificationItem[] {
   return [...items].sort((left, right) => {
+    const priority =
+      Number(isUnreadNeedsAction(right)) - Number(isUnreadNeedsAction(left));
+    if (priority !== 0) return priority;
     const rightTime = new Date(right.createdAt).getTime();
     const leftTime = new Date(left.createdAt).getTime();
     return rightTime - leftTime;
@@ -38,16 +46,19 @@ function NotificationRow({
 }) {
   const unread = notification.readAt === null;
   const formattedDateTime = formatNotificationDateTime(notification.createdAt);
+  const needsAction = notification.type === 'git_needs_action';
 
   return (
     <li>
       <button
         type="button"
         data-unread={String(unread)}
+        data-kind={needsAction ? 'needs-action' : undefined}
         onClick={() => onSelect(notification)}
         className={[
           'group relative flex w-full gap-3 px-4 py-3 text-left transition-colors duration-fast',
           'focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+          needsAction ? 'border-l-4 border-warning' : '',
           unread
             ? 'bg-moss-50 hover:bg-moss-100'
             : 'bg-surface-raised hover:bg-paper-100',
@@ -64,6 +75,11 @@ function NotificationRow({
           <span className="sr-only">
             {unread ? 'Unread notification. ' : 'Read notification. '}
           </span>
+          {needsAction && (
+            <span className="mb-0.5 block font-body text-xs font-semibold uppercase tracking-wide text-warning">
+              Needs action
+            </span>
+          )}
           <span
             className={[
               'block font-body text-sm text-text-primary',

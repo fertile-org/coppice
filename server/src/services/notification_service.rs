@@ -1,3 +1,4 @@
+use crate::domain::git_state::TicketGitState;
 use crate::domain::notification::{Notification, NotificationType};
 use sqlx::PgPool;
 use sqlx::Row;
@@ -158,6 +159,56 @@ impl<'a> NotificationService<'a> {
             ticket_id: None,
             run_id,
             agent_id: Some(agent_id),
+            comment_id: None,
+            mention_id: None,
+            source_key: &source_key,
+        })
+        .await
+    }
+
+    /// Fan out a "needs action" notification for a Done ticket whose git flow
+    /// stopped. Idempotent per `(recipient, ticket, state, transition)`: the
+    /// stored outcome time (or the acceptance time for "not merged") tells a
+    /// new stop from a repeat of the same one.
+    pub async fn create_for_git_needs_action(
+        &self,
+        ticket_id: Uuid,
+        state: TicketGitState,
+        reason: Option<&str>,
+    ) -> Result<Vec<Uuid>, NotificationError> {
+        let ticket_title: Option<String> =
+            sqlx::query_scalar("SELECT title FROM tickets WHERE id = $1")
+                .bind(ticket_id)
+                .fetch_optional(self.pool)
+                .await?;
+        let stamp: Option<i64> = sqlx::query_scalar(
+            r#"
+            SELECT (EXTRACT(EPOCH FROM COALESCE(git_outcome_at, accepted_at)) * 1000000)::bigint
+            FROM ticket_human_reviews
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?;
+        let title = format!(
+            "Needs action: {}",
+            ticket_title.as_deref().unwrap_or("Ticket")
+        );
+        let body = reason.unwrap_or("Accepted, not merged");
+        let source_key = format!(
+            "git_needs_action:{ticket_id}:{}:{}",
+            state.as_str(),
+            stamp.unwrap_or_default()
+        );
+
+        self.fan_out(FanOutInput {
+            kind: NotificationType::GitNeedsAction,
+            title: &title,
+            body: Some(body),
+            ticket_id: Some(ticket_id),
+            run_id: None,
+            agent_id: None,
             comment_id: None,
             mention_id: None,
             source_key: &source_key,

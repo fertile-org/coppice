@@ -11,6 +11,7 @@ use crate::domain::git_state::GitOutcome;
 use crate::domain::substatus::TicketStatus;
 use crate::services::git_chain;
 use crate::services::git_flow::{create_git_action_comment, Actor};
+use crate::services::git_state_service::GitStateService;
 use crate::services::human_review_service::HumanReviewService;
 use crate::services::repo_service::RepoService;
 use crate::services::ticket_attachments::{self, AttachmentFolderEnd};
@@ -120,9 +121,13 @@ impl<'a> TicketMergeFlow<'a> {
             Err(_) => None,
         };
         if let Some((outcome, reason)) = outcome {
-            if let Err(err) = HumanReviewService::new(self.pool)
-                .set_git_outcome(ticket_id, outcome, reason.as_deref())
-                .await
+            if let Err(err) = GitStateService::set_outcome_and_notify(
+                self.pool,
+                ticket_id,
+                outcome,
+                reason.as_deref(),
+            )
+            .await
             {
                 tracing::warn!(error = %err, %ticket_id, "could not record merge outcome");
             }

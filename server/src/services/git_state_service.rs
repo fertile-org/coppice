@@ -8,6 +8,7 @@ use crate::domain::git_state::{derive_git_state, GitOutcome, GitStateInput, Tick
 use crate::domain::substatus::TicketStatus;
 use crate::services::git_ops::{ahead_behind, git_rev_parse};
 use crate::services::human_review_service::{HumanReview, HumanReviewService};
+use crate::services::notification_service::NotificationService;
 use crate::services::ticket_git_service::{TicketGitError, TicketGitService};
 use crate::services::ticket_service::TicketService;
 use crate::AppState;
@@ -37,6 +38,35 @@ pub struct GitStateService<'a> {
 impl<'a> GitStateService<'a> {
     pub fn new(state: &'a AppState, pool: &'a PgPool) -> Self {
         Self { state, pool }
+    }
+
+    /// Store a failed git step and, when that puts the ticket into a
+    /// needs-action state, notify. Every write of a new outcome goes through
+    /// here. Clearing (`None`) and repeating the same outcome never notify.
+    /// Returns whether the outcome changed.
+    pub async fn set_outcome_and_notify(
+        pool: &PgPool,
+        ticket_id: Uuid,
+        outcome: Option<GitOutcome>,
+        reason: Option<&str>,
+    ) -> Result<bool, TicketGitError> {
+        let reviews = HumanReviewService::new(pool);
+        let changed = reviews.set_git_outcome(ticket_id, outcome, reason).await?;
+        if !changed || outcome.is_none() {
+            return Ok(changed);
+        }
+        let status = TicketService::new(pool).get(ticket_id).await?.ticket.status;
+        let review = reviews.get(ticket_id).await?;
+        let state = state_from_review(review.as_ref(), status);
+        if state.needs_action() {
+            if let Err(err) = NotificationService::new(pool)
+                .create_for_git_needs_action(ticket_id, state, reason)
+                .await
+            {
+                tracing::warn!(%ticket_id, error = %err, "could not create needs-action notification");
+            }
+        }
+        Ok(changed)
     }
 
     /// Clear a `NotPushed` or `WorktreeKept` outcome when local git says it is

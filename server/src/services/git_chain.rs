@@ -158,9 +158,13 @@ pub async fn push_after_merge(
         Err(err) => {
             let reason = push_failure_reason(&err, state.config.git.push_enabled, repo);
             tracing::info!(%ticket_id, %reason, "push after merge did not run");
-            match HumanReviewService::new(pool)
-                .set_git_outcome(ticket_id, Some(GitOutcome::NotPushed), Some(&reason))
-                .await
+            match GitStateService::set_outcome_and_notify(
+                pool,
+                ticket_id,
+                Some(GitOutcome::NotPushed),
+                Some(&reason),
+            )
+            .await
             {
                 Ok(_) => {
                     crate::events::publish_ticket_state(&state.event_bus, pool, ticket_id).await;

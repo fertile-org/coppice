@@ -95,9 +95,8 @@ async fn set_outcome(
     outcome: Option<GitOutcome>,
     reason: Option<&str>,
 ) {
-    if let Err(err) = HumanReviewService::new(pool)
-        .set_git_outcome(ticket_id, outcome, reason)
-        .await
+    if let Err(err) =
+        GitStateService::set_outcome_and_notify(pool, ticket_id, outcome, reason).await
     {
         tracing::warn!(%ticket_id, error = %err, "could not record worktree cleanup outcome");
     }

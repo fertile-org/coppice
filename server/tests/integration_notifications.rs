@@ -968,3 +968,142 @@ async fn stopping_running_run_publishes_cancellation_once() {
     assert_eq!(notification_events, 1);
     assert_eq!(get_unread_count(&app, &cookie, &csrf).await["count"], 1);
 }
+
+async fn git_needs_action_rows(
+    pool: &sqlx::PgPool,
+    ticket_id: uuid::Uuid,
+) -> Vec<(String, String)> {
+    sqlx::query(
+        "SELECT title, COALESCE(body, '') AS body FROM notifications \
+         WHERE type = 'git_needs_action' AND ticket_id = $1 ORDER BY created_at",
+    )
+    .bind(ticket_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .map(|r| (r.get("title"), r.get("body")))
+    .collect()
+}
+
+#[tokio::test]
+async fn conflict_outcome_notifies_once() {
+    use coppice_server::domain::git_state::GitOutcome;
+    use coppice_server::services::git_state_service::GitStateService;
+    use coppice_server::services::human_review_service::HumanReviewService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|_| {}).await;
+    let state = _state;
+    let pool = state.db.clone().expect("pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    HumanReviewService::new(&pool)
+        .record_acceptance(ticket_id, None, "abc1234abc1234abc1234abc1234abc1234abc12")
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        GitStateService::set_outcome_and_notify(
+            &pool,
+            ticket_id,
+            Some(GitOutcome::Conflict),
+            Some("2 files conflict with main"),
+        )
+        .await
+        .unwrap();
+    }
+    let rows = git_needs_action_rows(&pool, ticket_id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].0.starts_with("Needs action: "));
+    assert_eq!(rows[0].1, "2 files conflict with main");
+    let unread = get_unread_count(&app, &cookie, &csrf).await;
+    assert_eq!(unread["count"], 1);
+}
+
+#[tokio::test]
+async fn successful_chain_sends_no_notification() {
+    use coppice_server::services::git_state_service::GitStateService;
+    use coppice_server::services::human_review_service::HumanReviewService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|_| {}).await;
+    let pool = state.db.clone().expect("pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    HumanReviewService::new(&pool)
+        .record_acceptance(ticket_id, None, "abc1234abc1234abc1234abc1234abc1234abc12")
+        .await
+        .unwrap();
+
+    // A clean merge and push clear the outcome and never raise one.
+    GitStateService::set_outcome_and_notify(&pool, ticket_id, None, None)
+        .await
+        .unwrap();
+    assert!(git_needs_action_rows(&pool, ticket_id).await.is_empty());
+}
+
+#[tokio::test]
+async fn accept_with_merge_off_notifies_not_merged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = path;
+    })
+    .await;
+    let worktrees_root = std::path::PathBuf::from(&state.config.agent.worktrees_path);
+    let pool = state.db.clone().expect("pool");
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    for (method, uri, body) in [
+        (
+            "PATCH",
+            format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"wait_for_final_review"}"#,
+        ),
+        (
+            "POST",
+            format!("/api/tickets/{ticket_id}/final-approve"),
+            "{}",
+        ),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(common::json_request(method, &uri, body, &cookie, &csrf))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{uri}");
+    }
+    let id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let rows = git_needs_action_rows(&pool, id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].1, "Accepted, not merged");
+    drop(git_dir);
+}

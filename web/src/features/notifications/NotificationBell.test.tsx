@@ -133,6 +133,30 @@ describe('NotificationBell', () => {
     expect(onOpenTicket).not.toHaveBeenCalled();
   });
 
+  it('lists unread needs-action notifications first, marked and labelled', () => {
+    const needsAction: NotificationItem = {
+      ...unreadNotification,
+      id: '00000000-0000-0000-0000-000000000004',
+      type: 'git_needs_action',
+      title: 'Needs action: Fix login',
+      body: '2 files conflict with main',
+      runId: null,
+      agentId: null,
+      createdAt: '2026-08-01T12:00:00.000Z',
+    };
+    vi.stubGlobal('fetch', mockNotificationApi([unreadNotification, needsAction], 2));
+    renderBell({ items: [unreadNotification, needsAction], count: 2 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications, 2 unread' }));
+
+    const rows = within(
+      screen.getByRole('list', { name: 'Notification history' }),
+    ).getAllByRole('button');
+    expect(rows[0]).toHaveAttribute('data-kind', 'needs-action');
+    expect(within(rows[0]).getByText('Needs action')).toBeInTheDocument();
+    expect(rows[1]).not.toHaveAttribute('data-kind');
+  });
+
   it('does not reuse notification state when the signed-in user changes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith('/unread-count')) {
