@@ -325,14 +325,19 @@ impl<'a> RunOrchestrator<'a> {
                 && !is_implementer(&agent.role)
                 && (is_reviewer_identity(&agent_key, &agent.role)
                     || is_tech_lead_identity(&agent_key, &agent.role));
+            // The review pass only feeds auto-accept: a failure to store it
+            // must not fail the run.
             if approving_review {
-                crate::services::auto_accept::record_agent_review_pass(
+                if let Err(err) = crate::services::auto_accept::record_agent_review_pass(
                     self.pool,
                     self.app_state.map(|state| state.as_ref()),
                     ticket_id,
                     comment.as_ref().map(|posted| posted.created_at),
                 )
-                .await?;
+                .await
+                {
+                    tracing::warn!(%ticket_id, error = %err, "could not record agent review pass");
+                }
             } else if is_implementer(&agent.role)
                 || matches!(
                     current_status,
@@ -345,7 +350,12 @@ impl<'a> RunOrchestrator<'a> {
             {
                 // New work or a review that did not pass: an earlier pass no
                 // longer covers this ticket.
-                crate::services::auto_accept::clear_agent_review_pass(self.pool, ticket_id).await?;
+                if let Err(err) =
+                    crate::services::auto_accept::clear_agent_review_pass(self.pool, ticket_id)
+                        .await
+                {
+                    tracing::warn!(%ticket_id, error = %err, "could not clear agent review pass");
+                }
             }
         }
 

@@ -78,13 +78,16 @@ impl<'a> AcceptService<'a> {
         create_git_action_comment(self.state, self.pool, ticket_id, actor, body).await?;
 
         crate::events::publish_ticket_updated(&self.state.event_bus, &updated);
-        self.notify_if_not_merging(&updated).await;
+        if matches!(actor, Actor::Coppice) {
+            self.notify_if_not_merging(&updated).await;
+        }
         crate::services::git_chain::spawn_after_accept(self.state, ticket_id);
         Ok(updated)
     }
 
-    /// With merge-after-accept off the accepted work waits for a person, so
-    /// say so. With it on, the chain notifies only if it stops.
+    /// After an auto-accept with merge-after-accept off, the accepted work
+    /// waits for a person, so say so. A person who accepted already knows.
+    /// With merge-after-accept on, the chain notifies only if it stops.
     async fn notify_if_not_merging(&self, ticket: &TicketWithDisplay) {
         let Some(repo_id) = ticket.ticket.repo_id.filter(|_| !ticket.split_parent) else {
             return;

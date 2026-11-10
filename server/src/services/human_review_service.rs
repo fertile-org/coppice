@@ -198,6 +198,34 @@ impl<'a> HumanReviewService<'a> {
         Ok(changed.unwrap_or(false))
     }
 
+    /// Store a reason for an unmerged ticket without an outcome, such as a
+    /// chain merge that failed for a reason other than a conflict or a dirty
+    /// main. The state stays `not_merged`; the reason explains why. Skipped
+    /// once an outcome is recorded or the ticket is merged. `git_outcome_at`
+    /// is stamped so each new failure notifies once. Returns `true` when the
+    /// reason changed.
+    pub async fn set_not_merged_reason(
+        &self,
+        ticket_id: Uuid,
+        reason: &str,
+    ) -> Result<bool, HumanReviewError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET git_outcome_reason = $2, git_outcome_at = now()
+            WHERE ticket_id = $1
+              AND git_outcome IS NULL
+              AND merged_at IS NULL
+              AND git_outcome_reason IS DISTINCT FROM $2
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(reason)
+        .execute(self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Clear the outcome only while it is still `expected`, so a slower writer
     /// cannot erase an outcome another step recorded meanwhile. Returns `true`
     /// when it cleared.

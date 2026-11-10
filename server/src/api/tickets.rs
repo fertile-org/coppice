@@ -261,6 +261,7 @@ pub(crate) struct HumanReviewResponse {
     git_state_reason: Option<String>,
     accepted_by_coppice: bool,
     merged_sha: Option<String>,
+    merged_base_branch: Option<String>,
     comment_ids: Vec<Uuid>,
     run_ids: Vec<Uuid>,
 }
@@ -381,6 +382,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
                 git_state_reason: review.git_outcome_reason,
                 accepted_by_coppice: review.accepted_by_coppice,
                 merged_sha: review.merged_sha,
+                merged_base_branch: review.merged_base_branch,
                 head_sha: review.head_sha,
                 short_sha,
                 stale: review.stale,

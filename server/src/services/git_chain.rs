@@ -41,6 +41,9 @@ pub enum ChainOutcome {
     MergedAndPushed,
     /// A step failed and its outcome is recorded on the review row.
     Stopped(GitOutcome),
+    /// The merge failed for another reason. The ticket stays `not_merged`
+    /// with the reason on the review row.
+    MergeFailed,
 }
 
 /// Run the chain off the request path.
@@ -95,9 +98,41 @@ pub async fn run_after_accept(state: &Arc<AppState>, ticket_id: Uuid) -> ChainOu
         Err(TicketGitError::MainCheckoutDirty) => ChainOutcome::Stopped(GitOutcome::MainDirty),
         Err(err) => {
             tracing::warn!(%ticket_id, error = %err, "git chain: merge failed");
-            ChainOutcome::Skipped
+            let reason = merge_failure_reason(&err);
+            match GitStateService::record_not_merged_reason(pool, ticket_id, &reason).await {
+                Ok(true) => {
+                    crate::events::publish_ticket_state(&state.event_bus, pool, ticket_id).await;
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::warn!(%ticket_id, error = %err, "could not record merge failure");
+                }
+            }
+            ChainOutcome::MergeFailed
         }
     }
+}
+
+/// Longest error detail kept on the review row.
+const MERGE_FAILURE_DETAIL_MAX: usize = 160;
+
+/// "Auto-merge didn't run: <detail>", with a short detail: the first line of
+/// the error, cut to a limit. Internal errors show no detail.
+fn merge_failure_reason(err: &TicketGitError) -> String {
+    let detail = match err {
+        TicketGitError::Io(_) | TicketGitError::Database(_) | TicketGitError::Secret(_) => {
+            "internal error".to_string()
+        }
+        _ => {
+            let text = err.to_string();
+            let line = text.lines().next().unwrap_or_default().trim();
+            match line.char_indices().nth(MERGE_FAILURE_DETAIL_MAX) {
+                Some((cut, _)) => format!("{}…", &line[..cut]),
+                None => line.to_string(),
+            }
+        }
+    };
+    format!("Auto-merge didn't run: {detail}")
 }
 
 /// The outcome once the merge succeeded: the push may still have failed.

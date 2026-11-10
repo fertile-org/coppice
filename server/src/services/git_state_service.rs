@@ -69,6 +69,32 @@ impl<'a> GitStateService<'a> {
         Ok(changed)
     }
 
+    /// Record why the chain's merge did not run when it failed for a reason
+    /// other than a conflict or a dirty main, and notify once per failure.
+    /// Returns whether the reason changed.
+    pub async fn record_not_merged_reason(
+        pool: &PgPool,
+        ticket_id: Uuid,
+        reason: &str,
+    ) -> Result<bool, TicketGitError> {
+        let reviews = HumanReviewService::new(pool);
+        if !reviews.set_not_merged_reason(ticket_id, reason).await? {
+            return Ok(false);
+        }
+        let status = TicketService::new(pool).get(ticket_id).await?.ticket.status;
+        let review = reviews.get(ticket_id).await?;
+        let state = state_from_review(review.as_ref(), status);
+        if state.needs_action() {
+            if let Err(err) = NotificationService::new(pool)
+                .create_for_git_needs_action(ticket_id, state, Some(reason))
+                .await
+            {
+                tracing::warn!(%ticket_id, error = %err, "could not create needs-action notification");
+            }
+        }
+        Ok(true)
+    }
+
     /// Clear a `NotPushed` or `WorktreeKept` outcome when local git says it is
     /// resolved. Never fetches. Returns the state afterwards.
     pub async fn recheck(&self, ticket_id: Uuid) -> Result<TicketGitState, TicketGitError> {

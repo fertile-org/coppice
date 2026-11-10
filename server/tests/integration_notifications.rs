@@ -996,8 +996,7 @@ async fn conflict_outcome_notifies_once() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|_| {}).await;
-    let state = _state;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|_| {}).await;
     let pool = state.db.clone().expect("pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -1062,7 +1061,7 @@ async fn successful_chain_sends_no_notification() {
 }
 
 #[tokio::test]
-async fn accept_with_merge_off_notifies_not_merged() {
+async fn human_accept_with_merge_off_sends_no_notification() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -1102,8 +1101,9 @@ async fn accept_with_merge_off_notifies_not_merged() {
         assert_eq!(res.status(), StatusCode::OK, "{uri}");
     }
     let id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    // The person who accepted knows; the Done badge and the amber card cover
+    // the rest. An auto-accept does notify (integration_git_flow).
     let rows = git_needs_action_rows(&pool, id).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].1, "Accepted, not merged");
+    assert!(rows.is_empty(), "{rows:?}");
     drop(git_dir);
 }

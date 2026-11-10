@@ -256,6 +256,38 @@ async fn push_after_merge_rejected_without_remote() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn push_after_merge_can_be_turned_off_while_gated() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
+    let repo = create_repo_json(&app, None, &cookie, &csrf).await;
+    assert!(repo["pushAfterMergeDisabledReason"].is_string());
+    let id = repo["id"].as_str().unwrap().to_string();
+    // Turned on before the gate closed (e.g. push was disabled in config later).
+    let pool = state.db.clone().expect("pool");
+    sqlx::query("UPDATE repos SET push_after_merge = TRUE WHERE id = $1")
+        .bind(Uuid::parse_str(&id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("force push_after_merge on");
+    let res = patch_repo(
+        &app,
+        &id,
+        serde_json::json!({ "pushAfterMerge": false }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let got: serde_json::Value = common::json_body(res).await;
+    assert_eq!(got["pushAfterMerge"], false);
+    assert!(got["pushAfterMergeDisabledReason"].is_string());
+}
+
 struct MergeFixture {
     _git_keep: tempfile::TempDir,
     _worktrees: tempfile::TempDir,
@@ -915,6 +947,15 @@ async fn accept_merge_only() {
     wait_for_detail_state(&cf.fx, "merged").await;
     assert_ne!(rev(&cf.fx.local_path, "main"), remote_before);
     assert_eq!(rev(&cf.bare_path, "main"), remote_before);
+    let res = post(
+        &cf.fx,
+        "GET",
+        &format!("/api/tickets/{}", cf.fx.ticket_id),
+        "",
+    )
+    .await;
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["humanReview"]["mergedBaseBranch"], "main");
 }
 
 #[tokio::test]
@@ -1123,6 +1164,58 @@ async fn done_without_spawned_chain(fx: &MergeFixture) {
         .await
         .unwrap();
     assert_eq!(ticket_status(fx).await, "done");
+}
+
+async fn git_needs_action_bodies(pool: &sqlx::PgPool, ticket_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT body FROM notifications WHERE type = 'git_needs_action' AND ticket_id = $1",
+    )
+    .bind(ticket_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn chain_merge_error_records_reason_and_notifies_once() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let cf = chain_fixture(true, true, false).await;
+    let fx = &cf.fx;
+    done_without_spawned_chain(fx).await;
+    // Neither a conflict nor a dirty main: the ticket branch is gone.
+    let branch = current_branch(&fx.worktree_path);
+    git(
+        &fx.local_path,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            fx.worktree_path.to_str().unwrap(),
+        ],
+    );
+    git(&fx.local_path, &["branch", "-D", &branch]);
+
+    assert_eq!(run_chain(fx).await, ChainOutcome::MergeFailed);
+    assert_eq!(detail_git_state(fx).await.as_deref(), Some("not_merged"));
+    let review = review_of(fx).await;
+    assert_eq!(review.git_outcome, None);
+    let reason = review.git_outcome_reason.expect("reason");
+    assert!(
+        reason.starts_with("Auto-merge didn't run: "),
+        "reason: {reason}"
+    );
+    let res = post(fx, "GET", &format!("/api/tickets/{}", fx.ticket_id), "").await;
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["humanReview"]["gitStateReason"], reason.as_str());
+
+    // The same failure again does not ring the bell twice.
+    assert_eq!(run_chain(fx).await, ChainOutcome::MergeFailed);
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    assert_eq!(git_needs_action_bodies(&pool, id).await, vec![reason]);
 }
 
 #[tokio::test]
