@@ -1,4 +1,4 @@
-use crate::domain::usage::{UsageSnapshot, UsageTracker};
+use crate::domain::usage::{UsageEvent, UsageSnapshot, UsageTracker};
 use crate::providers::usage::{reader_for, ProcessContext, UsageReader};
 use crate::sessions::run_artifact_log::RunArtifactLog;
 use crate::sessions::LiveMessage;
@@ -192,18 +192,28 @@ impl RunStreamHandle {
     }
 
     /// One output event from the connector. Ignored until [`Self::track_usage`].
+    /// Context-window readings go out live on the run's stream; the rest is
+    /// counted.
     pub fn observe_usage(&self, event: &Value) {
         let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
         let UsageState { reader, tracker } = &mut *state;
         let Some(reader) = reader.as_mut() else {
             return;
         };
-        let events = reader.read(event);
-        if events.is_empty() {
-            return;
+        let mut counted = false;
+        for usage in reader.read(event) {
+            match usage {
+                UsageEvent::ContextWindow(context) => self.publish(LiveMessage::Event {
+                    event: UsageEvent::context_window_event(&context),
+                }),
+                usage => {
+                    tracker.apply(usage);
+                    counted = true;
+                }
+            }
         }
-        for usage in events {
-            tracker.apply(usage);
+        if !counted {
+            return;
         }
         // Sent under the lock so snapshots go out in version order.
         self.usage_tx
@@ -320,6 +330,27 @@ mod tests {
         registry.remove(run_id);
         drop(handle);
         assert!(rx.changed().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn context_window_goes_out_live_and_is_not_counted() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(Uuid::new_v4());
+        let mut live = handle.subscribe();
+        handle.track_usage(UsageFormat::Normalized, &ProcessContext::default());
+        handle.observe_usage(&serde_json::json!({
+            "kind": "contextWindow", "used": 84000, "size": 200000
+        }));
+        match live.recv().await.unwrap() {
+            LiveMessage::Event { event } => {
+                assert_eq!(event["type"], "usage.contextWindow");
+                assert_eq!(event["used"], 84000);
+                assert_eq!(event["size"], 200000);
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+        // Still the version-0 snapshot: nothing to store.
+        assert_eq!(handle.usage_snapshot().expect("tracked").version, 0);
     }
 
     #[tokio::test]

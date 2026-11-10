@@ -194,6 +194,30 @@ pub enum UsageEvent {
     /// reported yet, or its total cannot be trusted). Drops any earlier
     /// `RunTotal`; the run falls back to the sum of its rows.
     RunTotalUnknown,
+    /// How full the model's context window is now. Live only: shown in the
+    /// console, never stored or counted.
+    ContextWindow(ContextWindowUsage),
+}
+
+/// Tokens in the model's context window at one moment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextWindowUsage {
+    pub used: i64,
+    /// The window's size, when the CLI reports it.
+    #[serde(default)]
+    pub size: Option<i64>,
+}
+
+impl UsageEvent {
+    /// The live event a console shows for a [`UsageEvent::ContextWindow`].
+    pub fn context_window_event(context: &ContextWindowUsage) -> serde_json::Value {
+        serde_json::json!({
+            "type": "usage.contextWindow",
+            "used": context.used,
+            "size": context.size,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -285,12 +309,17 @@ impl UsageTracker {
         if matches!(event, UsageEvent::RunTotalUnknown) && self.reported.is_none() {
             return;
         }
+        // Not usage to count: the run stream shows it live.
+        if matches!(event, UsageEvent::ContextWindow(_)) {
+            return;
+        }
         self.version += 1;
         match event {
             UsageEvent::Request(request) => self.apply_request(request),
             UsageEvent::Subagent(subagent) => self.apply_subagent(subagent),
             UsageEvent::RunTotal(total) => self.reported = Some(total),
             UsageEvent::RunTotalUnknown => self.reported = None,
+            UsageEvent::ContextWindow(_) => {}
         }
     }
 
@@ -581,6 +610,26 @@ mod tests {
         tracker.apply(request(Some("m1"), counts(1, 1)));
         tracker.apply(UsageEvent::RunTotalUnknown);
         assert!(tracker.snapshot().totals.by_model.is_empty());
+    }
+
+    #[test]
+    fn context_window_is_not_counted() {
+        let mut tracker = UsageTracker::new();
+        tracker.apply(UsageEvent::ContextWindow(ContextWindowUsage {
+            used: 84_000,
+            size: Some(200_000),
+        }));
+        let snap = tracker.snapshot();
+        assert_eq!(snap.version, 0);
+        assert_eq!(snap.totals.status, UsageStatus::None);
+        let event: UsageEvent = serde_json::from_value(serde_json::json!({
+            "kind": "contextWindow", "used": 5
+        }))
+        .unwrap();
+        assert_eq!(
+            event,
+            UsageEvent::ContextWindow(ContextWindowUsage { used: 5, size: None })
+        );
     }
 
     #[test]

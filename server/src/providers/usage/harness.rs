@@ -12,15 +12,22 @@
 //! then review the diff. A missing `process` is written as a fresh process.
 
 use super::{reader_for, ProcessContext};
-use crate::domain::usage::{Granularity, TokenCounts, UsageSnapshot, UsageStatus, UsageTracker};
+use crate::domain::usage::{
+    ContextWindowUsage, Granularity, TokenCounts, UsageEvent, UsageSnapshot, UsageStatus,
+    UsageTracker,
+};
 use coppice_connectors::{
-    CoverageGranularity, SubagentSource, TokenFields, UsageCoverage, UsageFormat,
+    ContextWindowSource, CoverageGranularity, SubagentSource, TokenFields, UsageCoverage,
+    UsageFormat,
 };
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 /// Capture directories under `fixtures/` and the format their captures are in.
-const CAPTURE_DIRS: &[(&str, UsageFormat)] = &[("claude-code", UsageFormat::ClaudeStreamJson)];
+const CAPTURE_DIRS: &[(&str, UsageFormat)] = &[
+    ("claude-code", UsageFormat::ClaudeStreamJson),
+    ("cursor", UsageFormat::CursorStreamJson),
+];
 
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures")
@@ -58,12 +65,24 @@ fn process_json(process: &ProcessContext) -> Value {
     json!({ "resumed": process.resumed, "cliVersion": process.cli_version })
 }
 
+/// What a capture's replay gives: the tracked usage and every context-window
+/// reading, in order.
+struct Replayed {
+    snapshot: UsageSnapshot,
+    context: Vec<ContextWindowUsage>,
+}
+
 /// One CLI process: `start_process`, then every line of the capture.
-fn replay(format: UsageFormat, capture: &Path, process: &ProcessContext) -> UsageSnapshot {
+fn replay(format: UsageFormat, capture: &Path, process: &ProcessContext) -> Replayed {
     let mut reader = reader_for(format).expect("a format with a reader");
     let mut tracker = UsageTracker::new();
+    let mut context = Vec::new();
+    let mut apply = |event: UsageEvent| match event {
+        UsageEvent::ContextWindow(reading) => context.push(reading),
+        event => tracker.apply(event),
+    };
     for event in reader.start_process(process) {
-        tracker.apply(event);
+        apply(event);
     }
     let text = std::fs::read_to_string(capture)
         .unwrap_or_else(|err| panic!("{}: {err}", capture.display()));
@@ -71,18 +90,24 @@ fn replay(format: UsageFormat, capture: &Path, process: &ProcessContext) -> Usag
         let value: Value = serde_json::from_str(line)
             .unwrap_or_else(|err| panic!("{}: {err}", capture.display()));
         for event in reader.read(&value) {
-            tracker.apply(event);
+            apply(event);
         }
     }
-    tracker.snapshot()
+    Replayed {
+        snapshot: tracker.snapshot(),
+        context,
+    }
 }
 
-/// The part of a snapshot an expected file pins down.
-fn normalized(snapshot: &UsageSnapshot) -> Value {
+/// The part of a replay an expected file pins down. The context window is the
+/// last reading.
+fn normalized(replayed: &Replayed) -> Value {
+    let snapshot = &replayed.snapshot;
     json!({
         "requests": snapshot.requests,
         "subagents": snapshot.subagents,
         "totals": snapshot.totals,
+        "contextWindow": replayed.context.last(),
     })
 }
 
@@ -199,6 +224,27 @@ fn fields_errors(what: &str, tokens: &TokenCounts, fields: &TokenFields) -> Vec<
         .collect()
 }
 
+fn context_errors(context: &[ContextWindowUsage], coverage: &UsageCoverage) -> Vec<String> {
+    let mut errors = Vec::new();
+    for reading in context {
+        if reading.used < 0 || reading.size.is_some_and(|s| s < 0) {
+            errors.push(format!("context window {reading:?} is negative"));
+        }
+        match coverage.context_window {
+            ContextWindowSource::WithSize => {}
+            ContextWindowSource::UsedOnly if reading.size.is_none() => {}
+            ContextWindowSource::UsedOnly => {
+                errors.push("a context-window size from a used-only format".into())
+            }
+            ContextWindowSource::None => {
+                errors.push("a context-window reading from a format without one".into())
+            }
+        }
+    }
+    errors.dedup();
+    errors
+}
+
 /// What the result reports beyond the format's declared coverage.
 pub(super) fn coverage_errors(snapshot: &UsageSnapshot, coverage: &UsageCoverage) -> Vec<String> {
     let mut errors = Vec::new();
@@ -237,7 +283,7 @@ pub(super) fn coverage_errors(snapshot: &UsageSnapshot, coverage: &UsageCoverage
 
 /// Differences between an expected file's result and the replayed one.
 pub(super) fn mismatch(expected: &Value, actual: &Value) -> Option<String> {
-    let keys = ["requests", "subagents", "totals"];
+    let keys = ["requests", "subagents", "totals", "contextWindow"];
     let wrong: Vec<_> = keys
         .iter()
         .filter(|key| expected.get(**key) != actual.get(**key))
@@ -262,15 +308,17 @@ fn every_capture_matches_its_expected_usage() {
                 .ok()
                 .map(|text| serde_json::from_str(&text).expect("expected file is JSON"));
             let process = process_from(expected.as_ref());
-            let snapshot = replay(*format, &capture, &process);
+            let replayed = replay(*format, &capture, &process);
+            let snapshot = &replayed.snapshot;
             let coverage = format.coverage().expect("a format with a reader has coverage");
-            let errors = invariant_errors(&snapshot)
+            let errors = invariant_errors(snapshot)
                 .into_iter()
-                .chain(coverage_errors(&snapshot, &coverage));
+                .chain(coverage_errors(snapshot, &coverage))
+                .chain(context_errors(&replayed.context, &coverage));
             for error in errors {
                 failures.push(format!("{name}: {error}"));
             }
-            let mut actual = normalized(&snapshot);
+            let mut actual = normalized(&replayed);
             if update {
                 actual["process"] = process_json(&process);
                 let text = serde_json::to_string_pretty(&actual).expect("json") + "\n";
@@ -299,12 +347,12 @@ fn every_capture_matches_its_expected_usage() {
 #[test]
 fn a_wrong_expected_result_is_reported() {
     let capture = fixtures_root().join("claude-code/claude-code-2.1.318-usage-partial.jsonl");
-    let snapshot = replay(
+    let replayed = replay(
         UsageFormat::ClaudeStreamJson,
         &capture,
         &ProcessContext::default(),
     );
-    let actual = normalized(&snapshot);
+    let actual = normalized(&replayed);
     assert!(mismatch(&actual, &actual).is_none());
     let mut wrong = actual.clone();
     wrong["totals"]["tokens"]["output"] = json!(1);
@@ -416,4 +464,24 @@ fn a_split_by_model_that_does_not_add_up_is_reported() {
     }));
     let errors = invariant_errors(&tracker.snapshot());
     assert!(errors.iter().any(|e| e.contains("does not add up")), "{errors:?}");
+}
+
+#[test]
+fn context_readings_outside_the_coverage_are_reported() {
+    let coverage = |context_window| UsageCoverage {
+        granularity: CoverageGranularity::Request,
+        model: coppice_connectors::ModelSource::PerRequest,
+        fields: TokenFields::ALL,
+        subagents: SubagentSource::Breakdown,
+        context_window,
+    };
+    let sized = [ContextWindowUsage {
+        used: 10,
+        size: Some(100),
+    }];
+    assert!(context_errors(&sized, &coverage(ContextWindowSource::WithSize)).is_empty());
+    let errors = context_errors(&sized, &coverage(ContextWindowSource::UsedOnly));
+    assert!(errors.iter().any(|e| e.contains("size from a used-only")), "{errors:?}");
+    let errors = context_errors(&sized, &coverage(ContextWindowSource::None));
+    assert!(errors.iter().any(|e| e.contains("without one")), "{errors:?}");
 }

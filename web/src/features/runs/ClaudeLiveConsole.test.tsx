@@ -57,3 +57,30 @@ describe('ClaudeLiveConsole reconnect guard', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 });
+
+describe('ClaudeLiveConsole context window', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows the meter only once the run reports its context window', () => {
+    render(<ClaudeLiveConsole runId="run-1" runStatus="running" startedAt={null} />);
+    expect(screen.queryByText(/^Context /)).not.toBeInTheDocument();
+
+    const send = (event: Record<string, unknown>) =>
+      act(() => {
+        MockWebSocket.instances[0].onmessage?.({
+          data: JSON.stringify({ type: 'event', event }),
+        } as MessageEvent);
+      });
+    send({ type: 'usage.contextWindow', used: 20919, size: null });
+    expect(screen.getByText('Context 21k')).toBeInTheDocument();
+    send({ type: 'usage.contextWindow', used: 30000, size: null });
+    expect(screen.getByText('Context 30k')).toBeInTheDocument();
+  });
+});

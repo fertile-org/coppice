@@ -254,7 +254,8 @@ impl UsageFormat {
                 fields: TokenFields::ALL,
                 // The Agent tool result gives a subagent's total, never a breakdown.
                 subagents: SubagentSource::TotalOnly,
-                context_window: ContextWindowSource::None,
+                // Derived from each request's prompt; the size is never stated.
+                context_window: ContextWindowSource::UsedOnly,
             }),
             // One `result.usage` per process, without a model. Its
             // `reasoningTokens` is not read: whether it sits inside

@@ -1,4 +1,8 @@
 {
+  "contextWindow": {
+    "size": null,
+    "used": 15976
+  },
   "process": {
     "cliVersion": "2.1.302",
     "resumed": false
