@@ -241,6 +241,130 @@ pub enum UsageFormat {
     None,
 }
 
+impl UsageFormat {
+    /// What this format can report, or `None` when Coppice does not read it.
+    /// These are facts about the wire format: one run may still leave out a
+    /// count its format can report ("not reported"), while a count the
+    /// coverage leaves out is never reported by any run of this format ("—").
+    pub const fn coverage(self) -> Option<UsageCoverage> {
+        match self {
+            UsageFormat::ClaudeStreamJson => Some(UsageCoverage {
+                granularity: CoverageGranularity::Request,
+                model: ModelSource::PerRequest,
+                fields: TokenFields::ALL,
+                // The Agent tool result gives a subagent's total, never a breakdown.
+                subagents: SubagentSource::TotalOnly,
+                context_window: ContextWindowSource::None,
+            }),
+            // One `result.usage` per process, without a model. Its
+            // `reasoningTokens` is not read: whether it sits inside
+            // `outputTokens` is not established yet.
+            UsageFormat::CursorStreamJson => Some(UsageCoverage {
+                granularity: CoverageGranularity::RunTotalOnly,
+                model: ModelSource::None,
+                fields: TokenFields {
+                    input: true,
+                    cache_read: true,
+                    cache_write: true,
+                    output: true,
+                    reasoning: false,
+                },
+                subagents: SubagentSource::None,
+                context_window: ContextWindowSource::None,
+            }),
+            // MockProvider fixtures may carry any normalized event.
+            UsageFormat::Normalized => Some(UsageCoverage {
+                granularity: CoverageGranularity::Request,
+                model: ModelSource::PerRequest,
+                fields: TokenFields::ALL,
+                subagents: SubagentSource::Breakdown,
+                context_window: ContextWindowSource::WithSize,
+            }),
+            UsageFormat::None => None,
+        }
+    }
+}
+
+/// What a usage format can report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCoverage {
+    pub granularity: CoverageGranularity,
+    pub model: ModelSource,
+    pub fields: TokenFields,
+    pub subagents: SubagentSource,
+    pub context_window: ContextWindowSource,
+}
+
+/// The smallest unit a format reports usage for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CoverageGranularity {
+    /// One LLM request.
+    Request,
+    /// One agent turn, which may span several requests.
+    Turn,
+    /// Only a total for the run.
+    RunTotalOnly,
+}
+
+/// Where a format names the model that spent the tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelSource {
+    /// On every request or turn.
+    PerRequest,
+    /// In a run total broken down by model.
+    PerModelTotal,
+    /// Once for the whole run.
+    RunOnly,
+    None,
+}
+
+/// Which token counts a format reports, in Coppice's meanings
+/// (`TokenCounts`: input excludes cache; output includes reasoning).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenFields {
+    pub input: bool,
+    pub cache_read: bool,
+    pub cache_write: bool,
+    pub output: bool,
+    pub reasoning: bool,
+}
+
+impl TokenFields {
+    pub const ALL: TokenFields = TokenFields {
+        input: true,
+        cache_read: true,
+        cache_write: true,
+        output: true,
+        reasoning: true,
+    };
+}
+
+/// How a format reports subagents the connector spawned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubagentSource {
+    /// Each subagent with its token counts.
+    Breakdown,
+    /// Each subagent with one total and no breakdown.
+    TotalOnly,
+    None,
+}
+
+/// Whether a format reports how full the model's context window is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContextWindowSource {
+    /// Tokens in use and the window's size.
+    WithSize,
+    /// Tokens in use only.
+    UsedOnly,
+    None,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {

@@ -133,6 +133,22 @@ mod tests {
     }
 
     #[test]
+    fn a_format_has_coverage_exactly_when_it_has_a_reader() {
+        // Listed by hand: a new variant must be added here and to the matches.
+        for format in [
+            UsageFormat::ClaudeStreamJson,
+            UsageFormat::Normalized,
+            UsageFormat::None,
+        ] {
+            assert_eq!(
+                reader_for(format).is_some(),
+                format.coverage().is_some(),
+                "{format:?}"
+            );
+        }
+    }
+
+    #[test]
     fn none_format_has_no_reader() {
         assert!(reader_for(UsageFormat::None).is_none());
     }

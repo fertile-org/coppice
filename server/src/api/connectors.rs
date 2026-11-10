@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
 };
 use coppice_connectors::sign_in::Readiness;
-use coppice_connectors::{ConsoleKind, MOCK};
+use coppice_connectors::{ConsoleKind, UsageCoverage, MOCK};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -32,6 +32,9 @@ struct ConnectorResponse {
     display_name: &'static str,
     console: ConsoleKind,
     caps: ConnectorCapsResponse,
+    /// What the connector's output says about token usage; `null` when
+    /// Coppice does not read it, so its runs are not tracked.
+    usage_coverage: Option<UsageCoverage>,
     enabled: bool,
     /// `null` until the startup probe finishes. Mock is always `ready`.
     readiness: Option<Readiness>,
@@ -170,6 +173,7 @@ async fn list_connectors(
                     chat_resume: descriptor.caps.chat_resume,
                     thinking_level: descriptor.takes_thinking_level(),
                 },
+                usage_coverage: descriptor.usage.coverage(),
                 enabled: registry.has(descriptor.id),
                 readiness,
                 docs_url: descriptor.install.docs_url,

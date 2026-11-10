@@ -12,8 +12,10 @@
 //! then review the diff. A missing `process` is written as a fresh process.
 
 use super::{reader_for, ProcessContext};
-use crate::domain::usage::{TokenCounts, UsageSnapshot, UsageStatus, UsageTracker};
-use coppice_connectors::UsageFormat;
+use crate::domain::usage::{Granularity, TokenCounts, UsageSnapshot, UsageStatus, UsageTracker};
+use coppice_connectors::{
+    CoverageGranularity, SubagentSource, TokenFields, UsageCoverage, UsageFormat,
+};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -169,6 +171,57 @@ pub(super) fn invariant_errors(snapshot: &UsageSnapshot) -> Vec<String> {
     errors
 }
 
+fn fields_errors(what: &str, tokens: &TokenCounts, fields: &TokenFields) -> Vec<String> {
+    let checks = [
+        ("input", tokens.input, fields.input),
+        ("cacheRead", tokens.cache_read, fields.cache_read),
+        ("cacheWrite", tokens.cache_write, fields.cache_write),
+        ("output", tokens.output, fields.output),
+        ("reasoning", tokens.reasoning, fields.reasoning),
+    ];
+    checks
+        .iter()
+        .filter(|(_, value, declared)| value.is_some() && !declared)
+        .map(|(name, _, _)| format!("{what}: reports {name}, which the coverage leaves out"))
+        .collect()
+}
+
+/// What the result reports beyond the format's declared coverage.
+pub(super) fn coverage_errors(snapshot: &UsageSnapshot, coverage: &UsageCoverage) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (i, request) in snapshot.requests.iter().enumerate() {
+        let what = format!("request {i}");
+        errors.extend(fields_errors(&what, &request.tokens, &coverage.fields));
+        let allowed = match coverage.granularity {
+            CoverageGranularity::Request => true,
+            CoverageGranularity::Turn => request.granularity == Granularity::Turn,
+            CoverageGranularity::RunTotalOnly => false,
+        };
+        if !allowed {
+            errors.push(format!(
+                "{what}: a {:?} row from a format whose coverage is {:?}",
+                request.granularity, coverage.granularity
+            ));
+        }
+    }
+    for subagent in &snapshot.subagents {
+        let what = format!("subagent {}", subagent.id);
+        errors.extend(fields_errors(&what, &subagent.tokens, &coverage.fields));
+        match coverage.subagents {
+            SubagentSource::Breakdown => {}
+            SubagentSource::TotalOnly if subagent.tokens.is_empty() => {}
+            SubagentSource::TotalOnly => {
+                errors.push(format!("{what}: a breakdown from a total-only format"))
+            }
+            SubagentSource::None => {
+                errors.push(format!("{what}: a subagent from a format without subagents"))
+            }
+        }
+    }
+    errors.extend(fields_errors("run total", &snapshot.totals.tokens, &coverage.fields));
+    errors
+}
+
 /// Differences between an expected file's result and the replayed one.
 pub(super) fn mismatch(expected: &Value, actual: &Value) -> Option<String> {
     let keys = ["requests", "subagents", "totals"];
@@ -197,7 +250,11 @@ fn every_capture_matches_its_expected_usage() {
                 .map(|text| serde_json::from_str(&text).expect("expected file is JSON"));
             let process = process_from(expected.as_ref());
             let snapshot = replay(*format, &capture, &process);
-            for error in invariant_errors(&snapshot) {
+            let coverage = format.coverage().expect("a format with a reader has coverage");
+            let errors = invariant_errors(&snapshot)
+                .into_iter()
+                .chain(coverage_errors(&snapshot, &coverage));
+            for error in errors {
                 failures.push(format!("{name}: {error}"));
             }
             let mut actual = normalized(&snapshot);
@@ -279,4 +336,50 @@ fn broken_counts_are_reported() {
     }));
     let errors = invariant_errors(&tracker.snapshot());
     assert!(errors.iter().any(|e| e.contains("more output")), "{errors:?}");
+}
+
+#[test]
+fn results_outside_the_coverage_are_reported() {
+    use crate::domain::usage::{RequestUsage, SubagentUsage, UsageEvent};
+    let mut tracker = UsageTracker::new();
+    tracker.apply(UsageEvent::Request(RequestUsage {
+        id: Some("r1".into()),
+        granularity: Granularity::Request,
+        tokens: TokenCounts {
+            input: Some(5),
+            cache_write: Some(2),
+            ..TokenCounts::default()
+        },
+        ..RequestUsage::default()
+    }));
+    tracker.apply(UsageEvent::Subagent(SubagentUsage {
+        id: "s1".into(),
+        tokens: TokenCounts {
+            output: Some(1),
+            ..TokenCounts::default()
+        },
+        ..SubagentUsage::default()
+    }));
+    let snapshot = tracker.snapshot();
+    // Like a per-turn CLI without cache writes or subagents.
+    let turn_only = UsageCoverage {
+        granularity: CoverageGranularity::Turn,
+        model: coppice_connectors::ModelSource::RunOnly,
+        fields: TokenFields {
+            cache_write: false,
+            ..TokenFields::ALL
+        },
+        subagents: SubagentSource::None,
+        context_window: coppice_connectors::ContextWindowSource::None,
+    };
+    let errors = coverage_errors(&snapshot, &turn_only);
+    assert!(errors.iter().any(|e| e.contains("request 0: reports cacheWrite")), "{errors:?}");
+    assert!(errors.iter().any(|e| e.contains("Request row")), "{errors:?}");
+    assert!(errors.iter().any(|e| e.contains("without subagents")), "{errors:?}");
+    let total_only = UsageCoverage {
+        subagents: SubagentSource::TotalOnly,
+        ..turn_only
+    };
+    let errors = coverage_errors(&snapshot, &total_only);
+    assert!(errors.iter().any(|e| e.contains("breakdown from a total-only")), "{errors:?}");
 }
