@@ -9,6 +9,7 @@ import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
 import { runUsageQueryKey } from '../runs/useRunUsage';
 import { TICKET_USAGE_KEY } from '../tickets/useTicketUsage';
+import { gitInfoQueryKey } from '../tickets/useTicket';
 import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
@@ -127,6 +128,10 @@ function dispatchMessage(raw: string) {
       // Approve, Ask for changes and a pick all change what the popup offers.
       void queryClient.invalidateQueries({
         queryKey: designsQueryKey(msg.ticket_id),
+      });
+      // A merge, push or recheck changes the panel's git state too.
+      void queryClient.invalidateQueries({
+        queryKey: gitInfoQueryKey(msg.ticket_id),
       });
     }
   }

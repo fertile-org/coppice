@@ -12,11 +12,27 @@ import type { TicketGitInfo } from './useTicket';
 const pushMainMutateAsync = vi.fn();
 const invalidated: unknown[][] = [];
 const gitInfoState: { data: TicketGitInfo | undefined } = { data: undefined };
+const gitInfoEnabled: boolean[] = [];
+const sessionState: { role: string } = { role: 'admin' };
+const reposState: { data: unknown[] | undefined } = { data: undefined };
+
+vi.mock('../auth/useSession', () => ({
+  useSession: () => ({
+    user: { id: 'u1', email: 'u@example.com', role: sessionState.role },
+    loading: false,
+    desktopMode: false,
+    establishSession: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
 
 vi.mock('./useTicket', () => ({
   ticketQueryKey: (id: string) => ['ticket', id],
   gitInfoQueryKey: (id: string) => ['ticket-git-info', id],
-  useTicketGitInfo: () => ({ data: gitInfoState.data, isLoading: false }),
+  useTicketGitInfo: (_id: string, enabled: boolean) => {
+    gitInfoEnabled.push(enabled);
+    return { data: enabled ? gitInfoState.data : undefined, isLoading: false };
+  },
   useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRebaseTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useResolveConflict: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -26,6 +42,7 @@ vi.mock('./useTicket', () => ({
 }));
 
 vi.mock('../repos/useRepos', () => ({
+  useRepos: () => ({ data: reposState.data }),
   usePushDefaultBranch: () => ({ mutateAsync: pushMainMutateAsync, isPending: false }),
 }));
 
@@ -96,6 +113,9 @@ describe('GitStatusRow', () => {
     pushMainMutateAsync.mockReset();
     invalidated.length = 0;
     gitInfoState.data = { ...gitInfo };
+    gitInfoEnabled.length = 0;
+    sessionState.role = 'admin';
+    reposState.data = undefined;
   });
 
   it.each(withButton)('renders the pill and main action for %s', (state) => {
@@ -217,9 +237,69 @@ describe('GitStatusRow', () => {
     expect(screen.getAllByText(gitInfo.worktreePath)).toHaveLength(1);
   });
 
-  it('treats a missing human review as in review', () => {
+  it('treats a missing human review as in review before Done', () => {
     gitInfoState.data = { ...gitInfo, gitState: undefined };
-    renderRow(makeTicket('merged', { humanReview: null }));
+    renderRow(makeTicket('merged', { humanReview: null, status: 'in_review' }));
     expect(screen.getByText('In review')).toBeInTheDocument();
+  });
+
+  it('shows no status or actions for a Done ticket without a review, but keeps the branch', () => {
+    gitInfoState.data = { ...gitInfo, gitState: 'in_review' };
+    renderRow(makeTicket('in_review', { humanReview: null }));
+    expect(screen.queryByText('In review')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rebase…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More git actions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: gitInfo.ticketBranch })).toBeInTheDocument();
+  });
+
+  it('lets an admin push main', () => {
+    renderRow(makeTicket('not_pushed'));
+    const button = screen.getByRole('button', { name: 'Push main' });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('title');
+  });
+
+  it('disables Push main for a member and says who can push', () => {
+    sessionState.role = 'member';
+    renderRow(makeTicket('not_pushed'));
+    const button = screen.getByRole('button', { name: 'Push main' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'Ask an admin to push main');
+    fireEvent.click(button);
+    expect(pushMainMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('loads git info on a card only when it needs action', () => {
+    const view = renderRow(makeTicket('merged'), 'card');
+    expect(gitInfoEnabled.every((enabled) => !enabled)).toBe(true);
+    view.unmount();
+    gitInfoEnabled.length = 0;
+    renderRow(makeTicket('not_merged'), 'card');
+    expect(gitInfoEnabled.at(-1)).toBe(true);
+  });
+
+  it('always loads git info in the panel', () => {
+    renderRow(makeTicket('merged'));
+    expect(gitInfoEnabled.at(-1)).toBe(true);
+  });
+
+  it('describes a merge: base branch, pushed and worktree removed', () => {
+    gitInfoState.data = { ...gitInfo, gitState: 'merged', worktreeExists: false };
+    reposState.data = [{ id: makeTicket('merged').repoId, defaultBranch: 'main', pushAfterMerge: true }];
+    renderRow(
+      makeTicket('merged', {
+        humanReview: { ...makeTicket('merged').humanReview!, mergedBaseBranch: 'release' },
+      }),
+    );
+    expect(screen.getByTestId('git-merged-detail')).toHaveTextContent(
+      'release · pushed · worktree removed',
+    );
+  });
+
+  it('describes a merge with only the parts that apply', () => {
+    gitInfoState.data = { ...gitInfo, gitState: 'merged', worktreeExists: true };
+    reposState.data = [{ id: makeTicket('merged').repoId, defaultBranch: 'main', pushAfterMerge: false }];
+    renderRow(makeTicket('merged'));
+    expect(screen.getByTestId('git-merged-detail')).toHaveTextContent(/^main$/);
   });
 });

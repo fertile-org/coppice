@@ -8,8 +8,10 @@ import { Button } from '../../components/ui/button';
 import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { cn } from '../../lib/utils';
+import { useSession } from '../auth/useSession';
+import { needsAction } from '../board/doneColumn';
 import type { Ticket } from '../board/useTickets';
-import { usePushDefaultBranch } from '../repos/useRepos';
+import { usePushDefaultBranch, useRepos } from '../repos/useRepos';
 import {
   ConflictNotice,
   CreatePrButton,
@@ -71,16 +73,27 @@ export function GitStatusRow({
   const confirm = useConfirm();
   const isPanel = variant === 'panel';
   const repoId = ticket.repoId ?? '';
-  const { data: gitInfo, isLoading } = useTicketGitInfo(ticket.id, Boolean(ticket.repoId));
+  const { user } = useSession();
+  const isAdmin = user?.role === 'admin';
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [rebaseOpen, setRebaseOpen] = useState(false);
+  // git-info rechecks on the server and runs git. The board reads the stored
+  // state, so a card fetches it only when it needs action or a menu or
+  // dialog opens.
+  const wantsGitInfo =
+    isPanel || needsAction(ticket) || menuOpen || mergeOpen || rebaseOpen;
+  const { data: gitInfo, isLoading } = useTicketGitInfo(
+    ticket.id,
+    Boolean(ticket.repoId) && wantsGitInfo,
+  );
+  const { data: repos } = useRepos({ enabled: isPanel && Boolean(ticket.repoId) });
   const removeWorktree = useRemoveWorktree(ticket.id);
   const pushBranch = usePushTicketBranch(ticket.id);
   const pushMain = usePushDefaultBranch(repoId);
   const resolveConflict = useResolveConflict(ticket.id);
   const [createPrPending, setCreatePrPending] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [rebaseOpen, setRebaseOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<GitConflict | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -95,6 +108,9 @@ export function GitStatusRow({
   }
 
   const review = ticket.humanReview;
+  // A Done ticket without an acceptance (legacy tickets, split parents) has
+  // no git state to show, as on the card.
+  const showStatus = !(ticket.status === 'done' && !review);
   const state: TicketGitState = isPanel
     ? (gitInfo?.gitState ?? review?.gitState ?? 'in_review')
     : (review?.gitState ?? 'in_review');
@@ -115,7 +131,7 @@ export function GitStatusRow({
 
   const mainIsMerge = state === 'not_merged' || state === 'main_dirty';
   const mergeShortcutEnabled = isPanel
-    ? showFinalActions && mainIsMerge && Boolean(gitInfo) && !blocked
+    ? showStatus && showFinalActions && mainIsMerge && Boolean(gitInfo) && !blocked
     : () =>
         shortcutActive &&
         showFinalActions &&
@@ -236,8 +252,10 @@ export function GitStatusRow({
     }
   }
 
+  const pushMainForbidden = state === 'not_pushed' && !isAdmin;
   const mainDisabled =
     blocked ||
+    pushMainForbidden ||
     (state === 'in_review' && !worktreeExists) ||
     (state === 'worktree_kept' && (!worktreeExists || Boolean(ticket.hasActiveRun))) ||
     (state !== 'in_review' && state !== 'not_pushed' && state !== 'worktree_kept' && !gitInfo);
@@ -369,6 +387,17 @@ export function GitStatusRow({
   const visibleItems = menuItems.filter((item) => item.key !== mainAction);
 
   const shortSha = review?.mergedSha ? review.mergedSha.slice(0, 7) : null;
+  const repo = repos?.find((candidate) => candidate.id === ticket.repoId);
+  const mergedDetail =
+    state === 'merged'
+      ? [
+          review?.mergedBaseBranch ?? gitInfo?.defaultBranch ?? repo?.defaultBranch,
+          repo?.pushAfterMerge ? 'pushed' : null,
+          gitInfo && !gitInfo.worktreeExists ? 'worktree removed' : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : '';
   const showMenu = state !== 'merged' && visibleItems.length > 0;
   const buttonSize = isPanel ? 'default' : 'sm';
 
@@ -404,6 +433,7 @@ export function GitStatusRow({
               size={buttonSize}
               disabled={mainDisabled}
               className={showMenu ? 'rounded-r-none' : undefined}
+              title={pushMainForbidden ? 'Ask an admin to push main' : undefined}
               onClick={runMain}
             >
               {mainBusyLabel}
@@ -486,8 +516,13 @@ export function GitStatusRow({
 
   return (
     <div className="space-y-2" data-testid="git-status-row">
-      {row}
-      {reason && (
+      {showStatus && row}
+      {showStatus && mergedDetail && (
+        <p data-testid="git-merged-detail" className="font-body text-xs text-text-secondary">
+          {mergedDetail}
+        </p>
+      )}
+      {showStatus && reason && (
         <p
           data-testid="git-state-reason"
           className={cn('font-body text-xs', reasonTone[copy.tone])}
@@ -495,7 +530,7 @@ export function GitStatusRow({
           {reason}
         </p>
       )}
-      {state === 'conflict' && !conflict && (
+      {showStatus && state === 'conflict' && !conflict && (
         <p className="font-body text-xs text-text-secondary">
           Retry the merge to load the conflicting files.
         </p>

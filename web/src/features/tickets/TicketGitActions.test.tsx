@@ -43,7 +43,19 @@ vi.mock('./useTicket', () => ({
   useCreateTicketPr: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+vi.mock('../auth/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../auth/useSession')>()),
+  useSession: () => ({
+    user: { id: 'u1', email: 'u@example.com', role: 'admin' },
+    loading: false,
+    desktopMode: false,
+    establishSession: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
+
 vi.mock('../repos/useRepos', () => ({
+  useRepos: () => ({ data: undefined }),
   usePushDefaultBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -61,6 +73,18 @@ const baseGitInfo: TicketGitInfo = {
 function openMenu() {
   fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
 }
+
+const acceptedReview: Ticket['humanReview'] = {
+  headSha: 'abc1234deadbeef',
+  shortSha: 'abc1234',
+  stale: false,
+  gitState: 'not_merged',
+  gitStateReason: null,
+  acceptedByCoppice: false,
+  mergedSha: null,
+  commentIds: [],
+  runIds: [],
+};
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -168,7 +192,7 @@ describe('TicketGitActions', () => {
 
   it('shows Merge and Create PR for a Done ticket that is not merged', () => {
     gitInfoState.data = { ...baseGitInfo, canCreatePr: true, gitState: 'not_merged' };
-    renderActions(makeTicket({ status: 'done' }));
+    renderActions(makeTicket({ status: 'done', humanReview: acceptedReview }));
 
     expect(screen.getByRole('button', { name: 'Merge' })).toBeInTheDocument();
     openMenu();
@@ -210,7 +234,7 @@ describe('TicketGitActions', () => {
     );
 
     gitInfoState.data = { ...baseGitInfo, gitState: 'not_merged' };
-    renderActions(makeTicket({ status: 'done' }));
+    renderActions(makeTicket({ status: 'done', humanReview: acceptedReview }));
     fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
@@ -370,7 +394,7 @@ describe('TicketGitActions', () => {
     );
 
     gitInfoState.data = { ...baseGitInfo, gitState: 'not_merged' };
-    const view = renderActions(makeTicket({ status: 'done' }));
+    const view = renderActions(makeTicket({ status: 'done', humanReview: acceptedReview }));
     fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));

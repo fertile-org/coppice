@@ -60,6 +60,25 @@ describe('RepoGitFlowSection', () => {
     expect(screen.getByText('git.push_enabled is false in server config')).toBeInTheDocument();
   });
 
+  it('lets a checked push switch be turned off while a reason is set', async () => {
+    render(
+      <RepoGitFlowSection
+        repo={{
+          ...repo,
+          pushAfterMerge: true,
+          pushAfterMergeDisabledReason: 'git.push_enabled is false in server config',
+        }}
+      />,
+    );
+    const push = screen.getByRole('switch', { name: 'Push after merge' });
+    expect(push).toBeEnabled();
+    expect(screen.getByText('git.push_enabled is false in server config')).toBeInTheDocument();
+    fireEvent.click(push);
+    await waitFor(() =>
+      expect(mocks.update).toHaveBeenCalledWith({ id: repo.id, pushAfterMerge: false }),
+    );
+  });
+
   it('saves a toggled switch', async () => {
     render(<RepoGitFlowSection repo={repo} />);
     fireEvent.click(screen.getByRole('switch', { name: 'Merge after accept' }));

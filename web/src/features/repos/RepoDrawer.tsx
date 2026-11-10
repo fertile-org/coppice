@@ -122,7 +122,8 @@ export function RepoGitFlowSection({ repo }: { repo: Repo }) {
   }
 
   const branch = repo.defaultBranch;
-  const pushDisabled = Boolean(repo.pushAfterMergeDisabledReason);
+  // A blocked push can still be switched off; only turning it on is gated.
+  const pushDisabled = Boolean(repo.pushAfterMergeDisabledReason) && !repo.pushAfterMerge;
 
   return (
     <section className="space-y-4 border-t border-border pt-5">

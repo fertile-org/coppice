@@ -116,6 +116,17 @@ vi.mock('../agents/useAgents', () => ({
   useAgents: () => ({ data: [] }),
 }));
 
+vi.mock('../auth/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../auth/useSession')>()),
+  useSession: () => ({
+    user: { id: 'u1', email: 'u@example.com', role: 'admin' },
+    loading: false,
+    desktopMode: false,
+    establishSession: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
+
 vi.mock('../repos/useRepos', () => ({
   useRepos: () => ({ data: reposState.data }),
   usePushDefaultBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),

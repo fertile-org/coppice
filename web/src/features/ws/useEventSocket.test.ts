@@ -36,6 +36,10 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['designs', 'ticket', 'ticket-123'],
     });
+    // A merge, push or recheck changes the panel's git state too.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['ticket-git-info', 'ticket-123'],
+    });
   });
 
   it('invalidates agent runs on agent_run.started', async () => {

@@ -480,6 +480,9 @@ export function useFinalApprove(ticketId: string) {
       void queryClient.invalidateQueries({
         queryKey: commentsQueryKey(ticketId),
       });
+      void queryClient.invalidateQueries({
+        queryKey: gitInfoQueryKey(ticketId),
+      });
     },
   });
 }

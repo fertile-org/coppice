@@ -25,6 +25,8 @@ export interface HumanReview {
   /** The merge happened automatically after a clean agent review. */
   acceptedByCoppice: boolean;
   mergedSha?: string | null;
+  /** The branch the accepted commit was merged into. */
+  mergedBaseBranch?: string | null;
   commentIds: string[];
   runIds: string[];
 }
