@@ -435,9 +435,14 @@ export function BoardPage() {
     commitStatus(ticketId, targetStatus);
   }
 
-  const handleQuickAdd = useStableCallback(async (title: string) => {
-    await createTicket.mutateAsync(title);
-  });
+  const handleQuickAdd = useStableCallback(
+    async (title: string, options?: { skipHumanReview?: boolean }) => {
+      await createTicket.mutateAsync({
+        title,
+        skipHumanReview: options?.skipHumanReview,
+      });
+    },
+  );
 
   const handleRunPlan = useStableCallback((ticketId: string) => {
     void startPlan.mutateAsync(ticketId).catch((err: unknown) => {

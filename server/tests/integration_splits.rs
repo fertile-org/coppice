@@ -303,3 +303,56 @@ async fn approved_split_children_can_start_without_skip_planning() {
         assert_eq!(in_progress.status(), StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn split_children_do_not_inherit_skip_flag() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
+    let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
+    TicketService::new(pool)
+        .set_skip_human_review(ticket_uuid, true)
+        .await
+        .expect("flag the parent");
+    let parent = TicketService::new(pool)
+        .get(ticket_uuid)
+        .await
+        .expect("load parent");
+    assert!(parent.ticket.skip_human_review);
+
+    let splits = vec![SplitTicketSpec {
+        title: "Child A".into(),
+        description: "First deliverable".into(),
+        acceptance_criteria: None,
+        assign_to: None,
+        steps: Vec::new(),
+    }];
+    SplitService::new(pool, &state.config.workflow)
+        .apply_splits(&parent.ticket, &splits, pm_uuid, false)
+        .await
+        .expect("set pending splits");
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/approve-splits"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+    let created: serde_json::Value = common::json_body(approve).await;
+    let children = created.as_array().expect("children array");
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0]["skipHumanReview"], false);
+}

@@ -27,6 +27,7 @@ export const updateTicketSchema = z.object({
   priority: ticketPrioritySchema.optional().nullable(),
   branchName: z.string().optional().nullable(),
   skipPlanning: z.boolean().optional(),
+  skipHumanReview: z.boolean().optional(),
 });
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
@@ -133,6 +134,7 @@ export const ticketSchema = z.object({
     .optional(),
   clarificationRound: z.number().optional(),
   skipPlanning: z.boolean().optional(),
+  skipHumanReview: z.boolean().optional(),
   planApproved: z.boolean().optional(),
   latestPlanRunStatus: z.string().nullable().optional(),
   hasActiveRun: z.boolean().optional(),

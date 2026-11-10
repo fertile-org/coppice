@@ -11,7 +11,10 @@ import type { Ticket } from './useTickets';
 const backlog = BOARD_COLUMNS[0]!;
 
 function renderColumn(
-  onQuickAdd: (title: string) => Promise<void>,
+  onQuickAdd: (
+    title: string,
+    options: { skipHumanReview: boolean },
+  ) => Promise<void>,
   isAdding = false,
 ) {
   return render(
@@ -46,7 +49,9 @@ describe('BoardColumn quick-add', () => {
     fireEvent.change(input, { target: { value: 'New ticket' } });
     fireEvent.submit(input.closest('form')!);
 
-    expect(onQuickAdd).toHaveBeenCalledWith('New ticket');
+    expect(onQuickAdd).toHaveBeenCalledWith('New ticket', {
+      skipHumanReview: false,
+    });
     expect(input).toBeEnabled();
     expect(input).toHaveFocus();
     expect(input).toHaveValue('New ticket');
@@ -54,6 +59,21 @@ describe('BoardColumn quick-add', () => {
     finish();
     await waitFor(() => expect(input).toHaveValue(''));
     expect(input).toHaveFocus();
+  });
+
+  it('sends skipHumanReview when the checkbox is ticked', async () => {
+    const onQuickAdd = vi.fn(() => Promise.resolve());
+    renderColumn(onQuickAdd);
+    const box = screen.getByRole('checkbox', { name: 'Skip human review' });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    const input = screen.getByPlaceholderText('Add ticket…');
+    fireEvent.change(input, { target: { value: 'Tiny fix' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(onQuickAdd).toHaveBeenCalledWith('Tiny fix', {
+      skipHumanReview: true,
+    });
+    await waitFor(() => expect(box).not.toBeChecked());
   });
 
   it('creates exactly one ticket when Enter is pressed twice quickly', () => {
@@ -67,7 +87,9 @@ describe('BoardColumn quick-add', () => {
     fireEvent.submit(form);
 
     expect(onQuickAdd).toHaveBeenCalledTimes(1);
-    expect(onQuickAdd).toHaveBeenCalledWith('Once');
+    expect(onQuickAdd).toHaveBeenCalledWith('Once', {
+      skipHumanReview: false,
+    });
   });
 
   it('keeps the title and shows an error toast when create fails', async () => {

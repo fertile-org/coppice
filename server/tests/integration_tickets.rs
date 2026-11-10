@@ -628,3 +628,55 @@ async fn unassigned_backlog_ticket_suggests_the_pm() {
     let unassigned: serde_json::Value = common::json_body(unassigned).await;
     assert_eq!(suggested_id(&unassigned), Some(pm_id.as_str()));
 }
+
+#[tokio::test]
+async fn create_ticket_with_skip_human_review() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+
+    let create = |body: &'static str| {
+        let app = app.clone();
+        let (cookie, csrf, board_id) = (cookie.clone(), csrf.clone(), board_id.clone());
+        async move {
+            let res = app
+                .oneshot(common::json_request(
+                    "POST",
+                    &format!("/api/boards/{board_id}/tickets"),
+                    body,
+                    &cookie,
+                    &csrf,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::CREATED);
+            {
+                let v: serde_json::Value = common::json_body(res).await;
+                v
+            }
+        }
+    };
+    let plain = create(r#"{"title":"Plain","description":""}"#).await;
+    assert_eq!(plain["skipHumanReview"], false);
+    let skipped = create(r#"{"title":"Skip","description":"","skipHumanReview":true}"#).await;
+    assert_eq!(skipped["skipHumanReview"], true);
+
+    let id = plain["id"].as_str().unwrap();
+    let patched = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{id}"),
+            r#"{"skipHumanReview":true}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patched.status(), StatusCode::OK);
+    let patched: serde_json::Value = common::json_body(patched).await;
+    assert_eq!(patched["skipHumanReview"], true);
+}

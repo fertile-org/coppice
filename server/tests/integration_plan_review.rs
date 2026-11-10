@@ -285,7 +285,7 @@ async fn post_plan(
     let planning = PlanningService::new(pool);
     let ticket = Uuid::parse_str(ticket_id).unwrap();
     planning
-        .insert_plan(ticket, agent_id, CANONICAL_PLAN, None, false)
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, None, false, false)
         .await
         .expect("insert plan");
     planning.bind_latest_plan(ticket).await.expect("bind plan");
@@ -952,7 +952,7 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
 
     let second_plan = "### Changes requested\n- Use Postgres: switched the store.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n";
     planning
-        .insert_plan(ticket, pm, second_plan, None, false)
+        .insert_plan(ticket, pm, second_plan, None, false, false)
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1526,6 +1526,7 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
             "## Plan\n\n### Approach\nPostgres.\n",
             None,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1551,6 +1552,7 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
             pm,
             "## Plan\n\n### Approach\nSplit store and API.\n",
             None,
+            false,
             false,
         )
         .await
@@ -1781,7 +1783,7 @@ async fn inserted_plan_records_the_selected_design() {
         .expect("publish");
 
     planning
-        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false)
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false, false)
         .await
         .expect("insert plan");
     let plan = planning.latest_plan(ticket).await.unwrap().expect("plan");
@@ -1841,7 +1843,7 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
         .await
         .expect("publish");
     planning
-        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false)
+        .insert_plan(ticket, agent_id, CANONICAL_PLAN, Some(run_id), false, false)
         .await
         .expect("plan with design");
 
@@ -1851,6 +1853,7 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
             agent_id,
             "## Plan\n\n### Approach\nKeep the options.\n",
             None,
+            false,
             false,
         )
         .await
@@ -1869,4 +1872,135 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
             .await
             .unwrap();
     assert!(still_live);
+}
+
+async fn approve_with(app: &axum::Router, ticket_id: &str, body: &str, cookie: &str, csrf: &str) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/approve-plan"),
+            body,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+async fn planned_ticket(
+    state: &coppice_server::AppState,
+    app: &axum::Router,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let board_id = common::create_test_board(app, cookie, csrf).await;
+    let pm_id = common::create_agent_with_preset_key(app, "pm", "PM", cookie, csrf).await;
+    let ticket_id = common::create_unplanned_ticket(app, &board_id, cookie, csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    post_plan(
+        app,
+        &ticket_id,
+        Uuid::parse_str(&pm_id).unwrap(),
+        pool,
+        cookie,
+        csrf,
+    )
+    .await;
+    ticket_id
+}
+
+#[tokio::test]
+async fn approve_plan_sets_skip_flag() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let ticket_id = planned_ticket(&state, &app, &cookie, &csrf).await;
+    assert_eq!(
+        common::get_ticket(&app, &ticket_id, &cookie, &csrf).await["skipHumanReview"],
+        false
+    );
+    approve_with(
+        &app,
+        &ticket_id,
+        r#"{"skipHumanReview":true}"#,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let approved = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(approved["skipHumanReview"], true);
+}
+
+#[tokio::test]
+async fn approve_plan_without_body_keeps_flag() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let ticket_id = planned_ticket(&state, &app, &cookie, &csrf).await;
+    let flagged = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            r#"{"skipHumanReview":true}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(flagged.status(), StatusCode::OK);
+    approve_with(&app, &ticket_id, "", &cookie, &csrf).await;
+    let approved = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(approved["status"], "ready");
+    assert_eq!(approved["skipHumanReview"], true);
+}
+
+#[tokio::test]
+async fn plan_records_suggestion() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pool = _state.db.as_ref().expect("db");
+    sqlx::query("UPDATE agents SET preset_source = 'plan_skip_suggester' WHERE id = $1")
+        .bind(Uuid::parse_str(&pm_id).unwrap())
+        .execute(pool)
+        .await
+        .expect("point planner at the suggesting fixture");
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let started = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(started.status(), StatusCode::OK);
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan review",
+        Duration::from_secs(15),
+        |ticket| ticket["status"] == "plan_review",
+    )
+    .await;
+    assert_eq!(ticket["pendingPlan"]["suggestSkipHumanReview"], true);
+    assert_eq!(ticket["skipHumanReview"], false);
 }

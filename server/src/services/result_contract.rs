@@ -789,6 +789,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -822,6 +823,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
 
@@ -862,6 +864,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
 
@@ -900,6 +903,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
 
@@ -977,6 +981,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1007,6 +1012,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1037,6 +1043,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1078,6 +1085,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1127,6 +1135,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         }
     }
@@ -1296,6 +1305,7 @@ mod tests {
             missing,
             AgentRunResult::Done {
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 ..
             }
         ));

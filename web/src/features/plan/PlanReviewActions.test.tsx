@@ -126,6 +126,43 @@ describe('PlanReviewActions', () => {
     expect(screen.getByText(PLAN_COPY.approveAddsToDescription)).toBeInTheDocument();
   });
 
+  it('pre-ticks Skip human review from the planner suggestion and approves with the box value', async () => {
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" suggestSkipHumanReview />);
+    const box = screen.getByRole('checkbox', { name: new RegExp(PLAN_COPY.skipHumanReview) });
+    expect(box).toBeChecked();
+    expect(screen.getByText(PLAN_COPY.suggestedByPlanner)).toBeVisible();
+    fireEvent.click(box);
+    expect(box).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: PLAN_COPY.approvePlan }));
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        '/api/tickets/t1/approve-plan',
+        expect.objectContaining({ body: JSON.stringify({ skipHumanReview: false }) }),
+      ),
+    );
+  });
+
+  it('leaves Skip human review unticked without a suggestion, and shows an existing flag without the hint', () => {
+    const first = wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
+    expect(
+      screen.getByRole('checkbox', { name: new RegExp(PLAN_COPY.skipHumanReview) }),
+    ).not.toBeChecked();
+    first.unmount();
+    wrap(
+      <PlanReviewActions
+        ticketId="t1"
+        boardId="b1"
+        plan="## Plan"
+        suggestSkipHumanReview
+        skipHumanReview
+      />,
+    );
+    expect(
+      screen.getByRole('checkbox', { name: new RegExp(PLAN_COPY.skipHumanReview) }),
+    ).toBeChecked();
+    expect(screen.queryByText(PLAN_COPY.suggestedByPlanner)).toBeNull();
+  });
+
   it('puts the feedback box before Approve, with Approve on the right', () => {
     wrap(
       <PlanReviewActions

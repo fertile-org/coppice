@@ -159,6 +159,7 @@ async fn append_plan_sections(
     });
     markdown.push_str(&plan::plan_instructions(revision.as_ref()));
     markdown.push_str(&format!("\n{}\n", plan::PLAN_SPLIT_INSTRUCTION));
+    markdown.push_str(&format!("\n{}\n", plan::PLAN_SKIP_REVIEW_INSTRUCTION));
     let planning = PlanningService::new(pool);
     match planning
         .questions(ticket_id)
@@ -469,13 +470,19 @@ async fn drive_plan_run(
         return Err(JobCancelled.into());
     }
 
-    let (summary, questions, no_visible_change) = match &result {
+    let (summary, questions, no_visible_change, suggest_skip_review) = match &result {
         AgentRunResult::Done {
             summary,
             plan_questions,
             no_visible_change,
+            suggest_skip_human_review,
             ..
-        } => (summary.clone(), plan_questions.clone(), *no_visible_change),
+        } => (
+            summary.clone(),
+            plan_questions.clone(),
+            *no_visible_change,
+            *suggest_skip_human_review,
+        ),
         _ => anyhow::bail!(PLAN_MUST_FINISH),
     };
     result_contract::validate_for_profile(&result, run.context_profile, &run.job_type)
@@ -562,6 +569,7 @@ async fn drive_plan_run(
                 &summary,
                 Some(run.id),
                 no_visible_change,
+                suggest_skip_review,
             )
             .await
             .context("insert plan")?;

@@ -306,6 +306,10 @@ fn result_submit_properties() -> Value {
             "type": "boolean",
             "description": "Planning runs only. Set true when the plan has no visible change, including after a change request drops the UI work. Retires the ticket's live plan-run design options.",
         },
+        "suggestSkipHumanReview": {
+            "type": "boolean",
+            "description": "Planning runs only. Set true only when the change is trivial: a small, low-risk edit such as copy, config, or a one-file fix with no behavior change. Leave false when unsure.",
+        },
         "planQuestions": {
             "type": "array",
             "description": "Planning runs only. 1 to 3 short questions to ask before writing the plan, when the answers would change it. Leave summary empty when you ask.",

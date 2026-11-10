@@ -643,6 +643,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             board_agent_keys: vec!["pm".into()],
@@ -676,6 +677,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         }
     }
@@ -1055,6 +1057,7 @@ mod tests {
                     criteria_results: Vec::new(),
                     plan_questions: Vec::new(),
                     no_visible_change: false,
+                    suggest_skip_human_review: false,
                     actions: None,
                 };
                 if let Ok(action) = WorkflowService::resolve_transition(ctx) {
@@ -1382,6 +1385,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             ..minimal_ctx()
@@ -1442,6 +1446,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             ..minimal_ctx()
@@ -1498,6 +1503,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             ..minimal_ctx()
@@ -1532,6 +1538,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             ..minimal_ctx()
@@ -1568,6 +1575,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             ..minimal_ctx()
@@ -1604,6 +1612,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
@@ -1649,6 +1658,7 @@ mod tests {
                 criteria_results: Vec::new(),
                 plan_questions: Vec::new(),
                 no_visible_change: false,
+                suggest_skip_human_review: false,
                 actions: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],

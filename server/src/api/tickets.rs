@@ -185,6 +185,7 @@ pub(crate) struct TicketResponse {
     pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
     skip_planning: bool,
+    skip_human_review: bool,
     plan_approved: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     latest_plan_run_status: Option<String>,
@@ -235,6 +236,7 @@ struct PendingPlanResponse {
     revision: i32,
     markdown: String,
     change_requests: Vec<String>,
+    suggest_skip_human_review: bool,
 }
 
 #[derive(Serialize)]
@@ -272,6 +274,8 @@ struct CreateTicketBody {
     repo_id: Option<Uuid>,
     priority: Option<String>,
     #[serde(default)]
+    skip_human_review: bool,
+    #[serde(default)]
     attachment_ids: Vec<Uuid>,
 }
 
@@ -285,7 +289,14 @@ struct UpdateTicketBody {
     branch_name: Option<String>,
     owner_user_id: Option<Uuid>,
     skip_planning: Option<bool>,
+    skip_human_review: Option<bool>,
     attachment_ids: Option<Vec<Uuid>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovePlanBody {
+    skip_human_review: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -346,6 +357,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         pending_split_recommendation,
         clarification_round: ticket.clarification_round,
         skip_planning: ticket.skip_planning,
+        skip_human_review: ticket.skip_human_review,
         plan_approved: item.plan_approved,
         latest_plan_run_status: item.latest_plan_run_status,
         approved_plan: None,
@@ -845,6 +857,14 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
+    let ticket = if body.skip_human_review {
+        service
+            .set_skip_human_review(ticket.ticket.id, true)
+            .await
+            .map_err(map_error)?
+    } else {
+        ticket
+    };
     let ticket =
         store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
     let planner = load_suggested_planner(pool).await?;
@@ -959,6 +979,13 @@ async fn update_ticket(
             .map_err(map_error)?
     } else {
         service.get(ticket_id).await.map_err(map_error)?
+    };
+    let ticket = match body.skip_human_review {
+        Some(value) => service
+            .set_skip_human_review(ticket_id, value)
+            .await
+            .map_err(map_error)?,
+        None => ticket,
     };
     let ticket =
         store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
@@ -1095,10 +1122,19 @@ async fn approve_plan(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
+    body: axum::body::Bytes,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    // The body is optional: an empty one leaves the flag unchanged.
+    let skip_human_review = if body.iter().all(u8::is_ascii_whitespace) {
+        None
+    } else {
+        serde_json::from_slice::<ApprovePlanBody>(&body)
+            .map_err(|_| UpdateStatusError::Status(StatusCode::BAD_REQUEST))?
+            .skip_human_review
+    };
     PlanningService::new(pool)
-        .approve(ticket_id, &state.config.workflow)
+        .approve(ticket_id, &state.config.workflow, skip_human_review)
         .await
         .map_err(map_plan_error)?;
     let ticket = TicketService::new(pool)
@@ -1350,6 +1386,7 @@ async fn with_approved_plan(
                 plan_id: latest.id,
                 revision: latest.revision,
                 markdown: latest.body,
+                suggest_skip_human_review: latest.suggest_skip_review,
                 change_requests: planning
                     .change_requests(ticket_id)
                     .await

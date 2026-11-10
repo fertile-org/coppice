@@ -33,6 +33,7 @@ pub struct Ticket {
     pub pending_split_recommendation: Option<Value>,
     pub clarification_round: i32,
     pub skip_planning: bool,
+    pub skip_human_review: bool,
     pub content_version: i32,
     pub approved_plan_id: Option<Uuid>,
     pub approved_plan_content_version: Option<i32>,

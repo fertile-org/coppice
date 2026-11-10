@@ -286,6 +286,8 @@ export function TicketDetailPanel({
           planQuestions={ticket.planQuestions}
           planRunActive={planRunActive}
           designOutOfDate={designOutOfDate}
+          suggestSkipHumanReview={ticket.pendingPlan?.suggestSkipHumanReview}
+          skipHumanReview={ticket.skipHumanReview}
         />
       )}
 

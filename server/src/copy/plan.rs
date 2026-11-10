@@ -95,6 +95,9 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 /// not wait for a choice, and a person can ask for plan changes after picking.
 pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. When the plan has no visible change, including after a change request drops the UI work, call `result_submit` with `noVisibleChange` set to true and do not publish options.";
 
+/// Planner hint. A human still decides at plan approval.
+pub const PLAN_SKIP_REVIEW_INSTRUCTION: &str = "Set suggestSkipHumanReview to true only when the change is trivial: a small, low-risk edit such as copy, config, or a one-file fix with no behavior change. Leave it false when unsure.";
+
 /// Added to work runs when the agent has the design skill.
 pub const WORK_DESIGN_INSTRUCTION: &str = "If `ticket_get` returns `selectedDesign`, build that option. Read the HTML at its `path` for the layout when you can; otherwise follow its title and the plan.";
 

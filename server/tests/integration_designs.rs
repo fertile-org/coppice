@@ -1489,7 +1489,7 @@ async fn plan_review_with_set() -> (TicketHttp, Uuid) {
     let fx = unplanned_with_pm().await;
     let plans = planning(&fx);
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
         .await
         .expect("first plan");
     plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
@@ -1500,7 +1500,14 @@ async fn plan_review_with_set() -> (TicketHttp, Uuid) {
     let run_id = active_plan_run(&fx).await;
     let set_id = publish_plan_options(&fx, run_id, fx.agent_id).await;
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            PICK_PLAN,
+            Some(run_id),
+            false,
+            false,
+        )
         .await
         .expect("plan with design");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -1620,7 +1627,14 @@ async fn picking_back_to_the_earlier_option_starts_another_run() {
     );
     let run_id = active_plan_run(&fx).await;
     planning(&fx)
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            PICK_PLAN,
+            Some(run_id),
+            false,
+            false,
+        )
         .await
         .expect("rewritten plan");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -1880,7 +1894,7 @@ async fn pick_with_no_plan_saves_and_starts_no_run() {
     assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
     assert_eq!(plan_runs(&fx).await, runs);
     let plan = planning(&fx)
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
         .await
         .expect("next plan");
     assert_eq!(plan.design_option_id.as_deref(), Some("b"));
@@ -2506,7 +2520,7 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     let fx = unplanned_with_pm().await;
     let plans = planning(&fx);
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false)
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
         .await
         .expect("first plan");
     plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
@@ -2554,7 +2568,14 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
         .await
         .expect("publish");
     plans
-        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            PICK_PLAN,
+            Some(run_id),
+            false,
+            false,
+        )
         .await
         .expect("plan with design");
     set_run_status(&fx, run_id, "succeeded").await;
@@ -2667,6 +2688,7 @@ async fn no_visible_change_retires_plan_designs() {
             &summary,
             Some(run_id),
             no_visible_change,
+            false,
         )
         .await
         .expect("plan with no visible change");

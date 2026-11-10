@@ -29,7 +29,10 @@ interface BoardColumnProps {
   hierarchyIndex: TicketHierarchyIndex;
   agentsById: Map<string, string>;
   showQuickAdd?: boolean;
-  onQuickAdd?: (title: string) => Promise<void>;
+  onQuickAdd?: (
+    title: string,
+    options: { skipHumanReview: boolean },
+  ) => Promise<void>;
   isAdding?: boolean;
   onOpenTicket: (ticketId: string) => void;
   onRunPlan?: (ticketId: string) => void;
@@ -77,6 +80,7 @@ export const BoardColumn = memo(function BoardColumn({
   onShowMore,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
+  const [skipReview, setSkipReview] = useState(false);
   const addingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
@@ -91,8 +95,9 @@ export const BoardColumn = memo(function BoardColumn({
     if (!trimmed || !onQuickAdd || addingRef.current) return;
     addingRef.current = true;
     try {
-      await onQuickAdd(trimmed);
+      await onQuickAdd(trimmed, { skipHumanReview: skipReview });
       setTitle('');
+      setSkipReview(false);
     } catch (err: unknown) {
       toast.error(
         apiErrorToastMessage(
@@ -169,6 +174,15 @@ export const BoardColumn = memo(function BoardColumn({
               data-column-index={columnIndex}
               className="field-control w-full px-2 py-1.5 font-body text-sm placeholder:text-text-muted"
             />
+            <label className="mt-1.5 flex cursor-pointer items-center gap-2 font-body text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={skipReview}
+                onChange={(e) => setSkipReview(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border text-moss-600 focus:ring-moss-500"
+              />
+              Skip human review
+            </label>
           </form>
         )}
 

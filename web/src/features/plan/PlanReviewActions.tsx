@@ -188,6 +188,8 @@ export function PlanReviewActions({
   planQuestions,
   planRunActive = false,
   designOutOfDate = false,
+  suggestSkipHumanReview = false,
+  skipHumanReview = false,
 }: {
   ticketId: string;
   boardId: string;
@@ -204,10 +206,16 @@ export function PlanReviewActions({
   planRunActive?: boolean;
   /** The chosen design isn't the one the plan reflects. Approve stays available. */
   designOutOfDate?: boolean;
+  /** The planner judged the change trivial. Pre-ticks Skip human review. */
+  suggestSkipHumanReview?: boolean;
+  /** The ticket's current flag. Wins over the suggestion when already set. */
+  skipHumanReview?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [skipReview, setSkipReview] = useState(skipHumanReview || suggestSkipHumanReview);
+  const preTickedBySuggestion = suggestSkipHumanReview && !skipHumanReview;
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
@@ -218,7 +226,7 @@ export function PlanReviewActions({
   }
 
   const approve = useMutation({
-    mutationFn: () => approveTicketPlan(ticketId),
+    mutationFn: () => approveTicketPlan(ticketId, skipReview),
     onSuccess: () => {
       setError(null);
       refresh();
@@ -328,7 +336,20 @@ export function PlanReviewActions({
               {PLAN_COPY.approveNeedsEmptyNote}
             </p>
           )}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2 font-body text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={skipReview}
+                onChange={(event) => setSkipReview(event.target.checked)}
+                disabled={busy}
+                className="h-3.5 w-3.5 rounded border-border text-moss-600 focus:ring-moss-500"
+              />
+              {PLAN_COPY.skipHumanReview}
+              {preTickedBySuggestion && skipReview && (
+                <span className="text-text-muted">{PLAN_COPY.suggestedByPlanner}</span>
+              )}
+            </label>
             {designOutOfDate && (
               <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
             )}

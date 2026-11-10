@@ -11,6 +11,8 @@ export const PLAN_COPY = {
   sending: 'Sending…',
   askPlaceholder: 'What should change?',
   skipPlanning: 'Skip planning',
+  skipHumanReview: 'Skip human review',
+  suggestedByPlanner: 'Suggested by the planner',
   skipFailed: "Couldn't change Skip planning. Try again.",
   approvedPlan: 'Approved plan',
   proposedPlan: 'Proposed plan',

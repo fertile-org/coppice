@@ -388,7 +388,7 @@ describe('board keyboard navigation', () => {
     await act(async () => {
       fireEvent.submit(input.closest('form')!);
     });
-    expect(createTicket).toHaveBeenCalledWith('New gate');
+    expect(createTicket).toHaveBeenCalledWith({ title: 'New gate', skipHumanReview: false });
 
     card('Alpha').focus();
     press('l');

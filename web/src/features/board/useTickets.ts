@@ -50,6 +50,8 @@ export interface PendingPlan {
   revision: number;
   markdown: string;
   changeRequests: string[];
+  /** The planner judged the change trivial enough to skip Human Review. */
+  suggestSkipHumanReview?: boolean;
 }
 
 export interface PlanQuestion {
@@ -115,6 +117,7 @@ export interface Ticket {
   clarificationRound?: number;
   hasActiveRun?: boolean;
   skipPlanning?: boolean;
+  skipHumanReview?: boolean;
   planApproved?: boolean;
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
@@ -174,11 +177,12 @@ async function fetchTickets(
 async function createTicket(
   boardId: string,
   title: string,
+  skipHumanReview = false,
 ): Promise<Ticket> {
   const res = await apiFetch(`/api/boards/${boardId}/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(skipHumanReview ? { title, skipHumanReview } : { title }),
   });
   return res.json() as Promise<Ticket>;
 }
@@ -211,7 +215,13 @@ export function useCreateTicket(boardId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (title: string) => createTicket(boardId, title),
+    mutationFn: ({
+      title,
+      skipHumanReview,
+    }: {
+      title: string;
+      skipHumanReview?: boolean;
+    }) => createTicket(boardId, title, skipHumanReview),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ticketsQueryKey(boardId),

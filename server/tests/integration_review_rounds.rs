@@ -53,6 +53,7 @@ fn done(summary: &str, blockers: Vec<String>) -> AgentRunResult {
         criteria_results: Vec::new(),
         plan_questions: Vec::new(),
         no_visible_change: false,
+        suggest_skip_human_review: false,
         actions: None,
     }
 }

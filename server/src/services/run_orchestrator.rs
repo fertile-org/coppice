@@ -1256,6 +1256,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         }
     }
@@ -1294,6 +1295,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         }
     }
@@ -1325,6 +1327,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         }
     }
@@ -1458,6 +1461,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
 
@@ -1951,6 +1955,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let apply = ApplyResult {
@@ -3486,6 +3491,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let workflow = WorkflowConfig {
@@ -3735,6 +3741,7 @@ mod tests {
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
             no_visible_change: false,
+            suggest_skip_human_review: false,
             actions: None,
         };
         let mut malicious_apply =
@@ -4381,6 +4388,7 @@ mod tests {
                     criteria_results: Vec::new(),
                     plan_questions: Vec::new(),
                     no_visible_change: false,
+                    suggest_skip_human_review: false,
                     actions: None,
                 },
                 ApplyResult {

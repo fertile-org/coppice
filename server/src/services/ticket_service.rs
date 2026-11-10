@@ -94,7 +94,7 @@ const TICKET_COLUMNS_ALIASED: &str = r#"
                 t.assignee_agent_id, t.owner_user_id, t.branch_name,
                 t.pending_assign_recommendation, t.parent_ticket_id,
                 t.pending_split_recommendation, t.clarification_round,
-                t.skip_planning, t.content_version,
+                t.skip_planning, t.skip_human_review, t.content_version,
                 t.approved_plan_id, t.approved_plan_content_version,
                 t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at,
                 t.attachment_ids
@@ -267,7 +267,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -314,7 +314,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -354,7 +354,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -379,7 +379,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
@@ -455,7 +455,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -473,6 +473,38 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
+        self.enrich_row(&row).await
+    }
+
+    /// Opt a ticket in or out of auto-accept after review. Not a content edit.
+    pub async fn set_skip_human_review(
+        &self,
+        ticket_id: Uuid,
+        skip_human_review: bool,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET skip_human_review = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, board_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                skip_planning, skip_human_review, content_version,
+                approved_plan_id, approved_plan_content_version,
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(skip_human_review)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
         self.enrich_row(&row).await
     }
 
@@ -494,7 +526,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -629,7 +661,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -725,7 +757,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -768,7 +800,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -796,7 +828,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -823,7 +855,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
@@ -873,7 +905,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -907,7 +939,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -937,7 +969,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                skip_planning, content_version,
+                skip_planning, skip_human_review, content_version,
                 approved_plan_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
@@ -1253,6 +1285,7 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         pending_split_recommendation: row.get("pending_split_recommendation"),
         clarification_round: row.get("clarification_round"),
         skip_planning: row.get("skip_planning"),
+        skip_human_review: row.get("skip_human_review"),
         content_version: row.get("content_version"),
         approved_plan_id: row.get("approved_plan_id"),
         approved_plan_content_version: row.get("approved_plan_content_version"),

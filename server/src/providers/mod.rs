@@ -348,6 +348,14 @@ pub enum AgentRunResult {
             skip_serializing_if = "std::ops::Not::not"
         )]
         no_visible_change: bool,
+        /// Planning runs only. The planner judges the change trivial enough to
+        /// skip Human Review; the human decides at plan approval.
+        #[serde(
+            default,
+            rename = "suggestSkipHumanReview",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        suggest_skip_human_review: bool,
         /// Agent-chat turns only: proposed ticket/knowledge items for the human to confirm.
         /// Kept raw so validation can report the specific `parse_chat_actions` error.
         #[serde(default, rename = "actions", skip_serializing_if = "Option::is_none")]

@@ -96,6 +96,8 @@ pub struct TicketPlan {
     /// The design set the plan reflects, and the option it was written against.
     pub design_set_id: Option<Uuid>,
     pub design_option_id: Option<String>,
+    /// The planner judged the change trivial enough to skip Human Review.
+    pub suggest_skip_review: bool,
     pub created_at: time::OffsetDateTime,
 }
 
@@ -296,6 +298,7 @@ impl<'a> PlanningService<'a> {
         summary: &str,
         run_id: Option<Uuid>,
         no_visible_change: bool,
+        suggest_skip_review: bool,
     ) -> Result<TicketPlan, PlanError> {
         self.insert_plan_body(
             ticket_id,
@@ -304,10 +307,12 @@ impl<'a> PlanningService<'a> {
             &format_plan(summary),
             None,
             no_visible_change,
+            suggest_skip_review,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_plan_body(
         &self,
         ticket_id: Uuid,
@@ -316,6 +321,7 @@ impl<'a> PlanningService<'a> {
         body: &str,
         revision: Option<i32>,
         no_visible_change: bool,
+        suggest_skip_review: bool,
     ) -> Result<TicketPlan, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -389,11 +395,11 @@ impl<'a> PlanningService<'a> {
             r#"
             INSERT INTO ticket_plans (
                 id, ticket_id, run_id, agent_id, revision, body, content_version,
-                design_set_id, design_option_id
+                design_set_id, design_option_id, suggest_skip_review
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, ticket_id, run_id, agent_id, revision, body, content_version,
-                      change_request, design_set_id, design_option_id, created_at
+                      change_request, design_set_id, design_option_id, suggest_skip_review, created_at
             "#,
         )
         .bind(id)
@@ -405,6 +411,7 @@ impl<'a> PlanningService<'a> {
         .bind(ticket.ticket.content_version)
         .bind(design_set_id)
         .bind(design_option_id)
+        .bind(suggest_skip_review)
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -446,6 +453,7 @@ impl<'a> PlanningService<'a> {
         &self,
         ticket_id: Uuid,
         workflow: &crate::config::WorkflowConfig,
+        skip_human_review: Option<bool>,
     ) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
@@ -475,6 +483,7 @@ impl<'a> PlanningService<'a> {
             UPDATE tickets
             SET approved_plan_id = $2,
                 approved_plan_content_version = $3,
+                skip_human_review = COALESCE($4, skip_human_review),
                 updated_at = now()
             WHERE id = $1
             "#,
@@ -482,6 +491,7 @@ impl<'a> PlanningService<'a> {
         .bind(ticket_id)
         .bind(plan.id)
         .bind(ticket.ticket.content_version)
+        .bind(skip_human_review)
         .execute(self.pool)
         .await?;
 
@@ -573,7 +583,15 @@ impl<'a> PlanningService<'a> {
             spec.acceptance_criteria.as_deref(),
         );
         let child_plan = self
-            .insert_plan_body(child_id, Some(recommended_by), None, &body, Some(1), false)
+            .insert_plan_body(
+                child_id,
+                Some(recommended_by),
+                None,
+                &body,
+                Some(1),
+                false,
+                false,
+            )
             .await?;
         sqlx::query(
             r#"
@@ -1096,7 +1114,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, design_set_id, design_option_id, created_at
+                   change_request, design_set_id, design_option_id, suggest_skip_review, created_at
             FROM ticket_plans
             WHERE ticket_id = $1
             ORDER BY revision DESC
@@ -1113,7 +1131,7 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, design_set_id, design_option_id, created_at
+                   change_request, design_set_id, design_option_id, suggest_skip_review, created_at
             FROM ticket_plans
             WHERE id = $1
             "#,
@@ -1163,6 +1181,7 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
         change_request: row.get("change_request"),
         design_set_id: row.get("design_set_id"),
         design_option_id: row.get("design_option_id"),
+        suggest_skip_review: row.get("suggest_skip_review"),
         created_at: row.get("created_at"),
     }
 }
@@ -1327,6 +1346,7 @@ mod tests {
             pending_split_recommendation: None,
             clarification_round: 0,
             skip_planning: false,
+            skip_human_review: false,
             content_version: 1,
             approved_plan_id: None,
             approved_plan_content_version: None,
