@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "summary": "## QC Verdict\n**Passed**: every acceptance criterion checks out.",
+  "changedFiles": [],
+  "testsRun": [],
+  "nextStatus": null,
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

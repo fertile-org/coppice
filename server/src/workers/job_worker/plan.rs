@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use sqlx::PgPool;
@@ -42,7 +43,7 @@ pub const VERIFIED_RESULTS_SHA: &str = "verified";
 /// Run a `plan_ticket` or `verify_parent` job in a detached scratch worktree.
 /// Planning never changes your ticket's code.
 pub(super) async fn execute_plan(
-    state: &AppState,
+    state: &Arc<AppState>,
     pool: &PgPool,
     run_svc: &RunService<'_>,
     run: &AgentRun,
@@ -282,7 +283,7 @@ struct PlanDrive<'a> {
 }
 
 async fn drive_plan_run(
-    state: &AppState,
+    state: &Arc<AppState>,
     pool: &PgPool,
     run_svc: &RunService<'_>,
     run: &AgentRun,
@@ -540,8 +541,9 @@ async fn drive_plan_run(
         },
     };
 
-    let orchestrator =
-        RunOrchestrator::new(pool, &state.config.workflow).with_event_bus(&state.event_bus);
+    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow)
+        .with_event_bus(&state.event_bus)
+        .with_app_state(state);
     let finished = orchestrator
         .finish_run(run, &result, apply, None, None)
         .await

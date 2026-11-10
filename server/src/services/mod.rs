@@ -6,6 +6,7 @@ pub mod artifact_retention;
 pub mod artifact_service;
 pub mod attachment_cleanup;
 pub mod auth_service;
+pub mod auto_accept;
 pub mod backup_service;
 pub mod board_service;
 pub mod chat_cwd;

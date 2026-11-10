@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::config::WorkflowConfig;
 use crate::domain::agent::Agent;
@@ -7,11 +8,11 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::mention::TicketMention;
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
-use crate::domain::substatus::Substatus;
+use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    is_ready_tech_lead_refinement, is_tech_lead_identity, BoardAgentInfo, JobRequest, RunOutcome,
-    TransitionAction, TransitionContext,
+    is_ready_tech_lead_refinement, is_reviewer_identity, is_tech_lead_identity, BoardAgentInfo,
+    JobRequest, RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
@@ -32,6 +33,7 @@ use crate::services::ticket_thread;
 use crate::services::workflow_service::{
     is_implementer, WorkflowService, MAX_CLARIFICATION_ROUNDS, MAX_MENTIONS_PER_RUN,
 };
+use crate::AppState;
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -51,6 +53,8 @@ pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
     event_bus: Option<&'a EventBus>,
+    /// Needed to auto-accept a skip-review ticket at final review.
+    app_state: Option<&'a Arc<AppState>>,
 }
 
 pub async fn load_run_continuation_context(
@@ -91,11 +95,19 @@ impl<'a> RunOrchestrator<'a> {
             pool,
             workflow,
             event_bus: None,
+            app_state: None,
         }
     }
 
     pub fn with_event_bus(mut self, event_bus: &'a EventBus) -> Self {
         self.event_bus = Some(event_bus);
+        self
+    }
+
+    /// Lets a run that lands in final review auto-accept a ticket flagged to
+    /// skip human review.
+    pub fn with_app_state(mut self, state: &'a Arc<AppState>) -> Self {
+        self.app_state = Some(state);
         self
     }
 
@@ -302,6 +314,40 @@ impl<'a> RunOrchestrator<'a> {
             )
         };
 
+        if !consultation_run && !skip_workflow {
+            let approving_review = !review_capped
+                && run_outcome == RunOutcome::Succeeded
+                && current_status == TicketStatus::InReview
+                && matches!(
+                    ticket.ticket.status,
+                    TicketStatus::InQa | TicketStatus::WaitForFinalReview
+                )
+                && !is_implementer(&agent.role)
+                && (is_reviewer_identity(&agent_key, &agent.role)
+                    || is_tech_lead_identity(&agent_key, &agent.role));
+            if approving_review {
+                crate::services::auto_accept::record_agent_review_pass(
+                    self.pool,
+                    ticket_id,
+                    comment.as_ref().map(|posted| posted.created_at),
+                )
+                .await?;
+            } else if is_implementer(&agent.role)
+                || matches!(
+                    current_status,
+                    TicketStatus::InProgress | TicketStatus::InReview
+                )
+                || matches!(
+                    ticket.ticket.status,
+                    TicketStatus::InProgress | TicketStatus::InReview
+                )
+            {
+                // New work or a review that did not pass: an earlier pass no
+                // longer covers this ticket.
+                crate::services::auto_accept::clear_agent_review_pass(self.pool, ticket_id).await?;
+            }
+        }
+
         for notice in &action.system_comments {
             CommentService::new(self.pool)
                 .create(
@@ -468,9 +514,26 @@ impl<'a> RunOrchestrator<'a> {
             }
         }
 
+        if current_status != TicketStatus::WaitForFinalReview
+            && ticket.ticket.status == TicketStatus::WaitForFinalReview
+        {
+            self.try_auto_accept(ticket_id).await;
+        }
+
         self.handle_terminal_run(&finished_run).await;
 
         Ok(finished_run)
+    }
+
+    /// The run moved the ticket into final review. A failed auto-accept
+    /// leaves it waiting for a person.
+    async fn try_auto_accept(&self, ticket_id: Uuid) {
+        let Some(state) = self.app_state else {
+            return;
+        };
+        if let Err(err) = crate::services::auto_accept::try_auto_accept(state, ticket_id).await {
+            tracing::warn!(%ticket_id, error = %err, "auto-accept failed; ticket waits for a person");
+        }
     }
 
     async fn persist_and_publish_mentions(&self, mentions: &[TicketMention]) {

@@ -92,7 +92,7 @@ pub fn spawn_workers(state: Arc<AppState>) {
     }
 }
 
-async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
+async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<()> {
     let pool = state.db.as_ref().context("no db")?;
     let job_svc = JobService::new(pool);
     let (job, run, _slot) = {
@@ -280,7 +280,7 @@ async fn fail_check_for_run(pool: &PgPool, run_id: uuid::Uuid, failure: &str) {
 }
 
 async fn execute_job(
-    state: &AppState,
+    state: &Arc<AppState>,
     pool: &PgPool,
     run_svc: &RunService<'_>,
     run: &crate::domain::run::AgentRun,
@@ -845,8 +845,9 @@ async fn execute_job(
     }
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    let orchestrator =
-        RunOrchestrator::new(pool, &state.config.workflow).with_event_bus(&state.event_bus);
+    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow)
+        .with_event_bus(&state.event_bus)
+        .with_app_state(state);
     let finished_run = orchestrator
         .finish_run(
             run,

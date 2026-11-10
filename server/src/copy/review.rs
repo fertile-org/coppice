@@ -108,6 +108,17 @@ pub fn is_entry_hold(message: &str) -> bool {
     message.starts_with(ENTRY_HELD_PREFIX)
 }
 
+/// Skip human review was on, but no reviewer or Tech Lead passed the ticket.
+pub const SKIP_REVIEW_NO_AGENT_REVIEW: &str =
+    "Skip human review didn't apply: no agent code review approved this ticket.";
+
+/// Skip human review was on, but an agent asked for changes.
+pub const SKIP_REVIEW_CHANGES_REQUESTED: &str =
+    "Skip human review didn't apply: an agent asked for changes on this ticket.";
+
+/// Skip human review was on, but the ticket was split.
+pub const SKIP_REVIEW_SPLIT: &str = "Skip human review didn't apply: this ticket was split.";
+
 #[cfg(test)]
 mod tests {
     use super::*;

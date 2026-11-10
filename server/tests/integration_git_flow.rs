@@ -1233,3 +1233,318 @@ async fn merge_comment_failure_still_cleans_up_and_pushes() {
     wait_for_worktree_gone(&cf.fx.worktree_path).await;
     wait_for_detail_state(&cf.fx, "merged").await;
 }
+
+// --- Auto-accept at final review (skip human review) ---
+
+use coppice_server::copy::review::{
+    SKIP_REVIEW_CHANGES_REQUESTED, SKIP_REVIEW_NO_AGENT_REVIEW, SKIP_REVIEW_SPLIT,
+};
+use coppice_server::services::auto_accept::try_auto_accept;
+use coppice_server::services::run_service::{RunService, StartRunOptions};
+
+const COPPICE_ACCEPTED: &str =
+    "Accepted by Coppice (human review skipped): ticket moved to **Done**.";
+
+async fn comment_count(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2")
+        .bind(ticket_id)
+        .bind(body)
+        .fetch_one(pool)
+        .await
+        .expect("count comments")
+}
+
+async fn skip_review_notices(pool: &sqlx::PgPool, ticket_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT body FROM ticket_comments WHERE ticket_id = $1 \
+         AND author_type = 'system' AND body LIKE 'Skip human review%' ORDER BY created_at",
+    )
+    .bind(ticket_id)
+    .fetch_all(pool)
+    .await
+    .expect("skip review notices")
+}
+
+async fn wait_for_comment(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) {
+    for _ in 0..300 {
+        if comment_count(pool, ticket_id, body).await > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("comment never posted: {body}");
+}
+
+/// A repo ticket with a worktree commit, waiting in final review.
+async fn final_review_fixture(flagged: bool) -> (MergeFixture, sqlx::PgPool, Uuid) {
+    let fx = accepted_ticket_with_worktree().await;
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    sqlx::query(
+        "UPDATE tickets SET status = 'wait_for_final_review', skip_human_review = $2 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(flagged)
+    .execute(&pool)
+    .await
+    .unwrap();
+    (fx, pool, id)
+}
+
+/// An earlier agent comment, posted before the review passed.
+async fn add_agent_comment(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) {
+    sqlx::query(
+        "INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at) \
+         VALUES ($1, $2, 'agent', 'Please change this.', $3, now() - interval '1 minute')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(ticket_id)
+    .bind(intent)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn mark_review_passed(pool: &sqlx::PgPool, ticket_id: Uuid) {
+    sqlx::query("UPDATE tickets SET agent_review_passed_at = now() WHERE id = $1")
+        .bind(ticket_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn status_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+        .bind(ticket_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn flagged_ticket_with_clean_review_auto_accepts() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.clone().expect("pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::create_agent_with_preset_key(&app, "tech_lead", "Skip Tech Lead", &cookie, &csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "frontend_engineer",
+        "Skip Frontend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let qc_id = common::create_agent_with_preset_key(&app, "qc", "Skip QC", &cookie, &csrf).await;
+    // A QC run that passes, so the ticket reaches final review.
+    sqlx::query("UPDATE agents SET preset_source = 'qc_pass' WHERE id = $1")
+        .bind(Uuid::parse_str(&qc_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let id = Uuid::parse_str(&ticket_id).unwrap();
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    sqlx::query("UPDATE tickets SET skip_human_review = true WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
+
+    let done = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "auto-accepted to done",
+        std::time::Duration::from_secs(120),
+        |ticket| ticket["status"].as_str() == Some("done"),
+    )
+    .await;
+    assert_eq!(done["status"], "done");
+
+    let passed: Option<time::OffsetDateTime> =
+        sqlx::query_scalar("SELECT agent_review_passed_at FROM tickets WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(passed.is_some(), "the Tech Lead pass is recorded");
+    let review = HumanReviewService::new(&pool)
+        .get(id)
+        .await
+        .unwrap()
+        .expect("acceptance");
+    assert!(review.accepted_by_coppice);
+    assert_eq!(review.accepted_by, None, "no person accepted the ticket");
+    assert_eq!(comment_count(&pool, id, COPPICE_ACCEPTED).await, 1);
+    assert!(skip_review_notices(&pool, id).await.is_empty());
+}
+
+#[tokio::test]
+async fn unflagged_ticket_waits() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(false).await;
+    mark_review_passed(&pool, id).await;
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert!(skip_review_notices(&pool, id).await.is_empty());
+    assert!(HumanReviewService::new(&pool)
+        .get(id)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn review_feedback_blocks_auto_accept() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    add_agent_comment(&pool, id, "review_feedback").await;
+    mark_review_passed(&pool, id).await;
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    // A second check in the same final review posts nothing new.
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_CHANGES_REQUESTED.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn qa_failed_blocks_auto_accept() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    mark_review_passed(&pool, id).await;
+    add_agent_comment(&pool, id, "qa_failed").await;
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_CHANGES_REQUESTED.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn split_ticket_blocks_auto_accept() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    mark_review_passed(&pool, id).await;
+    let child = common::create_test_ticket(&fx.app, &fx.board_id, &fx.cookie, &fx.csrf).await;
+    sqlx::query("UPDATE tickets SET parent_ticket_id = $2 WHERE id = $1")
+        .bind(Uuid::parse_str(&child).unwrap())
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_SPLIT.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn auto_accept_without_merge_notifies_not_merged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    mark_review_passed(&pool, id).await;
+
+    assert!(try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "done");
+    assert!(review_of(&fx).await.accepted_by_coppice);
+    let notices: Vec<String> = sqlx::query_scalar(
+        "SELECT body FROM notifications WHERE type = 'git_needs_action' AND ticket_id = $1",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(!notices.is_empty(), "accepted, not merged needs a person");
+    assert!(notices.iter().all(|body| body == "Accepted, not merged"));
+}
+
+#[tokio::test]
+async fn scope_b_path_without_review_waits() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.clone().expect("pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "frontend_engineer",
+        "Resumed Frontend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let engineer = Uuid::parse_str(&engineer_id).unwrap();
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let id = Uuid::parse_str(&ticket_id).unwrap();
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    // The implementer resumes in In Review after a clarification: its finish
+    // goes straight to final review with no agent code review.
+    sqlx::query(
+        "UPDATE tickets SET status = 'in_review', skip_human_review = true, \
+         assignee_agent_id = $2 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(engineer)
+    .execute(&pool)
+    .await
+    .unwrap();
+    RunService::new(&pool)
+        .start_run_for_agent(id, engineer, "work_on_ticket", StartRunOptions::default())
+        .await
+        .expect("start implementer run");
+
+    wait_for_comment(&pool, id, SKIP_REVIEW_NO_AGENT_REVIEW).await;
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_NO_AGENT_REVIEW.to_string()]
+    );
+    assert!(HumanReviewService::new(&pool)
+        .get(id)
+        .await
+        .unwrap()
+        .is_none());
+}
