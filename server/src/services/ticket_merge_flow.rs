@@ -7,11 +7,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::git_state::GitOutcome;
-use crate::services::accept_service::{create_git_action_comment, Actor};
+use crate::services::git_flow::{create_git_action_comment, Actor};
 use crate::services::human_review_service::HumanReviewService;
 use crate::services::ticket_attachments::{self, AttachmentFolderEnd};
 use crate::services::ticket_git_service::{MergeBranchResult, TicketGitError, TicketGitService};
-use crate::services::ticket_service::TicketService;
 use crate::AppState;
 
 pub const MAIN_DIRTY_REASON: &str = "Your main checkout has uncommitted changes";
@@ -65,7 +64,7 @@ impl<'a> TicketMergeFlow<'a> {
                 tracing::warn!(error = %err, %ticket_id, "could not record merge outcome");
             }
         }
-        self.publish_ticket(ticket_id).await;
+        crate::events::publish_ticket_state(&self.state.event_bus, self.pool, ticket_id).await;
         let merge = merge?;
 
         // Accept does not remove these copies. A failed merge leaves them in
@@ -94,14 +93,5 @@ impl<'a> TicketMergeFlow<'a> {
         crate::services::worktree_cleanup::spawn_cleanup(self.state, ticket_id);
 
         Ok(merge)
-    }
-
-    /// `ticket.updated` plus `agent_run.started` for each active run.
-    async fn publish_ticket(&self, ticket_id: Uuid) {
-        if let Ok(ticket) = TicketService::new(self.pool).get(ticket_id).await {
-            crate::events::publish_ticket_updated(&self.state.event_bus, &ticket);
-            crate::events::publish_ticket_active_runs(&self.state.event_bus, self.pool, ticket_id)
-                .await;
-        }
     }
 }

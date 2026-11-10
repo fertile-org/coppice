@@ -85,6 +85,42 @@ async fn set_git_outcome_reports_change() {
     assert!(svc.set_git_outcome(ticket_id, None, None).await.unwrap());
 }
 
+#[tokio::test]
+async fn set_git_outcome_updates_reason_without_reporting_change() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, ticket_id, user_id, _env) = setup_ticket().await;
+    let pool = state.db.clone().expect("pool");
+    let svc = HumanReviewService::new(&pool);
+    svc.record_acceptance(ticket_id, Some(user_id), SHA)
+        .await
+        .unwrap();
+    assert!(svc
+        .set_git_outcome(
+            ticket_id,
+            Some(GitOutcome::Conflict),
+            Some("1 file conflicts with main")
+        )
+        .await
+        .unwrap());
+    assert!(!svc
+        .set_git_outcome(
+            ticket_id,
+            Some(GitOutcome::Conflict),
+            Some("2 files conflict with main")
+        )
+        .await
+        .unwrap());
+    let review = svc.get(ticket_id).await.unwrap().unwrap();
+    assert_eq!(review.git_outcome, Some(GitOutcome::Conflict));
+    assert_eq!(
+        review.git_outcome_reason.as_deref(),
+        Some("2 files conflict with main")
+    );
+}
+
 async fn create_repo_json(
     app: &axum::Router,
     remote: Option<&str>,
@@ -376,6 +412,11 @@ async fn manual_merge_dirty_main_records_outcome() {
 
     let res = merge_main(&fx).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["message"],
+        "main repository has uncommitted changes — commit or stash before merging"
+    );
 
     let review = review_of(&fx).await;
     assert_eq!(review.git_outcome, Some(GitOutcome::MainDirty));

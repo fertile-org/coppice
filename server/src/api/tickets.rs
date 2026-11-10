@@ -7,18 +7,18 @@ use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
 use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::domain::agent::Agent;
 use crate::domain::agent_health::AgentHealthStatus;
-use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::events::bus::AppEvent;
-use crate::services::accept_service::{AcceptError, AcceptService, Actor};
+use crate::services::accept_service::{AcceptError, AcceptService};
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::conflict_resolve::{self, ConflictResolveError, GitConflictHttp};
+use crate::services::git_flow::{self, Actor};
 use crate::services::human_review_service::short_commit_sha;
 use crate::services::planning_service::{
     planner_for_ticket, suggested_assignee, PlanningService, StartOutcome, SuggestedAssignee,
@@ -737,25 +737,9 @@ async fn create_git_action_comment(
     user_id: Uuid,
     body: &str,
 ) -> Result<(), StatusCode> {
-    let comment = CommentService::new(pool)
-        .create(
-            ticket_id,
-            AuthorType::Human,
-            Some(user_id),
-            body,
-            CommentIntent::SystemEvent,
-            &[],
-            &[],
-        )
+    git_flow::create_git_action_comment(state, pool, ticket_id, Actor::User(user_id), body)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    state.event_bus.publish(AppEvent::CommentCreated {
-        comment_id: comment.id,
-        ticket_id,
-        author_type: "human".into(),
-    });
-    Ok(())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn parse_status(status: &str) -> Result<TicketStatus, TicketError> {
@@ -1762,20 +1746,15 @@ async fn final_approve(
 }
 
 pub(super) async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
-    if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
-        publish_ticket_and_runs(state, pool, &ticket).await;
-    }
+    crate::events::publish_ticket_state(&state.event_bus, pool, ticket_id).await;
 }
 
-/// `ticket.updated` plus `agent_run.started` for each active run, so a run
-/// queued by the service call shows up before a worker picks it up.
 async fn publish_ticket_and_runs(
     state: &AppState,
     pool: &sqlx::PgPool,
     ticket: &crate::services::ticket_service::TicketWithDisplay,
 ) {
-    crate::events::publish_ticket_updated(&state.event_bus, ticket);
-    crate::events::publish_ticket_active_runs(&state.event_bus, pool, ticket.ticket.id).await;
+    crate::events::publish_ticket_and_runs(&state.event_bus, pool, ticket).await;
 }
 
 async fn ticket_git_info(

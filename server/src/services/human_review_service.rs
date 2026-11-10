@@ -159,7 +159,10 @@ impl<'a> HumanReviewService<'a> {
     }
 
     /// Store (or clear, with `None`) the outcome of a failed git step.
-    /// Returns `true` when the stored outcome changed, so callers notify only then.
+    ///
+    /// The reason is refreshed even when the outcome is unchanged, so a second
+    /// conflict with other files shows the new count. Returns `true` only when
+    /// the outcome itself changed, so callers notify only then.
     pub async fn set_git_outcome(
         &self,
         ticket_id: Uuid,
@@ -167,22 +170,31 @@ impl<'a> HumanReviewService<'a> {
         reason: Option<&str>,
     ) -> Result<bool, HumanReviewError> {
         let outcome_str = outcome.map(GitOutcome::as_str);
-        let result = sqlx::query(
+        let changed: Option<bool> = sqlx::query_scalar(
             r#"
-            UPDATE ticket_human_reviews
+            WITH prev AS (
+                SELECT ticket_id, git_outcome
+                FROM ticket_human_reviews
+                WHERE ticket_id = $1
+                FOR UPDATE
+            )
+            UPDATE ticket_human_reviews r
             SET git_outcome = $2,
                 git_outcome_reason = $3,
                 git_outcome_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END
-            WHERE ticket_id = $1
-              AND git_outcome IS DISTINCT FROM $2::text
+            FROM prev
+            WHERE r.ticket_id = prev.ticket_id
+              AND (r.git_outcome IS DISTINCT FROM $2::text
+                   OR r.git_outcome_reason IS DISTINCT FROM $3::text)
+            RETURNING prev.git_outcome IS DISTINCT FROM $2::text
             "#,
         )
         .bind(ticket_id)
         .bind(outcome_str)
         .bind(reason)
-        .execute(self.pool)
+        .fetch_optional(self.pool)
         .await?;
-        Ok(result.rows_affected() > 0)
+        Ok(changed.unwrap_or(false))
     }
 
     /// Record a remote merge only while this acceptance is still the live one.

@@ -24,6 +24,7 @@ pub mod criteria_results;
 pub mod design_choice;
 pub mod design_service;
 pub mod git_cmd;
+pub mod git_flow;
 pub mod git_ops;
 pub mod human_review_service;
 pub mod init_wizard;

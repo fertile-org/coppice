@@ -7,7 +7,7 @@ use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::bus::{AppEvent, EventBus};
 use crate::services::notification_service::NotificationService;
 use crate::services::run_service::{RunError, RunService};
-use crate::services::ticket_service::TicketWithDisplay;
+use crate::services::ticket_service::{TicketService, TicketWithDisplay};
 use crate::AppState;
 
 pub fn publish_ticket_updated(bus: &EventBus, ticket: &TicketWithDisplay) {
@@ -21,6 +21,21 @@ pub fn publish_ticket_updated(bus: &EventBus, ticket: &TicketWithDisplay) {
             .format(&Rfc3339)
             .unwrap_or_default(),
     });
+}
+
+/// `ticket.updated` plus `agent_run.started` for each active run, so a run
+/// queued by a service call shows up before a worker picks it up.
+pub async fn publish_ticket_and_runs(bus: &EventBus, pool: &PgPool, ticket: &TicketWithDisplay) {
+    publish_ticket_updated(bus, ticket);
+    publish_ticket_active_runs(bus, pool, ticket.ticket.id).await;
+}
+
+/// Reload the ticket and publish it with its active runs. A ticket that can't
+/// be loaded publishes nothing.
+pub async fn publish_ticket_state(bus: &EventBus, pool: &PgPool, ticket_id: Uuid) {
+    if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
+        publish_ticket_and_runs(bus, pool, &ticket).await;
+    }
 }
 
 /// Announce that a ticket run's final usage snapshot is saved. Call it after
