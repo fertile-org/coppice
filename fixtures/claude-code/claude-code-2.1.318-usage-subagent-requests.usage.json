@@ -1,0 +1,65 @@
+{
+  "process": {
+    "cliVersion": "2.1.318",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUPsi1Tec1dVHBtqhYQ",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 14237,
+        "cacheWrite": 10803,
+        "input": 2,
+        "output": 168,
+        "reasoning": 0
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUQGbACbWYxmEk2Lx9e",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 25040,
+        "cacheWrite": 2234,
+        "input": 2,
+        "output": 4,
+        "reasoning": 0
+      }
+    }
+  ],
+  "subagents": [
+    {
+      "agentType": "general-purpose",
+      "description": "Run echo commands and reply ok",
+      "durationMs": 3963,
+      "id": "toolu_01DZ26m6hNXf4vHBreU4AQEc",
+      "model": "claude-haiku-5-5",
+      "status": "completed",
+      "tokens": {
+        "cacheRead": null,
+        "cacheWrite": null,
+        "input": null,
+        "output": null,
+        "reasoning": null
+      },
+      "toolUses": 2,
+      "totalTokens": 20083
+    }
+  ],
+  "totals": {
+    "costUsd": 0.0058863299999999995,
+    "requestCount": 2,
+    "status": "reported",
+    "subagentCount": 1,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 56813,
+      "cacheWrite": 33005,
+      "input": 8,
+      "output": 428,
+      "reasoning": 109
+    }
+  }
+}

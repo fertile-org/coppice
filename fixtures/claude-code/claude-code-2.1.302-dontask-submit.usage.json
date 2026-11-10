@@ -1,0 +1,59 @@
+{
+  "process": {
+    "cliVersion": "2.1.302",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbxBd5nGpQHmi2SzKzU",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 7302,
+        "cacheWrite": 8149,
+        "input": 2,
+        "output": 16,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbxTYJb8WYxTzGkrjzk",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 15451,
+        "cacheWrite": 404,
+        "input": 2,
+        "output": 24,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbxd9zsPfHLitfUaxA8",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 15855,
+        "cacheWrite": 119,
+        "input": 2,
+        "output": 39,
+        "reasoning": null
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 3,
+    "status": "partial",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 38608,
+      "cacheWrite": 8672,
+      "input": 6,
+      "output": 79,
+      "reasoning": null
+    }
+  }
+}

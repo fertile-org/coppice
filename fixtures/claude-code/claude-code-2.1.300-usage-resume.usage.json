@@ -1,0 +1,35 @@
+{
+  "process": {
+    "cliVersion": "2.1.300",
+    "resumed": true
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011CgqLB7mZcXZb6pZCQsKuT",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 14590,
+        "cacheWrite": 11625,
+        "input": 2,
+        "output": 3,
+        "reasoning": null
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 1,
+    "status": "partial",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 14590,
+      "cacheWrite": 11625,
+      "input": 2,
+      "output": 3,
+      "reasoning": null
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "process": {
+    "cliVersion": null,
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_001",
+      "model": "claude-sonnet-4-20250514",
+      "tokens": {
+        "cacheRead": null,
+        "cacheWrite": null,
+        "input": 80,
+        "output": 15,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_002",
+      "model": "claude-sonnet-4-20250514",
+      "tokens": {
+        "cacheRead": null,
+        "cacheWrite": null,
+        "input": 100,
+        "output": 30,
+        "reasoning": null
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 2,
+    "status": "partial",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": null,
+      "cacheWrite": null,
+      "input": 180,
+      "output": 45,
+      "reasoning": null
+    }
+  }
+}

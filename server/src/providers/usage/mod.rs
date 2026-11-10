@@ -7,6 +7,8 @@
 
 mod claude_stream_json;
 mod cursor_stream_json;
+#[cfg(test)]
+mod harness;
 
 use crate::domain::usage::UsageEvent;
 use crate::providers::AgentRunInput;

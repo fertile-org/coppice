@@ -1,0 +1,113 @@
+{
+  "process": {
+    "cliVersion": "2.1.318",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUHwqdexQ3naH2QXA4Q",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 11873,
+        "cacheWrite": 14081,
+        "input": 2,
+        "output": 249,
+        "reasoning": 127
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUJDWCcS9uhPiucXx1r",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 25954,
+        "cacheWrite": 389,
+        "input": 2,
+        "output": 161,
+        "reasoning": 0
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUJK6ZhADBz7h1jC3tT",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 26343,
+        "cacheWrite": 552,
+        "input": 2,
+        "output": 166,
+        "reasoning": 56
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUJQo75GY13M3GqmJMi",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 26895,
+        "cacheWrite": 225,
+        "input": 2,
+        "output": 48,
+        "reasoning": 0
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUJUYLP1eYM6tHecugy",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 27120,
+        "cacheWrite": 415,
+        "input": 4,
+        "output": 204,
+        "reasoning": 94
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgmUJb6EajvMu8cPQBysr",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 27535,
+        "cacheWrite": 718,
+        "input": 2,
+        "output": 103,
+        "reasoning": 0
+      }
+    }
+  ],
+  "subagents": [
+    {
+      "agentType": "general-purpose",
+      "description": "Read two files and reply ok",
+      "durationMs": 3195,
+      "id": "toolu_01AwBcR53NG3e8pJxHz96nWm",
+      "model": "claude-haiku-5-5",
+      "status": "completed",
+      "tokens": {
+        "cacheRead": null,
+        "cacheWrite": null,
+        "input": null,
+        "output": null,
+        "reasoning": null
+      },
+      "toolUses": 2,
+      "totalTokens": 18594
+    }
+  ],
+  "totals": {
+    "costUsd": 0.007832015,
+    "requestCount": 6,
+    "status": "reported",
+    "subagentCount": 1,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 161484,
+      "cacheWrite": 34687,
+      "input": 18,
+      "output": 1302,
+      "reasoning": 524
+    }
+  }
+}
