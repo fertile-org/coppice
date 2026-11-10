@@ -32,7 +32,7 @@
 //!   totals are added up; while a later process has not reported its total,
 //!   the run falls back to the sum of its rows.
 
-use super::UsageReader;
+use super::{ProcessContext, UsageReader};
 use crate::domain::usage::{
     Granularity, RequestUsage, RunTotalUsage, SubagentUsage, TokenCounts, UsageEvent,
 };
@@ -69,7 +69,7 @@ struct Process {
 }
 
 impl UsageReader for ClaudeStreamJsonReader {
-    fn start_process(&mut self, resumed: bool) -> Vec<UsageEvent> {
+    fn start_process(&mut self, process: &ProcessContext) -> Vec<UsageEvent> {
         if self.process.started {
             match self.process.total.take() {
                 Some(total) => add_total(&mut self.finished, &total),
@@ -80,7 +80,7 @@ impl UsageReader for ClaudeStreamJsonReader {
         self.open = None;
         self.process = Process {
             started: true,
-            resumed,
+            resumed: process.resumed,
             ..Process::default()
         };
         Vec::new()
@@ -354,7 +354,11 @@ mod tests {
         resumed: bool,
         events: &[Value],
     ) {
-        for usage in reader.start_process(resumed) {
+        let process = ProcessContext {
+            resumed,
+            ..ProcessContext::default()
+        };
+        for usage in reader.start_process(&process) {
             tracker.apply(usage);
         }
         for event in events {
@@ -529,7 +533,10 @@ mod tests {
     #[test]
     fn resumed_process_with_since_last_uses_it() {
         let mut reader = ClaudeStreamJsonReader::default();
-        reader.start_process(true);
+        reader.start_process(&ProcessContext {
+            resumed: true,
+            ..ProcessContext::default()
+        });
         let result = json!({ "type": "result",
             "modelUsage": { "m": { "outputTokens": 6 } },
             "model_usage_since_last_result": { "m": { "outputTokens": 3 } } });

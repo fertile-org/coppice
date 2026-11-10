@@ -5,6 +5,7 @@ use super::cli_runner::{
 };
 use super::cli_version;
 use super::terminal;
+use super::usage::ProcessContext;
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
@@ -203,11 +204,10 @@ impl AgentProvider for ClaudeCodeProvider {
             run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
         if let Some(stream) = &input.stream {
-            let resumed = input
-                .resume_session_id
-                .as_deref()
-                .is_some_and(|sid| !sid.is_empty());
-            stream.track_usage(descriptor.usage, resumed);
+            stream.track_usage(
+                descriptor.usage,
+                &ProcessContext::new(input.resume_session_id.as_deref(), Some(&version)),
+            );
         }
         let invocation = CliInvocation {
             program,

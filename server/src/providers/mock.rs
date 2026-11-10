@@ -320,7 +320,10 @@ fn replay_usage(input: &AgentRunInput, events: &[serde_json::Value]) {
         return;
     };
     if let Some(descriptor) = coppice_connectors::get(coppice_connectors::MOCK) {
-        stream.track_usage(descriptor.usage, false);
+        stream.track_usage(
+            descriptor.usage,
+            &crate::providers::usage::ProcessContext::default(),
+        );
     }
     for event in events {
         stream.observe_usage(event);

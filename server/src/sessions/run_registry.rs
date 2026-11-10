@@ -1,5 +1,5 @@
 use crate::domain::usage::{UsageSnapshot, UsageTracker};
-use crate::providers::usage::{reader_for, UsageReader};
+use crate::providers::usage::{reader_for, ProcessContext, UsageReader};
 use crate::sessions::run_artifact_log::RunArtifactLog;
 use crate::sessions::LiveMessage;
 use coppice_connectors::UsageFormat;
@@ -171,12 +171,11 @@ impl RunStreamHandle {
 
     /// A CLI process starts writing to this run; read its usage in `format`.
     /// Call once per process, before its output. The first format with a
-    /// reader wins; a format without one leaves usage off. `resumed` says the
-    /// process continues an earlier session.
+    /// reader wins; a format without one leaves usage off.
     ///
     /// Publishes a snapshot right away, so a tracked run that reports nothing
     /// is still stored as tracked.
-    pub fn track_usage(&self, format: UsageFormat, resumed: bool) {
+    pub fn track_usage(&self, format: UsageFormat, process: &ProcessContext) {
         let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
         if state.reader.is_none() {
             state.reader = reader_for(format);
@@ -185,7 +184,7 @@ impl RunStreamHandle {
         let Some(reader) = reader.as_mut() else {
             return;
         };
-        for usage in reader.start_process(resumed) {
+        for usage in reader.start_process(process) {
             tracker.apply(usage);
         }
         self.usage_tx
@@ -299,17 +298,18 @@ mod tests {
 
         let mut rx = handle.subscribe_usage();
         // A format without a reader leaves usage off.
-        handle.track_usage(UsageFormat::None, false);
+        let fresh = ProcessContext::default();
+        handle.track_usage(UsageFormat::None, &fresh);
         assert!(handle.usage_snapshot().is_none());
 
-        handle.track_usage(UsageFormat::Normalized, false);
+        handle.track_usage(UsageFormat::Normalized, &fresh);
         // Tracked before anything is reported: a version-0 snapshot.
         let snapshot = handle.usage_snapshot().expect("tracked");
         assert_eq!(snapshot.version, 0);
         assert_eq!(snapshot.totals.status, UsageStatus::None);
 
         // A later format does not replace the first reader.
-        handle.track_usage(UsageFormat::None, true);
+        handle.track_usage(UsageFormat::None, &ProcessContext::new(Some("sid"), None));
         handle.observe_usage(&event);
         handle.observe_usage(&serde_json::json!({ "type": "unrelated" }));
         let snapshot = handle.usage_snapshot().expect("snapshot");
