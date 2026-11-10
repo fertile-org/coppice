@@ -457,11 +457,7 @@ fn score_pairs(items: &[FoldedItem], limit: usize) -> Vec<(Uuid, Uuid, f64)> {
             }
         }
     }
-    pairs.sort_by(|a, b| {
-        b.2.total_cmp(&a.2)
-            .then(a.0.cmp(&b.0))
-            .then(a.1.cmp(&b.1))
-    });
+    pairs.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
     pairs.truncate(limit);
     pairs
 }
@@ -650,7 +646,10 @@ mod tests {
             content: content.into(),
         };
         let pairs = score_pairs(
-            &[item(DRAG_TITLE, DRAG_BODY), item(paraphrase_title, paraphrase_body)],
+            &[
+                item(DRAG_TITLE, DRAG_BODY),
+                item(paraphrase_title, paraphrase_body),
+            ],
             10,
         );
         assert_eq!(pairs.len(), 1, "{pairs:?}");

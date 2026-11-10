@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::services::chat_repos::{
     self, assign_slug, begin_chat_workspace, chat_dir, choose_focus_repo, clear_swept_flag,
-    copies_were_swept, one_line_description, open_repo, refresh_index,
-    slugs_to_restore, touch_activity, ChatRepoLimits, LinkedRepo, INDEX_FILE, REPOS_READY_LINE,
+    copies_were_swept, one_line_description, open_repo, refresh_index, slugs_to_restore,
+    touch_activity, ChatRepoLimits, LinkedRepo, INDEX_FILE, REPOS_READY_LINE,
 };
 use crate::services::chat_service::ChatService;
 use crate::AppState;

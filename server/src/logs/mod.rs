@@ -224,9 +224,11 @@ pub fn init(logs_dir: &Path) -> io::Result<()> {
             })
         })
         // Dynamic, so the answer is not cached per callsite before ready.
-        .with_filter(env_filter().and(tracing_subscriber::filter::dynamic_filter_fn(
-            |meta, _| stdout_allows(meta.level(), meta.target()),
-        )));
+        .with_filter(
+            env_filter().and(tracing_subscriber::filter::dynamic_filter_fn(|meta, _| {
+                stdout_allows(meta.level(), meta.target())
+            })),
+        );
     tracing_subscriber::registry()
         .with(stdout)
         .with(json_file_layer(logs_dir, true)?)

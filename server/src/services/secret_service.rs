@@ -42,12 +42,11 @@ impl<'a> SecretService<'a> {
         let (ciphertext, nonce) = self.store.encrypt(value)?;
         let now = OffsetDateTime::now_utc();
 
-        if let Some(existing_id) = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM secrets WHERE name = $1",
-        )
-        .bind(name)
-        .fetch_optional(self.pool)
-        .await?
+        if let Some(existing_id) =
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM secrets WHERE name = $1")
+                .bind(name)
+                .fetch_optional(self.pool)
+                .await?
         {
             sqlx::query(
                 r#"
@@ -89,13 +88,12 @@ impl<'a> SecretService<'a> {
 
     pub async fn decrypt_named(&self, id: Uuid) -> Result<(String, String), SecretError> {
         let _guard = crate::crypto::operations_lock().lock().await;
-        let row = sqlx::query(
-            "SELECT name, ciphertext, nonce, needs_reentry FROM secrets WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(self.pool)
-        .await?
-        .ok_or(SecretError::NotFound)?;
+        let row =
+            sqlx::query("SELECT name, ciphertext, nonce, needs_reentry FROM secrets WHERE id = $1")
+                .bind(id)
+                .fetch_optional(self.pool)
+                .await?
+                .ok_or(SecretError::NotFound)?;
 
         let name: String = row.get("name");
         if row.get::<bool, _>("needs_reentry") {

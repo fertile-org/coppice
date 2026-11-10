@@ -142,7 +142,10 @@ esac"#,
     let cursor_json = common::json_body(cursor).await;
     assert_eq!(cursor_json["readiness"], "ready", "{cursor_json}");
     let cursor_path = cursor_json["cli"]["path"].as_str().unwrap_or("");
-    assert!(cursor_path.contains("tools/bin/cursor-agent"), "{cursor_path}");
+    assert!(
+        cursor_path.contains("tools/bin/cursor-agent"),
+        "{cursor_path}"
+    );
 
     let claude = app
         .clone()

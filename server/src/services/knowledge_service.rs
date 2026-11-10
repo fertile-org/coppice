@@ -9,8 +9,8 @@ use crate::knowledge::citations::{copy_citations, insert_citations, ResolvedCita
 use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::fts::build_tsquery;
 use crate::knowledge::retrieval::{
-    find_similar_inbox, near_duplicate_score, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
-    INBOX_SIMILAR_MAX_LIMIT,
+    find_similar_inbox, near_duplicate_score, SimilarKnowledgeNeighbor,
+    INBOX_SIMILAR_DEFAULT_LIMIT, INBOX_SIMILAR_MAX_LIMIT,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
@@ -330,7 +330,10 @@ impl<'a> KnowledgeService<'a> {
     }
 
     /// Open flags on the item's active revision, newest first.
-    pub async fn open_flags(&self, item_id: Uuid) -> Result<Vec<KnowledgeFlagView>, KnowledgeError> {
+    pub async fn open_flags(
+        &self,
+        item_id: Uuid,
+    ) -> Result<Vec<KnowledgeFlagView>, KnowledgeError> {
         let active_revision_id: Option<Uuid> =
             sqlx::query_scalar("SELECT active_revision_id FROM knowledge_items WHERE id = $1")
                 .bind(item_id)
@@ -351,12 +354,14 @@ impl<'a> KnowledgeService<'a> {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(verdict, reason, agent_name, created_at)| KnowledgeFlagView {
-                verdict,
-                reason,
-                agent_name,
-                created_at,
-            })
+            .map(
+                |(verdict, reason, agent_name, created_at)| KnowledgeFlagView {
+                    verdict,
+                    reason,
+                    agent_name,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -668,13 +673,13 @@ LIMIT $6"#
         }
         let source_revision_id = match citations_from {
             None => item.current_revision_id,
-            Some(source_id) => sqlx::query_scalar(
-                "SELECT current_revision_id FROM knowledge_items WHERE id = $1",
-            )
-            .bind(source_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(KnowledgeError::NotFound)?,
+            Some(source_id) => {
+                sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
+                    .bind(source_id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .ok_or(KnowledgeError::NotFound)?
+            }
         };
         self.enforce_capacity(&mut tx, &replacement, None).await?;
         let replacement_id = self
@@ -752,14 +757,8 @@ LIMIT $6"#
         board_id: Option<Uuid>,
         exclude_item_id: Option<Uuid>,
     ) -> Result<(), KnowledgeError> {
-        enforce_capacity_for_scope(
-            tx,
-            &self.config.retrieval,
-            scope,
-            board_id,
-            exclude_item_id,
-        )
-        .await
+        enforce_capacity_for_scope(tx, &self.config.retrieval, scope, board_id, exclude_item_id)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -930,8 +929,8 @@ async fn enforce_capacity_for_scope(
             }
         }
         KnowledgeScope::Board | KnowledgeScope::Agent => {
-            let board_id = board_id
-                .ok_or_else(|| KnowledgeError::Validation("boardId is required".into()))?;
+            let board_id =
+                board_id.ok_or_else(|| KnowledgeError::Validation("boardId is required".into()))?;
             let count: i64 = sqlx::query_scalar(
                 r#"
                 SELECT count(*)

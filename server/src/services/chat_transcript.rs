@@ -153,7 +153,10 @@ mod tests {
 
     #[test]
     fn empty_transcript_uses_the_existing_placeholder() {
-        assert_eq!(bound_rendered_transcript(&[], 100), "(No previous messages)");
+        assert_eq!(
+            bound_rendered_transcript(&[], 100),
+            "(No previous messages)"
+        );
     }
 
     #[test]

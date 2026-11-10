@@ -14,10 +14,7 @@ pub fn publish_ticket_updated(bus: &EventBus, ticket: &TicketWithDisplay) {
     bus.publish(AppEvent::TicketUpdated {
         ticket_id: ticket.ticket.id,
         status: status_to_str(ticket.ticket.status).into(),
-        substatus: ticket
-            .ticket
-            .substatus
-            .map(|s| substatus_to_str(s).into()),
+        substatus: ticket.ticket.substatus.map(|s| substatus_to_str(s).into()),
         updated_at: ticket
             .ticket
             .updated_at

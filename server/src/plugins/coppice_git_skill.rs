@@ -1,7 +1,6 @@
 //! `coppice-git` skill body: commit attribution appended when settings allow.
 
-pub const AGENT_COAUTHOR_TRAILER: &str =
-    "Co-authored-by: Coppice Agent <agent@getcoppice.app>";
+pub const AGENT_COAUTHOR_TRAILER: &str = "Co-authored-by: Coppice Agent <agent@getcoppice.app>";
 
 const BUILTIN_GIT_SKILL_IDS: [&str; 2] = ["coppice-git", "coppice:coppice-git"];
 

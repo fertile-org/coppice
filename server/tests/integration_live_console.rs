@@ -11,12 +11,7 @@ use http_body_util::BodyExt;
 use std::time::{Duration, Instant};
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{
-        client::IntoClientRequest,
-        http::HeaderValue,
-        Error as WsError,
-        Message,
-    },
+    tungstenite::{client::IntoClientRequest, http::HeaderValue, Error as WsError, Message},
 };
 use tower::ServiceExt;
 
@@ -95,15 +90,15 @@ async fn poll_run_until(
     }
 }
 
-async fn connect_ws(url: &str, cookie: Option<&str>) -> tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-> {
+async fn connect_ws(
+    url: &str,
+    cookie: Option<&str>,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let mut request = url.into_client_request().unwrap();
     if let Some(cookie) = cookie {
-        request.headers_mut().insert(
-            header::COOKIE,
-            HeaderValue::from_str(cookie).unwrap(),
-        );
+        request
+            .headers_mut()
+            .insert(header::COOKIE, HeaderValue::from_str(cookie).unwrap());
     }
     connect_async(request).await.expect("ws connect").0
 }
@@ -145,11 +140,7 @@ async fn live_ws_receives_mock_frames_and_terminal_log_written() {
             Ok(Some(Ok(Message::Text(text)))) => {
                 let json: serde_json::Value = serde_json::from_str(&text).unwrap();
                 if json["type"] == "frame" {
-                    if json["data"]
-                        .as_str()
-                        .unwrap_or("")
-                        .contains("Mock agent")
-                    {
+                    if json["data"].as_str().unwrap_or("").contains("Mock agent") {
                         saw_mock_frame = true;
                     }
                 } else if json["type"] == "end" {

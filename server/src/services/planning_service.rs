@@ -502,7 +502,8 @@ impl<'a> PlanningService<'a> {
             let count = self
                 .create_planned_children(&ticket.ticket, &pending, plan.id, workflow)
                 .await?;
-            self.note(ticket_id, &plan::split_approved_note(count)).await?;
+            self.note(ticket_id, &plan::split_approved_note(count))
+                .await?;
             return Ok(());
         }
 
@@ -696,7 +697,9 @@ impl<'a> PlanningService<'a> {
                 .iter()
                 .find(|agent| agent.id == id && agent.enabled)
                 .ok_or_else(|| PlanError::Validation("Agent not found.".into()))?,
-            None => planner_for_ticket(&agents).ok_or_else(|| PlanError::Validation(NO_PM.into()))?,
+            None => {
+                planner_for_ticket(&agents).ok_or_else(|| PlanError::Validation(NO_PM.into()))?
+            }
         };
         let run_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
@@ -732,12 +735,17 @@ impl<'a> PlanningService<'a> {
 
     /// What a verification run reads: the parent's criteria, and its
     /// sub-tickets as merged or excluded.
-    pub async fn verification_brief(&self, ticket_id: Uuid) -> Result<VerificationBrief, PlanError> {
+    pub async fn verification_brief(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<VerificationBrief, PlanError> {
         let criteria = match self.approved_plan(ticket_id).await? {
             Some(plan) => plan::plan_criteria(&plan.markdown),
             None => {
                 let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-                crate::services::result_contract::criteria_from_description(&ticket.ticket.description)
+                crate::services::result_contract::criteria_from_description(
+                    &ticket.ticket.description,
+                )
             }
         };
         let rows: Vec<(String, Option<String>, bool)> = sqlx::query_as(
@@ -779,7 +787,10 @@ impl<'a> PlanningService<'a> {
     }
 
     /// The ticket's question round, if the planner asked one.
-    pub async fn questions(&self, ticket_id: Uuid) -> Result<Option<PlanQuestionsState>, PlanError> {
+    pub async fn questions(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<PlanQuestionsState>, PlanError> {
         let row: Option<(serde_json::Value, Option<serde_json::Value>, bool)> = sqlx::query_as(
             r#"
             SELECT questions, answers, answered_at IS NULL
@@ -840,7 +851,9 @@ impl<'a> PlanningService<'a> {
         .await?
         .rows_affected();
         if inserted == 0 {
-            return Err(PlanError::Validation(plan::PLAN_QUESTIONS_ALREADY_ASKED.into()));
+            return Err(PlanError::Validation(
+                plan::PLAN_QUESTIONS_ALREADY_ASKED.into(),
+            ));
         }
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if let Some(next) = status_after_planning_run(ticket.ticket.status) {
@@ -856,7 +869,11 @@ impl<'a> PlanningService<'a> {
     pub async fn send_answers(&self, ticket_id: Uuid, answers: &[String]) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         TicketService::ensure_not_archived(&ticket.ticket)?;
-        let Some(state) = self.questions(ticket_id).await?.filter(|state| state.waiting) else {
+        let Some(state) = self
+            .questions(ticket_id)
+            .await?
+            .filter(|state| state.waiting)
+        else {
             return Err(PlanError::Validation(plan::NO_QUESTIONS_WAITING.into()));
         };
         let answers: Vec<String> = state
@@ -1154,9 +1171,7 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
 /// repeated, so Try again after a failed rewrite doesn't list it twice.
 fn append_change_request(existing: Option<&str>, added: &str) -> String {
     match existing.map(str::trim).filter(|text| !text.is_empty()) {
-        Some(prev) if prev == added || prev.ends_with(&format!("\n\n{added}")) => {
-            prev.to_string()
-        }
+        Some(prev) if prev == added || prev.ends_with(&format!("\n\n{added}")) => prev.to_string(),
         Some(prev) => format!("{prev}\n\n{added}"),
         None => added.to_string(),
     }
@@ -1416,7 +1431,10 @@ mod tests {
 
     #[test]
     fn a_second_ask_appends_to_the_same_revision() {
-        assert_eq!(append_change_request(None, "Use Postgres."), "Use Postgres.");
+        assert_eq!(
+            append_change_request(None, "Use Postgres."),
+            "Use Postgres."
+        );
         assert_eq!(
             append_change_request(Some("Use Postgres."), "Split the API."),
             "Use Postgres.\n\nSplit the API."

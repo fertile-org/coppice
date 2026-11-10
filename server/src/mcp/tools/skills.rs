@@ -58,10 +58,7 @@ pub async fn call_skill_load(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         .get(&ctx.scope.plugin_ids, name)
         .ok_or_else(|| ToolError::NotFound(format!("skill \"{name}\" not found")))?;
     let body = if is_coppice_git_skill(&info.id) {
-        augment_coppice_git_body(
-            &body,
-            ctx.state.config.git.agent_commit_attribution,
-        )
+        augment_coppice_git_body(&body, ctx.state.config.git.agent_commit_attribution)
     } else {
         body
     };

@@ -4,9 +4,16 @@ use crate::sessions::terminal_encoding::terminal_bytes_to_ws_string;
 
 #[derive(Debug, Clone)]
 pub enum LiveMessage {
-    Frame { seq: u64, data: Vec<u8> },
-    Snapshot { snapshot: Value },
-    Event { event: Value },
+    Frame {
+        seq: u64,
+        data: Vec<u8>,
+    },
+    Snapshot {
+        snapshot: Value,
+    },
+    Event {
+        event: Value,
+    },
     Heartbeat {
         session_status: Option<String>,
         elapsed_secs: u64,
@@ -71,7 +78,10 @@ mod tests {
         };
         let json = msg.to_ws_json();
         let data = json["data"].as_str().expect("data string");
-        assert!(data.contains('\x1b'), "ANSI ESC should survive JSON encoding");
+        assert!(
+            data.contains('\x1b'),
+            "ANSI ESC should survive JSON encoding"
+        );
         assert!(data.contains("muted"));
     }
 
@@ -90,7 +100,9 @@ mod tests {
     #[test]
     fn event_encodes_raw_payload() {
         let event = json!({"type": "message.part.delta", "properties": {}});
-        let msg = LiveMessage::Event { event: event.clone() };
+        let msg = LiveMessage::Event {
+            event: event.clone(),
+        };
         let json = msg.to_ws_json();
         assert_eq!(json["type"], "event");
         assert_eq!(json["event"], event);

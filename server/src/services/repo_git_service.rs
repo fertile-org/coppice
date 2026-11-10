@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
-    ahead_behind, fetch_default_refspec, fetch_gate, git_rev_parse, git_status_clean, network_remote,
-    push_argv, push_gate, push_refspec, run_git, sanitize_token, GitOpsError,
+    ahead_behind, fetch_default_refspec, fetch_gate, git_rev_parse, git_status_clean,
+    network_remote, push_argv, push_gate, push_refspec, run_git, sanitize_token, GitOpsError,
 };
 use crate::services::pr_create_url::https_remote_url;
 use crate::services::secret_service::SecretService;
@@ -137,7 +137,10 @@ impl<'a> RepoGitService<'a> {
         self.build_status(&ctx).await
     }
 
-    async fn build_status(&self, ctx: &RepoGitContext) -> Result<DefaultBranchSyncStatus, RepoGitError> {
+    async fn build_status(
+        &self,
+        ctx: &RepoGitContext,
+    ) -> Result<DefaultBranchSyncStatus, RepoGitError> {
         let branch = &ctx.default_branch;
         let local_ref = format!("refs/heads/{branch}");
         let remote_ref = format!("refs/remotes/origin/{branch}");
@@ -162,8 +165,7 @@ impl<'a> RepoGitService<'a> {
         let forge_token_configured = ctx.forge_token_secret_id.is_some();
         let (can_fetch, fetch_disabled_reason) = fetch_gate(ctx.remote_url.as_deref());
 
-        let (config_ok, config_reason) =
-            push_gate(self.push_enabled, ctx.remote_url.as_deref());
+        let (config_ok, config_reason) = push_gate(self.push_enabled, ctx.remote_url.as_deref());
 
         let (can_push, push_disabled_reason) = default_branch_push_gate(
             config_ok,
@@ -382,10 +384,7 @@ impl<'a> RepoGitService<'a> {
         })
     }
 
-    async fn fast_forward_default_branch(
-        &self,
-        ctx: &RepoGitContext,
-    ) -> Result<(), RepoGitError> {
+    async fn fast_forward_default_branch(&self, ctx: &RepoGitContext) -> Result<(), RepoGitError> {
         let local_ref = format!("refs/heads/{}", ctx.default_branch);
         let remote_ref = format!("refs/remotes/origin/{}", ctx.default_branch);
         let remote_sha = git_rev_parse(&ctx.git_dir, &remote_ref)
@@ -446,7 +445,13 @@ impl<'a> RepoGitService<'a> {
             let reason = status
                 .pull_disabled_reason
                 .unwrap_or_else(|| "Pull is not allowed".into());
-            if ctx.remote_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
+            if ctx
+                .remote_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            {
                 return Err(RepoGitError::NoRemoteUrl);
             }
             return Err(RepoGitError::Git(reason));
@@ -463,7 +468,13 @@ impl<'a> RepoGitService<'a> {
             if !self.push_enabled {
                 return Err(RepoGitError::PushDisabled);
             }
-            if ctx.remote_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
+            if ctx
+                .remote_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            {
                 return Err(RepoGitError::NoRemoteUrl);
             }
             return Err(RepoGitError::Git(reason));
@@ -490,10 +501,7 @@ fn default_branch_push_gate(
     if !working_tree_clean {
         return (
             false,
-            Some(
-                "Main repository has uncommitted changes — commit or stash before pushing"
-                    .into(),
-            ),
+            Some("Main repository has uncommitted changes — commit or stash before pushing".into()),
         );
     }
     if let Some(reason) = missing_remote_reason {
@@ -537,10 +545,7 @@ fn default_branch_pull_gate(
     if !working_tree_clean {
         return (
             false,
-            Some(
-                "Main repository has uncommitted changes — commit or stash before pulling"
-                    .into(),
-            ),
+            Some("Main repository has uncommitted changes — commit or stash before pulling".into()),
         );
     }
     if let Some(reason) = missing_remote_reason {
@@ -572,7 +577,10 @@ fn default_branch_pull_gate(
     (true, None)
 }
 
-async fn head_points_at_ref(git_dir: &std::path::Path, local_ref: &str) -> Result<bool, RepoGitError> {
+async fn head_points_at_ref(
+    git_dir: &std::path::Path,
+    local_ref: &str,
+) -> Result<bool, RepoGitError> {
     let output =
         crate::services::git_cmd::output(Some(git_dir), &["symbolic-ref", "-q", "HEAD"]).await?;
     if !output.status.success() {
@@ -614,32 +622,21 @@ mod tests {
             .env("GIT_COMMITTER_EMAIL", "test@localhost")
             .output()
             .expect("commit");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[test]
     fn push_gate_blocks_dirty_behind_and_not_ahead() {
-        let (ok, reason) = default_branch_push_gate(
-            true,
-            None,
-            false,
-            Some(1),
-            Some(0),
-            None,
-            true,
-        );
+        let (ok, reason) =
+            default_branch_push_gate(true, None, false, Some(1), Some(0), None, true);
         assert!(!ok);
         assert!(reason.unwrap().contains("uncommitted"));
 
-        let (ok, reason) = default_branch_push_gate(
-            true,
-            None,
-            true,
-            Some(1),
-            Some(2),
-            None,
-            true,
-        );
+        let (ok, reason) = default_branch_push_gate(true, None, true, Some(1), Some(2), None, true);
         assert!(!ok);
         let reason = reason.unwrap();
         assert!(reason.contains("behind") || reason.contains("diverged"));
@@ -648,13 +645,19 @@ mod tests {
             "behind push reason should point operators at Pull: {reason}"
         );
 
-        let (ok, reason) =
-            default_branch_push_gate(true, None, true, Some(0), Some(0), None, true);
+        let (ok, reason) = default_branch_push_gate(true, None, true, Some(0), Some(0), None, true);
         assert!(!ok);
         assert!(reason.unwrap().contains("not ahead"));
 
-        let (ok, reason) =
-            default_branch_push_gate(true, None, true, None, None, Some("Fetch remote first"), true);
+        let (ok, reason) = default_branch_push_gate(
+            true,
+            None,
+            true,
+            None,
+            None,
+            Some("Fetch remote first"),
+            true,
+        );
         assert!(!ok);
         assert_eq!(reason.as_deref(), Some("Fetch remote first"));
 
@@ -664,53 +667,28 @@ mod tests {
 
     #[test]
     fn pull_gate_allows_strictly_behind_clean_checkout() {
-        let (ok, reason) = default_branch_pull_gate(
-            true,
-            None,
-            true,
-            Some(0),
-            Some(2),
-            None,
-            true,
-        );
+        let (ok, reason) = default_branch_pull_gate(true, None, true, Some(0), Some(2), None, true);
         assert!(ok, "{reason:?}");
         assert!(reason.is_none());
     }
 
     #[test]
     fn pull_gate_blocks_dirty_diverged_not_behind_and_missing_remote() {
-        let (ok, reason) = default_branch_pull_gate(
-            true,
-            None,
-            false,
-            Some(0),
-            Some(1),
-            None,
-            true,
-        );
+        let (ok, reason) =
+            default_branch_pull_gate(true, None, false, Some(0), Some(1), None, true);
         assert!(!ok);
         assert!(reason.unwrap().contains("uncommitted"));
 
-        let (ok, reason) = default_branch_pull_gate(
-            true,
-            None,
-            true,
-            Some(1),
-            Some(1),
-            None,
-            true,
-        );
+        let (ok, reason) = default_branch_pull_gate(true, None, true, Some(1), Some(1), None, true);
         assert!(!ok);
         let reason = reason.unwrap();
         assert!(reason.contains("diverged") || reason.contains("ahead"));
 
-        let (ok, reason) =
-            default_branch_pull_gate(true, None, true, Some(0), Some(0), None, true);
+        let (ok, reason) = default_branch_pull_gate(true, None, true, Some(0), Some(0), None, true);
         assert!(!ok);
         assert!(reason.unwrap().contains("not behind"));
 
-        let (ok, reason) =
-            default_branch_pull_gate(true, None, true, Some(2), Some(0), None, true);
+        let (ok, reason) = default_branch_pull_gate(true, None, true, Some(2), Some(0), None, true);
         assert!(!ok);
         let reason = reason.unwrap();
         assert!(reason.contains("ahead") || reason.contains("not behind"));
@@ -727,8 +705,15 @@ mod tests {
         assert!(!ok);
         assert_eq!(reason.as_deref(), Some("Fetch remote first"));
 
-        let (ok, reason) =
-            default_branch_pull_gate(false, Some("Set repository remote URL".into()), true, Some(0), Some(1), None, true);
+        let (ok, reason) = default_branch_pull_gate(
+            false,
+            Some("Set repository remote URL".into()),
+            true,
+            Some(0),
+            Some(1),
+            None,
+            true,
+        );
         assert!(!ok);
         assert!(reason.unwrap().contains("remote URL"));
 
@@ -761,13 +746,9 @@ mod tests {
         commit_file(repo, "b.txt", "b\n", "local ahead");
         git(repo, &["update-ref", "refs/remotes/origin/main", &base_sha]);
 
-        let (ahead, behind) = ahead_behind(
-            repo,
-            "refs/heads/main",
-            "refs/remotes/origin/main",
-        )
-        .await
-        .expect("count");
+        let (ahead, behind) = ahead_behind(repo, "refs/heads/main", "refs/remotes/origin/main")
+            .await
+            .expect("count");
         assert_eq!((ahead, behind), (1, 0));
 
         let (can_push, reason) =

@@ -4,16 +4,16 @@ use crate::domain::chat_action::{
 };
 use crate::domain::chat_message::{ChatMessage, ChatMessageRole};
 use crate::domain::chat_session::{title_from_first_message, ChatSession, ChatSessionStatus};
-use crate::services::chat_transcript::bound_rendered_transcript;
 use crate::domain::knowledge::{
     scope_from_str, type_from_str, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeSourceType, KnowledgeType, MAX_KNOWLEDGE_CONTENT_CHARS,
 };
 use crate::domain::run::AgentRun;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::board_service::{BoardError, BoardService};
+use crate::services::chat_transcript::bound_rendered_transcript;
 use crate::services::comment_service::CommentService;
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
-use crate::services::board_service::{BoardError, BoardService};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
@@ -39,7 +39,10 @@ pub fn truncate_message_preview(body: &str) -> String {
     if collapsed.chars().count() <= CHAT_MESSAGE_PREVIEW_MAX_LEN {
         return collapsed;
     }
-    let mut out: String = collapsed.chars().take(CHAT_MESSAGE_PREVIEW_MAX_LEN).collect();
+    let mut out: String = collapsed
+        .chars()
+        .take(CHAT_MESSAGE_PREVIEW_MAX_LEN)
+        .collect();
     out.push('…');
     out
 }
@@ -467,7 +470,10 @@ impl<'a> ChatService<'a> {
         let attachment_ids: Vec<Uuid> = row.get("attachment_ids");
         let by_id = self.attachments_by_id(&attachment_ids).await?;
         let has_attachments = !attachment_ids.is_empty();
-        Ok((render_message_text(&body, &attachment_ids, &by_id), has_attachments))
+        Ok((
+            render_message_text(&body, &attachment_ids, &by_id),
+            has_attachments,
+        ))
     }
 
     async fn attachments_by_id(
@@ -568,8 +574,11 @@ impl<'a> ChatService<'a> {
         .fetch_all(self.pool)
         .await?;
         let has_more = rows.len() as i64 > limit;
-        let mut messages: Vec<ChatMessage> =
-            rows.iter().take(limit as usize).map(row_to_message).collect();
+        let mut messages: Vec<ChatMessage> = rows
+            .iter()
+            .take(limit as usize)
+            .map(row_to_message)
+            .collect();
         messages.reverse();
         let older = has_more.then(|| messages.first().map(|m| m.seq)).flatten();
         Ok((messages, older))
@@ -674,8 +683,14 @@ impl<'a> ChatService<'a> {
         body: &str,
         proposals: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
-        self.append_message(session_id, ChatMessageRole::Agent, body, Some(run_id), proposals)
-            .await
+        self.append_message(
+            session_id,
+            ChatMessageRole::Agent,
+            body,
+            Some(run_id),
+            proposals,
+        )
+        .await
     }
 
     pub async fn append_system_note(
@@ -775,7 +790,10 @@ impl<'a> ChatService<'a> {
             !ids.is_empty()
         });
         let blocks = self.render_blocks(rows).await?;
-        Ok((bound_rendered_transcript(&blocks, max_tokens), has_attachments))
+        Ok((
+            bound_rendered_transcript(&blocks, max_tokens),
+            has_attachments,
+        ))
     }
 
     /// The newest messages the bounded transcript can use, oldest first. Rows
@@ -1109,13 +1127,9 @@ impl<'a> ChatService<'a> {
             KnowledgeScope::Workspace => None,
             KnowledgeScope::Board | KnowledgeScope::Agent => {
                 let board_id = input.board_id.or(session.board_id).ok_or_else(|| {
-                    ChatError::Validation(
-                        "boardId is required for board-scoped knowledge".into(),
-                    )
+                    ChatError::Validation("boardId is required for board-scoped knowledge".into())
                 })?;
-                BoardService::new(self.pool)
-                    .get_board(board_id)
-                    .await?;
+                BoardService::new(self.pool).get_board(board_id).await?;
                 Some(board_id)
             }
         };
@@ -1397,9 +1411,7 @@ fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {
         "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
         "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
-        "image/webp" => {
-            bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
-        }
+        "image/webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
         _ => true,
     };
 
@@ -1498,9 +1510,7 @@ fn row_to_message(row: &sqlx::postgres::PgRow) -> ChatMessage {
         body: row.get("body"),
         agent_run_id: row.get("agent_run_id"),
         action_metadata: row.get("action_metadata"),
-        attachment_ids: row
-            .try_get("attachment_ids")
-            .unwrap_or_else(|_| Vec::new()),
+        attachment_ids: row.try_get("attachment_ids").unwrap_or_else(|_| Vec::new()),
         created_at: row.get("created_at"),
     }
 }

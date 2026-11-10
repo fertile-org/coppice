@@ -43,9 +43,7 @@ pub enum AppEvent {
     #[serde(rename = "usage.updated")]
     UsageUpdated { ticket_id: Uuid, run_id: Uuid },
     #[serde(rename = "notification.changed")]
-    NotificationChanged {
-        recipient_user_id: Option<Uuid>,
-    },
+    NotificationChanged { recipient_user_id: Option<Uuid> },
 }
 
 pub struct EventBus {

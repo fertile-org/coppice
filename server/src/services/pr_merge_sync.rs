@@ -196,8 +196,15 @@ async fn sync_ticket(
         }
     };
 
-    if local_work_would_be_lost(state, pool, worktrees_root, row, &matched.head_sha, &matched.html_url)
-        .await
+    if local_work_would_be_lost(
+        state,
+        pool,
+        worktrees_root,
+        row,
+        &matched.head_sha,
+        &matched.html_url,
+    )
+    .await
     {
         return Ok(false);
     }
@@ -220,7 +227,14 @@ async fn sync_ticket(
         return Ok(false);
     }
 
-    after_recorded_merge(state, pool, row.ticket_id, &matched.html_url, worktrees_root).await;
+    after_recorded_merge(
+        state,
+        pool,
+        row.ticket_id,
+        &matched.html_url,
+        worktrees_root,
+    )
+    .await;
     Ok(true)
 }
 
@@ -416,14 +430,13 @@ async fn find_matching_pr(
     default_branch: &str,
     accepted_sha: &str,
 ) -> GithubOutcome<Option<MatchedPr>> {
-    let pulls = match list_closed_prs(client, api_base, token, owner, repo, branch, default_branch)
-        .await
-    {
-        GithubOutcome::Ok(pulls) => pulls,
-        GithubOutcome::NotFound => return GithubOutcome::Ok(None),
-        GithubOutcome::RateLimited { status } => return GithubOutcome::RateLimited { status },
-        GithubOutcome::Failed(err) => return GithubOutcome::Failed(err),
-    };
+    let pulls =
+        match list_closed_prs(client, api_base, token, owner, repo, branch, default_branch).await {
+            GithubOutcome::Ok(pulls) => pulls,
+            GithubOutcome::NotFound => return GithubOutcome::Ok(None),
+            GithubOutcome::RateLimited { status } => return GithubOutcome::RateLimited { status },
+            GithubOutcome::Failed(err) => return GithubOutcome::Failed(err),
+        };
 
     for pull in pulls {
         if pull.merged_at.is_none() {

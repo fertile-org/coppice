@@ -59,10 +59,7 @@ mod tests {
             JobStatus::Cancelled,
         ];
         for status in statuses {
-            assert_eq!(
-                job_status_from_str(job_status_to_str(status)),
-                Some(status)
-            );
+            assert_eq!(job_status_from_str(job_status_to_str(status)), Some(status));
         }
     }
 }

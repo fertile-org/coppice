@@ -28,10 +28,7 @@ async fn create_ticket(
 #[tokio::test]
 async fn archive_and_unarchive_ticket() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket = create_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -102,10 +99,7 @@ async fn archive_and_unarchive_ticket() {
 #[tokio::test]
 async fn default_list_excludes_archived_include_flag_includes() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let active = create_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -173,10 +167,7 @@ async fn default_list_excludes_archived_include_flag_includes() {
 #[tokio::test]
 async fn reject_archive_while_active_run() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
 
     let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
@@ -218,10 +209,7 @@ async fn reject_archive_while_active_run() {
 #[tokio::test]
 async fn reject_mutations_while_archived() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket = create_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -296,10 +284,7 @@ async fn reject_mutations_while_archived() {
 #[tokio::test]
 async fn archive_parent_does_not_archive_children() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
@@ -414,10 +399,7 @@ fn write_run_dir(artifacts: &std::path::Path, run_id: Uuid) -> std::path::PathBu
 #[tokio::test]
 async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    assert!(
-        common::db_available().await,
-        "embedded test db unavailable"
-    );
+    assert!(common::db_available().await, "embedded test db unavailable");
     let artifacts = tempfile::tempdir().unwrap();
     let artifacts_path = artifacts.path().to_path_buf();
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
@@ -486,15 +468,17 @@ async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
     }
     assert!(archived_dirs.iter().all(|dir| !dir.exists()));
 
-    let removed =
-        coppice_server::services::artifact_retention::sweep(&pool, artifacts.path(), 30)
-            .await
-            .unwrap();
+    let removed = coppice_server::services::artifact_retention::sweep(&pool, artifacts.path(), 30)
+        .await
+        .unwrap();
     assert_eq!(removed, 1);
     assert!(!old_run.exists(), "a run past retention is removed");
     assert!(fresh_run.exists(), "a recent run is kept");
     assert!(running_run.exists(), "an active run is never touched");
-    assert!(fresh_orphan.exists(), "a new folder without a run row gets a grace period");
+    assert!(
+        fresh_orphan.exists(),
+        "a new folder without a run row gets a grace period"
+    );
 
     let leftover: Vec<String> = std::fs::read_dir(artifacts.path().join("runs"))
         .unwrap()

@@ -142,13 +142,9 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         replay_and_subscribe(&state, run_id, &mut sender, &handle).await;
         None
     } else if is_opencode {
-        Some(
-            handle_opencode_recovery(&state, &mut sender, run_id, &run).await,
-        )
+        Some(handle_opencode_recovery(&state, &mut sender, run_id, &run).await)
     } else if is_structured_console {
-        Some(
-            handle_structured_console_recovery(&state, &mut sender, run_id, &run).await,
-        )
+        Some(handle_structured_console_recovery(&state, &mut sender, run_id, &run).await)
     } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
         let msg = LiveMessage::Frame {
             seq: 0,
@@ -166,10 +162,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let status = run_status_to_str(run.status).to_string();
     let is_terminal = is_terminal_run_status(&status);
     let (recoverable, reason) = match recovery {
-        Some(outcome) => (
-            outcome.recoverable.unwrap_or(!is_terminal),
-            outcome.reason,
-        ),
+        Some(outcome) => (outcome.recoverable.unwrap_or(!is_terminal), outcome.reason),
         None => (is_active_run_status(run.status) && !is_terminal, None),
     };
 
@@ -488,7 +481,10 @@ mod tests {
 
     #[test]
     fn classify_ok_sends() {
-        let msg = LiveMessage::Frame { seq: 0, data: vec![] };
+        let msg = LiveMessage::Frame {
+            seq: 0,
+            data: vec![],
+        };
         assert!(matches!(
             classify_replay_recv(Ok(msg)),
             ReplayRecvAction::Send(_)
@@ -511,10 +507,16 @@ mod tests {
 
         let recv = rx.recv().await;
         assert!(
-            matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Lagged(_))),
+            matches!(
+                recv,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
+            ),
             "expected Lagged after overflow, got {recv:?}"
         );
-        assert!(matches!(classify_replay_recv(recv), ReplayRecvAction::Break));
+        assert!(matches!(
+            classify_replay_recv(recv),
+            ReplayRecvAction::Break
+        ));
     }
 
     #[tokio::test]

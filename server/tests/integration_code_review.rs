@@ -32,8 +32,7 @@ fn git_ok(dir: &std::path::Path, args: &[&str]) {
     );
 }
 
-async fn setup_repo_ticket_and_worktree(
-) -> (
+async fn setup_repo_ticket_and_worktree() -> (
     tempfile::TempDir,
     common::AgentTestEnv,
     axum::Router,
@@ -92,15 +91,19 @@ async fn setup_review_repo(
     )
 }
 
-async fn fetch_diff_head_sha(app: &axum::Router, repo_id: &str, worktree_path: &str, cookie: &str, csrf: &str) -> String {
+async fn fetch_diff_head_sha(
+    app: &axum::Router,
+    repo_id: &str,
+    worktree_path: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
     let encoded_path = percent_encode(worktree_path);
     let res = app
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!(
-                "/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"
-            ),
+            &format!("/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"),
             "",
             cookie,
             csrf,
@@ -146,9 +149,7 @@ async fn list_worktrees_and_diff_for_repo() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!(
-                "/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"
-            ),
+            &format!("/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"),
             "",
             &cookie,
             &csrf,
@@ -464,8 +465,14 @@ async fn move_to_in_progress_clears_waiting_and_assigns_engineer() {
     }
 
     let fx = setup_quiet_review(false).await;
-    let head_sha =
-        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let head_sha = fetch_diff_head_sha(
+        &fx.app,
+        &fx.repo_id,
+        &fx.worktree_path,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
     common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
     let engineer_id = common::create_agent_with_preset_key(
         &fx.app,
@@ -513,8 +520,14 @@ async fn move_to_in_progress_starts_a_work_run_when_auto_start_is_on() {
     }
 
     let fx = setup_quiet_review(true).await;
-    let head_sha =
-        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let head_sha = fetch_diff_head_sha(
+        &fx.app,
+        &fx.repo_id,
+        &fx.worktree_path,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
     common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
     let engineer_id = common::create_agent_with_preset_key(
         &fx.app,
@@ -562,8 +575,14 @@ async fn move_to_in_progress_without_engineer_leaves_the_ticket_unchanged() {
     }
 
     let fx = setup_quiet_review(true).await;
-    let head_sha =
-        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let head_sha = fetch_diff_head_sha(
+        &fx.app,
+        &fx.repo_id,
+        &fx.worktree_path,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
     let engineer_id = common::create_agent_with_preset_key(
         &fx.app,
         "backend_engineer",
@@ -609,8 +628,14 @@ async fn reassign_starts_a_run_only_outside_review_columns() {
     }
 
     let fx = setup_quiet_review(true).await;
-    let head_sha =
-        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let head_sha = fetch_diff_head_sha(
+        &fx.app,
+        &fx.repo_id,
+        &fx.worktree_path,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
     common::skip_planning(&fx.app, &fx.ticket_id, &fx.cookie, &fx.csrf).await;
     let engineer_id = common::create_agent_with_preset_key(
         &fx.app,
@@ -688,8 +713,14 @@ async fn move_to_in_progress_returns_the_plan_gate_message() {
     }
 
     let fx = setup_quiet_review(true).await;
-    let head_sha =
-        fetch_diff_head_sha(&fx.app, &fx.repo_id, &fx.worktree_path, &fx.cookie, &fx.csrf).await;
+    let head_sha = fetch_diff_head_sha(
+        &fx.app,
+        &fx.repo_id,
+        &fx.worktree_path,
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
     let engineer_id = common::create_agent_with_preset_key(
         &fx.app,
         "backend_engineer",
@@ -896,7 +927,11 @@ async fn hide_whitespace_drops_indentation_only_lines() {
         })
         .await;
     let worktree = std::path::Path::new(&worktree_path);
-    std::fs::write(worktree.join("indent.txt"), "fn foo() {\n        return 1;\n}\n").unwrap();
+    std::fs::write(
+        worktree.join("indent.txt"),
+        "fn foo() {\n        return 1;\n}\n",
+    )
+    .unwrap();
     git_ok(worktree, &["add", "indent.txt"]);
     git_ok(worktree, &["commit", "-m", "reindent"]);
 
@@ -963,9 +998,7 @@ async fn renamed_file_patch_shows_only_real_edits() {
     let encoded_path = percent_encode(&worktree_path);
     let (status, summary) = get_json(
         &app,
-        &format!(
-            "/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"
-        ),
+        &format!("/api/repos/{repo_id}/diff?worktreePath={encoded_path}&baseBranch=main"),
         &cookie,
         &csrf,
     )

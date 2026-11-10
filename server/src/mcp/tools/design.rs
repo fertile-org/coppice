@@ -1,5 +1,7 @@
 use crate::mcp::tools::{ToolCtx, ToolError};
-use crate::services::design_service::{ChosenOption, CreateScope, DesignError, DesignOption, DesignService};
+use crate::services::design_service::{
+    ChosenOption, CreateScope, DesignError, DesignOption, DesignService,
+};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use uuid::Uuid;

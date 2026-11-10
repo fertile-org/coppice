@@ -108,7 +108,11 @@ async fn list_notifications(
         .await
         .map_err(map_error)?;
     Ok(Json(ListResponse {
-        items: page.items.into_iter().map(notification_to_response).collect(),
+        items: page
+            .items
+            .into_iter()
+            .map(notification_to_response)
+            .collect(),
         next_cursor: page.next_cursor,
     }))
 }
@@ -130,10 +134,7 @@ async fn mark_read(
 ) -> Result<StatusCode, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = NotificationService::new(pool);
-    service
-        .mark_read(id, user.id)
-        .await
-        .map_err(map_error)?;
+    service.mark_read(id, user.id).await.map_err(map_error)?;
     state.event_bus.publish(AppEvent::NotificationChanged {
         recipient_user_id: Some(user.id),
     });
@@ -146,10 +147,7 @@ async fn mark_all_read(
 ) -> Result<Json<MarkAllReadResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = NotificationService::new(pool);
-    let marked = service
-        .mark_all_read(user.id)
-        .await
-        .map_err(map_error)?;
+    let marked = service.mark_all_read(user.id).await.map_err(map_error)?;
     state.event_bus.publish(AppEvent::NotificationChanged {
         recipient_user_id: Some(user.id),
     });

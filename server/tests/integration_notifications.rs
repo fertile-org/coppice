@@ -42,7 +42,10 @@ async fn login_as(app: &axum::Router, email: &str, password: &str) -> (String, S
 
     let body = login.into_body().collect().await.unwrap().to_bytes();
     let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let csrf_token = login_json["csrfToken"].as_str().expect("csrf token").to_string();
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
 
     (cookie, csrf_token)
 }
@@ -99,14 +102,11 @@ async fn list_notifications(
     common::json_body(res).await
 }
 
-async fn setup_ticket_with_agent(
-    app: &axum::Router,
-    cookie: &str,
-    csrf: &str,
-) -> String {
+async fn setup_ticket_with_agent(app: &axum::Router, cookie: &str, csrf: &str) -> String {
     let board_id = common::create_test_board(app, cookie, csrf).await;
     let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
-    common::create_agent_with_preset_key(app, "backend_engineer", "Backend Engineer", cookie, csrf).await;
+    common::create_agent_with_preset_key(app, "backend_engineer", "Backend Engineer", cookie, csrf)
+        .await;
     ticket_id
 }
 
@@ -121,11 +121,9 @@ async fn insert_notification(
     read: bool,
 ) -> uuid::Uuid {
     let id = uuid::Uuid::new_v4();
-    let created_ts = time::OffsetDateTime::parse(
-        created_at,
-        &time::format_description::well_known::Rfc3339,
-    )
-    .unwrap();
+    let created_ts =
+        time::OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339)
+            .unwrap();
     sqlx::query(
         r#"
         INSERT INTO notifications (
@@ -138,7 +136,11 @@ async fn insert_notification(
     .bind(recipient_user_id)
     .bind(title)
     .bind(source_key)
-    .bind(if read { Some(time::OffsetDateTime::now_utc()) } else { None })
+    .bind(if read {
+        Some(time::OffsetDateTime::now_utc())
+    } else {
+        None
+    })
     .bind(created_ts)
     .execute(pool)
     .await
@@ -211,8 +213,14 @@ async fn run_finished_creates_notification_and_dedupes() {
 
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let agent_id =
-        common::create_agent_with_preset_key(&app, "backend_engineer", "Backend Engineer", &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
 
     let run_id = uuid::Uuid::new_v4();
     sqlx::query(
@@ -311,14 +319,7 @@ async fn workflow_agent_mention_creates_notification() {
         &csrf,
     )
     .await;
-    let pm_id = common::create_agent_with_preset_key(
-        &app,
-        "pm",
-        "PM Agent",
-        &cookie,
-        &csrf,
-    )
-    .await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
     let ticket_id = ticket_id.parse::<uuid::Uuid>().unwrap();
     let engineer_id = engineer_id.parse::<uuid::Uuid>().unwrap();
@@ -430,25 +431,47 @@ async fn list_returns_newest_first_with_cursor_pagination() {
     let pool = state.db.as_ref().expect("db pool").clone();
     let admin_id = admin_user_id(&pool).await;
 
-    insert_notification(&pool, admin_id, "n1", "oldest", "2026-01-01T00:00:00Z", false).await;
-    insert_notification(&pool, admin_id, "n2", "middle", "2026-02-01T00:00:00Z", false).await;
-    insert_notification(&pool, admin_id, "n3", "newest", "2026-03-01T00:00:00Z", false).await;
+    insert_notification(
+        &pool,
+        admin_id,
+        "n1",
+        "oldest",
+        "2026-01-01T00:00:00Z",
+        false,
+    )
+    .await;
+    insert_notification(
+        &pool,
+        admin_id,
+        "n2",
+        "middle",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await;
+    insert_notification(
+        &pool,
+        admin_id,
+        "n3",
+        "newest",
+        "2026-03-01T00:00:00Z",
+        false,
+    )
+    .await;
 
     let page1 = list_notifications(&app, &cookie, &csrf, "?limit=2").await;
     let items = page1["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["title"], "newest");
     assert_eq!(items[1]["title"], "middle");
-    assert!(page1["nextCursor"].is_string(), "cursor present when more remain");
+    assert!(
+        page1["nextCursor"].is_string(),
+        "cursor present when more remain"
+    );
 
     let cursor = page1["nextCursor"].as_str().unwrap();
-    let page2 = list_notifications(
-        &app,
-        &cookie,
-        &csrf,
-        &format!("?limit=2&cursor={cursor}"),
-    )
-    .await;
+    let page2 =
+        list_notifications(&app, &cookie, &csrf, &format!("?limit=2&cursor={cursor}")).await;
     let items2 = page2["items"].as_array().unwrap();
     assert_eq!(items2.len(), 1);
     assert_eq!(items2[0]["title"], "oldest");
@@ -465,8 +488,24 @@ async fn filter_unread_excludes_read_notifications() {
     let pool = state.db.as_ref().expect("db pool").clone();
     let admin_id = admin_user_id(&pool).await;
 
-    insert_notification(&pool, admin_id, "read-one", "read", "2026-01-01T00:00:00Z", true).await;
-    insert_notification(&pool, admin_id, "unread-one", "unread", "2026-02-01T00:00:00Z", false).await;
+    insert_notification(
+        &pool,
+        admin_id,
+        "read-one",
+        "read",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+    insert_notification(
+        &pool,
+        admin_id,
+        "unread-one",
+        "unread",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await;
 
     let unread = list_notifications(&app, &cookie, &csrf, "?filter=unread").await;
     let titles: Vec<&str> = unread["items"]
@@ -494,7 +533,12 @@ async fn mark_one_read_decrements_unread_count() {
     let id_a = insert_notification(&pool, admin_id, "a", "a", "2026-01-01T00:00:00Z", false).await;
     insert_notification(&pool, admin_id, "b", "b", "2026-02-01T00:00:00Z", false).await;
 
-    assert_eq!(get_unread_count(&app, &cookie, &csrf).await["count"].as_i64().unwrap(), 2);
+    assert_eq!(
+        get_unread_count(&app, &cookie, &csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        2
+    );
 
     let res = app
         .clone()
@@ -509,7 +553,12 @@ async fn mark_one_read_decrements_unread_count() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
-    assert_eq!(get_unread_count(&app, &cookie, &csrf).await["count"].as_i64().unwrap(), 1);
+    assert_eq!(
+        get_unread_count(&app, &cookie, &csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
 
     // Marking an already-read notification is a no-op (idempotent), not an error.
     let res = app
@@ -550,8 +599,18 @@ async fn mark_all_read_clears_unread_for_signed_in_user_only() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
-    assert_eq!(get_unread_count(&app, &admin_cookie, &admin_csrf).await["count"].as_i64().unwrap(), 1);
-    assert_eq!(get_unread_count(&app, &member_cookie, &member_csrf).await["count"].as_i64().unwrap(), 1);
+    assert_eq!(
+        get_unread_count(&app, &admin_cookie, &admin_csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        get_unread_count(&app, &member_cookie, &member_csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
 
     let res = app
         .clone()
@@ -568,9 +627,19 @@ async fn mark_all_read_clears_unread_for_signed_in_user_only() {
     let body: serde_json::Value = common::json_body(res).await;
     assert_eq!(body["marked"].as_u64().unwrap(), 1);
 
-    assert_eq!(get_unread_count(&app, &admin_cookie, &admin_csrf).await["count"].as_i64().unwrap(), 0);
+    assert_eq!(
+        get_unread_count(&app, &admin_cookie, &admin_csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        0
+    );
     // Member's notification is independent and still unread.
-    assert_eq!(get_unread_count(&app, &member_cookie, &member_csrf).await["count"].as_i64().unwrap(), 1);
+    assert_eq!(
+        get_unread_count(&app, &member_cookie, &member_csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -615,7 +684,12 @@ async fn cannot_mark_another_users_notification_read() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 
     // Member's unread count is unchanged.
-    assert_eq!(get_unread_count(&app, &member_cookie, &member_csrf).await["count"].as_i64().unwrap(), 1);
+    assert_eq!(
+        get_unread_count(&app, &member_cookie, &member_csrf).await["count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -769,13 +843,9 @@ async fn interrupted_run_creates_failed_notification() {
     .unwrap();
 
     let mut events = state.event_bus.subscribe();
-    let published = mark_run_interrupted(
-        &state,
-        published_run_id,
-        "server restarted during run",
-    )
-    .await
-    .unwrap();
+    let published = mark_run_interrupted(&state, published_run_id, "server restarted during run")
+        .await
+        .unwrap();
     assert_eq!(published.status, RunStatus::Failed);
 
     match tokio::time::timeout(Duration::from_secs(1), events.recv())

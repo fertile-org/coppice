@@ -1,7 +1,7 @@
 use crate::mcp::protocol::SERVER_NAME;
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
-use crate::sessions::{LiveMessage, run_registry::RunStreamHandle};
+use crate::sessions::{run_registry::RunStreamHandle, LiveMessage};
 use coppice_connectors::{gateway_tool, ToolNameStyle};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -342,10 +342,8 @@ fn stream_text(body: &Value, key: &str) -> Option<String> {
         let parts: Vec<String> = arr
             .iter()
             .filter_map(|item| {
-                non_empty_str(item.as_str()).or_else(|| {
-                    item.get("text")
-                        .and_then(|v| non_empty_str(v.as_str()))
-                })
+                non_empty_str(item.as_str())
+                    .or_else(|| item.get("text").and_then(|v| non_empty_str(v.as_str())))
             })
             .collect();
         if !parts.is_empty() {
@@ -630,10 +628,7 @@ mod tests {
                 "message": {"content": [{"type": "text", "text": contract}]}
             }),
         );
-        console.handle_stream_json(
-            &handle,
-            &json!({"type": "result", "result": contract}),
-        );
+        console.handle_stream_json(&handle, &json!({"type": "result", "result": contract}));
 
         let result_count = collect_events(&handle)
             .iter()

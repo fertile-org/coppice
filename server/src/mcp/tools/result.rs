@@ -27,8 +27,7 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         if !plan_questions.is_empty() {
             questions_allowed(ctx).await?;
         }
-        if *no_visible_change
-            && ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+        if *no_visible_change && ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET
         {
             return Err(ToolError::InvalidArgs(
                 crate::copy::plan::NO_VISIBLE_CHANGE_PLAN_ONLY.into(),
@@ -139,7 +138,11 @@ fn target_warnings(
             mention_agents,
             agent_requests,
             ..
-        } => (assign_to.as_deref(), mention_agents.as_slice(), agent_requests.as_slice()),
+        } => (
+            assign_to.as_deref(),
+            mention_agents.as_slice(),
+            agent_requests.as_slice(),
+        ),
         AgentRunResult::Blocked {
             assign_to,
             mention_agents,
@@ -277,11 +280,32 @@ mod tests {
     #[test]
     fn warns_on_unknown_self_duplicate_and_excess_targets() {
         let (map, own) = keys();
-        let w = target_warnings(&done(Some("nobody"), &["me", "qc", "qc"], &["dba", "pm"]), &map, own);
-        assert!(w.iter().any(|m| m.contains("assignTo") && m.contains("nobody")), "{w:?}");
-        assert!(w.iter().any(|m| m.contains("mentionAgents[0]") && m.contains("itself")), "{w:?}");
-        assert!(w.iter().any(|m| m.contains("mentionAgents[2]") && m.contains("duplicate")), "{w:?}");
-        assert!(w.iter().any(|m| m.contains("agentRequests[1].agentKey") && m.contains("pm") && m.contains("limit")), "{w:?}");
+        let w = target_warnings(
+            &done(Some("nobody"), &["me", "qc", "qc"], &["dba", "pm"]),
+            &map,
+            own,
+        );
+        assert!(
+            w.iter()
+                .any(|m| m.contains("assignTo") && m.contains("nobody")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter()
+                .any(|m| m.contains("mentionAgents[0]") && m.contains("itself")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter()
+                .any(|m| m.contains("mentionAgents[2]") && m.contains("duplicate")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter().any(|m| m.contains("agentRequests[1].agentKey")
+                && m.contains("pm")
+                && m.contains("limit")),
+            "{w:?}"
+        );
         assert_eq!(w.len(), 4, "{w:?}");
     }
 

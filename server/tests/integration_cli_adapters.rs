@@ -356,10 +356,7 @@ async fn kilo_resume_nonzero_exit_is_a_missing_session() {
     let mut input = run_input(wt.path());
     input.resume_session_id = Some("kilo_sess_gone".into());
 
-    let err = kilo(30)
-        .run(input)
-        .await
-        .expect_err("missing session");
+    let err = kilo(30).run(input).await.expect_err("missing session");
 
     match err {
         ProviderError::ResumeSessionInvalid(msg) => {

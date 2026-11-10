@@ -5,7 +5,7 @@ use crate::services::connector_check_service::{
     CheckDetail, CheckError as ConnectorCheckError, ConnectorCheckService,
 };
 use crate::services::connector_probe_service::{
-    check_connector, diagnosable, list_statuses, automatic_on_connector_ids, CheckError,
+    automatic_on_connector_ids, check_connector, diagnosable, list_statuses, CheckError,
     ConnectorStatusResponse,
 };
 use crate::services::uncovered_model_service::{UncoveredModelError, UncoveredModelService};

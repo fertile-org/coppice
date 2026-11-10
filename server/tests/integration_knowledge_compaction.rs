@@ -3,8 +3,6 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use http_body_util::BodyExt;
-use tower::ServiceExt;
 use coppice_server::config::{AppConfig, KnowledgeConfig};
 use coppice_server::domain::knowledge_compaction::{BatchStatus, BatchTrigger, CompactionBatch};
 use coppice_server::services::knowledge_compaction_service::{
@@ -12,9 +10,11 @@ use coppice_server::services::knowledge_compaction_service::{
 };
 use coppice_server::services::workspace_settings_service::WorkspaceSettingsService;
 use coppice_server::AppState;
+use http_body_util::BodyExt;
 use sqlx::PgPool;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
+use tower::ServiceExt;
 use uuid::Uuid;
 
 struct Fixture {
@@ -96,16 +96,28 @@ impl Fixture {
         let response = self
             .app
             .clone()
-            .oneshot(common::json_request(method, path, "", &self.cookie, &self.csrf))
+            .oneshot(common::json_request(
+                method,
+                path,
+                "",
+                &self.cookie,
+                &self.csrf,
+            ))
             .await
             .unwrap();
         let status = response.status();
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        (status, serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null))
+        (
+            status,
+            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null),
+        )
     }
 
     async fn count(&self, sql: &str) -> i64 {
-        sqlx::query_scalar(sql).fetch_one(self.pool()).await.unwrap()
+        sqlx::query_scalar(sql)
+            .fetch_one(self.pool())
+            .await
+            .unwrap()
     }
 
     fn pool(&self) -> &PgPool {
@@ -217,7 +229,11 @@ async fn done_transitions_queue_tickets_once_and_reopen_removes_unbatched_rows()
 
     let ticket_id = fx.done_ticket().await;
     fx.set_status(ticket_id, "done").await;
-    assert_eq!(fx.queue_rows().await.len(), 1, "queued without a configured agent");
+    assert_eq!(
+        fx.queue_rows().await.len(),
+        1,
+        "queued without a configured agent"
+    );
 
     fx.set_status(ticket_id, "in_progress").await;
     assert!(fx.queue_rows().await.is_empty());
@@ -284,7 +300,10 @@ async fn scheduled_tick_waits_for_the_interval_then_queues_one_batch_and_run() {
             .await;
     }
     let now = OffsetDateTime::now_utc();
-    assert!(service.tick(now).await.unwrap().is_none(), "interval not elapsed");
+    assert!(
+        service.tick(now).await.unwrap().is_none(),
+        "interval not elapsed"
+    );
 
     let batch = service
         .tick(now + Duration::minutes(21))
@@ -311,7 +330,15 @@ async fn scheduled_tick_waits_for_the_interval_then_queues_one_batch_and_run() {
     assert_eq!(rows[1].1, Some(batch.id));
     assert_eq!(rows[2].1, None);
 
-    let run: (Uuid, Option<Uuid>, Option<Uuid>, String, String, String, Uuid) = sqlx::query_as(
+    let run: (
+        Uuid,
+        Option<Uuid>,
+        Option<Uuid>,
+        String,
+        String,
+        String,
+        Uuid,
+    ) = sqlx::query_as(
         r#"
         SELECT id, ticket_id, chat_session_id, job_type, context_profile, status, agent_id
         FROM agent_runs WHERE compaction_batch_id = $1
@@ -486,11 +513,19 @@ async fn compaction_run_creates_pending_candidates_without_notifications() {
     fx.backdate_queue(first, Duration::minutes(1)).await;
     let newest = fx.done_ticket().await;
 
-    fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    fx.service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let batches = fx.drive_until_idle().await;
     assert_eq!(batches.len(), 1);
     let batch = &batches[0];
-    assert_eq!(batch.status, BatchStatus::Succeeded, "{:?}", batch.error_message);
+    assert_eq!(
+        batch.status,
+        BatchStatus::Succeeded,
+        "{:?}",
+        batch.error_message
+    );
     assert_eq!(batch.candidate_count, Some(2));
     assert!(fx.queue_rows().await.is_empty());
 
@@ -525,9 +560,16 @@ async fn compaction_run_creates_pending_candidates_without_notifications() {
     assert_eq!(items[0].2, Some(newest));
     assert_eq!(items[1].2, Some(first));
     assert_eq!(items[0].4, "Use make test-unit while iterating");
-    assert_eq!(fx.count("SELECT count(*) FROM knowledge_item_sources").await, 2);
+    assert_eq!(
+        fx.count("SELECT count(*) FROM knowledge_item_sources")
+            .await,
+        2
+    );
     assert_eq!(fx.count("SELECT count(*) FROM notifications").await, 0);
-    assert_eq!(fx.count("SELECT count(*) FROM knowledge_usage_logs").await, 0);
+    assert_eq!(
+        fx.count("SELECT count(*) FROM knowledge_usage_logs").await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -546,15 +588,23 @@ async fn drain_cycle_runs_sequential_batches_until_the_queue_is_empty() {
         .await
         .unwrap();
 
-    fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    fx.service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let batches = fx.drive_until_idle().await;
     assert_eq!(
-        batches.iter().map(|batch| batch.ticket_count).collect::<Vec<_>>(),
+        batches
+            .iter()
+            .map(|batch| batch.ticket_count)
+            .collect::<Vec<_>>(),
         vec![10, 10, 5]
     );
-    assert!(batches.iter().all(|batch| batch.status == BatchStatus::Succeeded
-        && batch.candidate_count == Some(0)
-        && batch.cycle_id == batches[0].cycle_id));
+    assert!(batches
+        .iter()
+        .all(|batch| batch.status == BatchStatus::Succeeded
+            && batch.candidate_count == Some(0)
+            && batch.cycle_id == batches[0].cycle_id));
     assert!(fx.queue_rows().await.is_empty());
 }
 
@@ -565,7 +615,10 @@ async fn invalid_candidates_are_dropped_with_reasons_in_the_summary() {
     fx.configure_agent().await;
     fx.done_ticket().await;
 
-    fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    fx.service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let batch = fx.drive_until_idle().await.remove(0);
     assert_eq!(batch.status, BatchStatus::Succeeded);
     assert_eq!(batch.candidate_count, Some(1));
@@ -581,7 +634,10 @@ async fn failed_run_releases_tickets_notifies_every_user_once_and_retry_recovers
     fx.configure_agent().await;
     let ticket_id = fx.done_ticket().await;
 
-    fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    fx.service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let batches = fx.drive_until_idle().await;
     assert_eq!(batches.len(), 1, "a failure ends the cycle");
     let failed = &batches[0];
@@ -600,7 +656,10 @@ async fn failed_run_releases_tickets_notifies_every_user_once_and_retry_recovers
     for (kind, ticket, source_key) in &notifications {
         assert_eq!(kind, "knowledge_compaction_failed");
         assert_eq!(*ticket, None);
-        assert_eq!(source_key, &format!("knowledge_compaction_failed:{}", failed.id));
+        assert_eq!(
+            source_key,
+            &format!("knowledge_compaction_failed:{}", failed.id)
+        );
     }
     fx.service().reconcile().await.unwrap();
     assert_eq!(fx.count("SELECT count(*) FROM notifications").await, users);
@@ -651,7 +710,10 @@ async fn connector_without_read_only_enforcement_fails_closed() {
         .unwrap();
     fx.done_ticket().await;
 
-    fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    fx.service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let batch = fx.drive_until_idle().await.remove(0);
     assert_eq!(batch.status, BatchStatus::Failed);
     let message = batch.error_message.unwrap();
@@ -777,7 +839,10 @@ async fn status_api_reports_each_state() {
         .await
         .unwrap();
     let (_, body) = fx.api("GET", "/api/knowledge/compaction").await;
-    assert_eq!(body["state"], "running", "status does not reconcile on read");
+    assert_eq!(
+        body["state"], "running",
+        "status does not reconcile on read"
+    );
     fx.service().reconcile().await.unwrap();
     let (_, body) = fx.api("GET", "/api/knowledge/compaction").await;
     assert_eq!(body["state"], "failed");
@@ -792,7 +857,10 @@ async fn control_api_conflicts_and_cancel() {
 
     let (status, body) = fx.api("POST", "/api/knowledge/compaction/run").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body["message"].as_str().unwrap().contains("no knowledge compaction agent"));
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("no knowledge compaction agent"));
 
     fx.configure_agent().await;
     let (status, _) = fx.api("POST", "/api/knowledge/compaction/run").await;
@@ -811,19 +879,22 @@ async fn control_api_conflicts_and_cancel() {
     assert_eq!(cancelled["id"], batch["id"]);
     assert_eq!(cancelled["status"], "failed");
     assert_eq!(cancelled["errorMessage"], "cancelled");
-    let run_status: String = sqlx::query_scalar(
-        "SELECT status FROM agent_runs WHERE compaction_batch_id = $1",
-    )
-    .bind(Uuid::parse_str(batch["id"].as_str().unwrap()).unwrap())
-    .fetch_one(fx.pool())
-    .await
-    .unwrap();
+    let run_status: String =
+        sqlx::query_scalar("SELECT status FROM agent_runs WHERE compaction_batch_id = $1")
+            .bind(Uuid::parse_str(batch["id"].as_str().unwrap()).unwrap())
+            .fetch_one(fx.pool())
+            .await
+            .unwrap();
     assert_eq!(run_status, "cancelled");
     assert_eq!(fx.queue_rows().await, vec![(ticket_id, None, 0)]);
     assert_eq!(fx.count("SELECT count(*) FROM notifications").await, 0);
 
     let (status, _) = fx.api("POST", "/api/knowledge/compaction/retry").await;
-    assert_eq!(status, StatusCode::CONFLICT, "cancel does not count an attempt");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "cancel does not count an attempt"
+    );
     sqlx::query("UPDATE knowledge_compaction_queue SET attempts = 1")
         .execute(fx.pool())
         .await
@@ -850,7 +921,11 @@ async fn control_api_conflicts_and_cancel() {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path} requires CSRF");
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{path} requires CSRF"
+        );
     }
 }
 
@@ -889,7 +964,11 @@ async fn compaction_anchors_citations_to_default_branch() {
         .await
         .unwrap();
 
-    let batch = fx.service().start_manual(fx.admin_id().await).await.unwrap();
+    let batch = fx
+        .service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
     let spec = coppice_server::knowledge::candidates::KnowledgeCandidateSpec {
         knowledge_type: "test_command".into(),
         scope: "board".into(),
@@ -973,7 +1052,10 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
         )
         .await
         .unwrap();
-    let original = knowledge.approve(created.id, created.version, admin).await.unwrap();
+    let original = knowledge
+        .approve(created.id, created.version, admin)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO knowledge_citations (id, revision_id, repo_id, path) VALUES ($1, $2, $3, 'README.md')",
     )
@@ -1055,7 +1137,10 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
     assert_eq!(superseded_by, None);
 
     let merged = knowledge.get(merged_id).await.unwrap();
-    knowledge.approve(merged_id, merged.version, admin).await.unwrap();
+    knowledge
+        .approve(merged_id, merged.version, admin)
+        .await
+        .unwrap();
     let superseded_by: Option<Uuid> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original.id)
@@ -1088,16 +1173,22 @@ async fn verified_auto_approval_needs_an_anchored_citation() {
         .execute(fx.pool())
         .await
         .unwrap();
-    let batch = fx.service().start_manual(fx.admin_id().await).await.unwrap();
-    let spec = |title: &str, citations: &[&str]| coppice_server::knowledge::candidates::KnowledgeCandidateSpec {
-        knowledge_type: "test_command".into(),
-        scope: "board".into(),
-        title: title.into(),
-        confidence: Some("high".into()),
-        content: format!("{title} explains how to run the project."),
-        source_ticket_ids: vec![ticket_id.to_string()],
-        citations: citations.iter().map(|c| c.to_string()).collect(),
-        ..Default::default()
+    let batch = fx
+        .service()
+        .start_manual(fx.admin_id().await)
+        .await
+        .unwrap();
+    let spec = |title: &str, citations: &[&str]| {
+        coppice_server::knowledge::candidates::KnowledgeCandidateSpec {
+            knowledge_type: "test_command".into(),
+            scope: "board".into(),
+            title: title.into(),
+            confidence: Some("high".into()),
+            content: format!("{title} explains how to run the project."),
+            source_ticket_ids: vec![ticket_id.to_string()],
+            citations: citations.iter().map(|c| c.to_string()).collect(),
+            ..Default::default()
+        }
     };
     let config = config_with(|config| {
         config.auto_save.enabled = true;
@@ -1169,7 +1260,10 @@ async fn status_api_reports_the_oldest_pending_item() {
     let parsed =
         OffsetDateTime::parse(oldest, &time::format_description::well_known::Rfc3339).unwrap();
     let age = OffsetDateTime::now_utc() - parsed;
-    assert!(age > Duration::days(2) && age < Duration::days(4), "{oldest}");
+    assert!(
+        age > Duration::days(2) && age < Duration::days(4),
+        "{oldest}"
+    );
 }
 
 #[tokio::test]
@@ -1210,7 +1304,13 @@ async fn near_identical_approved_items_show_as_possible_duplicates_in_the_loaded
             )
             .await
             .unwrap();
-        ids.push(knowledge.approve(created.id, created.version, admin).await.unwrap().id);
+        ids.push(
+            knowledge
+                .approve(created.id, created.version, admin)
+                .await
+                .unwrap()
+                .id,
+        );
     }
 
     fx.done_ticket().await;
@@ -1222,6 +1322,9 @@ async fn near_identical_approved_items_show_as_possible_duplicates_in_the_loaded
         .find("## Possible duplicates")
         .unwrap_or_else(|| panic!("no duplicates section in:\n{markdown}"))..];
     for id in ids {
-        assert!(section.contains(&id.to_string()), "{id} missing from:\n{section}");
+        assert!(
+            section.contains(&id.to_string()),
+            "{id} missing from:\n{section}"
+        );
     }
 }

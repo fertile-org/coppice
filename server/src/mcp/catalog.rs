@@ -223,9 +223,7 @@ impl CoreTool {
 /// Shape of the run result. Deliberately permissive: the server-side
 /// deserializer and profile rules are the real validator, and report errors.
 fn result_submit_properties() -> Value {
-    let strings = |description: &str| {
-        json!({ "type": "array", "items": { "type": "string" }, "description": description })
-    };
+    let strings = |description: &str| json!({ "type": "array", "items": { "type": "string" }, "description": description });
     json!({
         "status": {
             "type": "string",

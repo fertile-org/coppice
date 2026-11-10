@@ -470,7 +470,10 @@ async fn run_agent_waits_for_the_startup_connector_check() {
         async move { post_run_agent(&app, &ticket_id, &cookie, &csrf).await }
     });
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(!run.is_finished(), "Run Agent answered before the check finished");
+    assert!(
+        !run.is_finished(),
+        "Run Agent answered before the check finished"
+    );
     state
         .connectors
         .finish_readiness_check([coppice_connectors::CLAUDE_CODE]);
@@ -838,16 +841,11 @@ async fn stopped_run_publishes_usage_updated_after_final_save() {
     while !(finished && usage_updated) {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let seen = drain_events(&mut events, remaining, |event| match event {
-            AppEvent::AgentRunFinished {
-                run_id, status, ..
-            } if *run_id == run_uuid => {
+            AppEvent::AgentRunFinished { run_id, status, .. } if *run_id == run_uuid => {
                 assert_eq!(status, "cancelled");
                 Some(true)
             }
-            AppEvent::UsageUpdated {
-                run_id,
-                ticket_id,
-            } if *run_id == run_uuid => {
+            AppEvent::UsageUpdated { run_id, ticket_id } if *run_id == run_uuid => {
                 assert_eq!(*ticket_id, ticket_uuid);
                 Some(false)
             }

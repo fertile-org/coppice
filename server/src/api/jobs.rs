@@ -3,12 +3,7 @@ use crate::domain::job::{job_status_to_str, AgentJob};
 use crate::middleware::admin::AdminUser;
 use crate::services::job_service::{JobError, JobService};
 use crate::AppState;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::Serialize;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
@@ -48,7 +43,9 @@ fn job_to_response(job: AgentJob) -> JobResponse {
         attempts: job.attempts,
         max_attempts: job.max_attempts,
         available_at: job.available_at.format(&Rfc3339).unwrap_or_default(),
-        locked_at: job.locked_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
+        locked_at: job
+            .locked_at
+            .map(|t| t.format(&Rfc3339).unwrap_or_default()),
         locked_by: job.locked_by,
         created_at: job.created_at.format(&Rfc3339).unwrap_or_default(),
     }

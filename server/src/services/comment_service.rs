@@ -1,7 +1,7 @@
 use crate::domain::attachment::Attachment;
 use crate::domain::comment::{
-    author_type_from_str, author_type_to_str, intent_from_str, intent_to_str, AuthorType,
-    Comment, CommentIntent,
+    author_type_from_str, author_type_to_str, intent_from_str, intent_to_str, AuthorType, Comment,
+    CommentIntent,
 };
 use sqlx::PgPool;
 use sqlx::Row;
@@ -116,7 +116,10 @@ impl<'a> CommentService<'a> {
         .await?;
         let has_more = rows.len() as i64 > limit;
         Ok((
-            rows.iter().take(limit as usize).map(row_to_comment).collect(),
+            rows.iter()
+                .take(limit as usize)
+                .map(row_to_comment)
+                .collect(),
             has_more,
         ))
     }
@@ -319,12 +322,11 @@ impl<'a> CommentService<'a> {
     }
 
     async fn ensure_ticket_exists(&self, ticket_id: Uuid) -> Result<(), CommentError> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tickets WHERE id = $1)",
-        )
-        .bind(ticket_id)
-        .fetch_one(self.pool)
-        .await?;
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM tickets WHERE id = $1)")
+                .bind(ticket_id)
+                .fetch_one(self.pool)
+                .await?;
 
         if !exists {
             return Err(CommentError::TicketNotFound);
@@ -333,12 +335,11 @@ impl<'a> CommentService<'a> {
     }
 
     async fn ensure_attachments_exist(&self, attachment_ids: &[Uuid]) -> Result<(), CommentError> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM attachments WHERE id = ANY($1)",
-        )
-        .bind(attachment_ids)
-        .fetch_one(self.pool)
-        .await?;
+        let count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attachments WHERE id = ANY($1)")
+                .bind(attachment_ids)
+                .fetch_one(self.pool)
+                .await?;
 
         if count as usize != attachment_ids.len() {
             return Err(CommentError::AttachmentNotFound);

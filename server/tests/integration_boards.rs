@@ -1,9 +1,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use coppice_server::copy::review::{
-    BOARD_NAME_CONFLICT, BOARD_NAME_INVALID, BOARD_NAME_LABEL,
-};
+use coppice_server::copy::review::{BOARD_NAME_CONFLICT, BOARD_NAME_INVALID, BOARD_NAME_LABEL};
 use tower::ServiceExt;
 
 #[tokio::test]

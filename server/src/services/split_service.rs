@@ -4,17 +4,15 @@ use crate::config::WorkflowConfig;
 use crate::domain::agent::Agent;
 use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, Ticket};
-use crate::domain::workflow::{
-    PendingRecommendation, PendingSplitRecommendation, SplitTicketSpec,
-};
-use crate::services::ticket_service::TicketWithDisplay;
+use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation, SplitTicketSpec};
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::planning_service::{PlanError, PlanningService};
 use crate::services::result_contract::merge_ticket_description;
+use crate::services::ticket_service::TicketWithDisplay;
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// A split proposed by a plan is created only by approving the plan.
@@ -194,9 +192,10 @@ impl<'a> SplitService<'a> {
             .ok_or_else(|| SplitError::Validation("no pending split recommendation".into()))?
             .clone();
 
-        let pending: PendingSplitRecommendation = serde_json::from_value(pending_value).map_err(
-            |e| SplitError::Validation(format!("invalid pending split recommendation: {e}")),
-        )?;
+        let pending: PendingSplitRecommendation =
+            serde_json::from_value(pending_value).map_err(|e| {
+                SplitError::Validation(format!("invalid pending split recommendation: {e}"))
+            })?;
         if pending.from_plan {
             return Err(SplitError::Validation(PLAN_SPLIT_NEEDS_APPROVAL.into()));
         }
@@ -470,7 +469,9 @@ mod tests {
         assert!(children
             .iter()
             .all(|child| child.parent_ticket_id == Some(parent_id)));
-        assert!(children.iter().all(|child| child.approved_plan_id.is_some()));
+        assert!(children
+            .iter()
+            .all(|child| child.approved_plan_id.is_some()));
         assert!(children
             .iter()
             .all(|child| child.approved_plan_content_version == Some(child.content_version)));

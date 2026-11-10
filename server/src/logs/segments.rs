@@ -91,7 +91,8 @@ impl SegmentedAppender {
         };
         let today = OffsetDateTime::now_utc().date();
         let seg = appender.latest_seg(today).unwrap_or(0);
-        *appender.active.lock().unwrap_or_else(|e| e.into_inner()) = Some(appender.open(today, seg)?);
+        *appender.active.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(appender.open(today, seg)?);
         Ok(appender)
     }
 
@@ -192,7 +193,9 @@ impl Write for SegmentWriter<'_> {
 impl Drop for SegmentWriter<'_> {
     fn drop(&mut self) {
         if !self.pending.is_empty() {
-            let _ = self.appender.write_record(&std::mem::take(&mut self.pending));
+            let _ = self
+                .appender
+                .write_record(&std::mem::take(&mut self.pending));
         }
     }
 }
@@ -324,11 +327,19 @@ mod tests {
         let date = parse_date("2026-10-18").unwrap();
         assert_eq!(
             parse_log_name("coppice.2026-10-18.3.jsonl"),
-            Some(LogName { date, seg: 3, compressed: false })
+            Some(LogName {
+                date,
+                seg: 3,
+                compressed: false
+            })
         );
         assert_eq!(
             parse_log_name("coppice.2026-10-18.jsonl.zst"),
-            Some(LogName { date, seg: 0, compressed: true })
+            Some(LogName {
+                date,
+                seg: 0,
+                compressed: true
+            })
         );
         assert_eq!(parse_log_name("current.jsonl"), None);
         assert_eq!(parse_log_name("coppice.2026-10-18.x.jsonl"), None);
@@ -339,7 +350,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let appender = SegmentedAppender::with_max_bytes(dir.path(), 100).unwrap();
         for i in 0..50 {
-            appender.write_record(format!("line {i:04}\n").as_bytes()).unwrap();
+            appender
+                .write_record(format!("line {i:04}\n").as_bytes())
+                .unwrap();
         }
         let today = OffsetDateTime::now_utc().date();
         let mut segs: Vec<u32> = fs::read_dir(dir.path())
@@ -350,7 +363,9 @@ mod tests {
         segs.sort();
         assert!(segs.len() > 3, "{segs:?}");
         for seg in &segs {
-            let len = fs::metadata(dir.path().join(segment_file_name(today, *seg))).unwrap().len();
+            let len = fs::metadata(dir.path().join(segment_file_name(today, *seg)))
+                .unwrap()
+                .len();
             assert!(len <= 100, "segment {seg} is {len} bytes");
         }
         assert_eq!(
@@ -361,8 +376,14 @@ mod tests {
         drop(appender);
         let again = SegmentedAppender::with_max_bytes(dir.path(), 100).unwrap();
         again.write_record(b"after restart\n").unwrap();
-        let latest = fs::read_to_string(dir.path().join(segment_file_name(today, *segs.last().unwrap())));
-        let next = fs::read_to_string(dir.path().join(segment_file_name(today, segs.last().unwrap() + 1)));
+        let latest = fs::read_to_string(
+            dir.path()
+                .join(segment_file_name(today, *segs.last().unwrap())),
+        );
+        let next = fs::read_to_string(
+            dir.path()
+                .join(segment_file_name(today, segs.last().unwrap() + 1)),
+        );
         assert!(
             latest.unwrap_or_default().contains("after restart")
                 || next.unwrap_or_default().contains("after restart")
@@ -411,7 +432,11 @@ mod tests {
         for _ in 0..200 {
             lines.next().unwrap().unwrap();
         }
-        assert!(lines.bytes_read() <= 2 * BLOCK, "read {} bytes", lines.bytes_read());
+        assert!(
+            lines.bytes_read() <= 2 * BLOCK,
+            "read {} bytes",
+            lines.bytes_read()
+        );
     }
 
     #[test]

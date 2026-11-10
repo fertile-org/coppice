@@ -266,8 +266,7 @@ async fn comment_linked_attachment_still_downloadable_by_other_user() {
     assert_eq!(create_member.status(), StatusCode::CREATED);
 
     let board_id = common::create_test_board(&app, &admin_cookie, &admin_csrf).await;
-    let ticket_id =
-        common::create_test_ticket(&app, &board_id, &admin_cookie, &admin_csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &admin_cookie, &admin_csrf).await;
 
     let upload = app
         .clone()

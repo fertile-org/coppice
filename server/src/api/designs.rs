@@ -1,9 +1,7 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::tickets::{map_plan_error, publish_ticket_state, UpdateStatusError};
 use crate::services::chat_service::{ChatError, ChatService};
-use crate::services::design_choice::{
-    choice_state, choose_design, ChoiceState, DesignChoiceError,
-};
+use crate::services::design_choice::{choice_state, choose_design, ChoiceState, DesignChoiceError};
 use crate::services::design_service::{
     chosen_option, ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord,
     DesignSetSummary,
@@ -198,13 +196,7 @@ async fn open_published(
     set_id: Uuid,
 ) -> Result<DesignSetRecord, StatusCode> {
     let record = svc.get(set_id).await.map_err(map_design)?;
-    visible(
-        pool,
-        user_id,
-        record.ticket_id,
-        record.chat_session_id,
-    )
-    .await?;
+    visible(pool, user_id, record.ticket_id, record.chat_session_id).await?;
     if !record.published {
         return Err(StatusCode::NOT_FOUND);
     }

@@ -285,15 +285,23 @@ async fn suffix_match_serves_a_conflicted_file_once() {
 
     std::fs::create_dir_all(local_path.join("src")).unwrap();
     std::fs::write(local_path.join("src/conflict.rs"), "base\n").unwrap();
-    assert!(git(&local_path, &["add", "src/conflict.rs"]).status.success());
+    assert!(git(&local_path, &["add", "src/conflict.rs"])
+        .status
+        .success());
     git_commit(&local_path, "add conflict.rs");
-    assert!(git(&local_path, &["checkout", "-b", "other"]).status.success());
+    assert!(git(&local_path, &["checkout", "-b", "other"])
+        .status
+        .success());
     std::fs::write(local_path.join("src/conflict.rs"), "other\n").unwrap();
-    assert!(git(&local_path, &["add", "src/conflict.rs"]).status.success());
+    assert!(git(&local_path, &["add", "src/conflict.rs"])
+        .status
+        .success());
     git_commit(&local_path, "other side");
     assert!(git(&local_path, &["checkout", "main"]).status.success());
     std::fs::write(local_path.join("src/conflict.rs"), "main\n").unwrap();
-    assert!(git(&local_path, &["add", "src/conflict.rs"]).status.success());
+    assert!(git(&local_path, &["add", "src/conflict.rs"])
+        .status
+        .success());
     git_commit(&local_path, "main side");
     let merge = git(&local_path, &["merge", "other"]);
     assert!(

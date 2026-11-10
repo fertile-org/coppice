@@ -44,6 +44,9 @@ mod tests {
     #[test]
     fn preserves_utf8_text() {
         let raw = "→ Claude session started\n".as_bytes();
-        assert_eq!(terminal_bytes_to_ws_string(raw), "→ Claude session started\n");
+        assert_eq!(
+            terminal_bytes_to_ws_string(raw),
+            "→ Claude session started\n"
+        );
     }
 }

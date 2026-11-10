@@ -2,14 +2,14 @@ use crate::domain::substatus::{
     build_substatus_display, validate_status_substatus_combo, Substatus, SubstatusDisplay,
     TicketStatus,
 };
-use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
-use crate::services::human_review_service::{HumanReview, HumanReviewService};
-use crate::services::review_capacity::ReviewCapacityService;
-use crate::services::workflow_service::{PlanEntry, WorkflowService};
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
 };
+use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
+use crate::services::human_review_service::{HumanReview, HumanReviewService};
+use crate::services::review_capacity::ReviewCapacityService;
+use crate::services::workflow_service::{PlanEntry, WorkflowService};
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -60,8 +60,15 @@ pub enum TicketError {
 
 /// The approved plan is the newest ticket_plans row, written for the ticket's
 /// current content. Same rule as [`TicketService::approved_plan_is_current`].
-fn plan_is_current(ticket: &Ticket, latest_plan_id: Option<Uuid>, latest_plan_version: Option<i32>) -> bool {
-    match (ticket.approved_plan_id, ticket.approved_plan_content_version) {
+fn plan_is_current(
+    ticket: &Ticket,
+    latest_plan_id: Option<Uuid>,
+    latest_plan_version: Option<i32>,
+) -> bool {
+    match (
+        ticket.approved_plan_id,
+        ticket.approved_plan_content_version,
+    ) {
         (Some(approved_id), Some(approved_version)) => {
             approved_version == ticket.content_version
                 && latest_plan_id == Some(approved_id)
@@ -171,16 +178,13 @@ impl<'a> TicketService<'a> {
         status: Option<TicketStatus>,
         limit: i64,
     ) -> Result<Vec<Ticket>, TicketError> {
-        let pattern = query
-            .map(str::trim)
-            .filter(|q| !q.is_empty())
-            .map(|q| {
-                let escaped = q
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_");
-                format!("%{escaped}%")
-            });
+        let pattern = query.map(str::trim).filter(|q| !q.is_empty()).map(|q| {
+            let escaped = q
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        });
         let sql = format!(
             r#"
             SELECT {TICKET_COLUMNS_ALIASED}
@@ -336,9 +340,8 @@ impl<'a> TicketService<'a> {
         ticket_id: Uuid,
         recommendation: PendingSplitRecommendation,
     ) -> Result<TicketWithDisplay, TicketError> {
-        let value = serde_json::to_value(recommendation).map_err(|e| {
-            TicketError::Validation(format!("pending split recommendation: {e}"))
-        })?;
+        let value = serde_json::to_value(recommendation)
+            .map_err(|e| TicketError::Validation(format!("pending split recommendation: {e}")))?;
 
         let row = sqlx::query(
             r#"
@@ -538,10 +541,7 @@ impl<'a> TicketService<'a> {
     }
 
     /// Accept is the only status write that may enter Done.
-    pub async fn accept_to_done(
-        &self,
-        ticket_id: Uuid,
-    ) -> Result<TicketWithDisplay, TicketError> {
+    pub async fn accept_to_done(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
         self.write_status(
             ticket_id,
             TicketStatus::Done,
@@ -608,9 +608,7 @@ impl<'a> TicketService<'a> {
             None => current.ticket.substatus_metadata.clone(),
         };
 
-        if let Some(msg) =
-            validate_status_substatus_combo(status, substatus, &substatus_metadata)
-        {
+        if let Some(msg) = validate_status_substatus_combo(status, substatus, &substatus_metadata) {
             return Err(TicketError::Validation(msg.to_string()));
         }
 
@@ -685,13 +683,16 @@ impl<'a> TicketService<'a> {
         };
         let pending_assign_recommendation = match pending_recommendation {
             Some(None) => None,
-            Some(Some(rec)) => Some(serde_json::to_value(rec).map_err(|e| {
-                TicketError::Validation(format!("pending recommendation: {e}"))
-            })?),
+            Some(Some(rec)) => Some(
+                serde_json::to_value(rec)
+                    .map_err(|e| TicketError::Validation(format!("pending recommendation: {e}")))?,
+            ),
             None => current.ticket.pending_assign_recommendation.clone(),
         };
-        let clarification_round =
-            current.ticket.clarification_round.saturating_add(clarification_round_delta);
+        let clarification_round = current
+            .ticket
+            .clarification_round
+            .saturating_add(clarification_round_delta);
 
         let plan = self.plan_entry(&current.ticket).await?;
         if let Some(msg) =
@@ -700,9 +701,7 @@ impl<'a> TicketService<'a> {
             return Err(TicketError::Validation(msg.to_string()));
         }
 
-        if let Some(msg) =
-            validate_status_substatus_combo(status, substatus, &substatus_metadata)
-        {
+        if let Some(msg) = validate_status_substatus_combo(status, substatus, &substatus_metadata) {
             return Err(TicketError::Validation(msg.to_string()));
         }
 
@@ -985,12 +984,11 @@ impl<'a> TicketService<'a> {
     }
 
     async fn ensure_board_exists(&self, board_id: Uuid) -> Result<(), TicketError> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM boards WHERE id = $1)",
-        )
-        .bind(board_id)
-        .fetch_one(self.pool)
-        .await?;
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM boards WHERE id = $1)")
+                .bind(board_id)
+                .fetch_one(self.pool)
+                .await?;
 
         if !exists {
             return Err(TicketError::BoardNotFound);
@@ -1128,7 +1126,9 @@ impl<'a> TicketService<'a> {
 
         let mut out = Vec::with_capacity(tickets.len());
         for ticket in tickets {
-            let row = by_id.remove(&ticket.id).ok_or(TicketError::TicketNotFound)?;
+            let row = by_id
+                .remove(&ticket.id)
+                .ok_or(TicketError::TicketNotFound)?;
             let agent_name: Option<String> = row.get("agent_name");
             let substatus_display = build_substatus_display(
                 ticket.substatus,
@@ -1230,9 +1230,7 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
     let status = status_from_str(&status_str).unwrap_or(TicketStatus::Backlog);
 
     let substatus: Option<String> = row.get("substatus");
-    let substatus = substatus
-        .as_deref()
-        .and_then(substatus_from_str);
+    let substatus = substatus.as_deref().and_then(substatus_from_str);
 
     let priority: Option<String> = row.get("priority");
     let priority = priority.as_deref().and_then(priority_from_str);
@@ -1296,29 +1294,14 @@ mod tests {
 
         let tickets = TicketService::new(&pool);
         let created = tickets
-            .create(
-                board_id,
-                "Shot",
-                "see file",
-                None,
-                None,
-                "ada",
-                user_id,
-            )
+            .create(board_id, "Shot", "see file", None, None, "ada", user_id)
             .await
             .expect("ticket");
         assert!(created.ticket.attachment_ids.is_empty());
 
         let attachment_id = Uuid::new_v4();
         CommentService::new(&pool)
-            .create_attachment(
-                attachment_id,
-                "shot.png",
-                "image/png",
-                4,
-                "unused",
-                user_id,
-            )
+            .create_attachment(attachment_id, "shot.png", "image/png", 4, "unused", user_id)
             .await
             .expect("attachment");
 

@@ -58,7 +58,8 @@ async fn handle_events_socket(state: Arc<AppState>, socket: WebSocket) {
         return;
     }
 
-    let mut ping_interval = tokio::time::interval(Duration::from_secs(EVENTS_KEEPALIVE_INTERVAL_SECS));
+    let mut ping_interval =
+        tokio::time::interval(Duration::from_secs(EVENTS_KEEPALIVE_INTERVAL_SECS));
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Discard the immediate first tick so the first ping goes out after one
     // full interval, matching the watchdog cadence.
@@ -125,7 +126,10 @@ async fn emit_active_run_snapshot(
     let Some(pool) = state.db.as_ref() else {
         return Ok(());
     };
-    let runs = RunService::new(pool).list_active_runs().await.unwrap_or_default();
+    let runs = RunService::new(pool)
+        .list_active_runs()
+        .await
+        .unwrap_or_default();
     for run in runs {
         let Some(ticket_id) = run.ticket_id else {
             continue;
@@ -253,19 +257,20 @@ mod tests {
 
         let recv = rx.recv().await;
         assert!(
-            matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Lagged(_))),
+            matches!(
+                recv,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
+            ),
             "expected Lagged after overflow, got {recv:?}"
         );
-        assert!(matches!(
-            classify_event_recv(recv),
-            EventRecvAction::Resync
-        ));
+        assert!(matches!(classify_event_recv(recv), EventRecvAction::Resync));
     }
 
     #[test]
     fn keepalive_is_stale_true_beyond_grace() {
         let now = Instant::now();
-        let grace = Duration::from_secs(EVENTS_KEEPALIVE_INTERVAL_SECS * EVENTS_KEEPALIVE_MAX_MISSED);
+        let grace =
+            Duration::from_secs(EVENTS_KEEPALIVE_INTERVAL_SECS * EVENTS_KEEPALIVE_MAX_MISSED);
         let last_pong = now - grace - Duration::from_secs(1);
         assert!(keepalive_is_stale(last_pong, now));
     }

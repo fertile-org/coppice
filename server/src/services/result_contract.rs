@@ -232,9 +232,7 @@ pub fn validate_for_profile(
         ContextProfile::Full if job_type == "respond_to_mention" => {
             apply_consultation_result(result).map(|_| ())
         }
-        ContextProfile::Full | ContextProfile::HumanAgent => {
-            apply_agent_result(result).map(|_| ())
-        }
+        ContextProfile::Full | ContextProfile::HumanAgent => apply_agent_result(result).map(|_| ()),
         ContextProfile::HumanChat | ContextProfile::Conversation => {
             let has = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.trim().is_empty());
             match result {
@@ -309,7 +307,10 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             {
                 return Err(PLAN_DESCRIPTION_REJECTED.into());
             }
-            if assign_to.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+            if assign_to
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
                 return Err(PLAN_ASSIGN_REJECTED.into());
             }
             // A split proposed here is created only when the plan is approved.
@@ -1237,10 +1238,7 @@ mod tests {
             "compact_knowledge"
         )
         .is_ok());
-        for result in [
-            continued_result(),
-            load_fixture("blocked.json"),
-        ] {
+        for result in [continued_result(), load_fixture("blocked.json")] {
             let err = validate_for_profile(
                 &result,
                 ContextProfile::KnowledgeCompaction,
@@ -1285,7 +1283,9 @@ mod tests {
             crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
         )
         .is_ok());
-        assert!(validate_for_profile(&done_result(), ContextProfile::Full, "work_on_ticket").is_ok());
+        assert!(
+            validate_for_profile(&done_result(), ContextProfile::Full, "work_on_ticket").is_ok()
+        );
     }
 
     #[test]

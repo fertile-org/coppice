@@ -211,14 +211,94 @@ async fn migration_backfills_plans_approvals_and_appended_change_requests() {
         .expect("comment");
     }
 
-    insert_comment(&db.pool, approved_comment, approved_id, agent_id, "## Plan\n\nApproved.", "plan", Some(1), 1).await;
-    insert_comment(&db.pool, stale_old, stale_id, agent_id, "## Plan\n\nOld.", "plan", Some(1), 1).await;
-    insert_comment(&db.pool, stale_new, stale_id, agent_id, "## Plan\n\nNew.", "plan", Some(2), 2).await;
-    insert_comment(&db.pool, split_comment, split_id, agent_id, "## Plan\n\nSplit.", "plan", Some(1), 1).await;
-    insert_comment(&db.pool, first_plan, revised_id, agent_id, "## Plan\n\nFirst.", "plan", Some(1), 10).await;
-    insert_comment(&db.pool, first_ask, revised_id, agent_id, "Use Postgres.", "review_feedback", None, 11).await;
-    insert_comment(&db.pool, second_ask, revised_id, agent_id, "Split the API.", "review_feedback", None, 12).await;
-    insert_comment(&db.pool, second_plan, revised_id, agent_id, "## Plan\n\nSecond.", "plan", Some(1), 13).await;
+    insert_comment(
+        &db.pool,
+        approved_comment,
+        approved_id,
+        agent_id,
+        "## Plan\n\nApproved.",
+        "plan",
+        Some(1),
+        1,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        stale_old,
+        stale_id,
+        agent_id,
+        "## Plan\n\nOld.",
+        "plan",
+        Some(1),
+        1,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        stale_new,
+        stale_id,
+        agent_id,
+        "## Plan\n\nNew.",
+        "plan",
+        Some(2),
+        2,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        split_comment,
+        split_id,
+        agent_id,
+        "## Plan\n\nSplit.",
+        "plan",
+        Some(1),
+        1,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        first_plan,
+        revised_id,
+        agent_id,
+        "## Plan\n\nFirst.",
+        "plan",
+        Some(1),
+        10,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        first_ask,
+        revised_id,
+        agent_id,
+        "Use Postgres.",
+        "review_feedback",
+        None,
+        11,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        second_ask,
+        revised_id,
+        agent_id,
+        "Split the API.",
+        "review_feedback",
+        None,
+        12,
+    )
+    .await;
+    insert_comment(
+        &db.pool,
+        second_plan,
+        revised_id,
+        agent_id,
+        "## Plan\n\nSecond.",
+        "plan",
+        Some(1),
+        13,
+    )
+    .await;
 
     sqlx::query(
         "UPDATE tickets SET approved_plan_comment_id = $2, approved_plan_content_version = $3 WHERE id = $1",
@@ -319,17 +399,19 @@ async fn migration_backfills_plans_approvals_and_appended_change_requests() {
     .fetch_one(&db.pool)
     .await
     .unwrap();
-    assert_ne!(stale.0, latest_id, "approved pointer stays on the old revision");
+    assert_ne!(
+        stale.0, latest_id,
+        "approved pointer stays on the old revision"
+    );
     assert_eq!(stale.1, 1);
     assert_eq!(stale.2, Some(2));
 
-    let split_plan: Option<Uuid> = sqlx::query_scalar(
-        "SELECT plan_id FROM ticket_plan_splits WHERE parent_ticket_id = $1",
-    )
-    .bind(split_id)
-    .fetch_one(&db.pool)
-    .await
-    .expect("split plan_id");
+    let split_plan: Option<Uuid> =
+        sqlx::query_scalar("SELECT plan_id FROM ticket_plan_splits WHERE parent_ticket_id = $1")
+            .bind(split_id)
+            .fetch_one(&db.pool)
+            .await
+            .expect("split plan_id");
     assert!(split_plan.is_some());
 
     let requests: Vec<(i32, Option<String>)> = sqlx::query_as(
@@ -409,12 +491,52 @@ async fn migration_approves_plans_for_stuck_split_children_only() {
     // (id, parent, status, skip_planning, archived, content_version, description)
     let rows: [(Uuid, Option<Uuid>, &str, bool, bool, i32, &str); 7] = [
         (parent, None, "backlog", false, false, 1, "Epic"),
-        (stuck, Some(parent), "backlog", false, false, 3, "Stuck child deliverable"),
+        (
+            stuck,
+            Some(parent),
+            "backlog",
+            false,
+            false,
+            3,
+            "Stuck child deliverable",
+        ),
         (top_level, None, "backlog", false, false, 1, "Top-level"),
-        (has_plan, Some(parent), "backlog", false, false, 1, "Already planned"),
-        (skip, Some(parent), "backlog", true, false, 1, "Skip planning"),
-        (ready, Some(parent), "ready", false, false, 1, "Already ready"),
-        (archived, Some(parent), "backlog", false, true, 1, "Archived"),
+        (
+            has_plan,
+            Some(parent),
+            "backlog",
+            false,
+            false,
+            1,
+            "Already planned",
+        ),
+        (
+            skip,
+            Some(parent),
+            "backlog",
+            true,
+            false,
+            1,
+            "Skip planning",
+        ),
+        (
+            ready,
+            Some(parent),
+            "ready",
+            false,
+            false,
+            1,
+            "Already ready",
+        ),
+        (
+            archived,
+            Some(parent),
+            "backlog",
+            false,
+            true,
+            1,
+            "Archived",
+        ),
     ];
     for (id, parent_id, status, skip_planning, archived, version, description) in rows {
         sqlx::query(
@@ -473,14 +595,16 @@ async fn migration_approves_plans_for_stuck_split_children_only() {
     assert_eq!(stuck_row.3, 3);
 
     for untouched in [parent, top_level, has_plan, skip, ready, archived] {
-        let approved: Option<Uuid> = sqlx::query_scalar(
-            "SELECT approved_plan_id FROM tickets WHERE id = $1",
-        )
-        .bind(untouched)
-        .fetch_one(&db.pool)
-        .await
-        .unwrap();
-        assert!(approved.is_none(), "ticket {untouched} must stay unapproved");
+        let approved: Option<Uuid> =
+            sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
+                .bind(untouched)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(
+            approved.is_none(),
+            "ticket {untouched} must stay unapproved"
+        );
     }
 
     let stuck_plans: i64 =

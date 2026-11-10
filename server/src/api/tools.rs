@@ -13,8 +13,8 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 const MAX_IMPORT_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
@@ -57,11 +57,7 @@ async fn export_backup(
         Ok(()) => {}
         Err(err) => {
             let (status, message) = map_error(err);
-            return Ok((
-                status,
-                Json(serde_json::json!({ "message": message })),
-            )
-                .into_response());
+            return Ok((status, Json(serde_json::json!({ "message": message }))).into_response());
         }
     }
 
@@ -128,10 +124,7 @@ async fn import_backup(
         ));
     }
 
-    let bytes = file_bytes.ok_or((
-        StatusCode::BAD_REQUEST,
-        "missing file field".into(),
-    ))?;
+    let bytes = file_bytes.ok_or((StatusCode::BAD_REQUEST, "missing file field".into()))?;
 
     let config_path = state.connectors.config_path();
     match BackupService::import_from_bytes(
@@ -141,12 +134,9 @@ async fn import_backup(
         config_path.as_deref(),
         &state.secret_store,
     )
-        .await
+    .await
     {
-        Ok(message) => Ok(Json(ImportBackupResponse {
-            ok: true,
-            message,
-        })),
+        Ok(message) => Ok(Json(ImportBackupResponse { ok: true, message })),
         Err(err) => {
             let (status, message) = map_error(err);
             Err((status, message))

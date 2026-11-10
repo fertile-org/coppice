@@ -74,10 +74,7 @@ mod tests {
             RunStatus::Cancelled,
         ];
         for status in statuses {
-            assert_eq!(
-                run_status_from_str(run_status_to_str(status)),
-                Some(status)
-            );
+            assert_eq!(run_status_from_str(run_status_to_str(status)), Some(status));
         }
     }
 }

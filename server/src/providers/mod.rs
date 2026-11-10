@@ -10,10 +10,10 @@ pub mod cli_version;
 pub mod codex;
 pub mod codex_console;
 pub mod codex_models;
-pub mod env_hygiene;
 pub mod cursor;
 pub mod cursor_console;
 pub mod cursor_models;
+pub mod env_hygiene;
 pub mod kilo_code;
 pub mod kilo_console;
 pub mod kilo_models;
@@ -158,7 +158,10 @@ pub async fn run_console_kind(
 
 /// The sentence to fail a run with when the installed CLI is older than the
 /// connector's floor. `None` when it is new enough or its version is unknown.
-pub async fn below_min_version(connector: &str, config: &coppice_config::AppConfig) -> Option<String> {
+pub async fn below_min_version(
+    connector: &str,
+    config: &coppice_config::AppConfig,
+) -> Option<String> {
     let descriptor = descriptor(connector)?;
     descriptor.min_version?;
     let command = config
@@ -180,9 +183,13 @@ pub fn console_kind_name(kind: coppice_connectors::ConsoleKind) -> String {
 
 pub fn parse_console_kind(name: &str) -> Option<coppice_connectors::ConsoleKind> {
     use coppice_connectors::ConsoleKind;
-    [ConsoleKind::OpenCodeSession, ConsoleKind::Structured, ConsoleKind::Plain]
-        .into_iter()
-        .find(|kind| console_kind_name(*kind) == name)
+    [
+        ConsoleKind::OpenCodeSession,
+        ConsoleKind::Structured,
+        ConsoleKind::Plain,
+    ]
+    .into_iter()
+    .find(|kind| console_kind_name(*kind) == name)
 }
 
 pub fn mcp_unavailable(reason: &str) -> ProviderError {
@@ -297,13 +304,25 @@ pub enum AgentRunResult {
         #[serde(default, rename = "knowledgeCandidates")]
         knowledge_candidates: Vec<KnowledgeCandidateSpec>,
         /// Short Human Review note. Absent when the connector did not report a brief.
-        #[serde(default, rename = "howItWorks", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "howItWorks",
+            skip_serializing_if = "Option::is_none"
+        )]
         how_it_works: Option<String>,
         /// What changed from the approved plan. Empty means nothing changed.
-        #[serde(default, rename = "changesFromPlan", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "changesFromPlan",
+            skip_serializing_if = "Option::is_none"
+        )]
         changes_from_plan: Option<String>,
         /// Where a reviewer should look first.
-        #[serde(default, rename = "lookHereFirst", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "lookHereFirst",
+            skip_serializing_if = "Option::is_none"
+        )]
         look_here_first: Option<String>,
         /// One entry per plan acceptance criterion. Malformed entries and
         /// unknown statuses are read leniently; a missing list is empty.
@@ -377,7 +396,12 @@ pub enum CriterionStatus {
 impl CriterionStatus {
     /// Unknown words read as not checked.
     pub fn parse(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+        match value
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', ' '], "_")
+            .as_str()
+        {
             "met" | "pass" | "passed" | "done" => Self::Met,
             "not_met" | "fail" | "failed" | "unmet" => Self::NotMet,
             _ => Self::NotChecked,
@@ -681,7 +705,10 @@ mod tests {
             let expected = format!(
                 "Coppice hasn't confirmed that {name} stays read-only. The agent can still run commands on your computer."
             );
-            assert_eq!(chat_isolation_banner(id).as_deref(), Some(expected.as_str()));
+            assert_eq!(
+                chat_isolation_banner(id).as_deref(),
+                Some(expected.as_str())
+            );
         }
 
         assert_eq!(

@@ -70,10 +70,7 @@ impl<'a> AuthService<'a> {
     ///
     /// No-op when email/password are unset, incomplete, or users already exist.
     /// Concurrent startups that lose the race are treated as success.
-    pub async fn maybe_auto_bootstrap(
-        &self,
-        auth: &AuthConfig,
-    ) -> Result<Option<User>, AuthError> {
+    pub async fn maybe_auto_bootstrap(&self, auth: &AuthConfig) -> Result<Option<User>, AuthError> {
         let (Some(email), Some(password)) =
             (&auth.bootstrap_admin_email, &auth.bootstrap_admin_password)
         else {

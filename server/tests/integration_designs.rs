@@ -1135,11 +1135,7 @@ async fn unpublished_design_is_hidden() {
             .app
             .clone()
             .oneshot(common::json_request(
-                method,
-                &uri,
-                body,
-                &fx.cookie,
-                &fx.csrf,
+                method, &uri, body, &fx.cookie, &fx.csrf,
             ))
             .await
             .expect(method);
@@ -1423,9 +1419,14 @@ async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> 
         .await
         .expect("create");
     for entry in ["a/index.html", "b/index.html"] {
-        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
-            .await
-            .expect("write");
+        svc.write(
+            created.id,
+            run_id,
+            entry,
+            b"<!doctype html><title>x</title>",
+        )
+        .await
+        .expect("write");
     }
     let options = vec![
         DesignOption {
@@ -1613,7 +1614,10 @@ async fn picking_back_to_the_earlier_option_starts_another_run() {
     require_db!();
 
     let (fx, set_id) = plan_review_with_set().await;
-    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "b").await.status(),
+        StatusCode::NO_CONTENT
+    );
     let run_id = active_plan_run(&fx).await;
     planning(&fx)
         .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, Some(run_id), false)
@@ -1621,9 +1625,15 @@ async fn picking_back_to_the_earlier_option_starts_another_run() {
         .expect("rewritten plan");
     set_run_status(&fx, run_id, "succeeded").await;
     let runs = plan_runs(&fx).await;
-    assert_eq!(set_json(&fx, set_id).await["choice"]["planOutOfDate"], false);
+    assert_eq!(
+        set_json(&fx, set_id).await["choice"]["planOutOfDate"],
+        false
+    );
 
-    assert_eq!(pick(&fx, set_id, "a").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "a").await.status(),
+        StatusCode::NO_CONTENT
+    );
 
     assert_eq!(plan_runs(&fx).await, runs + 1);
     assert_eq!(change_request(&fx).await.as_deref(), Some(A_NOTE));
@@ -1640,7 +1650,10 @@ async fn pick_is_refused_during_a_plan_run_and_saves_nothing() {
         .ask_for_changes(fx.ticket_id, "Tighten the steps.")
         .await
         .expect("ask");
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "plan_running");
+    assert_eq!(
+        set_json(&fx, set_id).await["choice"]["mode"],
+        "plan_running"
+    );
 
     assert_refused(&fx, set_id, "b", PLAN_ALREADY_RUNNING).await;
 }
@@ -1818,7 +1831,10 @@ async fn failed_rewrite_keeps_choice_and_try_again_starts_a_run() {
     require_db!();
 
     let (fx, set_id) = plan_review_with_set().await;
-    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "b").await.status(),
+        StatusCode::NO_CONTENT
+    );
     let run_id = active_plan_run(&fx).await;
     set_run_status(&fx, run_id, "failed").await;
 
@@ -1828,7 +1844,10 @@ async fn failed_rewrite_keeps_choice_and_try_again_starts_a_run() {
     assert_eq!(set["choice"]["planOutOfDate"], true);
     let runs = plan_runs(&fx).await;
 
-    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "b").await.status(),
+        StatusCode::NO_CONTENT
+    );
 
     assert_eq!(plan_runs(&fx).await, runs + 1);
     active_plan_run(&fx).await;
@@ -1853,7 +1872,10 @@ async fn pick_with_no_plan_saves_and_starts_no_run() {
     assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "save_only");
     let runs = plan_runs(&fx).await;
 
-    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "b").await.status(),
+        StatusCode::NO_CONTENT
+    );
 
     assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "b");
     assert_eq!(plan_runs(&fx).await, runs);
@@ -1886,7 +1908,10 @@ async fn pick_on_a_set_from_before_recommendations_rewrites_the_plan() {
     assert_eq!(before["choice"]["planOutOfDate"], false);
     let runs = plan_runs(&fx).await;
 
-    assert_eq!(pick(&fx, set_id, "b").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, set_id, "b").await.status(),
+        StatusCode::NO_CONTENT
+    );
 
     let after = set_json(&fx, set_id).await;
     assert_eq!(after["chosen"]["id"], "b");
@@ -1987,7 +2012,10 @@ async fn work_run_and_chat_sets_save_and_start_no_run() {
     )
     .await;
     assert_eq!(set_json(&fx, chat_set).await["choice"]["mode"], "save_only");
-    assert_eq!(pick(&fx, chat_set, "a").await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        pick(&fx, chat_set, "a").await.status(),
+        StatusCode::NO_CONTENT
+    );
     assert_eq!(set_json(&fx, chat_set).await["chosen"]["id"], "a");
     let all_plan_runs: i64 =
         sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE job_type = 'plan_ticket'")
@@ -2068,7 +2096,9 @@ async fn failed_run_insert_leaves_note_split_approval_and_choice_unchanged() {
     .execute(&fx.pool)
     .await
     .expect("approval");
-    let asked = planning(&fx).ask_for_changes(fx.ticket_id, "Change it.").await;
+    let asked = planning(&fx)
+        .ask_for_changes(fx.ticket_id, "Change it.")
+        .await;
     let approved: Option<Uuid> =
         sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
             .bind(fx.ticket_id)
@@ -2499,9 +2529,14 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
         .await
         .expect("create");
     for entry in ["option-a/index.html", "option-b/index.html"] {
-        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
-            .await
-            .expect("write");
+        svc.write(
+            created.id,
+            run_id,
+            entry,
+            b"<!doctype html><title>x</title>",
+        )
+        .await
+        .expect("write");
     }
     let options = vec![
         DesignOption {
@@ -2526,13 +2561,25 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
 
     let set = set_json(&fx, created.id).await;
     assert_eq!(set["options"][0]["id"], "option-a");
-    assert_eq!(set["options"][0]["title"], "A: Quiet button after the last card");
+    assert_eq!(
+        set["options"][0]["title"],
+        "A: Quiet button after the last card"
+    );
     assert_eq!(set["options"][0]["label"], "A");
-    assert_eq!(set["options"][0]["displayTitle"], "Quiet button after the last card");
+    assert_eq!(
+        set["options"][0]["displayTitle"],
+        "Quiet button after the last card"
+    );
     assert_eq!(set["options"][1]["label"], "B");
-    assert_eq!(set["options"][1]["displayTitle"], "Full-width button with Show all");
+    assert_eq!(
+        set["options"][1]["displayTitle"],
+        "Full-width button with Show all"
+    );
     assert_eq!(set["recommended"]["label"], "A");
-    assert_eq!(set["recommended"]["displayTitle"], "Quiet button after the last card");
+    assert_eq!(
+        set["recommended"]["displayTitle"],
+        "Quiet button after the last card"
+    );
 
     let res = pick(&fx, created.id, "option-b").await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
@@ -2540,7 +2587,10 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     let set = set_json(&fx, created.id).await;
     assert_eq!(set["chosen"]["id"], "option-b");
     assert_eq!(set["chosen"]["label"], "B");
-    assert_eq!(set["chosen"]["displayTitle"], "Full-width button with Show all");
+    assert_eq!(
+        set["chosen"]["displayTitle"],
+        "Full-width button with Show all"
+    );
     assert_eq!(set["selected"]["label"], "B");
 }
 

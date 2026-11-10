@@ -26,16 +26,23 @@ fn bearer_ok(headers: &HeaderMap, expected: &str) -> bool {
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| {
-            v.split_once(' ')
-                .is_some_and(|(scheme, token)| {
-                    scheme.eq_ignore_ascii_case("bearer") && token.trim() == expected
-                })
+            v.split_once(' ').is_some_and(|(scheme, token)| {
+                scheme.eq_ignore_ascii_case("bearer") && token.trim() == expected
+            })
         })
 }
 
-async fn post_mcp(State(state): State<Arc<ProbeGateway>>, headers: HeaderMap, body: Bytes) -> Response {
+async fn post_mcp(
+    State(state): State<Arc<ProbeGateway>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if !bearer_ok(&headers, "probe-token") {
-        state.calls.lock().expect("calls").push("unauthorized".into());
+        state
+            .calls
+            .lock()
+            .expect("calls")
+            .push("unauthorized".into());
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let Ok(req) = serde_json::from_slice::<Value>(&body) else {
@@ -313,7 +320,11 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
     write_touch_script(&claude_script, &claude_fired);
     std::fs::create_dir_all(worktree.join(".claude")).unwrap();
     let claude_hooks = serde_json::to_string(&claude_hooks_json(&claude_script)).unwrap();
-    std::fs::write(worktree.join(".claude").join("settings.json"), &claude_hooks).unwrap();
+    std::fs::write(
+        worktree.join(".claude").join("settings.json"),
+        &claude_hooks,
+    )
+    .unwrap();
     std::fs::write(
         worktree.join(".claude").join("settings.local.json"),
         &claude_hooks,
@@ -367,11 +378,14 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
 
     let (mcp_url, gateway) = spawn_probe_gateway().await;
     let artifacts = dir.path().join("artifacts");
-    for (job_type, run_id) in [("chat_turn", "cursor-probe-ask"), ("plan_ticket", "cursor-probe-plan")]
-    {
+    for (job_type, run_id) in [
+        ("chat_turn", "cursor-probe-ask"),
+        ("plan_ticket", "cursor-probe-plan"),
+    ] {
         *gateway.submitted.lock().expect("submitted") = None;
         gateway.calls.lock().expect("calls").clear();
-        let result = run_read_only_probe(&worktree, &artifacts, job_type, run_id, mcp_url.clone()).await;
+        let result =
+            run_read_only_probe(&worktree, &artifacts, job_type, run_id, mcp_url.clone()).await;
         eprintln!("{job_type} probe result: {result:?}");
         eprintln!(
             "{job_type} probe mcp calls: {:?}",
@@ -382,10 +396,19 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
             eprintln!("  {entry}");
         }
         assert!(!worktree.join("bash-ran").exists(), "{job_type}: shell ran");
-        assert!(!worktree.join("wrote.txt").exists(), "{job_type}: write ran");
+        assert!(
+            !worktree.join("wrote.txt").exists(),
+            "{job_type}: write ran"
+        );
         assert!(!outside_write.exists(), "{job_type}: absolute write ran");
-        assert!(!outside_shell.exists(), "{job_type}: absolute shell write ran");
-        assert!(!leak_path.exists(), "{job_type}: repo MCP server was started");
+        assert!(
+            !outside_shell.exists(),
+            "{job_type}: absolute shell write ran"
+        );
+        assert!(
+            !leak_path.exists(),
+            "{job_type}: repo MCP server was started"
+        );
         assert!(!hook_fired.exists(), "{job_type}: .cursor hook ran");
         assert!(!claude_fired.exists(), "{job_type}: .claude hook ran");
         assert!(

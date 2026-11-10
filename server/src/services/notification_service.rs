@@ -54,31 +54,23 @@ impl<'a> NotificationService<'a> {
         agent_id: Uuid,
         status: &str,
     ) -> Result<Vec<Uuid>, NotificationError> {
-        if !matches!(
-            status,
-            "succeeded" | "blocked" | "failed" | "cancelled"
-        ) {
+        if !matches!(status, "succeeded" | "blocked" | "failed" | "cancelled") {
             return Ok(Vec::new());
         }
 
-        let agent_name: Option<String> = sqlx::query_scalar(
-            "SELECT name FROM agents WHERE id = $1",
-        )
-        .bind(agent_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let agent_name: Option<String> =
+            sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
+                .bind(agent_id)
+                .fetch_optional(self.pool)
+                .await?;
 
-        let ticket_title: Option<String> = sqlx::query_scalar(
-            "SELECT title FROM tickets WHERE id = $1",
-        )
-        .bind(ticket_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let ticket_title: Option<String> =
+            sqlx::query_scalar("SELECT title FROM tickets WHERE id = $1")
+                .bind(ticket_id)
+                .fetch_optional(self.pool)
+                .await?;
 
-        let agent_label = agent_name
-            .as_deref()
-            .unwrap_or("Agent")
-            .to_string();
+        let agent_label = agent_name.as_deref().unwrap_or("Agent").to_string();
         let title = format!("{agent_label} run {status}");
         let body = ticket_title;
 
@@ -107,24 +99,19 @@ impl<'a> NotificationService<'a> {
         comment_id: Uuid,
         mentioned_agent_id: Uuid,
     ) -> Result<Vec<Uuid>, NotificationError> {
-        let agent_name: Option<String> = sqlx::query_scalar(
-            "SELECT name FROM agents WHERE id = $1",
-        )
-        .bind(mentioned_agent_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let agent_name: Option<String> =
+            sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
+                .bind(mentioned_agent_id)
+                .fetch_optional(self.pool)
+                .await?;
 
-        let ticket_title: Option<String> = sqlx::query_scalar(
-            "SELECT title FROM tickets WHERE id = $1",
-        )
-        .bind(ticket_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let ticket_title: Option<String> =
+            sqlx::query_scalar("SELECT title FROM tickets WHERE id = $1")
+                .bind(ticket_id)
+                .fetch_optional(self.pool)
+                .await?;
 
-        let agent_label = agent_name
-            .as_deref()
-            .unwrap_or("Agent")
-            .to_string();
+        let agent_label = agent_name.as_deref().unwrap_or("Agent").to_string();
         let title = format!("{agent_label} mentioned on ticket");
         let body = ticket_title;
 
@@ -153,12 +140,11 @@ impl<'a> NotificationService<'a> {
         agent_id: Uuid,
         error_message: &str,
     ) -> Result<Vec<Uuid>, NotificationError> {
-        let agent_name: Option<String> = sqlx::query_scalar(
-            "SELECT name FROM agents WHERE id = $1",
-        )
-        .bind(agent_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let agent_name: Option<String> =
+            sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
+                .bind(agent_id)
+                .fetch_optional(self.pool)
+                .await?;
         let title = format!(
             "Knowledge compaction failed ({})",
             agent_name.as_deref().unwrap_or("Agent")
@@ -180,10 +166,9 @@ impl<'a> NotificationService<'a> {
     }
 
     async fn fan_out(&self, input: FanOutInput<'_>) -> Result<Vec<Uuid>, NotificationError> {
-        let user_ids: Vec<Uuid> =
-            sqlx::query_scalar("SELECT id FROM users ORDER BY created_at")
-                .fetch_all(self.pool)
-                .await?;
+        let user_ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at")
+            .fetch_all(self.pool)
+            .await?;
 
         let mut created = Vec::new();
         for user_id in user_ids {
@@ -290,16 +275,10 @@ impl<'a> NotificationService<'a> {
             None
         };
 
-        Ok(NotificationPage {
-            items,
-            next_cursor,
-        })
+        Ok(NotificationPage { items, next_cursor })
     }
 
-    pub async fn unread_count(
-        &self,
-        recipient_user_id: Uuid,
-    ) -> Result<i64, NotificationError> {
+    pub async fn unread_count(&self, recipient_user_id: Uuid) -> Result<i64, NotificationError> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM notifications
@@ -356,10 +335,7 @@ impl<'a> NotificationService<'a> {
         Ok(())
     }
 
-    pub async fn mark_all_read(
-        &self,
-        recipient_user_id: Uuid,
-    ) -> Result<u64, NotificationError> {
+    pub async fn mark_all_read(&self, recipient_user_id: Uuid) -> Result<u64, NotificationError> {
         let result = sqlx::query(
             r#"
             UPDATE notifications
@@ -415,8 +391,7 @@ fn decode_cursor(raw: &str) -> (OffsetDateTime, Uuid) {
 
 fn row_to_notification(row: &sqlx::postgres::PgRow) -> Notification {
     let type_str: String = row.get("type");
-    let kind = NotificationType::parse_str(&type_str)
-        .unwrap_or(NotificationType::AgentRunFinished);
+    let kind = NotificationType::parse_str(&type_str).unwrap_or(NotificationType::AgentRunFinished);
 
     Notification {
         id: row.get("id"),

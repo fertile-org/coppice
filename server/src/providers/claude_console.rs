@@ -1,7 +1,7 @@
 use crate::mcp::protocol::SERVER_NAME;
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
-use crate::sessions::{LiveMessage, run_registry::RunStreamHandle};
+use crate::sessions::{run_registry::RunStreamHandle, LiveMessage};
 use coppice_connectors::{gateway_tool, ToolNameStyle};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -50,7 +50,10 @@ impl ClaudeConsolePublisher {
     }
 
     fn handle_message(&mut self, stream: &Arc<RunStreamHandle>, value: &Value) {
-        let Some(content) = value.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array())
+        let Some(content) = value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
         else {
             return;
         };
@@ -156,7 +159,10 @@ impl ClaudeConsolePublisher {
         else {
             return;
         };
-        let is_error = block.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+        let is_error = block
+            .get("is_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let output = tool_result_text(block.get("content"));
         emit(
             stream,
@@ -310,7 +316,8 @@ mod tests {
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
-        let contract = r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
+        let contract =
+            r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 
         publisher.handle_stream_json(
             &handle,
@@ -319,10 +326,7 @@ mod tests {
                 "message": {"content": [{"type": "text", "text": contract}]}
             }),
         );
-        publisher.handle_stream_json(
-            &handle,
-            &json!({"type": "result", "result": contract}),
-        );
+        publisher.handle_stream_json(&handle, &json!({"type": "result", "result": contract}));
 
         let mut result_count = 0;
         while let Ok(LiveMessage::Event { event }) = rx.try_recv() {

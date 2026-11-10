@@ -138,12 +138,14 @@ fn row_to_board(row: &sqlx::postgres::PgRow) -> Board {
 pub fn slugify(name: &str) -> String {
     name.to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() {
-            c
-        } else if c.is_whitespace() {
-            '-'
-        } else {
-            '\0'
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c
+            } else if c.is_whitespace() {
+                '-'
+            } else {
+                '\0'
+            }
         })
         .filter(|c| *c != '\0')
         .collect::<String>()

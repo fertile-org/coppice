@@ -568,11 +568,18 @@ impl Connection<'_> {
         if option.get("currentValue").and_then(Value::as_str) == Some(wanted) {
             return Ok(());
         }
-        if !option_values(option.get("options")).iter().any(|v| v == wanted) {
+        if !option_values(option.get("options"))
+            .iter()
+            .any(|v| v == wanted)
+        {
             tracing::warn!(agent = %self.name, mode = wanted, "the agent has no such mode");
             return Ok(());
         }
-        let config_id = option.get("id").and_then(Value::as_str).unwrap_or("mode").to_string();
+        let config_id = option
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("mode")
+            .to_string();
         self.call(
             "session/set_config_option",
             json!({ "sessionId": session_id, "configId": config_id, "value": wanted }),
@@ -1081,13 +1088,23 @@ mod tests {
 
     #[test]
     fn read_only_still_allows_the_gateway_tools() {
-        for title in ["mcp__coppice__result_submit", "coppice-ticket_get", "coppice_result_submit"] {
+        for title in [
+            "mcp__coppice__result_submit",
+            "coppice-ticket_get",
+            "coppice_result_submit",
+        ] {
             let params = json!({ "toolCall": { "kind": "other", "title": title }, "options": [] });
-            assert!(permission_decision(ToolPolicy::ReadOnly, &params).0, "{title}");
+            assert!(
+                permission_decision(ToolPolicy::ReadOnly, &params).0,
+                "{title}"
+            );
         }
         for title in ["mcp__other__delete", "coppicex-run", "touch x"] {
             let params = json!({ "toolCall": { "kind": "other", "title": title }, "options": [] });
-            assert!(!permission_decision(ToolPolicy::ReadOnly, &params).0, "{title}");
+            assert!(
+                !permission_decision(ToolPolicy::ReadOnly, &params).0,
+                "{title}"
+            );
         }
     }
 
@@ -1135,14 +1152,20 @@ mod tests {
         ] });
         assert_eq!(
             offered_models(&config),
-            [("auto".to_string(), "Auto".to_string()), ("gpt-5".to_string(), "GPT-5".to_string())]
+            [
+                ("auto".to_string(), "Auto".to_string()),
+                ("gpt-5".to_string(), "GPT-5".to_string())
+            ]
         );
         let older = json!({ "models": { "availableModels": [
             { "modelId": "qwen3(openai)", "name": "Qwen 3" }, { "modelId": "x" }
         ] } });
         assert_eq!(
             offered_models(&older),
-            [("qwen3(openai)".to_string(), "Qwen 3".to_string()), ("x".to_string(), "x".to_string())]
+            [
+                ("qwen3(openai)".to_string(), "Qwen 3".to_string()),
+                ("x".to_string(), "x".to_string())
+            ]
         );
         assert!(offered_models(&json!({})).is_empty());
     }

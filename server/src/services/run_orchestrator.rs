@@ -68,9 +68,7 @@ pub async fn load_run_continuation_context(
         return Ok(None);
     };
 
-    let comments = CommentService::new(pool)
-        .list_by_ticket(ticket_id)
-        .await?;
+    let comments = CommentService::new(pool).list_by_ticket(ticket_id).await?;
 
     let agent_names = AgentService::new(pool)
         .list_agents()
@@ -164,10 +162,7 @@ impl<'a> RunOrchestrator<'a> {
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
-            plan_allows_ready: ticket_svc
-                .plan_entry(&ticket.ticket)
-                .await?
-                .allows_ready(),
+            plan_allows_ready: ticket_svc.plan_entry(&ticket.ticket).await?.allows_ready(),
             board_agents,
         };
 
@@ -392,12 +387,7 @@ impl<'a> RunOrchestrator<'a> {
                     StartRunOptions::default()
                 };
                 match run_svc
-                    .start_run_for_agent(
-                        ticket_id,
-                        job_req.agent_id,
-                        &job_req.job_type,
-                        options,
-                    )
+                    .start_run_for_agent(ticket_id, job_req.agent_id, &job_req.job_type, options)
                     .await
                 {
                     Ok(_) => {}
@@ -424,7 +414,9 @@ impl<'a> RunOrchestrator<'a> {
                             "could not auto-start mentioned agent; mention remains pending"
                         );
                     }
-                    Err(error) if is_review_capacity_hold(&error) || is_review_round_stop(&error) => {
+                    Err(error)
+                        if is_review_capacity_hold(&error) || is_review_round_stop(&error) =>
+                    {
                         tracing::info!(
                             source_run_id = %run.id,
                             error = %error,
@@ -459,7 +451,10 @@ impl<'a> RunOrchestrator<'a> {
                                     "handoff target is already active; assigned Ready work will start after the active run finishes"
                                 );
                             }
-                            Err(error) if is_review_capacity_hold(&error) || is_review_round_stop(&error) => {
+                            Err(error)
+                                if is_review_capacity_hold(&error)
+                                    || is_review_round_stop(&error) =>
+                            {
                                 tracing::info!(
                                     source_run_id = %run.id,
                                     error = %error,
@@ -543,15 +538,7 @@ impl<'a> RunOrchestrator<'a> {
         let Some(resume_agent_id) = mention.resume_agent_id else {
             if run.context_profile == ContextProfile::HumanChat {
                 ticket_svc
-                    .apply_workflow_update(
-                        ticket_id,
-                        None,
-                        Some(None),
-                        Some(None),
-                        None,
-                        None,
-                        0,
-                    )
+                    .apply_workflow_update(ticket_id, None, Some(None), Some(None), None, None, 0)
                     .await?;
             }
             return Ok(None);
@@ -625,11 +612,7 @@ impl<'a> RunOrchestrator<'a> {
         {
             let mention_svc = MentionService::new(self.pool);
             match mention_svc
-                .find_pending_for_agent_and_comment(
-                    ticket_id,
-                    run.agent_id,
-                    run.trigger_comment_id,
-                )
+                .find_pending_for_agent_and_comment(ticket_id, run.agent_id, run.trigger_comment_id)
                 .await
             {
                 Ok(Some(mention)) if mention.resume_agent_id.is_none() => {
@@ -756,10 +739,7 @@ impl<'a> RunOrchestrator<'a> {
             return;
         };
 
-        let ticket = match TicketService::new(self.pool)
-            .get(ticket_id)
-            .await
-        {
+        let ticket = match TicketService::new(self.pool).get(ticket_id).await {
             Ok(ticket) => ticket,
             Err(error) => {
                 tracing::warn!(
@@ -958,8 +938,7 @@ fn enqueue_successful_consultation_jobs(
     if let Some(Some(assignee_id)) = action.new_assignee_id {
         scheduled_agent_ids.insert(assignee_id);
     }
-    if let Some(pending_id) =
-        pending_recommendation_target(pending_recommendation, board_agent_ids)
+    if let Some(pending_id) = pending_recommendation_target(pending_recommendation, board_agent_ids)
     {
         scheduled_agent_ids.insert(pending_id);
     }
@@ -1032,8 +1011,7 @@ fn target_has_ownership(
     board_agent_ids: &HashMap<String, Uuid>,
 ) -> bool {
     current_assignee_id == Some(target_id)
-        || pending_recommendation_target(pending_recommendation, board_agent_ids)
-            == Some(target_id)
+        || pending_recommendation_target(pending_recommendation, board_agent_ids) == Some(target_id)
 }
 
 fn pending_recommendation_target(
@@ -2939,8 +2917,8 @@ mod tests {
             .handle_terminal_run(&AgentRun {
                 id: failed_response_id,
                 ticket_id: Some(fx.ticket_id),
-                    chat_session_id: None,
-                    chat_message_id: None,
+                chat_session_id: None,
+                chat_message_id: None,
                 agent_id: fx.engineer_agent_id,
                 job_type: "respond_to_mention".into(),
                 status: RunStatus::Failed,
@@ -3183,8 +3161,8 @@ mod tests {
         let human_chat_run = AgentRun {
             id: Uuid::new_v4(),
             ticket_id: Some(fx.ticket_id),
-                    chat_session_id: None,
-                    chat_message_id: None,
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id: fx.pm_agent_id,
             job_type: "respond_to_mention".into(),
             status: RunStatus::Succeeded,
@@ -4521,8 +4499,8 @@ mod tests {
         let run = AgentRun {
             id: fx.run_id,
             ticket_id: Some(fx.ticket_id),
-                    chat_session_id: None,
-                    chat_message_id: None,
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id: fx.engineer_agent_id,
             job_type: "work_on_ticket".into(),
             status: RunStatus::Queued,
@@ -4631,8 +4609,8 @@ mod tests {
         let second_run = AgentRun {
             id: second_run_id,
             ticket_id: Some(fx.ticket_id),
-                    chat_session_id: None,
-                    chat_message_id: None,
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id: fx.engineer_agent_id,
             job_type: "work_on_ticket".into(),
             status: RunStatus::Queued,

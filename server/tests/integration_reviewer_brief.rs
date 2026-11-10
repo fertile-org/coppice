@@ -59,7 +59,10 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
         .await
         .unwrap();
     let shown = get_ticket(&app, &with_brief, &cookie, &csrf).await;
-    assert_eq!(shown["reviewerBrief"]["howItWorks"], "The parser reads the header first.");
+    assert_eq!(
+        shown["reviewerBrief"]["howItWorks"],
+        "The parser reads the header first."
+    );
 
     std::env::set_var("MOCK_AGENT_RESPONSE", "done");
     let without_brief = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;

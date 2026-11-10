@@ -112,7 +112,10 @@ impl RunStreamHandle {
         &self,
         source: Arc<Mutex<crate::sessions::session_snapshot::SessionSnapshot>>,
     ) {
-        *self.snapshot_source.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
+        *self
+            .snapshot_source
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
 
     /// The live session changed; idle checkpoints wait for this to settle.
@@ -248,7 +251,9 @@ impl RunStreamRegistry {
         let (snapshot_version, _) = watch::channel(0);
         let artifact_log = self.artifacts.as_ref().map(|(dir, max_bytes)| {
             RunArtifactLog::start(
-                std::path::Path::new(dir).join("runs").join(run_id.to_string()),
+                std::path::Path::new(dir)
+                    .join("runs")
+                    .join(run_id.to_string()),
                 *max_bytes,
             )
         });

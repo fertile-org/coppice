@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn run_artifact_paths() {
-        let paths = RunArtifactPaths::new("/data/artifacts", "550e8400-e29b-41d4-a716-446655440000");
+        let paths =
+            RunArtifactPaths::new("/data/artifacts", "550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(
             paths.terminal_log.display().to_string(),
             "/data/artifacts/runs/550e8400-e29b-41d4-a716-446655440000/terminal.log"
@@ -132,7 +133,8 @@ mod tests {
 
     #[test]
     fn run_artifact_paths_includes_session_snapshot() {
-        let paths = RunArtifactPaths::new("/data/artifacts", "550e8400-e29b-41d4-a716-446655440000");
+        let paths =
+            RunArtifactPaths::new("/data/artifacts", "550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(
             paths.session_snapshot.display().to_string(),
             "/data/artifacts/runs/550e8400-e29b-41d4-a716-446655440000/session.snapshot.json"
@@ -144,10 +146,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let artifacts_dir = temp.path().join("artifacts");
         let run_id = "550e8400-e29b-41d4-a716-446655440000";
-        let paths = RunArtifactPaths::new(
-            artifacts_dir.to_str().expect("utf8"),
-            run_id,
-        );
+        let paths = RunArtifactPaths::new(artifacts_dir.to_str().expect("utf8"), run_id);
         assert!(!paths.meta_json.parent().expect("parent").exists());
 
         ArtifactService::write_meta(

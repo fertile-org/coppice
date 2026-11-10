@@ -1,6 +1,6 @@
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
-use crate::sessions::{LiveMessage, run_registry::RunStreamHandle};
+use crate::sessions::{run_registry::RunStreamHandle, LiveMessage};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -189,7 +189,8 @@ mod tests {
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
         let mut publisher = KiloConsolePublisher::new();
-        let contract = r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
+        let contract =
+            r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 
         publisher.handle_json(
             &handle,

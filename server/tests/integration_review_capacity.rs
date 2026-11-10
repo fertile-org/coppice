@@ -250,8 +250,7 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
     common::set_ticket_repo(&app, &reopened, &repo_id, &cookie, &csrf).await;
     common::setup_worktree_with_commit(&local_path, worktrees.path(), "test-repo", &reopened);
     let agent_id =
-        common::create_agent_with_preset_key(&app, "backend_engineer", "Ada", &cookie, &csrf)
-            .await;
+        common::create_agent_with_preset_key(&app, "backend_engineer", "Ada", &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &reopened, &agent_id, &cookie, &csrf).await;
     let to_review = app
         .clone()

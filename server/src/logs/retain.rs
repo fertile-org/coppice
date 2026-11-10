@@ -1061,7 +1061,12 @@ mod tests {
             .sum();
         assert!(total <= cap, "logs are {total} bytes after the sweep");
         let active = crate::logs::segments::current_target_name(dir.path()).expect("current");
-        assert!(dir.path().join(&active).is_file(), "the active segment stays");
-        appender.write_record(line.as_bytes()).expect("still writable");
+        assert!(
+            dir.path().join(&active).is_file(),
+            "the active segment stays"
+        );
+        appender
+            .write_record(line.as_bytes())
+            .expect("still writable");
     }
 }

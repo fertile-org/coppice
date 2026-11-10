@@ -4,6 +4,7 @@ use crate::domain::knowledge::{
     source_type_to_str, status_from_str, status_to_str, type_from_str, type_to_str,
     KnowledgeItemView, KnowledgeRevisionInput,
 };
+use crate::knowledge::freshness::Freshness;
 use crate::knowledge::retrieval::SimilarKnowledgeNeighbor;
 use crate::middleware::admin::AdminUser;
 use crate::services::context_budget::{render_entry, KnowledgeEntryFields};
@@ -18,7 +19,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use crate::knowledge::freshness::Freshness;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::sync::Arc;
@@ -35,7 +35,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_knowledge).patch(edit_knowledge),
         )
         .route("/api/knowledge/{item_id}/similar", get(similar_knowledge))
-        .route("/api/knowledge/{item_id}/freshness", get(knowledge_freshness))
+        .route(
+            "/api/knowledge/{item_id}/freshness",
+            get(knowledge_freshness),
+        )
         .route("/api/knowledge/{item_id}/feedback", get(knowledge_feedback))
         .route(
             "/api/knowledge/{item_id}/flags/dismiss",

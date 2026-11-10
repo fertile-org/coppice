@@ -3,19 +3,13 @@ use crate::domain::user::User;
 use crate::middleware::admin::AdminUser;
 use crate::services::user_service::{UserError, UserService};
 use crate::AppState;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 
 pub fn routes() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/api/users", get(list_users).post(create_user))
+    Router::new().route("/api/users", get(list_users).post(create_user))
 }
 
 #[derive(Serialize)]

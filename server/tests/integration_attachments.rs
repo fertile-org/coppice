@@ -22,7 +22,13 @@ async fn upload(app: &axum::Router, name: &str, contents: &str, cookie: &str, cs
     Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
 }
 
-async fn set_ticket_attachments(app: &axum::Router, ticket_id: &str, ids: &[Uuid], cookie: &str, csrf: &str) {
+async fn set_ticket_attachments(
+    app: &axum::Router,
+    ticket_id: &str,
+    ids: &[Uuid],
+    cookie: &str,
+    csrf: &str,
+) {
     let res = app
         .clone()
         .oneshot(common::json_request(
@@ -59,7 +65,14 @@ async fn attachments_are_removed_once_nothing_references_them() {
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
 
     // Uploads up to the 10 MiB cap are accepted, not cut off at axum's 2 MB default.
-    let big = upload(&app, "big.txt", &"x".repeat(3 * 1024 * 1024), &cookie, &csrf).await;
+    let big = upload(
+        &app,
+        "big.txt",
+        &"x".repeat(3 * 1024 * 1024),
+        &cookie,
+        &csrf,
+    )
+    .await;
     let kept = upload(&app, "kept.txt", "keep me", &cookie, &csrf).await;
     let dropped = upload(&app, "dropped.txt", "drop me", &cookie, &csrf).await;
     set_ticket_attachments(&app, &ticket_id, &[big, kept, dropped], &cookie, &csrf).await;
@@ -86,7 +99,10 @@ async fn attachments_are_removed_once_nothing_references_them() {
     assert!(!row_exists(&pool, abandoned).await);
     assert!(!artifacts.path().join(abandoned.to_string()).exists());
     assert!(row_exists(&pool, fresh).await);
-    assert!(row_exists(&pool, kept).await, "a referenced attachment stays");
+    assert!(
+        row_exists(&pool, kept).await,
+        "a referenced attachment stays"
+    );
 }
 
 #[tokio::test]

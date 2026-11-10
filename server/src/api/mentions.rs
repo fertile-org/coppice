@@ -31,14 +31,20 @@ async fn ignore_mention(
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let mention_svc = MentionService::new(pool);
-    let mention = mention_svc.get(mention_id).await.map_err(map_mention_error)?;
+    let mention = mention_svc
+        .get(mention_id)
+        .await
+        .map_err(map_mention_error)?;
     mention_svc
         .mark_ignored(mention_id)
         .await
         .map_err(map_mention_error)?;
 
     let ticket_svc = TicketService::new(pool);
-    let ticket = ticket_svc.get(mention.ticket_id).await.map_err(map_ticket_error)?;
+    let ticket = ticket_svc
+        .get(mention.ticket_id)
+        .await
+        .map_err(map_ticket_error)?;
     let updated = ticket_svc
         .update_status(
             mention.ticket_id,

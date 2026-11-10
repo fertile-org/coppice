@@ -52,12 +52,21 @@ async fn ticket_comments_page_newest_first() {
     let expected: Vec<String> = (1..=450).rev().map(|n| format!("comment {n}")).collect();
     assert_eq!(seen, expected);
 
-    let small = get(&app, &format!("/api/tickets/{ticket_id}/comments?limit=5"), &cookie, &csrf).await;
+    let small = get(
+        &app,
+        &format!("/api/tickets/{ticket_id}/comments?limit=5"),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert!(small.headers().contains_key("x-next-before"));
     assert_eq!(common::json_body(small).await.as_array().unwrap().len(), 5);
     let bad = get(
         &app,
-        &format!("/api/tickets/{ticket_id}/comments?before={}", Uuid::new_v4()),
+        &format!(
+            "/api/tickets/{ticket_id}/comments?before={}",
+            Uuid::new_v4()
+        ),
         &cookie,
         &csrf,
     )
@@ -65,7 +74,16 @@ async fn ticket_comments_page_newest_first() {
     assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
 }
 
-async fn chat_with_messages(count: i64, body: &str) -> (std::sync::Arc<coppice_server::AppState>, axum::Router, String, String, Uuid) {
+async fn chat_with_messages(
+    count: i64,
+    body: &str,
+) -> (
+    std::sync::Arc<coppice_server::AppState>,
+    axum::Router,
+    String,
+    String,
+    Uuid,
+) {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
@@ -81,7 +99,8 @@ async fn chat_with_messages(count: i64, body: &str) -> (std::sync::Arc<coppice_s
         .await
         .unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
-    let session = Uuid::parse_str(common::json_body(created).await["id"].as_str().unwrap()).unwrap();
+    let session =
+        Uuid::parse_str(common::json_body(created).await["id"].as_str().unwrap()).unwrap();
     sqlx::query(
         r#"
         INSERT INTO chat_messages (id, session_id, seq, role, body)
@@ -104,7 +123,13 @@ async fn opening_a_long_chat_loads_one_page() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (_state, app, cookie, csrf, session) = chat_with_messages(5000, "message").await;
 
-    let res = get(&app, &format!("/api/chat/sessions/{session}/messages"), &cookie, &csrf).await;
+    let res = get(
+        &app,
+        &format!("/api/chat/sessions/{session}/messages"),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::OK);
     let page = common::json_body(res).await;
     let messages = page["messages"].as_array().unwrap();
@@ -152,7 +177,14 @@ async fn the_model_transcript_matches_reading_the_whole_chat() {
         .collect();
     let service = ChatService::new(state.db.as_ref().unwrap());
     for budget in [50, 300, 5_000, 40_000] {
-        let paged = service.format_model_transcript(session, budget).await.unwrap();
-        assert_eq!(paged, bound_rendered_transcript(&blocks, budget), "budget {budget}");
+        let paged = service
+            .format_model_transcript(session, budget)
+            .await
+            .unwrap();
+        assert_eq!(
+            paged,
+            bound_rendered_transcript(&blocks, budget),
+            "budget {budget}"
+        );
     }
 }

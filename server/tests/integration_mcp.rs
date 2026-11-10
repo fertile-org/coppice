@@ -1,13 +1,13 @@
 mod common;
 
 use axum::Router;
-use http_body_util::BodyExt;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 use coppice_server::services::knowledge_compaction_service::KnowledgeCompactionService;
 use coppice_server::services::run_service::RunService;
 use coppice_server::services::workspace_settings_service::WorkspaceSettingsService;
 use coppice_server::AppState;
+use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -615,16 +615,22 @@ struct TokenRow {
 }
 
 async fn token_rows(pool: &PgPool, run_id: Uuid) -> Vec<TokenRow> {
-    let rows: Vec<(String, Option<Uuid>, Option<Uuid>, Option<Uuid>, Vec<Uuid>, bool)> =
-        sqlx::query_as(
-            "SELECT context_profile, chat_session_id, ticket_id, board_id, \
+    let rows: Vec<(
+        String,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Vec<Uuid>,
+        bool,
+    )> = sqlx::query_as(
+        "SELECT context_profile, chat_session_id, ticket_id, board_id, \
              compaction_ticket_ids, revoked_at IS NOT NULL \
              FROM run_tool_tokens WHERE run_id = $1",
-        )
-        .bind(run_id)
-        .fetch_all(pool)
-        .await
-        .unwrap();
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
     rows.into_iter()
         .map(
             |(profile, chat_session_id, ticket_id, board_id, compaction_ticket_ids, revoked)| {
@@ -710,7 +716,10 @@ async fn token_revoked_after_run_finishes() {
     // marked succeeded, so it must already be visible here.
     let tokens = token_rows(&pool, run_id).await;
     assert_eq!(tokens.len(), 1);
-    assert!(tokens[0].revoked, "token must be revoked once the run finished");
+    assert!(
+        tokens[0].revoked,
+        "token must be revoked once the run finished"
+    );
 }
 
 #[tokio::test]
@@ -923,10 +932,12 @@ async fn ticket_get_other_board_is_not_found() {
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
 
     let other_board = create_other_board(&fx).await;
-    let other_ticket = common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
+    let other_ticket =
+        common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
 
     for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
-        let (is_error, text) = call_tool(&url, &token, tool, json!({"ticketId": other_ticket})).await;
+        let (is_error, text) =
+            call_tool(&url, &token, tool, json!({"ticketId": other_ticket})).await;
         assert!(is_error, "{tool} should fail");
         assert_eq!(text, "ticket not on this board");
     }
@@ -1000,9 +1011,13 @@ async fn ticket_comments_pages_large_threads() {
     let mut cursor = oldest["nextBefore"].as_str().map(str::to_string);
     let mut seen = 50;
     while let Some(before) = cursor {
-        let page =
-            call_tool_json(&url, &token, "ticket_comments", json!({"limit": 50, "before": before}))
-                .await;
+        let page = call_tool_json(
+            &url,
+            &token,
+            "ticket_comments",
+            json!({"limit": 50, "before": before}),
+        )
+        .await;
         seen += page["comments"].as_array().unwrap().len();
         cursor = page["nextBefore"].as_str().map(str::to_string);
     }
@@ -1101,13 +1116,17 @@ async fn boardless_chat_searches_tickets_across_boards_and_opens_them() {
     assert_eq!(board_of(&home), "Test Board");
     assert_eq!(board_of(&elsewhere), "Other Board");
 
-    let opened =
-        call_tool_json(&url, &token, "ticket_get", json!({"ticketId": elsewhere})).await;
+    let opened = call_tool_json(&url, &token, "ticket_get", json!({"ticketId": elsewhere})).await;
     assert_eq!(opened["id"], elsewhere);
     assert_eq!(opened["title"], "Lantern invoice beta");
     assert_eq!(opened["boardName"], "Other Board");
-    let comments =
-        call_tool_json(&url, &token, "ticket_comments", json!({"ticketId": elsewhere})).await;
+    let comments = call_tool_json(
+        &url,
+        &token,
+        "ticket_comments",
+        json!({"ticketId": elsewhere}),
+    )
+    .await;
     assert!(comments["comments"].is_array());
     let runs = call_tool_json(&url, &token, "ticket_runs", json!({"ticketId": elsewhere})).await;
     assert!(runs["runs"].is_array());
@@ -1222,8 +1241,14 @@ async fn boardless_chat_exposes_no_write_tools() {
     )
     .await;
     let scoped_names = tool_names(&url, &scoped).await;
-    assert!(scoped_names.iter().any(|n| n == "board_list"), "{scoped_names:?}");
-    assert!(!scoped_names.iter().any(|n| n == "comment_post"), "{scoped_names:?}");
+    assert!(
+        scoped_names.iter().any(|n| n == "board_list"),
+        "{scoped_names:?}"
+    );
+    assert!(
+        !scoped_names.iter().any(|n| n == "comment_post"),
+        "{scoped_names:?}"
+    );
 }
 
 #[tokio::test]
@@ -1435,15 +1460,11 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     let url = serve(&fx).await;
     let home = fx.scope.board_id.unwrap();
     let other_board: Uuid = create_other_board(&fx).await.parse().unwrap();
-    let other_agent: Uuid = common::create_test_agent_from_preset(
-        &fx.app,
-        "Other Agent",
-        &fx.cookie,
-        &fx.csrf,
-    )
-    .await
-    .parse()
-    .unwrap();
+    let other_agent: Uuid =
+        common::create_test_agent_from_preset(&fx.app, "Other Agent", &fx.cookie, &fx.csrf)
+            .await
+            .parse()
+            .unwrap();
 
     seed_scoped_knowledge(
         &fx.pool,
@@ -1507,7 +1528,13 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     .await;
 
     let token = mint_scope(&fx, boardless_chat_scope(&fx)).await;
-    let out = call_tool_json(&url, &token, "knowledge_search", json!({"query": "axolotl"})).await;
+    let out = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "axolotl"}),
+    )
+    .await;
     let items = out["items"].as_array().unwrap();
     let titles: Vec<&str> = items.iter().map(|i| i["title"].as_str().unwrap()).collect();
     assert!(titles.contains(&"Axolotl on the home board"), "{out}");
@@ -1541,8 +1568,13 @@ async fn boardless_chat_searches_knowledge_across_boards() {
         },
     )
     .await;
-    let scoped_out =
-        call_tool_json(&url, &scoped, "knowledge_search", json!({"query": "axolotl"})).await;
+    let scoped_out = call_tool_json(
+        &url,
+        &scoped,
+        "knowledge_search",
+        json!({"query": "axolotl"}),
+    )
+    .await;
     let scoped_items = scoped_out["items"].as_array().unwrap();
     let mut scoped_titles: Vec<&str> = scoped_items
         .iter()
@@ -1569,7 +1601,10 @@ async fn boardless_chat_searches_knowledge_across_boards() {
             .cloned()
             .unwrap_or(Value::Null)
     };
-    assert_eq!(scoped_board("Axolotl on the other board"), json!("Other Board"));
+    assert_eq!(
+        scoped_board("Axolotl on the other board"),
+        json!("Other Board")
+    );
     assert!(scoped_board("Axolotl workspace note").is_null());
 
     let compaction = mint_scope(
@@ -1597,7 +1632,11 @@ async fn boardless_chat_searches_knowledge_across_boards() {
         .iter()
         .map(|i| i["title"].as_str().unwrap())
         .collect();
-    assert_eq!(compaction_titles, vec!["Axolotl workspace note"], "{compaction_out}");
+    assert_eq!(
+        compaction_titles,
+        vec!["Axolotl workspace note"],
+        "{compaction_out}"
+    );
 }
 
 #[tokio::test]
@@ -1679,9 +1718,14 @@ async fn knowledge_search_returns_rows_without_content_and_logs_nothing() {
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
     let board_id = fx.scope.board_id.unwrap();
     let long_content = format!("Zebrafish {}", "x".repeat(400));
-    let approved =
-        seed_knowledge_with_content(&fx.pool, board_id, "Approved zebrafish tip", &long_content, "approved")
-            .await;
+    let approved = seed_knowledge_with_content(
+        &fx.pool,
+        board_id,
+        "Approved zebrafish tip",
+        &long_content,
+        "approved",
+    )
+    .await;
     seed_knowledge(&fx.pool, board_id, "Pending zebrafish tip", "pending").await;
     seed_knowledge_with_content(
         &fx.pool,
@@ -1692,7 +1736,13 @@ async fn knowledge_search_returns_rows_without_content_and_logs_nothing() {
     )
     .await;
 
-    let out = call_tool_json(&url, &token, "knowledge_search", json!({"query": "zebrafish"})).await;
+    let out = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "zebrafish"}),
+    )
+    .await;
     assert!(out["note"]
         .as_str()
         .unwrap()
@@ -1704,9 +1754,15 @@ async fn knowledge_search_returns_rows_without_content_and_logs_nothing() {
     assert_eq!(row["title"], "Approved zebrafish tip");
     assert_eq!(row["type"], "test_command");
     assert_eq!(row["snippet"].as_str().unwrap().chars().count(), 200);
-    assert!(row["snippet"].as_str().unwrap().starts_with("Zebrafish xxx"));
+    assert!(row["snippet"]
+        .as_str()
+        .unwrap()
+        .starts_with("Zebrafish xxx"));
     assert!(row["tokens"].as_i64().unwrap() > 0);
-    assert!(row.get("content").is_none() && row.get("revisionId").is_none(), "{row}");
+    assert!(
+        row.get("content").is_none() && row.get("revisionId").is_none(),
+        "{row}"
+    );
     assert!(!out.to_string().contains("BEGIN UNTRUSTED"), "{out}");
 
     let unmatched = call_tool_json(
@@ -1716,13 +1772,17 @@ async fn knowledge_search_returns_rows_without_content_and_logs_nothing() {
         json!({"query": "nonexistentterm"}),
     )
     .await;
-    assert!(unmatched["items"].as_array().unwrap().is_empty(), "{unmatched}");
+    assert!(
+        unmatched["items"].as_array().unwrap().is_empty(),
+        "{unmatched}"
+    );
 
-    let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1")
-        .bind(fx.scope.run_id)
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
+    let logged: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1")
+            .bind(fx.scope.run_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
     assert_eq!(logged, 0, "search must not log usage");
 
     let (is_error, _) = call_tool(&url, &token, "knowledge_search", json!({"query": "  "})).await;
@@ -1880,8 +1940,13 @@ async fn knowledge_get_out_of_scope_is_same_as_unknown() {
         },
     )
     .await;
-    let (is_error, text) =
-        call_tool(&url, &boardless, "knowledge_get", json!({"ids": [visible_item]})).await;
+    let (is_error, text) = call_tool(
+        &url,
+        &boardless,
+        "knowledge_get",
+        json!({"ids": [visible_item]}),
+    )
+    .await;
     assert!(is_error);
     assert_eq!(text, "knowledge item not found");
 }
@@ -1957,15 +2022,30 @@ async fn run_context_is_slim_and_knowledge_arrives_only_via_search() {
         .unwrap();
     let agent_dir = std::path::Path::new(&worktree).join(".agent");
     let context = std::fs::read_to_string(agent_dir.join("context.md")).unwrap();
-    for heading in ["# Agent", "# Task", "# Repository", "# Skills", "# Coppice tools"] {
+    for heading in [
+        "# Agent",
+        "# Task",
+        "# Repository",
+        "# Skills",
+        "# Coppice tools",
+    ] {
         assert!(context.contains(heading), "missing {heading}:\n{context}");
     }
-    assert!(context.contains("Load `coppice-git` before starting."), "{context}");
+    assert!(
+        context.contains("Load `coppice-git` before starting."),
+        "{context}"
+    );
     assert!(context.contains("result_submit"));
-    assert!(!context.contains("Approved zebrafish tip"), "knowledge must not be pre-injected");
+    assert!(
+        !context.contains("Approved zebrafish tip"),
+        "knowledge must not be pre-injected"
+    );
     assert!(!context.contains("```json"));
     for legacy in ["ticket.json", "comments.json", "runs.json"] {
-        assert!(!agent_dir.join(legacy).exists(), "{legacy} must not be written");
+        assert!(
+            !agent_dir.join(legacy).exists(),
+            "{legacy} must not be written"
+        );
     }
 }
 
@@ -2006,8 +2086,13 @@ async fn m06_smoke_fixture_logs_each_approved_revision_once() {
     let pool = state.db.clone().unwrap();
     let board: Uuid = board_id.parse().unwrap();
     let manual = seed_knowledge(&pool, board, "M06 exact retrieval 1-2", "approved").await;
-    let compacted =
-        seed_knowledge(&pool, board, "Use make test-unit while iterating", "approved").await;
+    let compacted = seed_knowledge(
+        &pool,
+        board,
+        "Use make test-unit while iterating",
+        "approved",
+    )
+    .await;
     let pending = seed_knowledge(&pool, board, "Pending exact retrieval marker", "pending").await;
 
     let res = app
@@ -2038,7 +2123,10 @@ async fn m06_smoke_fixture_logs_each_approved_revision_once() {
     logged.sort();
     let mut expected = vec![manual, compacted];
     expected.sort();
-    assert_eq!(logged, expected, "pending revision {pending} must not be used");
+    assert_eq!(
+        logged, expected,
+        "pending revision {pending} must not be used"
+    );
     assert_eq!(
         tool_call_rows(&pool, run_id).await,
         vec![
@@ -2068,17 +2156,28 @@ async fn comment_post_creates_agent_comment() {
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
     let mut events = fx.state.event_bus.subscribe();
 
-    let out = call_tool_json(&url, &token, "comment_post", json!({"body": "Progress note"})).await;
+    let out = call_tool_json(
+        &url,
+        &token,
+        "comment_post",
+        json!({"body": "Progress note"}),
+    )
+    .await;
     let comment_id: Uuid = out["commentId"].as_str().unwrap().parse().unwrap();
 
-    let (author_type, author_id, intent, body, ticket_id): (String, Option<Uuid>, String, String, Uuid) =
-        sqlx::query_as(
-            "SELECT author_type, author_id, intent, body, ticket_id FROM ticket_comments WHERE id = $1",
-        )
-        .bind(comment_id)
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
+    let (author_type, author_id, intent, body, ticket_id): (
+        String,
+        Option<Uuid>,
+        String,
+        String,
+        Uuid,
+    ) = sqlx::query_as(
+        "SELECT author_type, author_id, intent, body, ticket_id FROM ticket_comments WHERE id = $1",
+    )
+    .bind(comment_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
     assert_eq!(author_type, "agent");
     assert_eq!(author_id, Some(fx.scope.agent_id));
     assert_eq!(intent, "progress_update");
@@ -2108,16 +2207,25 @@ async fn comment_post_capped_per_run() {
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
     let limit = fx.state.config.mcp.comment_post_limit;
     for i in 0..limit {
-        call_tool_json(&url, &token, "comment_post", json!({"body": format!("note {i}")})).await;
+        call_tool_json(
+            &url,
+            &token,
+            "comment_post",
+            json!({"body": format!("note {i}")}),
+        )
+        .await;
     }
-    let (is_error, text) = call_tool(&url, &token, "comment_post", json!({"body": "one more"})).await;
+    let (is_error, text) =
+        call_tool(&url, &token, "comment_post", json!({"body": "one more"})).await;
     assert!(is_error);
     assert!(text.contains("limit reached"), "{text}");
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND author_type = 'agent'")
-        .bind(fx.scope.ticket_id.unwrap())
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND author_type = 'agent'",
+    )
+    .bind(fx.scope.ticket_id.unwrap())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
     assert_eq!(count, i64::from(limit));
 }
 
@@ -2148,11 +2256,13 @@ async fn comment_post_cannot_target_other_ticket() {
         .await
         .unwrap();
     assert_eq!(Some(ticket_id), fx.scope.ticket_id);
-    let on_other: i64 = sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1::uuid AND author_type = 'agent'")
-        .bind(&other)
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
+    let on_other: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1::uuid AND author_type = 'agent'",
+    )
+    .bind(&other)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
     assert_eq!(on_other, 0);
 }
 
@@ -2198,11 +2308,13 @@ async fn result_submit_invalid_returns_errors() {
     let token =
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
 
-    let (is_error, text) = call_tool(&url, &token, "result_submit", json!({"status": "nope"})).await;
+    let (is_error, text) =
+        call_tool(&url, &token, "result_submit", json!({"status": "nope"})).await;
     assert!(is_error);
     assert!(text.contains("nope") || text.contains("status"), "{text}");
 
-    let (is_error, text) = call_tool(&url, &token, "result_submit", json!({"status": "done"})).await;
+    let (is_error, text) =
+        call_tool(&url, &token, "result_submit", json!({"status": "done"})).await;
     assert!(is_error);
     assert!(text.contains("summary"), "{text}");
 
@@ -2252,10 +2364,14 @@ async fn result_submit_warns_on_unknown_targets() {
     assert_eq!(out["accepted"], true);
     let warnings = out["warnings"].as_array().unwrap();
     assert!(
-        warnings.iter().any(|w| w.as_str().unwrap().contains("nobody")),
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("nobody")),
         "{warnings:?}"
     );
-    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    let stored = submitted_result(&fx.pool, fx.scope.run_id)
+        .await
+        .expect("stored");
     assert_eq!(stored["summary"], "handoff");
     assert_eq!(stored["status"], "done");
 }
@@ -2301,10 +2417,14 @@ async fn result_submit_warns_on_a_long_plan_and_still_accepts_it() {
     assert_eq!(out["accepted"], true);
     let warnings = out["warnings"].as_array().unwrap();
     assert!(
-        warnings.iter().any(|w| w.as_str().unwrap().contains("12 steps")),
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("12 steps")),
         "{warnings:?}"
     );
-    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    let stored = submitted_result(&fx.pool, fx.scope.run_id)
+        .await
+        .expect("stored");
     assert_eq!(stored["summary"], long);
 }
 
@@ -2332,7 +2452,9 @@ async fn invalid_resubmission_keeps_previous_valid() {
     let (is_error, _) = call_tool(&url, &token, "result_submit", json!({"status": "done"})).await;
     assert!(is_error);
 
-    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    let stored = submitted_result(&fx.pool, fx.scope.run_id)
+        .await
+        .expect("stored");
     assert_eq!(stored["summary"], "first, valid");
 
     // A later valid submission replaces it.
@@ -2343,7 +2465,9 @@ async fn invalid_resubmission_keeps_previous_valid() {
         json!({"status": "done", "summary": "second, valid"}),
     )
     .await;
-    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    let stored = submitted_result(&fx.pool, fx.scope.run_id)
+        .await
+        .expect("stored");
     assert_eq!(stored["summary"], "second, valid");
 }
 
@@ -2416,7 +2540,9 @@ async fn final_json_fallback_without_submission() {
     assert!(submitted_result(&pool, run_id).await.is_none());
     let bodies = agent_comment_bodies(&pool, run_id).await;
     assert!(
-        bodies.iter().any(|b| b.contains("Mock implementation complete.")),
+        bodies
+            .iter()
+            .any(|b| b.contains("Mock implementation complete.")),
         "{bodies:?}"
     );
     std::env::remove_var("MOCK_AGENT_RESPONSE");
@@ -2505,7 +2631,10 @@ async fn stopped_run_revokes_token_and_discards_submission() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(submitted_result(&pool, run_id).await.is_none());
     let bodies = agent_comment_bodies(&pool, run_id).await;
-    assert!(bodies.is_empty(), "no agent result comment expected: {bodies:?}");
+    assert!(
+        bodies.is_empty(),
+        "no agent result comment expected: {bodies:?}"
+    );
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 
@@ -2524,7 +2653,14 @@ fn copy_tree(src: &std::path::Path, dst: &std::path::Path) {
     }
 }
 
-async fn api(app: &Router, method: &str, uri: &str, body: Value, cookie: &str, csrf: &str) -> Value {
+async fn api(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    body: Value,
+    cookie: &str,
+    csrf: &str,
+) -> Value {
     let res = app
         .clone()
         .oneshot(common::json_request(
@@ -2551,7 +2687,13 @@ async fn api(app: &Router, method: &str, uri: &str, body: Value, cookie: &str, c
 /// agent gets it. Returns the run id and the plugin id.
 async fn run_ticket_with_sample_plugin(
     assign: bool,
-) -> (Arc<AppState>, Uuid, Uuid, Vec<tempfile::TempDir>, common::AgentTestEnv) {
+) -> (
+    Arc<AppState>,
+    Uuid,
+    Uuid,
+    Vec<tempfile::TempDir>,
+    common::AgentTestEnv,
+) {
     let run = sample_plugin_run(assign).await;
     (run.state, run.run_id, run.plugin_id, run.dirs, run.env)
 }
@@ -2572,8 +2714,7 @@ async fn sample_plugin_run(assign: bool) -> SamplePluginRun {
         common::bootstrap_and_login_with_gateway("mcp/plugin_skill_tool_call").await;
     let plugins = tempfile::tempdir().unwrap();
     copy_tree(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures/plugins/sample-plugin"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/plugins/sample-plugin"),
         &plugins.path().join("sample-plugin"),
     );
     let dir = api(
@@ -3610,10 +3751,18 @@ async fn freshness_of(fx: &RunFixture, revision_id: Uuid) -> (String, Value) {
     let url = serve(fx).await;
     let token =
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let search =
-        call_tool_json(&url, &token, "knowledge_search", json!({"query": "mulberry"})).await;
+    let search = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "mulberry"}),
+    )
+    .await;
     let row = &search["items"].as_array().unwrap()[0];
-    let state = row["freshness"].as_str().expect("freshness on row").to_string();
+    let state = row["freshness"]
+        .as_str()
+        .expect("freshness on row")
+        .to_string();
     let item = item_of(&fx.pool, revision_id).await;
     let got = call_tool_json(&url, &token, "knowledge_get", json!({"ids": [item]})).await;
     let entry = got["items"][0].clone();
@@ -3790,8 +3939,13 @@ async fn knowledge_flag_outdated_shows_on_item_and_does_not_retire_it() {
     .await;
     assert_eq!(out["recorded"], true, "{out}");
 
-    let search =
-        call_tool_json(&url, &token, "knowledge_search", json!({"query": "mulberry"})).await;
+    let search = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "mulberry"}),
+    )
+    .await;
     assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
     let status: String = sqlx::query_scalar("SELECT status FROM knowledge_items WHERE id = $1")
         .bind(item)
@@ -4109,10 +4263,16 @@ async fn propose_creates_pending_with_source_and_citations() {
     .await
     .unwrap();
     assert_eq!(cites.len(), 2, "{cites:?}");
-    let readme = cites.iter().find(|c| c.1 == "README.md").expect("README.md");
+    let readme = cites
+        .iter()
+        .find(|c| c.1 == "README.md")
+        .expect("README.md");
     assert_eq!(readme.0, Some(repo_id));
     assert!(readme.2.is_some());
-    let missing = cites.iter().find(|c| c.1 == "gone/missing.txt").expect("missing");
+    let missing = cites
+        .iter()
+        .find(|c| c.1 == "gone/missing.txt")
+        .expect("missing");
     assert!(missing.2.is_none());
 }
 
@@ -4197,8 +4357,7 @@ async fn close_match_returns_existing_item() {
             "Elderberry backups run hourly on weekdays.",
         ),
     ] {
-        let out =
-            call_tool_json(&url, &token, "knowledge_propose", proposal(title, content)).await;
+        let out = call_tool_json(&url, &token, "knowledge_propose", proposal(title, content)).await;
         assert_eq!(out["status"], "existing", "{out}");
         assert_eq!(
             out["itemId"].as_str().unwrap(),
@@ -4313,7 +4472,10 @@ async fn propose_not_listed_in_chat_or_compaction() {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert!(!names.contains(&"knowledge_propose"), "{profile:?} {names:?}");
+        assert!(
+            !names.contains(&"knowledge_propose"),
+            "{profile:?} {names:?}"
+        );
         let (is_error, _) = call_tool(
             &url,
             &token,
@@ -4351,12 +4513,20 @@ async fn proposed_item_is_not_searchable_until_approved() {
         &url,
         &token,
         "knowledge_propose",
-        proposal("Persimmon cache rule", "Persimmon keys must include the board id."),
+        proposal(
+            "Persimmon cache rule",
+            "Persimmon keys must include the board id.",
+        ),
     )
     .await;
     let item = out["itemId"].as_str().unwrap().to_string();
-    let search =
-        call_tool_json(&url, &token, "knowledge_search", json!({"query": "persimmon"})).await;
+    let search = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "persimmon"}),
+    )
+    .await;
     assert!(search["items"].as_array().unwrap().is_empty(), "{search}");
     let (is_error, _) = call_tool(&url, &token, "knowledge_get", json!({"ids": [item]})).await;
     assert!(is_error);
@@ -4371,8 +4541,13 @@ async fn proposed_item_is_not_searchable_until_approved() {
     )
     .await;
     assert_eq!(approved["status"], "approved", "{approved}");
-    let search =
-        call_tool_json(&url, &token, "knowledge_search", json!({"query": "persimmon"})).await;
+    let search = call_tool_json(
+        &url,
+        &token,
+        "knowledge_search",
+        json!({"query": "persimmon"}),
+    )
+    .await;
     assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
 }
 

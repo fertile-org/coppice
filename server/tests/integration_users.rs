@@ -91,8 +91,7 @@ async fn member_cannot_create_user() {
         .unwrap();
     assert_eq!(create.status(), StatusCode::CREATED);
 
-    let (member_cookie, member_csrf) =
-        login_as(&app, "member@localhost", "secret123").await;
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
 
     let res = app
         .clone()

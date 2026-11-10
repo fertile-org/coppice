@@ -1,3 +1,4 @@
+use crate::domain::chat_action::KNOWLEDGE_TYPES;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::knowledge::{
     confidence_from_str, type_from_str, KnowledgeConfidence, KnowledgeRevisionInput,
@@ -8,13 +9,12 @@ use crate::knowledge::citations::{
 };
 use crate::knowledge::freshness::{freshness_for, Freshness};
 use crate::knowledge::retrieval::{fetch_visible, retrieve, RetrievalScope};
-use crate::domain::chat_action::KNOWLEDGE_TYPES;
 use crate::mcp::tools::{ToolCtx, ToolError};
-use crate::services::knowledge_service::{
-    find_close_item, KnowledgeError, KnowledgeService, RunProposal,
-};
 use crate::services::context_budget::{
     record_usage, render_knowledge, ByteTokenCounter, RenderedKnowledge, KNOWLEDGE_DATA_NOTE,
+};
+use crate::services::knowledge_service::{
+    find_close_item, KnowledgeError, KnowledgeService, RunProposal,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -272,10 +272,9 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
     let content = text("content")?.to_string();
     let confidence = match args.get("confidence").filter(|v| !v.is_null()) {
         None => KnowledgeConfidence::Medium,
-        Some(v) => v
-            .as_str()
-            .and_then(confidence_from_str)
-            .ok_or_else(|| ToolError::InvalidArgs("confidence must be low, medium or high".into()))?,
+        Some(v) => v.as_str().and_then(confidence_from_str).ok_or_else(|| {
+            ToolError::InvalidArgs("confidence must be low, medium or high".into())
+        })?,
     };
     let requested: Vec<String> = match args.get("citations").filter(|v| !v.is_null()) {
         None => Vec::new(),
@@ -284,9 +283,9 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
             .ok_or_else(|| ToolError::InvalidArgs("citations must be an array of paths".into()))?
             .iter()
             .map(|p| {
-                p.as_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| ToolError::InvalidArgs("citations must be an array of paths".into()))
+                p.as_str().map(str::to_string).ok_or_else(|| {
+                    ToolError::InvalidArgs("citations must be an array of paths".into())
+                })
             })
             .collect::<Result<_, _>>()?,
     };
@@ -352,7 +351,11 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
         )));
     }
     if let Some(close) = find_close_item(&mut tx, board_id, &input.title, &input.content).await? {
-        let status = if close.rejected { "rejected" } else { "existing" };
+        let status = if close.rejected {
+            "rejected"
+        } else {
+            "existing"
+        };
         return Ok(json!({ "itemId": close.item_id, "status": status }));
     }
     let item_id = KnowledgeService::new(ctx.pool, &ctx.state.config.knowledge)
@@ -446,7 +449,10 @@ pub(crate) async fn tool_scope(ctx: &ToolCtx<'_>) -> Result<Option<RetrievalScop
         .await?;
         return Ok(Some(RetrievalScope::Boards(boards)));
     }
-    Ok(ctx.scope.board_id.map(|id| RetrievalScope::Boards(vec![id])))
+    Ok(ctx
+        .scope
+        .board_id
+        .map(|id| RetrievalScope::Boards(vec![id])))
 }
 
 fn response(items: Vec<Value>) -> Value {

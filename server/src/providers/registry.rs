@@ -92,7 +92,11 @@ fn build_acp_cli(
     model_providers: &[String],
 ) -> Option<BuiltConnector> {
     Some(BuiltConnector {
-        provider: Arc::new(AcpCliProvider::new(spec, command.to_string(), run_timeout_secs)),
+        provider: Arc::new(AcpCliProvider::new(
+            spec,
+            command.to_string(),
+            run_timeout_secs,
+        )),
         models: Arc::new(AcpCliModels::new(
             spec,
             command.to_string(),
@@ -103,22 +107,42 @@ fn build_acp_cli(
 
 fn build_copilot(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.copilot;
-    build_acp_cli(acp_cli::COPILOT, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+    build_acp_cli(
+        acp_cli::COPILOT,
+        &cfg.command,
+        cfg.run_timeout_secs,
+        &cfg.model_providers,
+    )
 }
 
 fn build_qwen_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.qwen_code;
-    build_acp_cli(acp_cli::QWEN_CODE, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+    build_acp_cli(
+        acp_cli::QWEN_CODE,
+        &cfg.command,
+        cfg.run_timeout_secs,
+        &cfg.model_providers,
+    )
 }
 
 fn build_kimi(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.kimi;
-    build_acp_cli(acp_cli::KIMI, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+    build_acp_cli(
+        acp_cli::KIMI,
+        &cfg.command,
+        cfg.run_timeout_secs,
+        &cfg.model_providers,
+    )
 }
 
 fn build_grok(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.grok;
-    build_acp_cli(acp_cli::GROK, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+    build_acp_cli(
+        acp_cli::GROK,
+        &cfg.command,
+        cfg.run_timeout_secs,
+        &cfg.model_providers,
+    )
 }
 
 #[cfg(feature = "mock-provider")]

@@ -111,7 +111,10 @@ fn tool_first_job_label(input: &ContextInput<'_>) -> &'static str {
 }
 
 fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
-    out.push_str(&format!("# Task\n\n**Job:** {}\n\n", tool_first_job_label(input)));
+    out.push_str(&format!(
+        "# Task\n\n**Job:** {}\n\n",
+        tool_first_job_label(input)
+    ));
 
     if input.context_profile == ContextProfile::Conversation {
         out.push_str(
@@ -140,10 +143,9 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
             );
         }
         match (&input.human_request, input.latest_comments) {
-            (Some(human), _) => out.push_str(&format!(
-                "### Latest human message\n\n{}\n\n",
-                human.body
-            )),
+            (Some(human), _) => {
+                out.push_str(&format!("### Latest human message\n\n{}\n\n", human.body))
+            }
             (None, transcript) => out.push_str(&format!(
                 "### Conversation transcript\n\n{}\n\n",
                 transcript.unwrap_or("(No previous messages)")
@@ -212,7 +214,9 @@ fn write_tool_first_repository(out: &mut String, input: &ContextInput<'_>) {
     let Some(repo) = input.repo_name else {
         if input.context_profile == ContextProfile::Conversation {
             if let Some(path) = input.worktree_path {
-                out.push_str(&format!("# Repository\n\n**Working directory:** `{path}`\n\n"));
+                out.push_str(&format!(
+                    "# Repository\n\n**Working directory:** `{path}`\n\n"
+                ));
             }
         }
         return;
@@ -231,7 +235,9 @@ fn write_tool_first_repository(out: &mut String, input: &ContextInput<'_>) {
     if read_only {
         out.push_str("Read-only run: do not edit, stage, or commit files.\n");
     } else if input.context_profile != ContextProfile::HumanChat {
-        out.push_str("Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git.\n");
+        out.push_str(
+            "Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git.\n",
+        );
     }
     out.push('\n');
 }
@@ -301,8 +307,10 @@ mod tests {
         let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
             full_profile_defaults();
         let description: &'static str = Box::leak(
-            format!("## Context\n\n{}", "Refine the polling retry behaviour. ".repeat(60))
-                [..2048]
+            format!(
+                "## Context\n\n{}",
+                "Refine the polling retry behaviour. ".repeat(60)
+            )[..2048]
                 .to_string()
                 .into_boxed_str(),
         );
@@ -456,10 +464,18 @@ mod tests {
             "# Coppice tools\n",
         ]
         .iter()
-        .map(|heading| md.find(heading).unwrap_or_else(|| panic!("missing {heading}")))
+        .map(|heading| {
+            md.find(heading)
+                .unwrap_or_else(|| panic!("missing {heading}"))
+        })
         .collect();
-        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{positions:?}");
-        assert!(md.contains("Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git."));
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{positions:?}"
+        );
+        assert!(md.contains(
+            "Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git."
+        ));
         // The bulky legacy inputs are fetched via tools, not embedded.
         assert!(!md.contains("Refine the polling retry behaviour."));
         assert!(!md.contains("Please keep the retry window configurable"));
@@ -512,7 +528,9 @@ mod tests {
             mode_label: "Agent",
         });
         let md = build_tool_first_context(&input, &test_skills(), Some("coppice-git"));
-        let human = md.find("## Human request (read this first)").expect("human");
+        let human = md
+            .find("## Human request (read this first)")
+            .expect("human");
         let ticket = md.find("## Ticket\n").expect("ticket");
         assert!(human < ticket);
         assert!(md.contains("Please fix the retry logic in the poller."));

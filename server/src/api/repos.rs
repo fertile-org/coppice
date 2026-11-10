@@ -1,20 +1,20 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::code_reviews::map_code_review_error;
 use crate::domain::repo::{verification_status_to_str, Repo};
-use crate::middleware::admin::AdminUser;
 use crate::domain::substatus::TicketStatus;
+use crate::middleware::admin::AdminUser;
 use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FileContent, FilePatch,
 };
 use crate::services::planning_service::PlanningService;
-use crate::services::reviewer_brief::file_outside_plan;
-use crate::services::ticket_service::{TicketError, TicketService};
 use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
     RepoGitService,
 };
-use crate::services::repo_verifier::inspect_local_path;
 use crate::services::repo_service::{RepoError, RepoService};
+use crate::services::repo_verifier::inspect_local_path;
+use crate::services::reviewer_brief::file_outside_plan;
+use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -394,9 +394,8 @@ async fn default_branch_sync(
     AdminUser(_): AdminUser,
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        RepoGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
     let status = repo_git_service(&state, pool)
         .default_branch_sync_status(repo_id)
         .await
@@ -409,9 +408,8 @@ async fn fetch_default_branch(
     AdminUser(_): AdminUser,
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        RepoGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
     let status = repo_git_service(&state, pool)
         .fetch_default_branch(repo_id)
         .await
@@ -424,9 +422,8 @@ async fn push_default_branch(
     AdminUser(_): AdminUser,
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<PushDefaultBranchResult>, RepoGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        RepoGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
     let result = repo_git_service(&state, pool)
         .push_default_branch(repo_id)
         .await
@@ -439,9 +436,8 @@ async fn pull_default_branch(
     AdminUser(_): AdminUser,
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<PullDefaultBranchResult>, RepoGitApiError> {
-    let pool = pool_from_state(&state).map_err(|code| {
-        RepoGitApiError::Message(code, "Database unavailable.".into())
-    })?;
+    let pool = pool_from_state(&state)
+        .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
     let result = repo_git_service(&state, pool)
         .pull_default_branch(repo_id)
         .await
@@ -455,10 +451,7 @@ async fn list_repo_worktrees(
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let worktrees = service
         .list_worktrees(repo_id)
         .await
@@ -472,10 +465,7 @@ async fn list_repo_branches(
     Path(repo_id): Path<Uuid>,
 ) -> Result<Json<BranchesResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let branches = service
         .list_branches(repo_id)
         .await
@@ -490,10 +480,7 @@ async fn get_repo_diff(
     Query(query): Query<DiffQuery>,
 ) -> Result<Json<DiffSummary>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let mut diff = service
         .diff_summary(
             repo_id,
@@ -552,10 +539,7 @@ async fn get_repo_diff_file(
     Query(query): Query<DiffFileQuery>,
 ) -> Result<Json<FilePatch>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let patch = service
         .file_patch(
             repo_id,
@@ -576,10 +560,7 @@ async fn get_repo_diff_file_content(
     Query(query): Query<FileContentQuery>,
 ) -> Result<Json<FileContent>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let content = service
         .file_content(
             repo_id,

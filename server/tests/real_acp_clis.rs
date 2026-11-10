@@ -54,10 +54,7 @@ async fn read_only_turn(spec: AcpCliSpec, command: &str) {
     )
     .unwrap();
     let provider = AcpCliProvider::new(spec, command.to_string(), 600);
-    let result = provider
-        .run(input(dir.path()))
-        .await
-        .expect("turn");
+    let result = provider.run(input(dir.path())).await.expect("turn");
     assert!(!dir.path().join("bash-ran").exists(), "shell ran");
     assert!(!dir.path().join("wrote.txt").exists(), "write ran");
     match result {
@@ -113,6 +110,12 @@ async fn grok_read_only_run_in_a_temp_folder_is_refused() {
     let provider = AcpCliProvider::new(acp_cli::GROK, "grok-not-installed".into(), 60);
     let err = provider.run(input(dir.path())).await.expect_err("refused");
     let text = err.to_string();
-    assert!(text.contains("can't be kept read-only in a temp folder"), "{text}");
-    assert!(!text.contains("grok-not-installed"), "it must not try to start: {text}");
+    assert!(
+        text.contains("can't be kept read-only in a temp folder"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("grok-not-installed"),
+        "it must not try to start: {text}"
+    );
 }

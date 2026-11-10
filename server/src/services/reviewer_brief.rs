@@ -57,8 +57,7 @@ impl<'a> ReviewerBriefService<'a> {
             look_here_first.as_deref(),
         ) {
             Some(brief) => {
-                let commit_sha =
-                    crate::services::human_review_service::normalize_sha(commit_sha);
+                let commit_sha = crate::services::human_review_service::normalize_sha(commit_sha);
                 sqlx::query(
                     r#"
                     INSERT INTO ticket_reviewer_briefs (
@@ -314,7 +313,8 @@ mod tests {
         assert_eq!(stored["changesFromPlan"], "Dropped the cache.");
         assert_eq!(stored["lookHereFirst"], "src/lib.rs");
 
-        let legacy = r#"{"status":"done","summary":"ok","changedFiles":[],"testsRun":[],"blockers":[]}"#;
+        let legacy =
+            r#"{"status":"done","summary":"ok","changedFiles":[],"testsRun":[],"blockers":[]}"#;
         let legacy: AgentRunResult = serde_json::from_str(legacy).unwrap();
         let stored = serde_json::to_value(&legacy).unwrap();
         assert!(stored.get("howItWorks").is_none());

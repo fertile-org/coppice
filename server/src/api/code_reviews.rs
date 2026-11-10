@@ -124,10 +124,7 @@ async fn submit_code_review(
     Json(input): Json<SubmitReviewInput>,
 ) -> Result<(StatusCode, Json<SubmitReviewResponse>), SubmitReviewError> {
     let pool = pool_from_state(&state).map_err(SubmitReviewError::Status)?;
-    let service = CodeReviewService::new(
-        pool,
-        state.config.agent.worktrees_path.clone().into(),
-    );
+    let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
     let response = service
         .submit_review(user.id, input)
         .await

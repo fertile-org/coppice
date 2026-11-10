@@ -218,32 +218,30 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         .list_for_ticket(ticket.ticket.id)
         .await
         .map_err(|err| ToolError::Internal(err.into()))?;
-    body["designs"] = json!(
-        designs
-            .iter()
-            .map(|set| {
-                json!({
-                    "title": set.title,
-                    "options": set.options.iter().map(|option| json!({
-                        "id": option.id,
-                        "title": option.title,
-                    })).collect::<Vec<_>>(),
-                    "chosen": set.chosen.as_ref().map(|chosen| json!({
-                        "id": chosen.id,
-                        "title": chosen.title,
-                    })),
-                    "recommended": set.recommended.as_ref().map(|option| json!({
-                        "id": option.id,
-                        "title": option.title,
-                    })),
-                    "selected": set.selected.as_ref().map(|option| json!({
-                        "id": option.id,
-                        "title": option.title,
-                    })),
-                })
+    body["designs"] = json!(designs
+        .iter()
+        .map(|set| {
+            json!({
+                "title": set.title,
+                "options": set.options.iter().map(|option| json!({
+                    "id": option.id,
+                    "title": option.title,
+                })).collect::<Vec<_>>(),
+                "chosen": set.chosen.as_ref().map(|chosen| json!({
+                    "id": chosen.id,
+                    "title": chosen.title,
+                })),
+                "recommended": set.recommended.as_ref().map(|option| json!({
+                    "id": option.id,
+                    "title": option.title,
+                })),
+                "selected": set.selected.as_ref().map(|option| json!({
+                    "id": option.id,
+                    "title": option.title,
+                })),
             })
-            .collect::<Vec<_>>()
-    );
+        })
+        .collect::<Vec<_>>());
     body["selectedDesign"] = crate::mcp::tools::design::selected_design_json(
         &DesignService::new(ctx.pool, &ctx.state.config.storage.artifacts_dir),
         ticket.ticket.id,
@@ -318,11 +316,7 @@ pub async fn call_ticket_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     }
 
     // The session board picks the focus repo. Conversation search ignores it.
-    let search_board = if workspace {
-        None
-    } else {
-        ctx.scope.board_id
-    };
+    let search_board = if workspace { None } else { ctx.scope.board_id };
     let tickets = TicketService::new(ctx.pool)
         .search(search_board, query, status, limit as i64)
         .await
@@ -371,7 +365,10 @@ mod tests {
         let (body, criteria) =
             split_ticket_description("Fix it.\n\n## Acceptance criteria\n- [ ] Works\n");
         assert_eq!(body, "Fix it.");
-        assert_eq!(criteria.as_deref(), Some("## Acceptance criteria\n- [ ] Works"));
+        assert_eq!(
+            criteria.as_deref(),
+            Some("## Acceptance criteria\n- [ ] Works")
+        );
     }
 
     #[test]
@@ -387,6 +384,9 @@ mod tests {
         let description = "Fix it.\n- [ ] Split on `## Acceptance criteria` only as a line\n\n## Acceptance criteria\n- [ ] Works";
         let (body, criteria) = split_ticket_description(description);
         assert!(body.ends_with("only as a line"), "{body}");
-        assert_eq!(criteria.as_deref(), Some("## Acceptance criteria\n- [ ] Works"));
+        assert_eq!(
+            criteria.as_deref(),
+            Some("## Acceptance criteria\n- [ ] Works")
+        );
     }
 }

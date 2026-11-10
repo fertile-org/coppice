@@ -2124,12 +2124,13 @@ async fn folded_stopwords_match_coppice_unaccent() {
         "và", "của", "là", "các", "cho", "với", "trong", "được", "có", "không", "này", "một",
         "những", "để", "khi", "thì", "đã", "sẽ", "từ", "theo", "cũng", "như", "nếu", "vào", "ra",
     ];
-    let folded: Vec<String> =
-        sqlx::query_scalar("SELECT coppice_unaccent(w) FROM unnest($1::text[]) WITH ORDINALITY AS t(w, n) ORDER BY n")
-            .bind(&accented[..])
-            .fetch_all(state.db.as_ref().unwrap())
-            .await
-            .unwrap();
+    let folded: Vec<String> = sqlx::query_scalar(
+        "SELECT coppice_unaccent(w) FROM unnest($1::text[]) WITH ORDINALITY AS t(w, n) ORDER BY n",
+    )
+    .bind(&accented[..])
+    .fetch_all(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
     assert_eq!(folded, FOLDED_STOPWORDS);
 }
 
@@ -2749,7 +2750,10 @@ async fn full_run_context_lists_matching_titles_only() {
     assert!(index.contains("Use smoke checks"), "{index}");
     assert!(index.contains(&ids[0]), "{index}");
     assert!(!index.contains("Rotate credentials"), "{index}");
-    assert!(!index.contains("make test-unit"), "content stays out: {index}");
+    assert!(
+        !index.contains("make test-unit"),
+        "content stays out: {index}"
+    );
 
     let nothing = coppice_server::knowledge::index::build_run_index(
         pool,
@@ -2900,7 +2904,11 @@ async fn editing_an_item_keeps_its_citations() {
             (repo_id, "src/b.rs".to_string(), sha.clone()),
         ]
     );
-    assert_eq!(citations_of(&pool, revision).await.len(), 2, "old revision is untouched");
+    assert_eq!(
+        citations_of(&pool, revision).await.len(),
+        2,
+        "old revision is untouched"
+    );
 }
 
 #[tokio::test]
@@ -2920,13 +2928,25 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
     // The near-duplicate assist copies a pending item onto an approved neighbor.
     let neighbor = create_candidate(&app, &board_id, &cookie, &csrf, "Neighbor").await;
     let neighbor_id = neighbor["id"].as_str().unwrap();
-    add_citation(&pool, neighbor["revisionId"].as_str().unwrap(), repo_id, "neighbor.rs", &sha)
-        .await;
+    add_citation(
+        &pool,
+        neighbor["revisionId"].as_str().unwrap(),
+        repo_id,
+        "neighbor.rs",
+        &sha,
+    )
+    .await;
     let approved = approve_item(&app, neighbor_id, 1, &cookie, &csrf).await;
     let pending = create_candidate(&app, &board_id, &cookie, &csrf, "Pending copy").await;
     let pending_id = pending["id"].as_str().unwrap();
-    add_citation(&pool, pending["revisionId"].as_str().unwrap(), repo_id, "pending.rs", &sha)
-        .await;
+    add_citation(
+        &pool,
+        pending["revisionId"].as_str().unwrap(),
+        repo_id,
+        "pending.rs",
+        &sha,
+    )
+    .await;
 
     let mut body = supersede_body(
         &board_id,
@@ -2965,8 +2985,14 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
     // The Supersede dialog rewrites the superseded item itself.
     let original = create_candidate(&app, &board_id, &cookie, &csrf, "Original").await;
     let original_id = original["id"].as_str().unwrap();
-    add_citation(&pool, original["revisionId"].as_str().unwrap(), repo_id, "original.rs", &sha)
-        .await;
+    add_citation(
+        &pool,
+        original["revisionId"].as_str().unwrap(),
+        repo_id,
+        "original.rs",
+        &sha,
+    )
+    .await;
     let approved = approve_item(&app, original_id, 1, &cookie, &csrf).await;
     let (status, rewritten) = mutate(
         &app,
@@ -2990,11 +3016,24 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
 }
 
 /// An approved item, ready to be flagged: (item id, active revision id).
-async fn approved_item(app: &Router, board_id: &str, title: &str, cookie: &str, csrf: &str) -> (String, Uuid) {
+async fn approved_item(
+    app: &Router,
+    board_id: &str,
+    title: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (String, Uuid) {
     let created = create_candidate(app, board_id, cookie, csrf, title).await;
     let id = created["id"].as_str().unwrap().to_string();
     let approved = approve_item(app, &id, 1, cookie, csrf).await;
-    (id, approved["activeRevisionId"].as_str().unwrap().parse().unwrap())
+    (
+        id,
+        approved["activeRevisionId"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    )
 }
 
 /// One agent verdict, `age_secs` old.
@@ -3047,13 +3086,24 @@ async fn flagged_filter_lists_approved_items_with_open_flags_most_recent_first()
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (older, older_rev) = approved_item(&app, &board_id, "Flagged first", &cookie, &csrf).await;
     let (newer, newer_rev) = approved_item(&app, &board_id, "Flagged last", &cookie, &csrf).await;
-    let (confirmed, confirmed_rev) = approved_item(&app, &board_id, "Confirmed", &cookie, &csrf).await;
-    let (superseded, superseded_rev) = approved_item(&app, &board_id, "Replaced", &cookie, &csrf).await;
+    let (confirmed, confirmed_rev) =
+        approved_item(&app, &board_id, "Confirmed", &cookie, &csrf).await;
+    let (superseded, superseded_rev) =
+        approved_item(&app, &board_id, "Replaced", &cookie, &csrf).await;
     let _unflagged = approved_item(&app, &board_id, "Unflagged", &cookie, &csrf).await;
     add_feedback(&pool, &older, older_rev, "wrong", "Older", None, 60).await;
     add_feedback(&pool, &newer, newer_rev, "outdated", "Newer", None, 10).await;
     add_feedback(&pool, &confirmed, confirmed_rev, "confirmed", "", None, 10).await;
-    add_feedback(&pool, &superseded, superseded_rev, "wrong", "Gone", None, 10).await;
+    add_feedback(
+        &pool,
+        &superseded,
+        superseded_rev,
+        "wrong",
+        "Gone",
+        None,
+        10,
+    )
+    .await;
     let replacement = Uuid::new_v4();
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'pending', 1)")
         .bind(replacement)
@@ -3078,7 +3128,10 @@ async fn flagged_filter_lists_approved_items_with_open_flags_most_recent_first()
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    assert_eq!(flagged_titles(&app, &cookie, &csrf).await, ["Flagged last", "Flagged first"]);
+    assert_eq!(
+        flagged_titles(&app, &cookie, &csrf).await,
+        ["Flagged last", "Flagged first"]
+    );
 
     let (_, first) = get_json(&app, "/api/knowledge?flagged=true&limit=1", &cookie, &csrf).await;
     assert_eq!(first["items"][0]["title"], "Flagged last");
@@ -3114,10 +3167,24 @@ async fn feedback_endpoint_returns_open_flags_with_reason_and_agent() {
     let (item, rev) = approved_item(&app, &board_id, "Has flags", &cookie, &csrf).await;
     add_feedback(&pool, &item, rev, "confirmed", "", Some(agent), 300).await;
     add_feedback(&pool, &item, rev, "wrong", "<b>Not</b> true", None, 120).await;
-    add_feedback(&pool, &item, rev, "outdated", "Moved to make test-unit", Some(agent), 60).await;
+    add_feedback(
+        &pool,
+        &item,
+        rev,
+        "outdated",
+        "Moved to make test-unit",
+        Some(agent),
+        60,
+    )
+    .await;
 
-    let (status, body) =
-        get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    let (status, body) = get_json(
+        &app,
+        &format!("/api/knowledge/{item}/feedback"),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let flags = body["items"].as_array().unwrap();
     assert_eq!(flags.len(), 2, "{body}");
@@ -3151,16 +3218,26 @@ async fn dismissing_closes_open_flags_and_later_flags_reopen() {
     .await;
     assert_eq!(status, StatusCode::OK, "{view}");
     assert_eq!(view["openFlagCount"], 0);
-    assert_eq!(view["status"], "approved", "dismissing leaves the item as it is");
+    assert_eq!(
+        view["status"], "approved",
+        "dismissing leaves the item as it is"
+    );
     assert_eq!(view["version"], 2, "dismissing does not change the item");
     assert!(flagged_titles(&app, &cookie, &csrf).await.is_empty());
-    let (_, body) = get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    let (_, body) = get_json(
+        &app,
+        &format!("/api/knowledge/{item}/feedback"),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert!(body["items"].as_array().unwrap().is_empty(), "{body}");
-    let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_feedback WHERE item_id = $1")
-        .bind(item.parse::<Uuid>().unwrap())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let kept: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM knowledge_feedback WHERE item_id = $1")
+            .bind(item.parse::<Uuid>().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(kept, 2, "dismissed rows stay for the audit trail");
 
     add_feedback(&pool, &item, rev, "wrong", "Three", None, 0).await;
@@ -3264,14 +3341,24 @@ async fn flag_endpoints_check_auth_and_unknown_ids() {
         )
         .await
         .unwrap();
-    assert_eq!(no_csrf.status(), StatusCode::FORBIDDEN, "CSRF token is required");
+    assert_eq!(
+        no_csrf.status(),
+        StatusCode::FORBIDDEN,
+        "CSRF token is required"
+    );
 
     sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
         .execute(&pool)
         .await
         .unwrap();
     assert_eq!(dismiss(item.clone()).await, StatusCode::FORBIDDEN);
-    let (status, body) = get_json(&app, &format!("/api/knowledge/{item}/feedback"), &cookie, &csrf).await;
+    let (status, body) = get_json(
+        &app,
+        &format!("/api/knowledge/{item}/feedback"),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "members can read: {body}");
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
 }

@@ -516,7 +516,6 @@ impl OpenCodeClient {
                     break;
                 };
                 for line in lines_in_chunk {
-
                     let Some(data) = line.strip_prefix("data: ") else {
                         continue;
                     };
@@ -592,7 +591,6 @@ impl OpenCodeClient {
                     break;
                 };
                 for line in lines_in_chunk {
-
                     let Some(data) = line.strip_prefix("data: ") else {
                         continue;
                     };
@@ -675,7 +673,10 @@ mod sse_buffer_tests {
         let line = "data: {\"text\":\"héllo\"}\n".as_bytes();
         let split = line.iter().position(|b| *b == 0xC3).unwrap() + 1;
         assert!(buffer.push(&line[..split]).unwrap().is_empty());
-        assert_eq!(buffer.push(&line[split..]).unwrap(), vec!["data: {\"text\":\"héllo\"}"]);
+        assert_eq!(
+            buffer.push(&line[split..]).unwrap(),
+            vec!["data: {\"text\":\"héllo\"}"]
+        );
     }
 
     #[test]

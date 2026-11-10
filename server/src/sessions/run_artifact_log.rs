@@ -113,13 +113,14 @@ impl RotatingFile {
     /// room for one active segment.
     fn prune(&self) -> std::io::Result<()> {
         let budget = self.max_bytes.saturating_sub(self.segment_max());
-        let mut segments: Vec<(u64, PathBuf, u64)> = numbered_segments(&self.dir, self.stem, self.ext)
-            .into_iter()
-            .map(|(n, path)| {
-                let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                (n, path, len)
-            })
-            .collect();
+        let mut segments: Vec<(u64, PathBuf, u64)> =
+            numbered_segments(&self.dir, self.stem, self.ext)
+                .into_iter()
+                .map(|(n, path)| {
+                    let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    (n, path, len)
+                })
+                .collect();
         let mut total: u64 = segments.iter().map(|(_, _, len)| len).sum();
         while total > budget && !segments.is_empty() {
             let (_, path, len) = segments.remove(0);

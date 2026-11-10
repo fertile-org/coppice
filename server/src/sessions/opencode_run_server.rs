@@ -415,7 +415,10 @@ mod tests {
         let with_mcp: serde_json::Value =
             serde_json::from_str(&opencode_run_config(Some(&access), true)).expect("parse config");
         assert_eq!(with_mcp["permission"]["bash"], "deny");
-        assert_eq!(with_mcp["mcp"][SERVER_NAME]["url"], "http://127.0.0.1:5000/mcp");
+        assert_eq!(
+            with_mcp["mcp"][SERVER_NAME]["url"],
+            "http://127.0.0.1:5000/mcp"
+        );
         assert!(!with_mcp.to_string().contains("secret-run-token"));
     }
 

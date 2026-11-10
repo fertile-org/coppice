@@ -620,7 +620,10 @@ mod tests {
         assert_eq!(review_cap_limit(None, invalid), Ok(None));
         assert_eq!(review_cap_limit(Some(1), invalid), Ok(Some(1)));
         assert_eq!(review_cap_limit(Some(0), invalid), Err(invalid.to_string()));
-        assert_eq!(review_cap_limit(Some(-1), invalid), Err(invalid.to_string()));
+        assert_eq!(
+            review_cap_limit(Some(-1), invalid),
+            Err(invalid.to_string())
+        );
     }
 
     #[test]

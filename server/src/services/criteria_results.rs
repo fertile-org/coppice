@@ -89,7 +89,12 @@ impl<'a> CriteriaResultsService<'a> {
 fn normalize(text: &str) -> String {
     let lower = text.to_lowercase();
     let mut core = lower.as_str();
-    for marker in ["(verified by", "— verified by", "- verified by", "verified by:"] {
+    for marker in [
+        "(verified by",
+        "— verified by",
+        "- verified by",
+        "verified by:",
+    ] {
         if let Some(at) = core.find(marker) {
             core = &core[..at];
         }
@@ -111,7 +116,10 @@ pub fn criteria_view(
 ) -> Vec<CriterionView> {
     let current = stored.filter(|stored| {
         reviewed_sha.is_some_and(|reviewed| {
-            crate::services::human_review_service::reviewed_sha_matches(&stored.commit_sha, reviewed)
+            crate::services::human_review_service::reviewed_sha_matches(
+                &stored.commit_sha,
+                reviewed,
+            )
         })
     });
     criteria
@@ -176,7 +184,10 @@ mod tests {
         );
         let view = criteria_view(&criteria, Some(&stored), Some("ABC123"));
         assert!(view.iter().all(|item| item.status == CriterionStatus::Met));
-        assert_eq!(view[0].evidence.as_deref(), Some("evidence for refuses the drag"));
+        assert_eq!(
+            view[0].evidence.as_deref(),
+            Some("evidence for refuses the drag")
+        );
     }
 
     #[test]
@@ -184,12 +195,19 @@ mod tests {
         let criteria = vec!["One".to_string(), "Two".to_string(), "Three".to_string()];
         let stored = stored(
             "abc",
-            vec![result("one", CriterionStatus::Met), result("two", CriterionStatus::NotMet)],
+            vec![
+                result("one", CriterionStatus::Met),
+                result("two", CriterionStatus::NotMet),
+            ],
         );
         let view = criteria_view(&criteria, Some(&stored), Some("abc"));
         assert_eq!(
             view.iter().map(|item| item.status).collect::<Vec<_>>(),
-            vec![CriterionStatus::Met, CriterionStatus::NotMet, CriterionStatus::NotChecked]
+            vec![
+                CriterionStatus::Met,
+                CriterionStatus::NotMet,
+                CriterionStatus::NotChecked
+            ]
         );
     }
 
@@ -217,15 +235,22 @@ mod tests {
             ]
         }))
         .unwrap();
-        let AgentRunResult::Done { criteria_results, .. } = done else {
+        let AgentRunResult::Done {
+            criteria_results, ..
+        } = done
+        else {
             panic!("done");
         };
         assert_eq!(criteria_results.len(), 2);
         assert_eq!(criteria_results[1].status, CriterionStatus::NotChecked);
-        let missing: AgentRunResult =
-            serde_json::from_value(serde_json::json!({"status": "done", "summary": "s", "criteriaResults": "nope"}))
-                .unwrap();
-        let AgentRunResult::Done { criteria_results, .. } = missing else {
+        let missing: AgentRunResult = serde_json::from_value(
+            serde_json::json!({"status": "done", "summary": "s", "criteriaResults": "nope"}),
+        )
+        .unwrap();
+        let AgentRunResult::Done {
+            criteria_results, ..
+        } = missing
+        else {
             panic!("done");
         };
         assert!(criteria_results.is_empty());

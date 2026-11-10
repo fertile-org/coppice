@@ -149,7 +149,14 @@ pub(super) async fn execute_compaction(
     let result = match provider_result {
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
-            best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after cancel");
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                None,
+                "after cancel",
+            );
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
@@ -163,11 +170,19 @@ pub(super) async fn execute_compaction(
                 "after provider error",
             );
             state.run_streams.remove(run.id);
-            return Err(anyhow::Error::new(err)
-                .context(format!("connector `{connector_name}` knowledge compaction failed")));
+            return Err(anyhow::Error::new(err).context(format!(
+                "connector `{connector_name}` knowledge compaction failed"
+            )));
         }
     };
-    best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after compaction");
+    best_effort_persist_artifacts(
+        state,
+        &stream,
+        run.id,
+        connector_name,
+        None,
+        "after compaction",
+    );
     state.run_streams.remove(run.id);
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -183,7 +198,9 @@ pub(super) async fn execute_compaction(
             anyhow::bail!("compaction agent reported blocked: {summary}")
         }
         AgentRunResult::Continued { .. } => {
-            anyhow::bail!("compaction agent returned `continued`; compaction must finish in one run")
+            anyhow::bail!(
+                "compaction agent returned `continued`; compaction must finish in one run"
+            )
         }
     };
 

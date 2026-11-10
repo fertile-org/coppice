@@ -1,7 +1,7 @@
 pub mod builtin;
-pub mod coppice_git_skill;
 pub mod capability;
 pub mod catalog;
+pub mod coppice_git_skill;
 pub mod discover;
 pub mod git_install;
 pub mod manifest;

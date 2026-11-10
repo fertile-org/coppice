@@ -174,10 +174,7 @@ impl SessionSnapshot {
         if props.get("sessionID").and_then(|s| s.as_str()) != Some(self.session_id.as_str()) {
             return;
         }
-        let message = props
-            .get("message")
-            .or_else(|| props.get("info"))
-            .cloned();
+        let message = props.get("message").or_else(|| props.get("info")).cloned();
         let Some(message) = message else {
             return;
         };
@@ -491,16 +488,29 @@ mod tests {
             }
         }
         snap.trim_to_budget();
-        assert!(snap.approx_bytes() <= budget, "{} bytes", snap.approx_bytes());
+        assert!(
+            snap.approx_bytes() <= budget,
+            "{} bytes",
+            snap.approx_bytes()
+        );
         // The newest message and its text are kept whole.
-        assert_eq!(message_id_from_value(snap.messages.last().unwrap()), Some("msg_199"));
-        assert_eq!(snap.parts["msg_199"][0]["text"].as_str().unwrap().len(), 20 * 200);
+        assert_eq!(
+            message_id_from_value(snap.messages.last().unwrap()),
+            Some("msg_199")
+        );
+        assert_eq!(
+            snap.parts["msg_199"][0]["text"].as_str().unwrap().len(),
+            20 * 200
+        );
         assert!(!snap.parts.contains_key("msg_0"));
         // Deltas for a kept part still land after trimming.
         snap.apply_event(&json!({
             "type": "message.part.delta",
             "properties": { "sessionID": "ses_1", "partID": "prt_199", "field": "text", "delta": "!" }
         }));
-        assert!(snap.parts["msg_199"][0]["text"].as_str().unwrap().ends_with('!'));
+        assert!(snap.parts["msg_199"][0]["text"]
+            .as_str()
+            .unwrap()
+            .ends_with('!'));
     }
 }

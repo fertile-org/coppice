@@ -193,9 +193,7 @@ pub fn validate_revision(input: &mut KnowledgeRevisionInput) -> Result<(), Strin
         KnowledgeScope::Board => {
             return Err("board scope requires boardId and forbids agentId".into())
         }
-        KnowledgeScope::Agent => {
-            return Err("agent scope requires both boardId and agentId".into())
-        }
+        KnowledgeScope::Agent => return Err("agent scope requires both boardId and agentId".into()),
     }
     Ok(())
 }

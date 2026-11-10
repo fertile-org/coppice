@@ -99,12 +99,7 @@ fn checkout_ahead_of_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
     commit_file(&local, "README.md", "# test\n", "initial");
     git(
         &local,
-        &[
-            "remote",
-            "add",
-            "origin",
-            bare.to_str().expect("utf8"),
-        ],
+        &["remote", "add", "origin", bare.to_str().expect("utf8")],
     );
     git(&local, &["push", "-u", "origin", "main"]);
     let base = rev_parse(&local, "HEAD");
@@ -128,12 +123,7 @@ fn checkout_behind_of_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
     commit_file(&local, "README.md", "# test\n", "initial");
     git(
         &local,
-        &[
-            "remote",
-            "add",
-            "origin",
-            bare.to_str().expect("utf8"),
-        ],
+        &["remote", "add", "origin", bare.to_str().expect("utf8")],
     );
     git(&local, &["push", "-u", "origin", "main"]);
     let base = rev_parse(&local, "HEAD");

@@ -55,7 +55,10 @@ pub struct InlineCommentInput {
     pub body: String,
 }
 
-pub fn validate_worktree_path(worktrees_root: &Path, worktree_path: &Path) -> Result<PathBuf, CodeReviewError> {
+pub fn validate_worktree_path(
+    worktrees_root: &Path,
+    worktree_path: &Path,
+) -> Result<PathBuf, CodeReviewError> {
     let canonical_root = worktrees_root
         .canonicalize()
         .map_err(|_| CodeReviewError::InvalidWorktreePath)?;
@@ -101,14 +104,19 @@ pub fn format_review_comment(
     let mut by_path: std::collections::BTreeMap<&str, Vec<&InlineCommentInput>> =
         std::collections::BTreeMap::new();
     for comment in inline_comments {
-        by_path.entry(comment.path.as_str()).or_default().push(comment);
+        by_path
+            .entry(comment.path.as_str())
+            .or_default()
+            .push(comment);
     }
     for (path, comments) in by_path {
         body.push_str(&format!("\n#### `{path}`\n"));
         for comment in comments {
             body.push_str(&format!(
                 "- **L{}** ({}): {}\n",
-                comment.line, comment.side, comment.body.trim()
+                comment.line,
+                comment.side,
+                comment.body.trim()
             ));
         }
     }
@@ -251,12 +259,18 @@ impl<'a> CodeReviewService<'a> {
         }
     }
 
-    pub async fn list_worktrees(&self, repo_id: Uuid) -> Result<Vec<WorktreeSummary>, CodeReviewError> {
-        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
-            RepoError::NotFound => CodeReviewError::RepoNotFound,
-            RepoError::Database(err) => CodeReviewError::Database(err),
-            other => CodeReviewError::Git(other.to_string()),
-        })?;
+    pub async fn list_worktrees(
+        &self,
+        repo_id: Uuid,
+    ) -> Result<Vec<WorktreeSummary>, CodeReviewError> {
+        let repo = RepoService::new(self.pool)
+            .get(repo_id)
+            .await
+            .map_err(|e| match e {
+                RepoError::NotFound => CodeReviewError::RepoNotFound,
+                RepoError::Database(err) => CodeReviewError::Database(err),
+                other => CodeReviewError::Git(other.to_string()),
+            })?;
         if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
             return Err(CodeReviewError::RepoNotReady);
         }
@@ -280,7 +294,8 @@ impl<'a> CodeReviewService<'a> {
                 .strip_prefix("TICKET-")
                 .and_then(|rest| rest.strip_suffix(&suffix))
                 .unwrap_or("");
-            let (ticket_id, ticket_title) = self.lookup_ticket_by_short(repo_id, ticket_short).await?;
+            let (ticket_id, ticket_title) =
+                self.lookup_ticket_by_short(repo_id, ticket_short).await?;
             out.push(WorktreeSummary {
                 path: path.to_string_lossy().into_owned(),
                 branch,
@@ -320,11 +335,14 @@ impl<'a> CodeReviewService<'a> {
     }
 
     pub async fn list_branches(&self, repo_id: Uuid) -> Result<BranchesResponse, CodeReviewError> {
-        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
-            RepoError::NotFound => CodeReviewError::RepoNotFound,
-            RepoError::Database(err) => CodeReviewError::Database(err),
-            other => CodeReviewError::Git(other.to_string()),
-        })?;
+        let repo = RepoService::new(self.pool)
+            .get(repo_id)
+            .await
+            .map_err(|e| match e {
+                RepoError::NotFound => CodeReviewError::RepoNotFound,
+                RepoError::Database(err) => CodeReviewError::Database(err),
+                other => CodeReviewError::Git(other.to_string()),
+            })?;
         if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
             return Err(CodeReviewError::RepoNotReady);
         }
@@ -399,12 +417,7 @@ impl<'a> CodeReviewService<'a> {
             )
             .await?
         } else {
-            git_diff(
-                &ctx.worktree,
-                ignore_whitespace,
-                &[&range, "--", path],
-            )
-            .await?
+            git_diff(&ctx.worktree, ignore_whitespace, &[&range, "--", path]).await?
         };
         if patch.len() > MAX_PATCH_BYTES {
             return Err(CodeReviewError::PatchTooLarge);
@@ -463,11 +476,14 @@ impl<'a> CodeReviewService<'a> {
             return Err(CodeReviewError::Validation("summary is required".into()));
         }
 
-        let repo = RepoService::new(self.pool).get(input.repo_id).await.map_err(|e| match e {
-            RepoError::NotFound => CodeReviewError::RepoNotFound,
-            RepoError::Database(err) => CodeReviewError::Database(err),
-            other => CodeReviewError::Git(other.to_string()),
-        })?;
+        let repo = RepoService::new(self.pool)
+            .get(input.repo_id)
+            .await
+            .map_err(|e| match e {
+                RepoError::NotFound => CodeReviewError::RepoNotFound,
+                RepoError::Database(err) => CodeReviewError::Database(err),
+                other => CodeReviewError::Git(other.to_string()),
+            })?;
         if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
             return Err(CodeReviewError::RepoNotReady);
         }
@@ -553,8 +569,8 @@ impl<'a> CodeReviewService<'a> {
 
         let workflow_action = match input.workflow_action.as_deref() {
             Some("move_to_in_progress") => {
-                let engineer_id = engineer_id
-                    .ok_or_else(|| CodeReviewError::Validation(PICK_ENGINEER.into()))?;
+                let engineer_id =
+                    engineer_id.ok_or_else(|| CodeReviewError::Validation(PICK_ENGINEER.into()))?;
                 // Some(None) clears the stale waiting_for_agent label. None would keep it.
                 ticket_service
                     .update_status(ticket_id, TicketStatus::InProgress, Some(None), Some(None))
@@ -593,11 +609,14 @@ impl<'a> CodeReviewService<'a> {
     ) -> Result<WorktreeRepoContext, CodeReviewError> {
         validate_branch_name(base_branch).map_err(|_| CodeReviewError::InvalidBranchName)?;
 
-        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
-            RepoError::NotFound => CodeReviewError::RepoNotFound,
-            RepoError::Database(err) => CodeReviewError::Database(err),
-            other => CodeReviewError::Git(other.to_string()),
-        })?;
+        let repo = RepoService::new(self.pool)
+            .get(repo_id)
+            .await
+            .map_err(|e| match e {
+                RepoError::NotFound => CodeReviewError::RepoNotFound,
+                RepoError::Database(err) => CodeReviewError::Database(err),
+                other => CodeReviewError::Git(other.to_string()),
+            })?;
         if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
             return Err(CodeReviewError::RepoNotReady);
         }
@@ -661,14 +680,8 @@ fn parse_diff_files(
             continue;
         }
         let mut parts = line.split('\t');
-        let additions = parts
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let deletions = parts
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let additions = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let deletions = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         if let Some(path) = parts.next() {
             stats.insert(numstat_new_path(path), (additions, deletions));
         }

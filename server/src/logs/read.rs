@@ -188,7 +188,12 @@ struct Merged {
 }
 
 impl Merged {
-    fn open(dir: &Path, filter: &LogFilter, cursor: &Cursor, keep: usize) -> Result<Self, QueryError> {
+    fn open(
+        dir: &Path,
+        filter: &LogFilter,
+        cursor: &Cursor,
+        keep: usize,
+    ) -> Result<Self, QueryError> {
         let jsonl = if filter.source == Some(Source::Postgres) {
             None
         } else {
@@ -220,7 +225,11 @@ impl Merged {
 
     fn next(&mut self) -> Result<Option<Located>, QueryError> {
         let from_jsonl = match (
-            self.jsonl.as_mut().map(JsonlStream::peek).transpose()?.flatten(),
+            self.jsonl
+                .as_mut()
+                .map(JsonlStream::peek)
+                .transpose()?
+                .flatten(),
             self.postgres.get(self.postgres_next),
         ) {
             (None, None) => return Ok(None),
@@ -309,7 +318,9 @@ impl JsonlStream {
         segments.sort_by_key(|file| std::cmp::Reverse((file.log.date, file.log.seg)));
         let bound = match &after {
             None => None,
-            Some((key, offset)) => Some((parse_file_key(key).ok_or(QueryError::BadCursor)?, *offset)),
+            Some((key, offset)) => {
+                Some((parse_file_key(key).ok_or(QueryError::BadCursor)?, *offset))
+            }
         };
         let mut files = std::collections::VecDeque::new();
         for file in segments {
@@ -956,22 +967,41 @@ mod tests {
         let mut yesterday = String::new();
         for i in 0..30 {
             let message = format!("m{i:03}");
-            yesterday.push_str(&jsonl(&format!("{}T01:00:{:02}Z", day(3), i), "INFO", "server", &message, ""));
+            yesterday.push_str(&jsonl(
+                &format!("{}T01:00:{:02}Z", day(3), i),
+                "INFO",
+                "server",
+                &message,
+                "",
+            ));
             yesterday.push('\n');
             expected.push(message);
         }
-        write_zst(&dir.path().join(format!("coppice.{}.jsonl.zst", day(3))), &yesterday);
+        write_zst(
+            &dir.path().join(format!("coppice.{}.jsonl.zst", day(3))),
+            &yesterday,
+        );
         let mut i = 30;
         for seg in 0..3 {
             let mut text = String::new();
             for _ in 0..25 {
                 let message = format!("m{i:03}");
-                text.push_str(&jsonl(&format!("{}T02:{:02}:{:02}Z", day(4), i / 60, i % 60), "INFO", "server", &message, ""));
+                text.push_str(&jsonl(
+                    &format!("{}T02:{:02}:{:02}Z", day(4), i / 60, i % 60),
+                    "INFO",
+                    "server",
+                    &message,
+                    "",
+                ));
                 text.push('\n');
                 expected.push(message);
                 i += 1;
             }
-            fs::write(dir.path().join(format!("coppice.{}.{seg}.jsonl", day(4))), text).expect("write");
+            fs::write(
+                dir.path().join(format!("coppice.{}.{seg}.jsonl", day(4))),
+                text,
+            )
+            .expect("write");
         }
         expected.reverse();
 

@@ -238,8 +238,7 @@ async fn list_sessions_has_active_run_while_turn_queued() {
 
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let agent_id =
-        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf)
-            .await;
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
 
     let created = app
         .clone()
@@ -288,9 +287,9 @@ async fn list_sessions_has_active_run_while_turn_queued() {
 
 #[tokio::test]
 async fn conversation_profile_starts_kilo_read_only_chat() {
+    use coppice_config::KiloCodeProviderConfig;
     use coppice_server::domain::context_profile::ContextProfile;
     use coppice_server::providers::{kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput};
-    use coppice_config::KiloCodeProviderConfig;
 
     let provider = KiloCodeProvider::new(KiloCodeProviderConfig {
         enabled: Some(true),
@@ -326,18 +325,9 @@ async fn conversation_profile_starts_kilo_read_only_chat() {
         .await
         .expect_err("missing kilo binary");
     let message = err.to_string();
-    assert!(
-        !message.contains("cannot enforce read-only"),
-        "{message}"
-    );
-    assert!(
-        !message.contains("Chat isn't available"),
-        "{message}"
-    );
-    assert!(
-        message.contains("kilo-not-installed"),
-        "{message}"
-    );
+    assert!(!message.contains("cannot enforce read-only"), "{message}");
+    assert!(!message.contains("Chat isn't available"), "{message}");
+    assert!(message.contains("kilo-not-installed"), "{message}");
 }
 
 #[tokio::test]
@@ -741,9 +731,7 @@ async fn post_message_with_attachment_persists_summaries() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/chat/sessions/{session_id}/messages"),
-            &format!(
-                r#"{{"body":"see file","attachmentIds":["{attachment_id}"]}}"#
-            ),
+            &format!(r#"{{"body":"see file","attachmentIds":["{attachment_id}"]}}"#),
             &cookie,
             &csrf,
         ))
@@ -752,7 +740,10 @@ async fn post_message_with_attachment_persists_summaries() {
     assert_eq!(posted.status(), StatusCode::CREATED);
     let post_body: serde_json::Value = common::json_body(posted).await;
     assert_eq!(post_body["message"]["attachmentIds"][0], attachment_id);
-    assert_eq!(post_body["message"]["attachments"][0]["filename"], "notes.txt");
+    assert_eq!(
+        post_body["message"]["attachments"][0]["filename"],
+        "notes.txt"
+    );
     assert_eq!(
         post_body["message"]["attachments"][0]["contentType"],
         "text/plain"
@@ -898,9 +889,7 @@ async fn post_message_rejects_disallowed_mime_type() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/chat/sessions/{session_id}/messages"),
-            &format!(
-                r#"{{"body":"bad mime","attachmentIds":["{attachment_id}"]}}"#
-            ),
+            &format!(r#"{{"body":"bad mime","attachmentIds":["{attachment_id}"]}}"#),
             &cookie,
             &csrf,
         ))
@@ -1001,9 +990,7 @@ async fn non_owner_cannot_download_chat_only_attachment() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/chat/sessions/{session_id}/messages"),
-            &format!(
-                r#"{{"body":"secret","attachmentIds":["{attachment_id}"]}}"#
-            ),
+            &format!(r#"{{"body":"secret","attachmentIds":["{attachment_id}"]}}"#),
             &admin_cookie,
             &admin_csrf,
         ))
@@ -1104,9 +1091,7 @@ async fn chat_turn_stages_attachments_into_cwd_and_transcript() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/chat/sessions/{session_id}/messages"),
-            &format!(
-                r#"{{"body":"read the file","attachmentIds":["{attachment_id}"]}}"#
-            ),
+            &format!(r#"{{"body":"read the file","attachmentIds":["{attachment_id}"]}}"#),
             &cookie,
             &csrf,
         ))
@@ -1161,8 +1146,7 @@ async fn chat_turn_stages_attachments_into_cwd_and_transcript() {
     }
     assert!(succeeded, "chat turn should succeed");
     assert!(
-        env.worktrees.path().join("chat").join(session_id).exists()
-            || true,
+        env.worktrees.path().join("chat").join(session_id).exists() || true,
         "session cwd under worktrees"
     );
 }
@@ -1391,7 +1375,11 @@ async fn kilo_chat_resumed_turn_lists_latest_attachment() {
         ))
         .await
         .unwrap();
-    assert!(upload.status().is_success(), "upload failed: {}", upload.status());
+    assert!(
+        upload.status().is_success(),
+        "upload failed: {}",
+        upload.status()
+    );
     let attachment: serde_json::Value = common::json_body(upload).await;
     let attachment_id = attachment["id"].as_str().unwrap().to_string();
 
@@ -1585,10 +1573,7 @@ async fn kilo_chat_resume_failure_retries_once_with_earlier_context() {
     )
     .expect("fake cli env");
 
-    let earlier = format!(
-        "FIRSTUNIQUE older kilo turn\n{}",
-        "PADTOKEN ".repeat(400)
-    );
+    let earlier = format!("FIRSTUNIQUE older kilo turn\n{}", "PADTOKEN ".repeat(400));
     let first = post_chat_message(&app, &cookie, &csrf, &session_id, &earlier).await;
     let first_run = wait_run(&app, &cookie, &csrf, &first).await;
     assert_eq!(
@@ -1831,7 +1816,13 @@ async fn start_chat_session(
     };
     let created = app
         .clone()
-        .oneshot(common::json_request("POST", "/api/chat/sessions", &body, cookie, csrf))
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &body,
+            cookie,
+            csrf,
+        ))
         .await
         .unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
@@ -1877,7 +1868,9 @@ async fn ticket_count(pool: &sqlx::PgPool, board_id: &str) -> i64 {
 }
 
 fn proposal_url(session_id: &str, message_id: &str, proposal_id: &str, action: &str) -> String {
-    format!("/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/{action}")
+    format!(
+        "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/{action}"
+    )
 }
 
 /// Wait for a chat turn to attach a proposal. Returns (message id, proposal id).
@@ -1913,7 +1906,10 @@ async fn await_agent_proposal(
                 proposal["id"].as_str().unwrap().to_string(),
             );
         }
-        assert!(tokio::time::Instant::now() < deadline, "no proposal message");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no proposal message"
+        );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -1957,10 +1953,19 @@ async fn accept_ticket_proposal_creates_one_ticket_then_conflicts() {
         .unwrap();
     assert_eq!(accepted.status(), StatusCode::OK);
     let body: serde_json::Value = common::json_body(accepted).await;
-    let ticket_id = body["ticket"]["id"].as_str().expect("ticket id").to_string();
+    let ticket_id = body["ticket"]["id"]
+        .as_str()
+        .expect("ticket id")
+        .to_string();
     assert_eq!(body["ticket"]["title"], "Fix chat cwd");
-    assert_eq!(body["message"]["actionMetadata"]["proposals"][0]["status"], "created");
-    assert_eq!(body["message"]["actionMetadata"]["proposals"][0]["ticketId"], ticket_id);
+    assert_eq!(
+        body["message"]["actionMetadata"]["proposals"][0]["status"],
+        "created"
+    );
+    assert_eq!(
+        body["message"]["actionMetadata"]["proposals"][0]["ticketId"],
+        ticket_id
+    );
     assert_eq!(ticket_count(pool, &board_id).await, before + 1);
 
     let source: Option<uuid::Uuid> =
@@ -1969,7 +1974,10 @@ async fn accept_ticket_proposal_creates_one_ticket_then_conflicts() {
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(source.map(|id| id.to_string()).as_deref(), Some(session_id.as_str()));
+    assert_eq!(
+        source.map(|id| id.to_string()).as_deref(),
+        Some(session_id.as_str())
+    );
 
     let second = app
         .clone()
@@ -2168,7 +2176,10 @@ async fn accept_knowledge_proposal_creates_knowledge_item() {
     assert_eq!(body["knowledge"]["status"], "pending");
     assert_eq!(body["knowledge"]["sourceType"], "chat_session");
     assert_eq!(body["knowledge"]["sourceId"], session_id);
-    assert_eq!(body["message"]["actionMetadata"]["proposals"][0]["status"], "created");
+    assert_eq!(
+        body["message"]["actionMetadata"]["proposals"][0]["status"],
+        "created"
+    );
     assert_eq!(
         body["message"]["actionMetadata"]["proposals"][0]["knowledgeItemId"],
         knowledge_id
@@ -2221,7 +2232,10 @@ async fn agent_chat_turn_proposes_ticket_until_human_accepts() {
         .unwrap();
     assert_eq!(accepted.status(), StatusCode::OK);
     let body: serde_json::Value = common::json_body(accepted).await;
-    assert_eq!(body["ticket"]["title"], "Harden chat cwd resolution for unbound sessions");
+    assert_eq!(
+        body["ticket"]["title"],
+        "Harden chat cwd resolution for unbound sessions"
+    );
     assert_eq!(ticket_count(pool, &board_id).await, before + 1);
 }
 
@@ -2259,7 +2273,10 @@ async fn agent_chat_turn_proposes_knowledge_until_human_accepts() {
         .fetch_one(pool)
         .await
         .unwrap();
-    assert_eq!(knowledge_rows, 0, "proposal must not create knowledge before accept");
+    assert_eq!(
+        knowledge_rows, 0,
+        "proposal must not create knowledge before accept"
+    );
 
     let accepted = app
         .clone()

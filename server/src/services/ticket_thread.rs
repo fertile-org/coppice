@@ -158,7 +158,10 @@ mod tests {
     #[test]
     fn format_ticket_thread_includes_comments() {
         let agent_id = Uuid::new_v4();
-        let mut comment = sample_comment("Implemented polling retry.", CommentIntent::ImplementationDone);
+        let mut comment = sample_comment(
+            "Implemented polling retry.",
+            CommentIntent::ImplementationDone,
+        );
         comment.author_id = Some(agent_id);
         let mut names = HashMap::new();
         names.insert(agent_id, "Backend Engineer".into());
@@ -192,12 +195,8 @@ mod tests {
 
         let mut names = HashMap::new();
         names.insert(agent_id, "Backend Engineer".into());
-        let summary = format_previous_attempt_summary(
-            &[older, newer, other],
-            agent_id,
-            &names,
-        )
-        .expect("previous attempt summary");
+        let summary = format_previous_attempt_summary(&[older, newer, other], agent_id, &names)
+            .expect("previous attempt summary");
 
         assert!(summary.contains("Backend Engineer"));
         assert!(summary.contains("newer matching update"));
@@ -282,8 +281,8 @@ mod tests {
             .collect();
 
         let legacy = format_ticket_thread(&comments, &names).expect("legacy thread");
-        let expanded = format_ticket_thread_with_limit(&comments, &names, 16_000)
-            .expect("expanded thread");
+        let expanded =
+            format_ticket_thread_with_limit(&comments, &names, 16_000).expect("expanded thread");
         assert!(legacy.len() <= TICKET_THREAD_MAX);
         assert!(expanded.len() <= 16_000);
         assert!(expanded.len() > legacy.len());

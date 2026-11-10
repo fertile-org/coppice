@@ -144,7 +144,10 @@ impl AgentProvider for CursorProvider {
             }
             Err(CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::Stalled { reason, stderr_tail }) => {
+            Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            }) => {
                 return Err(super::terminal::stalled("Cursor", &reason, &stderr_tail));
             }
             Err(CliError::TimedOut { stderr_tail }) => {
@@ -831,8 +834,9 @@ mod tests {
         assert_eq!(mcp_raw, spec.cursor_mcp_json());
         assert!(!mcp_raw.contains("super-secret-run-token"));
 
-        let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
-            .expect("cli config");
+        let cli_raw =
+            std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
+                .expect("cli config");
         assert_eq!(cli_raw, spec.cursor_cli_config(false));
         assert!(!run_dir.join("cursor-home").exists());
 
@@ -864,7 +868,10 @@ mod tests {
         assert!(!merged.to_string().contains("super-secret-run-token"));
 
         drop(guard);
-        assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
+        assert_eq!(
+            std::fs::read_to_string(&mcp_path).expect("restored"),
+            existing
+        );
         assert!(cursor_dir.is_dir(), "pre-existing .cursor must stay");
     }
 
@@ -891,8 +898,9 @@ mod tests {
             Some(config_dir.as_str())
         );
 
-        let cli_raw = std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
-            .expect("cli config");
+        let cli_raw =
+            std::fs::read_to_string(run_dir.join("cursor-config").join("cli-config.json"))
+                .expect("cli config");
         let parsed: serde_json::Value = serde_json::from_str(&cli_raw).expect("cli json");
         assert_eq!(
             parsed["permissions"]["allow"],
@@ -950,7 +958,10 @@ mod tests {
         );
 
         drop(guard);
-        assert_eq!(std::fs::read_to_string(&mcp_path).expect("restored"), existing);
+        assert_eq!(
+            std::fs::read_to_string(&mcp_path).expect("restored"),
+            existing
+        );
     }
 
     #[test]
@@ -985,8 +996,7 @@ mod tests {
         std::fs::create_dir_all(&claude_dir).expect("claude dir");
         let settings = claude_dir.join("settings.json");
         let local = claude_dir.join("settings.local.json");
-        let existing_settings =
-            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch fired"}]}]}}"#;
+        let existing_settings = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch fired"}]}]}}"#;
         let existing_local =
             r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"touch local"}]}]}}"#;
         std::fs::write(&settings, existing_settings).expect("settings");

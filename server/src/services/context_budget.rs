@@ -201,11 +201,8 @@ mod tests {
     fn render_knowledge_drops_whole_entries_that_do_not_fit() {
         let counter = ByteTokenCounter;
         let eligible = vec![retrieved("a", 800, 0.9), retrieved("b", 800, 0.8)];
-        let section = render_knowledge(
-            &eligible,
-            counter.count(KNOWLEDGE_PREAMBLE) + 300,
-            &counter,
-        );
+        let section =
+            render_knowledge(&eligible, counter.count(KNOWLEDGE_PREAMBLE) + 300, &counter);
         assert_eq!(section.entries.len(), 1);
         assert!(section.markdown.contains("Title: a"));
         assert!(!section.markdown.contains("Title: b"));

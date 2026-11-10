@@ -492,7 +492,10 @@ impl LineHandler for ClaudeLines {
 /// `task-notification`, `num_turns` 0) before the prompt even starts; ending
 /// the run there reported "no result contract found". Seen on 2.1.310.
 fn answers_task_notification(result: &serde_json::Value) -> bool {
-    result.pointer("/origin/kind").and_then(|kind| kind.as_str()) == Some("task-notification")
+    result
+        .pointer("/origin/kind")
+        .and_then(|kind| kind.as_str())
+        == Some("task-notification")
 }
 
 impl ClaudeTerminal {
@@ -807,7 +810,11 @@ mod tests {
             let notification_result = json!({ "type": "result", "subtype": "success",
                 "is_error": false, "num_turns": 0, "stop_reason": null, "result": "",
                 "origin": { "kind": "task-notification" }, "permission_denials": [] });
-            for line in [notification, init("bypassPermissions", "connected"), notification_result] {
+            for line in [
+                notification,
+                init("bypassPermissions", "connected"),
+                notification_result,
+            ] {
                 assert!(!h.on_json(&line).stop, "{line}");
             }
             let assistant = json!({ "type": "assistant", "message": { "content": [
@@ -865,7 +872,11 @@ mod tests {
                              "input": { "tool_name": "Write" } } }));
             let replies = h.take_replies();
             assert_eq!(replies.len(), 1);
-            assert!(replies[0].contains("\"permissionDecision\":\"deny\""), "{}", replies[0]);
+            assert!(
+                replies[0].contains("\"permissionDecision\":\"deny\""),
+                "{}",
+                replies[0]
+            );
             assert!(h.take_replies().is_empty());
             // A write run has no gate and writes nothing back.
             let mut write = handler(false);

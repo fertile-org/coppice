@@ -73,14 +73,14 @@ pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>
         return Err("actions must be an array".into());
     };
     if arr.len() > MAX_CHAT_ACTIONS {
-        return Err(format!("actions allows at most {MAX_CHAT_ACTIONS} per turn"));
+        return Err(format!(
+            "actions allows at most {MAX_CHAT_ACTIONS} per turn"
+        ));
     }
     let mut out = Vec::with_capacity(arr.len());
     for (i, item) in arr.iter().enumerate() {
         let action: ChatAction = serde_json::from_value(item.clone()).map_err(|err| {
-            format!(
-                "invalid chat action at index {i}: {err} (unknown or malformed action type)"
-            )
+            format!("invalid chat action at index {i}: {err} (unknown or malformed action type)")
         })?;
         match &action {
             ChatAction::CreateTicket { title, .. } if title.trim().is_empty() => {
@@ -212,24 +212,26 @@ mod tests {
     #[test]
     fn parse_create_ticket_and_knowledge() {
         let value = json!([
-                {
-                    "type": "create_ticket",
-                    "title": "Fix cwd",
-                    "description": "Details",
-                    "boardId": "11111111-1111-1111-1111-111111111111"
-                },
-                {
-                    "type": "create_knowledge",
-                    "title": "Rule",
-                    "content": "Always resolve chat cwd",
-                    "knowledgeType": "coding_convention",
-                    "scope": "board"
-                }
-            ]);
+            {
+                "type": "create_ticket",
+                "title": "Fix cwd",
+                "description": "Details",
+                "boardId": "11111111-1111-1111-1111-111111111111"
+            },
+            {
+                "type": "create_knowledge",
+                "title": "Rule",
+                "content": "Always resolve chat cwd",
+                "knowledgeType": "coding_convention",
+                "scope": "board"
+            }
+        ]);
         let actions = parse_chat_actions(&value).expect("parse");
         assert_eq!(actions.len(), 2);
         match &actions[0] {
-            ChatAction::CreateTicket { title, board_id, .. } => {
+            ChatAction::CreateTicket {
+                title, board_id, ..
+            } => {
                 assert_eq!(title, "Fix cwd");
                 assert!(board_id.is_some());
             }
@@ -250,7 +252,9 @@ mod tests {
         assert!(parse_chat_actions(&json!({ "type": "create_ticket" })).is_err());
         let one = json!({ "type": "create_ticket", "title": "T" });
         let six = json!([one, one, one, one, one, one]);
-        assert!(parse_chat_actions(&six).expect_err("cap").contains("at most 5"));
+        assert!(parse_chat_actions(&six)
+            .expect_err("cap")
+            .contains("at most 5"));
     }
 
     #[test]
@@ -259,13 +263,19 @@ mod tests {
             "type": "create_knowledge", "title": "T", "content": "C", "knowledgeType": "convention"
         }]);
         let err = parse_chat_actions(&bad_type).expect_err("bad type");
-        assert!(err.contains("index 0") && err.contains("coding_convention"), "{err}");
+        assert!(
+            err.contains("index 0") && err.contains("coding_convention"),
+            "{err}"
+        );
 
         let bad_scope = json!([{
             "type": "create_knowledge", "title": "T", "content": "C", "scope": "team"
         }]);
         let err = parse_chat_actions(&bad_scope).expect_err("bad scope");
-        assert!(err.contains("scope must be one of workspace, board, agent"), "{err}");
+        assert!(
+            err.contains("scope must be one of workspace, board, agent"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -284,8 +294,8 @@ mod tests {
 
     #[test]
     fn draft_ticket_title_from_last_human() {
-        let transcript = "### Human\n\nFirst\n\n### Agent\n\nOk\n\n### Human\n\nShip the feature please\n\n";
+        let transcript =
+            "### Human\n\nFirst\n\n### Agent\n\nOk\n\n### Human\n\nShip the feature please\n\n";
         assert_eq!(draft_ticket_title(transcript), "Ship the feature please");
     }
-
 }

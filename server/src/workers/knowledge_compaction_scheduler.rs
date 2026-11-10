@@ -33,7 +33,9 @@ pub fn spawn_knowledge_compaction_scheduler(state: Arc<AppState>) {
                         });
                     }
                 }
-                Err(error) => tracing::warn!(error = %error, "knowledge compaction reconcile failed"),
+                Err(error) => {
+                    tracing::warn!(error = %error, "knowledge compaction reconcile failed")
+                }
             }
             match service.tick(OffsetDateTime::now_utc()).await {
                 Ok(Some(batch)) => tracing::info!(

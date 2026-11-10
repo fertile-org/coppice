@@ -1,12 +1,11 @@
 use crate::config::KnowledgeConfig;
 use crate::domain::agent::Agent;
+use crate::domain::knowledge::scope_from_str;
 use crate::domain::knowledge_compaction::{
     next_scheduled_at, select_within_bytes, BatchStatus, BatchTrigger, CompactionBatch,
 };
-use crate::domain::knowledge::scope_from_str;
 use crate::knowledge::candidates::{
-    SupersedableItem,
-    review_candidates, BatchTicket, CandidateContext, KnowledgeCandidateSpec,
+    review_candidates, BatchTicket, CandidateContext, KnowledgeCandidateSpec, SupersedableItem,
 };
 use crate::knowledge::citations::{
     insert_citations, resolve_anchors, validate_citation_path, ResolvedCitation,
@@ -16,13 +15,13 @@ use crate::knowledge::policy::{policy_decision, PolicyInput};
 use crate::services::knowledge_service::{CompactionProvenance, KnowledgeError, KnowledgeService};
 use crate::services::notification_service::NotificationService;
 use crate::services::run_service::{RunError, RunService};
-use crate::util::truncate::truncate_with_ellipsis;
-use sqlx::Connection;
-use std::collections::{HashMap, HashSet};
 use crate::services::workspace_settings_service::{
     WorkspaceSettingsError, WorkspaceSettingsService,
 };
+use crate::util::truncate::truncate_with_ellipsis;
+use sqlx::Connection;
 use sqlx::{PgPool, Row};
+use std::collections::{HashMap, HashSet};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
@@ -110,7 +109,10 @@ impl<'a> KnowledgeCompactionService<'a> {
 
     /// One scheduler step: continue a successful drain cycle, otherwise start a
     /// scheduled cycle once the interval has elapsed.
-    pub async fn tick(&self, now: OffsetDateTime) -> Result<Option<CompactionBatch>, CompactionError> {
+    pub async fn tick(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<Option<CompactionBatch>, CompactionError> {
         self.reconcile().await?;
         let agent = match self.ready_agent().await {
             Ok(agent) => agent,
@@ -421,16 +423,15 @@ impl<'a> KnowledgeCompactionService<'a> {
                     .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
             })
             .collect();
-        let ticket_repos: HashMap<Uuid, Option<Uuid>> =
-            sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
-                "SELECT id, repo_id FROM tickets WHERE id = ANY($1)",
-            )
-            .bind(first_sources.iter().flatten().copied().collect::<Vec<_>>())
-            .fetch_all(self.pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        let ticket_repos: HashMap<Uuid, Option<Uuid>> = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+            "SELECT id, repo_id FROM tickets WHERE id = ANY($1)",
+        )
+        .bind(first_sources.iter().flatten().copied().collect::<Vec<_>>())
+        .fetch_all(self.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
         // A merge has no source ticket: it takes the repo its superseded
         // item's active revision is already anchored to, if any.
         let merged_ids: Vec<Uuid> = specs
@@ -509,7 +510,10 @@ impl<'a> KnowledgeCompactionService<'a> {
             "#,
         )
         .bind(batch_id)
-        .bind(truncate_with_ellipsis(error_message.trim(), MAX_ERROR_BYTES))
+        .bind(truncate_with_ellipsis(
+            error_message.trim(),
+            MAX_ERROR_BYTES,
+        ))
         .execute(&mut *tx)
         .await?
         .rows_affected()
@@ -563,12 +567,20 @@ impl<'a> KnowledgeCompactionService<'a> {
                     true,
                 ),
             };
-            if !self.fail_batch(batch_id, &message, counts_as_failure).await? {
+            if !self
+                .fail_batch(batch_id, &message, counts_as_failure)
+                .await?
+            {
                 continue;
             }
             if counts_as_failure {
                 NotificationService::new(self.pool)
-                    .create_for_knowledge_compaction_failed(batch_id, Some(run_id), agent_id, &message)
+                    .create_for_knowledge_compaction_failed(
+                        batch_id,
+                        Some(run_id),
+                        agent_id,
+                        &message,
+                    )
                     .await
                     .map_err(|error| match error {
                         crate::services::notification_service::NotificationError::Database(

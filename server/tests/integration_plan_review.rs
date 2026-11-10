@@ -288,10 +288,7 @@ async fn post_plan(
         .insert_plan(ticket, agent_id, CANONICAL_PLAN, None, false)
         .await
         .expect("insert plan");
-    planning
-        .bind_latest_plan(ticket)
-        .await
-        .expect("bind plan");
+    planning.bind_latest_plan(ticket).await.expect("bind plan");
     let moved = app
         .clone()
         .oneshot(common::json_request(
@@ -498,7 +495,9 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     )
     .await;
     assert_eq!(ticket["status"], "plan_review");
-    let body = ticket["pendingPlan"]["markdown"].as_str().expect("pending plan");
+    let body = ticket["pendingPlan"]["markdown"]
+        .as_str()
+        .expect("pending plan");
     assert!(body.contains("## Plan"));
     assert!(body.contains("- [ ] Add the column"));
     assert_eq!(ticket["pendingPlan"]["revision"], 1);
@@ -879,7 +878,13 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
     );
 }
 
-async fn ask_for_changes(app: &axum::Router, ticket_id: &str, comment: &str, cookie: &str, csrf: &str) {
+async fn ask_for_changes(
+    app: &axum::Router,
+    ticket_id: &str,
+    comment: &str,
+    cookie: &str,
+    csrf: &str,
+) {
     let ask = app
         .clone()
         .oneshot(common::json_request(
@@ -974,8 +979,13 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
         .await
         .unwrap()
         .expect("revision");
-    assert_eq!(round_three.requests, vec!["Use Postgres.", "Split the API change."]);
-    assert!(round_three.previous_plan.starts_with("### Changes requested"));
+    assert_eq!(
+        round_three.requests,
+        vec!["Use Postgres.", "Split the API change."]
+    );
+    assert!(round_three
+        .previous_plan
+        .starts_with("### Changes requested"));
     assert!(round_three.previous_plan.contains("- [ ] Add the table"));
 }
 
@@ -987,7 +997,13 @@ async fn post_json(
     csrf: &str,
 ) -> axum::response::Response {
     app.clone()
-        .oneshot(common::json_request("POST", path, &body.to_string(), cookie, csrf))
+        .oneshot(common::json_request(
+            "POST",
+            path,
+            &body.to_string(),
+            cookie,
+            csrf,
+        ))
         .await
         .unwrap()
 }
@@ -1003,8 +1019,7 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     }
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
-    let (ticket_id, git) =
-        open_planned_repo(&app, &state, "plan_questioner", &cookie, &csrf).await;
+    let (ticket_id, git) = open_planned_repo(&app, &state, "plan_questioner", &cookie, &csrf).await;
     let board_id = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await["boardId"]
         .as_str()
         .unwrap()
@@ -1023,13 +1038,22 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     .await;
     assert_eq!(ticket["status"], "plan_review");
     assert_eq!(ticket["hasPlan"], false);
-    assert_eq!(ticket["planQuestions"]["questions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        ticket["planQuestions"]["questions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
     let asked = thread
         .iter()
         .find(|note| note["intent"] == "clarification_request")
         .expect("questions comment");
-    assert!(asked["body"].as_str().unwrap().starts_with(QUESTIONS_COMMENT_TITLE));
+    assert!(asked["body"]
+        .as_str()
+        .unwrap()
+        .starts_with(QUESTIONS_COMMENT_TITLE));
     assert!(thread.iter().all(|note| note["intent"] != "plan"));
     wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
@@ -1042,7 +1066,14 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
         .unwrap();
     assert_eq!(occupancy, 0);
 
-    let approve = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    let approve = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/approve-plan"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(approve.status(), StatusCode::BAD_REQUEST);
     assert_eq!(message(approve).await, APPROVE_WAITING_FOR_ANSWERS);
     let ask = post_json(
@@ -1113,7 +1144,10 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
     let plan = plan_runs(&listed);
     assert_eq!(plan.len(), 2);
-    assert!(plan.iter().all(|run| run["status"] == "succeeded"), "{plan:?}");
+    assert!(
+        plan.iter().all(|run| run["status"] == "succeeded"),
+        "{plan:?}"
+    );
     wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
 }
@@ -1138,7 +1172,10 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
     };
 
     let four: Vec<PlanQuestion> = ["a", "b", "c", "d"].iter().map(|q| question(q)).collect();
-    let err = planning.record_questions(ticket, None, None, &four).await.unwrap_err();
+    let err = planning
+        .record_questions(ticket, None, None, &four)
+        .await
+        .unwrap_err();
     assert_eq!(err.to_string(), PLAN_QUESTIONS_TOO_MANY);
 
     assert!(planning.can_ask_questions(ticket).await.unwrap());
@@ -1162,7 +1199,8 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
         "summary": "",
         "planQuestions": ["a", "b", "c", "d"]
     });
-    let result: coppice_server::providers::AgentRunResult = serde_json::from_value(four_json).unwrap();
+    let result: coppice_server::providers::AgentRunResult =
+        serde_json::from_value(four_json).unwrap();
     let refused = coppice_server::services::result_contract::validate_for_profile(
         &result,
         coppice_server::domain::context_profile::ContextProfile::Full,
@@ -1204,10 +1242,24 @@ async fn a_split_at_plan_review_then_verify_parent() {
     assert_eq!(pending["splits"].as_array().unwrap().len(), 2);
 
     // The split is approved only with the plan.
-    let early = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-splits"), serde_json::json!({}), &cookie, &csrf).await;
+    let early = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/approve-splits"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_ne!(early.status(), StatusCode::OK);
 
-    let approved = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    let approved = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/approve-plan"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(approved.status(), StatusCode::OK);
 
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
@@ -1244,11 +1296,25 @@ async fn a_split_at_plan_review_then_verify_parent() {
     );
     // Only the planning run ran on the parent: no Tech Lead, no work.
     assert_eq!(runs(&app, &ticket_id, &cookie, &csrf).await.len(), 1);
-    let work = post_json(&app, &format!("/api/tickets/{ticket_id}/run-agent"), serde_json::json!({}), &cookie, &csrf).await;
+    let work = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/run-agent"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(work.status(), StatusCode::BAD_REQUEST);
     assert_eq!(message(work).await, UMBRELLA_NO_WORK);
 
-    let not_yet = post_json(&app, &format!("/api/tickets/{ticket_id}/verify-parent"), serde_json::json!({}), &cookie, &csrf).await;
+    let not_yet = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/verify-parent"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(not_yet.status(), StatusCode::BAD_REQUEST);
     assert_eq!(message(not_yet).await, VERIFY_NOT_READY);
 
@@ -1296,7 +1362,9 @@ async fn a_split_at_plan_review_then_verify_parent() {
         .await
         .unwrap();
 
-    let verifier = common::create_agent_with_preset_key(&app, "backend_engineer", "Verifier", &cookie, &csrf).await;
+    let verifier =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "Verifier", &cookie, &csrf)
+            .await;
     sqlx::query("UPDATE agents SET preset_source = 'verifier' WHERE id = $1")
         .bind(Uuid::parse_str(&verifier).unwrap())
         .execute(pool)
@@ -1322,19 +1390,35 @@ async fn a_split_at_plan_review_then_verify_parent() {
         |ticket| ticket["status"] == "wait_for_final_review",
     )
     .await;
-    let criteria = ticket["approvedPlan"]["criteria"].as_array().expect("criteria");
+    let criteria = ticket["approvedPlan"]["criteria"]
+        .as_array()
+        .expect("criteria");
     assert_eq!(criteria[0]["status"], "met");
     assert_eq!(criteria[1]["status"], "not_met");
     let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
     let verification = thread
         .iter()
-        .find(|note| note["body"].as_str().is_some_and(|b| b.starts_with("**Verification**")))
+        .find(|note| {
+            note["body"]
+                .as_str()
+                .is_some_and(|b| b.starts_with("**Verification**"))
+        })
         .expect("verification comment");
     let body = verification["body"].as_str().unwrap();
-    assert!(body.contains("**Met:** Orders persist across restarts"), "{body}");
+    assert!(
+        body.contains("**Met:** Orders persist across restarts"),
+        "{body}"
+    );
     assert!(body.contains("Excluded (archived): Order export"), "{body}");
 
-    let accepted = post_json(&app, &format!("/api/tickets/{ticket_id}/final-approve"), serde_json::json!({}), &cookie, &csrf).await;
+    let accepted = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/final-approve"),
+        serde_json::json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
     assert_eq!(accepted.status(), StatusCode::OK);
     assert_eq!(common::json_body(accepted).await["status"], "done");
 }
@@ -1385,14 +1469,12 @@ async fn plan_count(pool: &sqlx::PgPool, ticket_id: Uuid) -> i64 {
 }
 
 async fn intent_count(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND intent = $2",
-    )
-    .bind(ticket_id)
-    .bind(intent)
-    .fetch_one(pool)
-    .await
-    .unwrap()
+    sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND intent = $2")
+        .bind(ticket_id)
+        .bind(intent)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -1414,7 +1496,10 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
     let first = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(first["pendingPlan"]["revision"], 1);
-    assert_eq!(first["pendingPlan"]["changeRequests"], serde_json::json!([]));
+    assert_eq!(
+        first["pendingPlan"]["changeRequests"],
+        serde_json::json!([])
+    );
     assert_eq!(plan_count(pool, ticket).await, 1);
     assert_eq!(intent_count(pool, ticket, "plan").await, 0);
 
@@ -1435,7 +1520,13 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     assert_eq!(context.requests, vec!["Use Postgres.".to_string()]);
 
     planning
-        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nPostgres.\n", None, false)
+        .insert_plan(
+            ticket,
+            pm,
+            "## Plan\n\n### Approach\nPostgres.\n",
+            None,
+            false,
+        )
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1448,11 +1539,20 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
         .expect("both requests");
     assert_eq!(
         both.requests,
-        vec!["Use Postgres.".to_string(), "Split the API change.".to_string()]
+        vec![
+            "Use Postgres.".to_string(),
+            "Split the API change.".to_string()
+        ]
     );
 
     planning
-        .insert_plan(ticket, pm, "## Plan\n\n### Approach\nSplit store and API.\n", None, false)
+        .insert_plan(
+            ticket,
+            pm,
+            "## Plan\n\n### Approach\nSplit store and API.\n",
+            None,
+            false,
+        )
         .await
         .unwrap();
     planning.bind_latest_plan(ticket).await.unwrap();
@@ -1480,12 +1580,10 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     assert_eq!(intent_count(pool, ticket, "review_feedback").await, 0);
     let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
     assert!(thread.iter().all(|note| note["intent"] != "plan"));
-    assert!(thread
-        .iter()
-        .any(|note| note["body"] == PLAN_APPROVED_NOTE));
-    assert!(!thread
-        .iter()
-        .any(|note| note["body"].as_str().is_some_and(|body| body.contains("### Approach"))));
+    assert!(thread.iter().any(|note| note["body"] == PLAN_APPROVED_NOTE));
+    assert!(!thread.iter().any(|note| note["body"]
+        .as_str()
+        .is_some_and(|body| body.contains("### Approach"))));
 
     let run_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM agent_runs WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
@@ -1563,10 +1661,7 @@ async fn a_second_ask_after_a_failed_revision_appends_on_that_revision() {
     .await
     .unwrap();
     assert_eq!(revision, 1);
-    assert_eq!(
-        change_request,
-        "Use Postgres.\n\nAnd keep the public API."
-    );
+    assert_eq!(change_request, "Use Postgres.\n\nAnd keep the public API.");
     assert_eq!(plan_count(pool, ticket).await, 1);
     let context = PlanningService::new(pool)
         .revision_context(ticket)
@@ -1665,9 +1760,14 @@ async fn inserted_plan_records_the_selected_design() {
         .await
         .expect("create");
     for entry in ["a/index.html", "b/index.html"] {
-        svc.write(created.id, run_id, entry, b"<!doctype html><title>x</title>")
-            .await
-            .expect("write");
+        svc.write(
+            created.id,
+            run_id,
+            entry,
+            b"<!doctype html><title>x</title>",
+        )
+        .await
+        .expect("write");
     }
     let options = ["a", "b"]
         .map(|id| DesignOption {

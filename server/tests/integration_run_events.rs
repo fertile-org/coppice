@@ -14,7 +14,10 @@ use tokio::sync::broadcast::Receiver;
 use uuid::Uuid;
 
 /// The first `agent_run.started` for `ticket_id`, skipping other events.
-async fn next_run_started(events: &mut Receiver<AppEvent>, ticket_id: Uuid) -> (Uuid, Uuid, String) {
+async fn next_run_started(
+    events: &mut Receiver<AppEvent>,
+    ticket_id: Uuid,
+) -> (Uuid, Uuid, String) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let event = tokio::time::timeout_at(deadline, events.recv())
@@ -41,11 +44,10 @@ async fn assign_with_auto_start_publishes_queued_run() {
     if !common::db_available().await {
         return;
     }
-    let (state, app, cookie, csrf) =
-        common::bootstrap_and_login_with_state_config(|config| {
-            config.workflow.auto_start_runs = true;
-        })
-        .await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.workflow.auto_start_runs = true;
+    })
+    .await;
     let pool = state.db.as_ref().expect("db pool");
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
@@ -75,11 +77,10 @@ async fn orchestrator_hand_off_publishes_queued_run() {
     if !common::db_available().await {
         return;
     }
-    let (state, app, cookie, csrf) =
-        common::bootstrap_and_login_with_state_config(|config| {
-            config.workflow.auto_start_runs = true;
-        })
-        .await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.workflow.auto_start_runs = true;
+    })
+    .await;
     let pool = state.db.as_ref().expect("db pool");
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
@@ -140,7 +141,10 @@ async fn orchestrator_hand_off_publishes_queued_run() {
     let (queued_id, agent_id, status) = next_run_started(&mut events, ticket_id).await;
     assert_eq!(status, "queued");
     assert_eq!(agent_id, engineer_id);
-    let queued = RunService::new(pool).get(queued_id).await.expect("queued run");
+    let queued = RunService::new(pool)
+        .get(queued_id)
+        .await
+        .expect("queued run");
     assert_eq!(queued.job_type, "work_on_ticket");
 }
 
@@ -196,7 +200,8 @@ async fn ticket_resume_skips_sessions_from_another_connector() {
         .await
         .unwrap();
 
-    let latest = |connector| runs.latest_ticket_session(ticket_id, agent_id, connector, current_run);
+    let latest =
+        |connector| runs.latest_ticket_session(ticket_id, agent_id, connector, current_run);
     assert_eq!(
         latest("cursor").await.unwrap().as_deref(),
         Some("cursor-uuid")

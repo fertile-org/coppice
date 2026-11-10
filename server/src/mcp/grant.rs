@@ -66,7 +66,10 @@ pub async fn grant_for_run(
 impl RunToolGrant {
     pub async fn revoke(mut self) {
         self.revoked = true;
-        if let Err(err) = TokenService::new(&self.pool).revoke_for_run(self.run_id).await {
+        if let Err(err) = TokenService::new(&self.pool)
+            .revoke_for_run(self.run_id)
+            .await
+        {
             tracing::warn!(run_id = %self.run_id, error = %err, "failed to revoke run tool token");
         }
     }

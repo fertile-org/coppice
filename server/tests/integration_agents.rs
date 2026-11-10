@@ -213,14 +213,9 @@ async fn list_agents_orders_by_role_and_stays_stable_after_edit() {
             .await;
     let tech_lead =
         common::create_agent_with_preset_key(&app, "tech_lead", "TL One", &cookie, &csrf).await;
-    let be_second = common::create_agent_with_preset_key(
-        &app,
-        "backend_engineer",
-        "BE Second",
-        &cookie,
-        &csrf,
-    )
-    .await;
+    let be_second =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE Second", &cookie, &csrf)
+            .await;
     let fe =
         common::create_agent_with_preset_key(&app, "frontend_engineer", "FE One", &cookie, &csrf)
             .await;
@@ -271,7 +266,13 @@ async fn list_agents_orders_by_role_and_stays_stable_after_edit() {
         let csrf = csrf.clone();
         async move {
             let res = app
-                .oneshot(common::json_request("GET", "/api/agents", "", &cookie, &csrf))
+                .oneshot(common::json_request(
+                    "GET",
+                    "/api/agents",
+                    "",
+                    &cookie,
+                    &csrf,
+                ))
                 .await
                 .unwrap();
             assert_eq!(res.status(), StatusCode::OK);
@@ -613,13 +614,12 @@ async fn deleting_agent_with_run_sourced_knowledge_keeps_provenance_without_the_
         .await
         .unwrap();
     assert_eq!(run_count, 0);
-    let (ticket, agent): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
-        "SELECT ticket_id, agent_id FROM knowledge_provenance WHERE run_id = $1",
-    )
-    .bind(run_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let (ticket, agent): (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT ticket_id, agent_id FROM knowledge_provenance WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     assert_eq!(ticket, Some(Uuid::parse_str(&ticket_id).unwrap()));
     assert_eq!(agent, Some(Uuid::parse_str(&agent_id).unwrap()));
 }
@@ -710,13 +710,12 @@ async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
         .await
         .expect("a run that used knowledge can be deleted");
 
-    let (usage_run, usage_rank): (Option<Uuid>, i32) = sqlx::query_as(
-        "SELECT run_id, rank FROM knowledge_usage_logs WHERE revision_id = $1",
-    )
-    .bind(revision_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let (usage_run, usage_rank): (Option<Uuid>, i32) =
+        sqlx::query_as("SELECT run_id, rank FROM knowledge_usage_logs WHERE revision_id = $1")
+            .bind(revision_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     assert_eq!(usage_run, None);
     assert_eq!(usage_rank, 1);
 

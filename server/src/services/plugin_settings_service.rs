@@ -56,8 +56,8 @@ impl<'a> PluginSettingsService<'a> {
             WHERE NOT s.needs_reentry
             "#,
         )
-            .fetch_all(self.pool)
-            .await?;
+        .fetch_all(self.pool)
+        .await?;
         let mut by_plugin: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
         for row in rows {
             by_plugin
@@ -171,9 +171,9 @@ impl<'a> PluginSettingsService<'a> {
             WHERE ps.plugin_id = $1 AND NOT s.needs_reentry
             "#,
         )
-            .bind(plugin_id)
-            .fetch_all(self.pool)
-            .await?;
+        .bind(plugin_id)
+        .fetch_all(self.pool)
+        .await?;
         let secrets = self.secrets();
         let mut values = BTreeMap::new();
         for row in rows {

@@ -394,10 +394,12 @@ async fn plan_base_rev(
 
 async fn local_branch_exists(git_dir: &Path, branch: &str) -> Result<bool, WorktreeError> {
     let spec = format!("refs/heads/{branch}");
-    let output =
-        crate::services::git_cmd::output(Some(git_dir), &["show-ref", "--verify", "--quiet", &spec])
-            .await
-            .map_err(WorktreeError::from)?;
+    let output = crate::services::git_cmd::output(
+        Some(git_dir),
+        &["show-ref", "--verify", "--quiet", &spec],
+    )
+    .await
+    .map_err(WorktreeError::from)?;
     Ok(output.status.success())
 }
 
@@ -444,21 +446,21 @@ async fn init_detached_scratch(path: &Path) -> Result<(), WorktreeError> {
 }
 
 async fn scratch_has_changes(worktree: &Path) -> bool {
-    let output = match crate::services::git_cmd::output(Some(worktree), &["status", "--porcelain"]).await
-    {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            tracing::warn!(
-                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-                "plan scratch status failed"
-            );
-            return false;
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "plan scratch status failed");
-            return false;
-        }
-    };
+    let output =
+        match crate::services::git_cmd::output(Some(worktree), &["status", "--porcelain"]).await {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                tracing::warn!(
+                    stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                    "plan scratch status failed"
+                );
+                return false;
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "plan scratch status failed");
+                return false;
+            }
+        };
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .any(|line| !porcelain_line_is_agent_context(line))

@@ -9,8 +9,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 const MERGE_REFUSED: &str = "Not merged. This isn't the commit you reviewed.";
-const ACCEPT_AGAIN: &str =
-    "Not merged. Accept again so Coppice knows which commit you reviewed.";
+const ACCEPT_AGAIN: &str = "Not merged. Accept again so Coppice knows which commit you reviewed.";
 
 fn git_env_commit(dir: &Path, message: &str) {
     let output = Command::new("git")
@@ -467,13 +466,11 @@ async fn user_merge_comment_does_not_keep_review_fresh() {
 
 async fn stored_merged_sha(fx: &Fixture) -> Option<String> {
     let pool = fx.state.db.clone().expect("pool");
-    sqlx::query_scalar(
-        "SELECT merged_sha FROM ticket_human_reviews WHERE ticket_id = $1",
-    )
-    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
-    .fetch_one(&pool)
-    .await
-    .expect("merged_sha")
+    sqlx::query_scalar("SELECT merged_sha FROM ticket_human_reviews WHERE ticket_id = $1")
+        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .expect("merged_sha")
 }
 
 #[tokio::test]
@@ -604,13 +601,11 @@ async fn legacy_done_ticket_without_acceptance_must_accept_before_merge() {
 
 async fn human_review_row_count(fx: &Fixture) -> i64 {
     let pool = fx.state.db.clone().expect("pool");
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM ticket_human_reviews WHERE ticket_id = $1",
-    )
-    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
-    .fetch_one(&pool)
-    .await
-    .expect("review row count")
+    sqlx::query_scalar("SELECT COUNT(*) FROM ticket_human_reviews WHERE ticket_id = $1")
+        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .expect("review row count")
 }
 
 async fn seed_approved_plan(fx: &Fixture, markdown: &str) {
@@ -702,7 +697,10 @@ async fn human_review_ticks_criteria_from_the_result_for_the_reviewed_commit() {
     .await;
     let ticket = get_ticket(&fx).await;
     let criteria = ticket["approvedPlan"]["criteria"].as_array().unwrap();
-    assert!(criteria.iter().all(|c| c["status"] == "not_checked"), "{criteria:?}");
+    assert!(
+        criteria.iter().all(|c| c["status"] == "not_checked"),
+        "{criteria:?}"
+    );
 
     // Accept is not affected by criteria.
     set_wait_for_human_review(&fx).await;
@@ -716,6 +714,9 @@ async fn a_plan_without_criteria_has_none() {
     let fx = setup().await;
     seed_approved_plan(&fx, "## Plan\n\n### Steps\n- [ ] Only step\n").await;
     let ticket = get_ticket(&fx).await;
-    assert_eq!(ticket["approvedPlan"]["steps"], serde_json::json!(["Only step"]));
+    assert_eq!(
+        ticket["approvedPlan"]["steps"],
+        serde_json::json!(["Only step"])
+    );
     assert_eq!(ticket["approvedPlan"]["criteria"], serde_json::json!([]));
 }

@@ -220,20 +220,15 @@ impl<'a> RestartService<'a> {
 /// Files the run changed relative to the commit it started from.
 /// A missing start commit or an unreadable worktree counts as zero so the run still waits.
 pub async fn changed_file_count(pool: &PgPool, run: &crate::domain::run::AgentRun) -> u32 {
-    let sha = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT start_sha FROM agent_runs WHERE id = $1",
-    )
-    .bind(run.id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .flatten();
-    count_changed_files(
-        run.worktree_path.as_deref().map(Path::new),
-        sha.as_deref(),
-    )
-    .await
+    let sha =
+        sqlx::query_scalar::<_, Option<String>>("SELECT start_sha FROM agent_runs WHERE id = $1")
+            .bind(run.id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    count_changed_files(run.worktree_path.as_deref().map(Path::new), sha.as_deref()).await
 }
 
 /// Tracked edits, deletions, later commits, and untracked files that are not

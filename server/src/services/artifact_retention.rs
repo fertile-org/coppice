@@ -23,7 +23,10 @@ pub fn spawn_sweep(state: Arc<crate::AppState>) {
     tokio::spawn(async move {
         loop {
             let artifacts_dir = state.config.storage.artifacts_dir.clone();
-            let days = state.config.storage.effective_run_artifacts_retention_days();
+            let days = state
+                .config
+                .storage
+                .effective_run_artifacts_retention_days();
             match sweep(&pool, Path::new(&artifacts_dir), days).await {
                 Ok(0) => {}
                 Ok(removed) => tracing::info!(removed, "removed old run artifacts"),
@@ -35,7 +38,11 @@ pub fn spawn_sweep(state: Arc<crate::AppState>) {
 }
 
 /// Remove run folders the retention rule no longer keeps. Returns how many.
-pub async fn sweep(pool: &PgPool, artifacts_dir: &Path, retention_days: u32) -> anyhow::Result<usize> {
+pub async fn sweep(
+    pool: &PgPool,
+    artifacts_dir: &Path,
+    retention_days: u32,
+) -> anyhow::Result<usize> {
     let runs_dir = artifacts_dir.join("runs");
     let dirs = run_dirs(&runs_dir);
     let mut removed = 0;

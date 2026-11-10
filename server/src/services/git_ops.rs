@@ -23,7 +23,11 @@ pub fn push_gate(push_enabled: bool, remote_url: Option<&str>) -> (bool, Option<
             Some("git.push_enabled is false in server config".into()),
         );
     }
-    if remote_url.map(str::trim).filter(|s| !s.is_empty()).is_none() {
+    if remote_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
         return (
             false,
             Some("Set repository remote URL in Settings → Repositories".into()),
@@ -34,7 +38,11 @@ pub fn push_gate(push_enabled: bool, remote_url: Option<&str>) -> (bool, Option<
 
 /// Fetch needs a configured remote only (not `git.push_enabled` or a forge token).
 pub fn fetch_gate(remote_url: Option<&str>) -> (bool, Option<String>) {
-    if remote_url.map(str::trim).filter(|s| !s.is_empty()).is_none() {
+    if remote_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
         return (
             false,
             Some("Set repository remote URL in Settings → Repositories".into()),
@@ -170,11 +178,9 @@ pub async fn ahead_behind(
 }
 
 pub async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, GitOpsError> {
-    let output = crate::services::git_cmd::output(
-        Some(git_dir),
-        &["branch", "--format=%(refname:short)"],
-    )
-    .await?;
+    let output =
+        crate::services::git_cmd::output(Some(git_dir), &["branch", "--format=%(refname:short)"])
+            .await?;
 
     if !output.status.success() {
         return Err(GitOpsError::Git(git_stderr(&output)));
@@ -237,7 +243,11 @@ mod tests {
             .env("GIT_COMMITTER_EMAIL", "test@localhost")
             .output()
             .expect("commit");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[test]
@@ -257,15 +267,16 @@ mod tests {
     fn network_remote_uses_origin_without_token() {
         let remote = network_remote("https://github.com/o/r.git", None).unwrap();
         assert_eq!(remote, "origin");
-        let authed =
-            network_remote("https://github.com/o/r.git", Some("ghs_secret")).unwrap();
+        let authed = network_remote("https://github.com/o/r.git", Some("ghs_secret")).unwrap();
         assert!(authed.contains("x-access-token:ghs_secret@"));
     }
 
     #[test]
     fn sanitize_token_redacts() {
         let token = "ghs_supersecret";
-        let msg = format!("fatal: could not read Password for 'https://x-access-token:{token}@github.com'");
+        let msg = format!(
+            "fatal: could not read Password for 'https://x-access-token:{token}@github.com'"
+        );
         let cleaned = sanitize_token(&msg, token);
         assert!(!cleaned.contains(token));
         assert!(cleaned.contains("***"));
@@ -331,7 +342,12 @@ mod tests {
         run_git(&local, &args).await.expect("push");
 
         let remote_sha = Command::new("git")
-            .args(["--git-dir", bare.to_str().unwrap(), "rev-parse", "refs/heads/main"])
+            .args([
+                "--git-dir",
+                bare.to_str().unwrap(),
+                "rev-parse",
+                "refs/heads/main",
+            ])
             .output()
             .expect("rev-parse");
         assert!(remote_sha.status.success());

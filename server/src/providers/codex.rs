@@ -190,7 +190,10 @@ impl AgentProvider for CodexProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::Stalled { reason, stderr_tail }) => {
+            Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            }) => {
                 return Err(super::terminal::stalled("Codex", &reason, &stderr_tail));
             }
             Err(CliError::TimedOut { stderr_tail }) => {
@@ -342,7 +345,12 @@ mod tests {
         use serde_json::json;
         use std::os::unix::process::ExitStatusExt;
 
-        fn run(lines: &[serde_json::Value], code: i32, stderr: &[&str], profile: ContextProfile) -> Result<AgentRunResult, ProviderError> {
+        fn run(
+            lines: &[serde_json::Value],
+            code: i32,
+            stderr: &[&str],
+            profile: ContextProfile,
+        ) -> Result<AgentRunResult, ProviderError> {
             let mut handler = CodexLines {
                 stream: None,
                 console: CodexConsolePublisher::new(super::super::super::tool_name_style("codex")),
@@ -379,13 +387,21 @@ mod tests {
             )
             .unwrap_err();
             assert!(matches!(err, ProviderError::MissingResult(_)));
-            assert!(err.to_string().contains("Codex ended with an error: usage limit reached (stderr: warn: quota)"), "{err}");
+            assert!(
+                err.to_string().contains(
+                    "Codex ended with an error: usage limit reached (stderr: warn: quota)"
+                ),
+                "{err}"
+            );
         }
 
         #[test]
         fn a_failed_turn_without_a_message_falls_back_to_the_last_error_event() {
             let err = run(
-                &[json!({ "type": "error", "message": "stream disconnected" }), json!({ "type": "turn.failed" })],
+                &[
+                    json!({ "type": "error", "message": "stream disconnected" }),
+                    json!({ "type": "turn.failed" }),
+                ],
                 0,
                 &[],
                 ContextProfile::Full,
@@ -398,7 +414,11 @@ mod tests {
         fn a_retry_error_event_alone_is_not_a_failure() {
             let done = r#"{"status":"done","summary":"ok"}"#;
             let result = run(
-                &[json!({ "type": "error", "message": "Reconnecting... 1/5" }), message("m1", done), json!({ "type": "turn.completed" })],
+                &[
+                    json!({ "type": "error", "message": "Reconnecting... 1/5" }),
+                    message("m1", done),
+                    json!({ "type": "turn.completed" }),
+                ],
                 0,
                 &[],
                 ContextProfile::Full,
@@ -409,7 +429,11 @@ mod tests {
         #[test]
         fn chat_replies_with_the_last_message_not_the_progress_notes() {
             let reply = run(
-                &[message("m1", "Let me look around."), message("m2", "Here is the answer."), json!({ "type": "turn.completed" })],
+                &[
+                    message("m1", "Let me look around."),
+                    message("m2", "Here is the answer."),
+                    json!({ "type": "turn.completed" }),
+                ],
                 0,
                 &[],
                 ContextProfile::Conversation,
@@ -424,7 +448,11 @@ mod tests {
         #[test]
         fn a_contract_split_over_messages_still_parses() {
             let result = run(
-                &[message("m1", r#"{"status":"done","#), message("m2", r#""summary":"joined"}"#), json!({ "type": "turn.completed" })],
+                &[
+                    message("m1", r#"{"status":"done","#),
+                    message("m2", r#""summary":"joined"}"#),
+                    json!({ "type": "turn.completed" }),
+                ],
                 0,
                 &[],
                 ContextProfile::Full,
@@ -444,7 +472,9 @@ mod tests {
                 last_error: None,
                 tools: Default::default(),
             };
-            handler.on_json(&json!({ "type": "item.started", "item": { "id": "m", "type": "agent_message" } }));
+            handler.on_json(
+                &json!({ "type": "item.started", "item": { "id": "m", "type": "agent_message" } }),
+            );
             assert!(!handler.tools_running());
             handler.on_json(&json!({ "type": "item.started", "item": { "id": "c1", "type": "command_execution", "command": "make" } }));
             assert!(handler.tools_running());
@@ -454,7 +484,13 @@ mod tests {
 
         #[test]
         fn an_exit_before_finishing_carries_stderr() {
-            let err = run(&[], 2, &["error: unexpected argument '--foo'"], ContextProfile::Full).unwrap_err();
+            let err = run(
+                &[],
+                2,
+                &["error: unexpected argument '--foo'"],
+                ContextProfile::Full,
+            )
+            .unwrap_err();
             assert!(matches!(err, ProviderError::InvalidFixture(_)));
             assert!(err.to_string().contains("unexpected argument"), "{err}");
         }

@@ -5,7 +5,9 @@
 use super::acp::{self, AcpLaunch, AcpLimits, AcpTurn, NoObserver, ToolPolicy};
 use super::acp_connector::{self, AcpRun};
 use super::models::{ModelCatalog, ModelInfo, ModelListCache};
-use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+};
 use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::coppice_run_prompt;
 use async_trait::async_trait;
@@ -100,14 +102,16 @@ pub fn in_temp_dir(dir: &Path, roots: &[PathBuf]) -> bool {
 /// The CLI's arguments for a run: the pinned flags and the permission flags
 /// for its policy.
 pub fn launch_args(spec: &AcpCliSpec, read_only: bool, version: Option<&str>) -> Vec<String> {
-    descriptor(spec).run_contract.argv(&coppice_connectors::LaunchSubst {
-        read_only,
-        plan: false,
-        worktree: "",
-        hostname: "",
-        port: "",
-        version,
-    })
+    descriptor(spec)
+        .run_contract
+        .argv(&coppice_connectors::LaunchSubst {
+            read_only,
+            plan: false,
+            worktree: "",
+            hostname: "",
+            port: "",
+            version,
+        })
 }
 
 fn env_for(spec: &AcpCliSpec, read_only: bool) -> Vec<(String, String)> {
@@ -145,8 +149,8 @@ impl AgentProvider for AcpCliProvider {
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
         let worktree = worktree_dir_from_context(&input.context_path)?;
         // Planning is always read-only.
-        let read_only = input.read_only_tools
-            || crate::domain::workflow::is_read_only_job(&input.job_type);
+        let read_only =
+            input.read_only_tools || crate::domain::workflow::is_read_only_job(&input.job_type);
         if read_only
             && self.spec.read_only_needs_non_temp_dir
             && in_temp_dir(&worktree, &temp_roots())
@@ -322,9 +326,14 @@ mod tests {
             let args = launch_args(&QWEN_CODE, read_only, None);
             assert!(has_pair(&args, "--approval-mode", "yolo"), "{args:?}");
             assert!(!args.iter().any(|a| a == "plan"));
-            let excluded = args[args.iter().position(|a| a == "--exclude-tools").unwrap() + 1].clone();
+            let excluded =
+                args[args.iter().position(|a| a == "--exclude-tools").unwrap() + 1].clone();
             assert!(excluded.contains("enter_plan_mode"));
-            assert_eq!(excluded.contains("run_shell_command"), read_only, "{excluded}");
+            assert_eq!(
+                excluded.contains("run_shell_command"),
+                read_only,
+                "{excluded}"
+            );
             assert_eq!(excluded.contains("write_file"), read_only, "{excluded}");
         }
     }
@@ -347,10 +356,19 @@ mod tests {
 
     #[test]
     fn temp_folders_are_spotted_after_resolving_links() {
-        let roots = vec![PathBuf::from("/tmp"), PathBuf::from("/private/var/folders/x/T")];
+        let roots = vec![
+            PathBuf::from("/tmp"),
+            PathBuf::from("/private/var/folders/x/T"),
+        ];
         assert!(in_temp_dir(Path::new("/tmp/wt"), &roots));
-        assert!(in_temp_dir(Path::new("/private/var/folders/x/T/coppice/wt"), &roots));
-        assert!(!in_temp_dir(Path::new("/home/me/.local/share/coppice/worktrees/a"), &roots));
+        assert!(in_temp_dir(
+            Path::new("/private/var/folders/x/T/coppice/wt"),
+            &roots
+        ));
+        assert!(!in_temp_dir(
+            Path::new("/home/me/.local/share/coppice/worktrees/a"),
+            &roots
+        ));
         assert!(!in_temp_dir(Path::new("/tmpfoo/wt"), &roots));
         let real = temp_roots();
         assert!(real.iter().any(|r| r == &std::env::temp_dir()));

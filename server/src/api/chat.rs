@@ -23,7 +23,10 @@ use uuid::Uuid;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/chat/sessions", get(list_sessions).post(create_session))
+        .route(
+            "/api/chat/sessions",
+            get(list_sessions).post(create_session),
+        )
         .route(
             "/api/chat/sessions/{session_id}",
             get(get_session).patch(patch_session),
@@ -208,10 +211,7 @@ fn map_chat_start_error(err: ChatError) -> ChatApiError {
 }
 
 fn discard_chat_workspace_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
-    if !matches!(
-        status,
-        ChatSessionStatus::Archived
-    ) {
+    if !matches!(status, ChatSessionStatus::Archived) {
         return;
     }
     if let Err(err) = crate::services::chat_repos::remove_chat_workspace(
@@ -453,7 +453,6 @@ async fn reject_proposal(
         .reject_proposal(session_id, message_id, proposal_id, user.id)
         .await
         .map_err(map_error)?;
-    let attachments_by_id =
-        attachments_for_messages(pool, std::slice::from_ref(&message)).await?;
+    let attachments_by_id = attachments_for_messages(pool, std::slice::from_ref(&message)).await?;
     Ok(Json(message_response(message, &attachments_by_id)))
 }

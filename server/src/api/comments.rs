@@ -87,7 +87,9 @@ fn parse_mention_mode(raw: Option<&str>) -> Result<MentionMode, CommentError> {
     match raw.unwrap_or("agent") {
         "agent" => Ok(MentionMode::Agent),
         "chat" => Ok(MentionMode::Chat),
-        other => Err(CommentError::Validation(format!("invalid mentionMode: {other}"))),
+        other => Err(CommentError::Validation(format!(
+            "invalid mentionMode: {other}"
+        ))),
     }
 }
 
@@ -127,10 +129,7 @@ fn comment_to_response(
         mentions: comment.mentions,
         attachment_ids: comment.attachment_ids,
         attachments,
-        created_at: comment
-            .created_at
-            .format(&Rfc3339)
-            .unwrap_or_default(),
+        created_at: comment.created_at.format(&Rfc3339).unwrap_or_default(),
     }
 }
 
@@ -262,13 +261,14 @@ async fn create_comment(
 
     let mention_mode = parse_mention_mode(body.mention_mode.as_deref()).map_err(map_error)?;
 
-    let agents = AgentService::new(pool)
-        .list_agents()
-        .await
-        .map_err(|err: AgentError| match err {
-            AgentError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        })?;
+    let agents =
+        AgentService::new(pool)
+            .list_agents()
+            .await
+            .map_err(|err: AgentError| match err {
+                AgentError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            })?;
     let agent_keys = build_agent_keys(&agents);
     let key_refs: Vec<&str> = agent_keys.iter().map(String::as_str).collect();
     let mut parsed_mentions = MentionService::parse_mention_keys(&body.body, &key_refs);

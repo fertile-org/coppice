@@ -19,8 +19,7 @@ async fn approve_splits_creates_children() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
     let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
@@ -88,13 +87,12 @@ async fn approve_splits_creates_children() {
     let child_items = children.as_array().expect("children list");
     assert_eq!(child_items.len(), 2);
 
-    let pending: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT pending_split_recommendation FROM tickets WHERE id = $1",
-    )
-    .bind(ticket_uuid)
-    .fetch_one(pool)
-    .await
-    .expect("load pending");
+    let pending: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT pending_split_recommendation FROM tickets WHERE id = $1")
+            .bind(ticket_uuid)
+            .fetch_one(pool)
+            .await
+            .expect("load pending");
     assert!(pending.is_none());
 }
 
@@ -105,24 +103,21 @@ async fn auto_split_creates_children_on_pm_run() {
         return;
     }
 
-    let (state, app, cookie, csrf, _env) = common::bootstrap_and_login_with_state_and_workers(
-        "pm/split_auto",
-        |config| {
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("pm/split_auto", |config| {
             config.workflow.auto_split = AutoSplitConfig {
                 default: true,
                 ..Default::default()
             };
-        },
-    )
-    .await;
+        })
+        .await;
     let pool = state.db.as_ref().expect("db pool");
 
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let _engineer_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -189,13 +184,12 @@ async fn auto_split_creates_children_on_pm_run() {
         assert_eq!(child["status"], "backlog");
     }
 
-    let pending: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT pending_split_recommendation FROM tickets WHERE id = $1",
-    )
-    .bind(ticket_uuid)
-    .fetch_one(pool)
-    .await
-    .expect("load pending split");
+    let pending: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT pending_split_recommendation FROM tickets WHERE id = $1")
+            .bind(ticket_uuid)
+            .fetch_one(pool)
+            .await
+            .expect("load pending split");
     assert!(pending.is_none());
 
     // Default auto_assign has backlog=false: assignTo becomes a recommendation, not assignment.
@@ -209,7 +203,6 @@ async fn auto_split_creates_children_on_pm_run() {
     let dashboard_child = &child_items[1];
     assert!(dashboard_child["assigneeAgentId"].is_null());
     assert!(dashboard_child["pendingAssignRecommendation"].is_null());
-
 }
 
 #[tokio::test]
@@ -222,8 +215,7 @@ async fn approved_split_children_can_start_without_skip_planning() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
     let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
@@ -270,7 +262,11 @@ async fn approved_split_children_can_start_without_skip_planning() {
 
     let created: serde_json::Value = common::json_body(approve).await;
     let created_items = created.as_array().expect("children array");
-    assert_eq!(created_items.len(), 2, "empty assign_to still creates a child");
+    assert_eq!(
+        created_items.len(),
+        2,
+        "empty assign_to still creates a child"
+    );
 
     for child in created_items {
         let child_id = child["id"].as_str().expect("child id");

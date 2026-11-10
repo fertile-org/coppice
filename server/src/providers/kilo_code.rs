@@ -188,7 +188,10 @@ impl AgentProvider for KiloCodeProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::Stalled { reason, stderr_tail }) => {
+            Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            }) => {
                 return Err(super::terminal::stalled("Kilo Code", &reason, &stderr_tail));
             }
             Err(CliError::TimedOut { stderr_tail }) => {

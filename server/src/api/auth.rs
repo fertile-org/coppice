@@ -180,10 +180,7 @@ async fn logout(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn session_response(
-    state: &AppState,
-    bundle: crate::domain::session::SessionBundle,
-) -> Response {
+fn session_response(state: &AppState, bundle: crate::domain::session::SessionBundle) -> Response {
     let cookie = session_cookie(&bundle.session_token, state.config.auth.cookie_secure);
     let body = SessionResponse {
         user: UserResponse {
@@ -194,18 +191,12 @@ fn session_response(
         csrf_token: bundle.session.csrf_token,
     };
 
-    (
-        StatusCode::OK,
-        [(SET_COOKIE, cookie)],
-        Json(body),
-    )
-        .into_response()
+    (StatusCode::OK, [(SET_COOKIE, cookie)], Json(body)).into_response()
 }
 
 fn session_cookie(token: &str, secure: bool) -> String {
-    let mut cookie = format!(
-        "coppice_session={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800"
-    );
+    let mut cookie =
+        format!("coppice_session={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800");
     if secure {
         cookie.push_str("; Secure");
     }

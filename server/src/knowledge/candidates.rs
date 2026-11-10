@@ -1,11 +1,11 @@
 //! `knowledgeCandidates` from a compaction run: lenient parsing, strict validation.
 //! Invalid candidates are dropped with a reason; they never fail the batch.
 
-use crate::knowledge::citations::{validate_citation_path, MAX_CITATIONS_PER_CANDIDATE};
 use crate::domain::knowledge::{
     confidence_from_str, scope_from_str, type_from_str, validate_revision, KnowledgeConfidence,
     KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType,
 };
+use crate::knowledge::citations::{validate_citation_path, MAX_CITATIONS_PER_CANDIDATE};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -157,15 +157,16 @@ fn accept(
                 None if is_merge => match supersedes.and_then(|(_, item)| item.board_id) {
                     Some(board) => board,
                     None => {
-                        return Err(
-                            "a merge of a workspace item must use workspace scope".into()
-                        )
+                        return Err("a merge of a workspace item must use workspace scope".into())
                     }
                 },
                 None if source_boards.len() == 1 => *source_boards.iter().next().unwrap(),
                 None => return Err("boardId is required when sources span boards".into()),
             };
-            if source_boards.iter().any(|source_board| *source_board != board_id) {
+            if source_boards
+                .iter()
+                .any(|source_board| *source_board != board_id)
+            {
                 return Err(format!(
                     "boardId {board_id} does not match the board of every source ticket"
                 ));
@@ -372,8 +373,16 @@ mod tests {
         assert_eq!(review.accepted.len(), 1);
         assert_eq!(review.accepted[0].citations, vec!["server/src/lib.rs"]);
         assert_eq!(review.dropped.len(), 1, "{:?}", review.dropped);
-        assert!(review.dropped[0].contains("candidate 1"), "{:?}", review.dropped);
-        assert!(review.dropped[0].contains("../../etc/passwd"), "{:?}", review.dropped);
+        assert!(
+            review.dropped[0].contains("candidate 1"),
+            "{:?}",
+            review.dropped
+        );
+        assert!(
+            review.dropped[0].contains("../../etc/passwd"),
+            "{:?}",
+            review.dropped
+        );
     }
 
     #[test]
@@ -385,7 +394,11 @@ mod tests {
         assert_eq!(review.accepted[0].citations.len(), 10);
         assert_eq!(review.accepted[0].citations[9], "src/file9.rs");
         assert_eq!(review.dropped.len(), 1, "{:?}", review.dropped);
-        assert!(review.dropped[0].contains("at most 10"), "{:?}", review.dropped);
+        assert!(
+            review.dropped[0].contains("at most 10"),
+            "{:?}",
+            review.dropped
+        );
     }
 
     #[test]
@@ -435,9 +448,10 @@ mod tests {
         let live_item = Uuid::new_v4();
         let other_board_item = Uuid::new_v4();
         world.supersedable.insert(live_item, supersedable(None));
-        world
-            .supersedable
-            .insert(other_board_item, supersedable(Some(world.tickets[2].board_id)));
+        world.supersedable.insert(
+            other_board_item,
+            supersedable(Some(world.tickets[2].board_id)),
+        );
 
         let mut workspace = spec(&[world.tickets[0].id]);
         workspace.scope = "workspace".into();
@@ -462,12 +476,18 @@ mod tests {
     fn empty_sources_allowed_only_with_supersedes() {
         let mut world = World::new();
         let item = Uuid::new_v4();
-        world.supersedable.insert(item, supersedable(Some(world.board_a())));
+        world
+            .supersedable
+            .insert(item, supersedable(Some(world.board_a())));
 
         // Direction 1: no sources and nothing superseded is still refused.
         let review = world.review(&[spec(&[])], 20);
         assert!(review.accepted.is_empty());
-        assert!(review.dropped[0].contains("must not be empty"), "{:?}", review.dropped);
+        assert!(
+            review.dropped[0].contains("must not be empty"),
+            "{:?}",
+            review.dropped
+        );
 
         // Direction 2: no sources but a superseded item is a merge.
         let mut merge = spec(&[]);
@@ -478,7 +498,10 @@ mod tests {
         assert!(accepted.source_ticket_ids.is_empty());
         assert_eq!(accepted.supersedes_item_id, Some(item));
         assert_eq!(accepted.input.board_id, Some(world.board_a()));
-        assert_eq!(accepted.input.source_type, KnowledgeSourceType::AgentSummary);
+        assert_eq!(
+            accepted.input.source_type,
+            KnowledgeSourceType::AgentSummary
+        );
         assert_eq!(accepted.input.source_id, None);
 
         // Sources plus supersedes keep the ticket source.
@@ -495,8 +518,12 @@ mod tests {
         let mut world = World::new();
         let board_item = Uuid::new_v4();
         let workspace_item = Uuid::new_v4();
-        world.supersedable.insert(board_item, supersedable(Some(world.board_a())));
-        world.supersedable.insert(workspace_item, supersedable(None));
+        world
+            .supersedable
+            .insert(board_item, supersedable(Some(world.board_a())));
+        world
+            .supersedable
+            .insert(workspace_item, supersedable(None));
 
         let mut wrong_board = spec(&[]);
         wrong_board.supersedes_item_id = Some(board_item.to_string());
@@ -521,8 +548,16 @@ mod tests {
         );
         assert_eq!(review.accepted.len(), 2, "{:?}", review.dropped);
         assert_eq!(review.dropped.len(), 2, "{:?}", review.dropped);
-        assert!(review.dropped[0].contains("different board"), "{:?}", review.dropped);
-        assert!(review.dropped[1].contains("workspace"), "{:?}", review.dropped);
+        assert!(
+            review.dropped[0].contains("different board"),
+            "{:?}",
+            review.dropped
+        );
+        assert!(
+            review.dropped[1].contains("workspace"),
+            "{:?}",
+            review.dropped
+        );
         assert_eq!(review.accepted[0].input.board_id, Some(world.board_a()));
         assert_eq!(review.accepted[1].input.scope, KnowledgeScope::Workspace);
         assert_eq!(review.accepted[1].input.board_id, None);
@@ -544,7 +579,9 @@ mod tests {
                 agent_id: Some(agent),
             },
         );
-        world.supersedable.insert(board_item, supersedable(Some(world.board_a())));
+        world
+            .supersedable
+            .insert(board_item, supersedable(Some(world.board_a())));
 
         let merge = |item: Uuid, scope: &str, agent_id: Option<Uuid>| {
             let mut candidate = spec(&[]);

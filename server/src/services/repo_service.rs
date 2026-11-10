@@ -43,9 +43,7 @@ impl<'a> RepoService<'a> {
     }
 
     pub async fn list_all(&self) -> Result<Vec<Repo>, RepoError> {
-        let query = format!(
-            "SELECT {REPO_COLUMNS} FROM repos ORDER BY created_at ASC"
-        );
+        let query = format!("SELECT {REPO_COLUMNS} FROM repos ORDER BY created_at ASC");
         let rows = sqlx::query(&query).fetch_all(self.pool).await?;
         Ok(rows.iter().map(row_to_repo).collect())
     }
@@ -184,12 +182,11 @@ impl<'a> RepoService<'a> {
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
-        let in_use: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM tickets WHERE repo_id = $1)",
-        )
-        .bind(id)
-        .fetch_one(self.pool)
-        .await?;
+        let in_use: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tickets WHERE repo_id = $1)")
+                .bind(id)
+                .fetch_one(self.pool)
+                .await?;
 
         if in_use {
             return Err(RepoError::InUse);
@@ -271,8 +268,8 @@ fn map_unique_path_error(err: sqlx::Error) -> RepoError {
 
 fn row_to_repo(row: &sqlx::postgres::PgRow) -> Repo {
     let status_str: String = row.get("verification_status");
-    let verification_status = verification_status_from_str(&status_str)
-        .unwrap_or(VerificationStatus::Error);
+    let verification_status =
+        verification_status_from_str(&status_str).unwrap_or(VerificationStatus::Error);
 
     Repo {
         id: row.get("id"),

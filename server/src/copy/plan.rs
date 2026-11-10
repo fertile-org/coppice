@@ -160,7 +160,11 @@ pub fn child_plan(
         "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{}\n\n{STEPS_HEADING}\n",
         child_plan_approach(parent_title, description)
     );
-    let steps: Vec<&str> = steps.iter().map(|step| step.trim()).filter(|s| !s.is_empty()).collect();
+    let steps: Vec<&str> = steps
+        .iter()
+        .map(|step| step.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
     if steps.is_empty() {
         out.push_str(&format!("- [ ] {FOLLOW_APPROACH_STEP}\n"));
     }
@@ -188,7 +192,9 @@ pub fn child_plan(
             out.push_str(&format!("- [ ] {criterion}\n"));
         }
     }
-    out.push_str(&format!("\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"));
+    out.push_str(&format!(
+        "\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+    ));
     out
 }
 
@@ -211,7 +217,11 @@ pub const VERIFICATION_COMMENT_TITLE: &str = "**Verification**";
 pub const VERIFY_EXCLUDED_HEADING: &str = "Excluded (archived):";
 
 /// Instructions for a verification run on a split parent.
-pub fn verify_instructions(criteria: &[String], merged: &[(String, String)], excluded: &[String]) -> String {
+pub fn verify_instructions(
+    criteria: &[String],
+    merged: &[(String, String)],
+    excluded: &[String],
+) -> String {
     let mut out = format!("{VERIFY_TASK}\n\n{ACCEPTANCE_CRITERIA_HEADING}\n");
     if criteria.is_empty() {
         out.push_str("The parent has no acceptance criteria. Check its description instead.\n");
@@ -258,7 +268,10 @@ pub fn verification_comment(
         }
     }
     if !excluded.is_empty() {
-        out.push_str(&format!("\n{VERIFY_EXCLUDED_HEADING} {}\n", excluded.join(", ")));
+        out.push_str(&format!(
+            "\n{VERIFY_EXCLUDED_HEADING} {}\n",
+            excluded.join(", ")
+        ));
     }
     out
 }
@@ -541,7 +554,10 @@ mod tests {
     #[test]
     fn criteria_are_their_own_section_and_not_steps() {
         let markdown = "## Plan\n\n### Approach\nDo it.\n\n### Steps\n- [ ] Write the gate\n- [ ] Cover the API\n\n### Acceptance criteria\n- [ ] Dragging to In Progress without a plan is refused (verified by integration test)\n- [ ] The API returns 409 (verified by curl)\n\n### Risks\nNone.\n";
-        assert_eq!(checklist_steps(markdown), vec!["Write the gate", "Cover the API"]);
+        assert_eq!(
+            checklist_steps(markdown),
+            vec!["Write the gate", "Cover the API"]
+        );
         assert_eq!(
             plan_criteria(markdown),
             vec![
@@ -649,7 +665,9 @@ mod tests {
         let text = plan_instructions(Some(&revision));
         let previous = text.find(PREVIOUS_PLAN_HEADING).unwrap();
         let first = text.find("1. Use Postgres.").unwrap();
-        let second = text.find("2. Split the API change\n   into two steps.").unwrap();
+        let second = text
+            .find("2. Split the API change\n   into two steps.")
+            .unwrap();
         assert!(previous < first && first < second, "{text}");
         assert!(text.contains("- [ ] Second version"));
         assert!(text.contains(REVISION_INSTRUCTION));
@@ -665,7 +683,10 @@ mod tests {
             ],
         };
         let text = plan_instructions(Some(&revision));
-        assert!(text.contains("If requests conflict, the later one wins"), "{text}");
+        assert!(
+            text.contains("If requests conflict, the later one wins"),
+            "{text}"
+        );
         assert!(text.contains("`selectedDesign` in `ticket_get`"), "{text}");
     }
 
@@ -681,7 +702,10 @@ mod tests {
     fn a_revised_plan_keeps_its_changes_section_out_of_the_steps() {
         let revised = "### Changes requested\n- Use Postgres: switched the store to Postgres.\n- [ ] Split the API change: now two steps.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n- [ ] Change the API\n";
         assert_eq!(format_plan(revised), revised.trim());
-        assert_eq!(checklist_steps(revised), vec!["Add the table", "Change the API"]);
+        assert_eq!(
+            checklist_steps(revised),
+            vec!["Add the table", "Change the API"]
+        );
     }
     fn plan_with(steps: usize, criteria: usize, approach: &str) -> String {
         let mut plan =

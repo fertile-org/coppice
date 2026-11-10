@@ -210,8 +210,8 @@ async fn record_plan_ref_changes(
 
 fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
     let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
-    let ends_with_newline = ArtifactService::read_terminal_log_tail(&paths, 1)
-        .is_none_or(|last| last.ends_with(b"\n"));
+    let ends_with_newline =
+        ArtifactService::read_terminal_log_tail(&paths, 1).is_none_or(|last| last.ends_with(b"\n"));
     let mut bytes = Vec::new();
     if !ends_with_newline {
         bytes.push(b'\n');
@@ -499,7 +499,9 @@ async fn drive_plan_run(
     };
     let (comment_body, comment_intent) = if verifying {
         let criteria_results = match &result {
-            AgentRunResult::Done { criteria_results, .. } => criteria_results.as_slice(),
+            AgentRunResult::Done {
+                criteria_results, ..
+            } => criteria_results.as_slice(),
             _ => &[],
         };
         (
@@ -509,7 +511,10 @@ async fn drive_plan_run(
     } else if questions.is_empty() {
         (plan::format_plan(&summary), CommentIntent::Plan)
     } else {
-        (plan::questions_comment(&questions), CommentIntent::ClarificationRequest)
+        (
+            plan::questions_comment(&questions),
+            CommentIntent::ClarificationRequest,
+        )
     };
 
     let apply = ApplyResult {
@@ -641,7 +646,10 @@ mod tests {
             description: String::new(),
             path: Default::default(),
         };
-        assert!(has_design_skill(&[skill("coppice-git"), skill(DESIGN_SKILL_ID)]));
+        assert!(has_design_skill(&[
+            skill("coppice-git"),
+            skill(DESIGN_SKILL_ID)
+        ]));
         assert!(!has_design_skill(&[skill("coppice-git")]));
         assert!(PLAN_DESIGN_INSTRUCTION.contains(DESIGN_SKILL_ID));
         assert!(PLAN_DESIGN_INSTRUCTION.contains("noVisibleChange"));

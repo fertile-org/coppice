@@ -156,23 +156,15 @@ mod tests {
 
     #[test]
     fn gitlab_merge_request_url() {
-        let url = build_pr_create_url(
-            Some("https://gitlab.com/group/coppice.git"),
-            "main",
-            "feat",
-        )
-        .expect("url");
+        let url = build_pr_create_url(Some("https://gitlab.com/group/coppice.git"), "main", "feat")
+            .expect("url");
         assert!(url.contains("gitlab.com/group/coppice/-/merge_requests/new"));
     }
 
     #[test]
     fn bitbucket_pr_url() {
-        let url = build_pr_create_url(
-            Some("https://bitbucket.org/acme/repo.git"),
-            "main",
-            "feat",
-        )
-        .expect("url");
+        let url = build_pr_create_url(Some("https://bitbucket.org/acme/repo.git"), "main", "feat")
+            .expect("url");
         assert!(url.contains("bitbucket.org/acme/repo/pull-requests/new"));
     }
 
@@ -180,7 +172,9 @@ mod tests {
     fn missing_or_unknown_remote() {
         assert!(build_pr_create_url(None, "main", "feature").is_none());
         assert!(build_pr_create_url(Some(""), "main", "feature").is_none());
-        assert!(build_pr_create_url(Some("git@codeberg.org:acme/repo.git"), "main", "feat").is_none());
+        assert!(
+            build_pr_create_url(Some("git@codeberg.org:acme/repo.git"), "main", "feat").is_none()
+        );
     }
 
     #[test]

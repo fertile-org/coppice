@@ -16,8 +16,7 @@ pub const BOARD_SETTINGS_LABEL: &str = "Board settings";
 pub const BOARD_NAME_LABEL: &str = "Name";
 
 /// Rejected board name: blank, whitespace, or a slug that would be empty.
-pub const BOARD_NAME_INVALID: &str =
-    "Enter a board name that includes letters or numbers.";
+pub const BOARD_NAME_INVALID: &str = "Enter a board name that includes letters or numbers.";
 
 /// Slug collision with another board (`foo-bar` matches `foobar`).
 pub const BOARD_NAME_CONFLICT: &str = "This name is too similar to another board's name.";

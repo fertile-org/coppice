@@ -10,14 +10,14 @@ use tokio_tungstenite::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
-async fn connect_ws(url: &str, cookie: &str) -> tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-> {
+async fn connect_ws(
+    url: &str,
+    cookie: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let mut request = url.into_client_request().unwrap();
-    request.headers_mut().insert(
-        header::COOKIE,
-        HeaderValue::from_str(cookie).unwrap(),
-    );
+    request
+        .headers_mut()
+        .insert(header::COOKIE, HeaderValue::from_str(cookie).unwrap());
     connect_async(request).await.expect("ws connect").0
 }
 
@@ -98,11 +98,7 @@ async fn live_ws_replays_snapshot_when_no_registry() {
     let ws = connect_ws(&ws_url, &cookie).await;
     let (_, mut read) = ws.split();
 
-    let first = read
-        .next()
-        .await
-        .expect("first ws message")
-        .expect("ws ok");
+    let first = read.next().await.expect("first ws message").expect("ws ok");
     let first_text = match first {
         Message::Text(text) => text,
         other => panic!("expected text message, got {other:?}"),
@@ -112,11 +108,7 @@ async fn live_ws_replays_snapshot_when_no_registry() {
     assert_eq!(first_json["sessionId"], session_id);
     assert_eq!(first_json["messages"][0]["id"], "msg-1");
 
-    let end_msg = read
-        .next()
-        .await
-        .expect("end ws message")
-        .expect("ws ok");
+    let end_msg = read.next().await.expect("end ws message").expect("ws ok");
     let end_text = match end_msg {
         Message::Text(text) => text,
         other => panic!("expected text message, got {other:?}"),

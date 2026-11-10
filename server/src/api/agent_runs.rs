@@ -176,7 +176,9 @@ pub(crate) fn run_to_response(
         branch_name: run.branch_name,
         error_message: run.error_message,
         session_id: run.session_id,
-        started_at: run.started_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
+        started_at: run
+            .started_at
+            .map(|t| t.format(&Rfc3339).unwrap_or_default()),
         ended_at: run.ended_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
         created_at: run.created_at.format(&Rfc3339).unwrap_or_default(),
         connector,

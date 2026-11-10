@@ -133,7 +133,13 @@ async fn reject_done_with_waiting_substatus() {
     assert_eq!(patch.status(), StatusCode::BAD_REQUEST);
 }
 
-async fn create_repo_less_ticket(app: &axum::Router, board_id: &str, body: &str, cookie: &str, csrf: &str) -> serde_json::Value {
+async fn create_repo_less_ticket(
+    app: &axum::Router,
+    board_id: &str,
+    body: &str,
+    cookie: &str,
+    csrf: &str,
+) -> serde_json::Value {
     let res = app
         .clone()
         .oneshot(common::json_request(
@@ -235,7 +241,8 @@ async fn a_large_board_lists_quickly_without_descriptions() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let board = uuid::Uuid::parse_str(&board_id).unwrap();
     let agent_id = uuid::Uuid::parse_str(
-        &common::create_agent_with_preset_key(&app, "backend_engineer", "Builder", &cookie, &csrf).await,
+        &common::create_agent_with_preset_key(&app, "backend_engineer", "Builder", &cookie, &csrf)
+            .await,
     )
     .unwrap();
     sqlx::query(
@@ -292,12 +299,17 @@ async fn a_large_board_lists_quickly_without_descriptions() {
     let list = common::json_body(res).await;
     let tickets = list.as_array().unwrap();
     assert_eq!(tickets.len(), 2000);
-    assert!(tickets.iter().all(|ticket| ticket.get("description").is_none()));
+    assert!(tickets
+        .iter()
+        .all(|ticket| ticket.get("description").is_none()));
     assert_eq!(tickets[0]["latestPlanRunStatus"], "succeeded");
     assert_eq!(tickets[0]["substatusDisplay"], serde_json::Value::Null);
     assert!(tickets[0]["lastActivityAt"].is_string());
     // One set-based query instead of five per ticket; was ~0.4 s at this size.
-    assert!(elapsed < std::time::Duration::from_secs(1), "board list took {elapsed:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(1),
+        "board list took {elapsed:?}"
+    );
     println!("2000-ticket board list: {elapsed:?}");
 
     // The ticket view still gets the description.
@@ -439,7 +451,13 @@ async fn unassigned_backlog_ticket_suggests_the_pm() {
 
     let agents_res = app
         .clone()
-        .oneshot(common::json_request("GET", "/api/agents", "", &cookie, &csrf))
+        .oneshot(common::json_request(
+            "GET",
+            "/api/agents",
+            "",
+            &cookie,
+            &csrf,
+        ))
         .await
         .unwrap();
     assert_eq!(agents_res.status(), StatusCode::OK);

@@ -570,7 +570,10 @@ async fn check_run_fails_without_ticket_get() {
         .await
         .unwrap();
     assert_eq!(detail.status, "failed");
-    assert_eq!(detail.failure.as_deref(), Some("Chat: ticket_get was not called"));
+    assert_eq!(
+        detail.failure.as_deref(),
+        Some("Chat: ticket_get was not called")
+    );
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 

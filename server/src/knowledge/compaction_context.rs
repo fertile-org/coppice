@@ -26,18 +26,42 @@ const WORTH_KEEPING: &str = "A candidate must (1) help a future ticket with a di
 (2) not be obvious from reading the code or docs alone, and (3) be specific enough to act on.";
 
 const TYPES: &[(&str, &str)] = &[
-    ("coding_convention", "durable code style or idiom the codebase follows"),
-    ("architecture_rule", "where logic lives, layering, module boundaries"),
-    ("bug_pattern", "a recurring failure mode and how to avoid it"),
+    (
+        "coding_convention",
+        "durable code style or idiom the codebase follows",
+    ),
+    (
+        "architecture_rule",
+        "where logic lives, layering, module boundaries",
+    ),
+    (
+        "bug_pattern",
+        "a recurring failure mode and how to avoid it",
+    ),
     ("test_command", "how to run or scope tests and checks"),
     ("review_feedback", "feedback reviewers repeatedly give"),
     ("dependency_note", "constraints or gotchas of a dependency"),
-    ("api_contract", "request/response shapes other code relies on"),
+    (
+        "api_contract",
+        "request/response shapes other code relies on",
+    ),
     ("workflow_rule", "how work moves through the team or board"),
-    ("human_preference", "a stated preference of the humans on this workspace"),
-    ("operational_runbook", "how to deploy, recover, or operate the system"),
-    ("security_rule", "a security constraint that must always hold"),
-    ("performance_note", "a performance constraint or known hotspot"),
+    (
+        "human_preference",
+        "a stated preference of the humans on this workspace",
+    ),
+    (
+        "operational_runbook",
+        "how to deploy, recover, or operate the system",
+    ),
+    (
+        "security_rule",
+        "a security constraint that must always hold",
+    ),
+    (
+        "performance_note",
+        "a performance constraint or known hotspot",
+    ),
 ];
 
 #[derive(Debug, Clone)]
@@ -148,7 +172,10 @@ pub fn build_compaction_context(input: &CompactionContextInput<'_>) -> String {
 
 fn write_instructions(out: &mut String, max_candidates: usize) {
     let _ = writeln!(out, "## Instructions\n");
-    let _ = writeln!(out, "Worth-keeping test for every ticket-derived candidate:\n");
+    let _ = writeln!(
+        out,
+        "Worth-keeping test for every ticket-derived candidate:\n"
+    );
     let _ = writeln!(out, "{WORTH_KEEPING}\n");
     let _ = writeln!(
         out,
@@ -271,7 +298,11 @@ fn write_tickets(out: &mut String, tickets: &[CompactionTicket], max_bytes: usiz
 
 fn render_ticket(ticket: &CompactionTicket) -> String {
     let mut section = String::new();
-    let _ = writeln!(section, "### {}\n", truncate_with_ellipsis(&ticket.title, 300));
+    let _ = writeln!(
+        section,
+        "### {}\n",
+        truncate_with_ellipsis(&ticket.title, 300)
+    );
     let _ = writeln!(section, "- id: `{}`", ticket.id);
     let _ = writeln!(
         section,
@@ -535,7 +566,11 @@ mod tests {
         }
     }
 
-    fn render(tickets: &[CompactionTicket], existing: &[ExistingKnowledge], budget: usize) -> String {
+    fn render(
+        tickets: &[CompactionTicket],
+        existing: &[ExistingKnowledge],
+        budget: usize,
+    ) -> String {
         build_compaction_context(&CompactionContextInput {
             batch_id: Uuid::nil(),
             tickets,
@@ -613,7 +648,12 @@ mod tests {
         assert!(!markdown.contains("Compacted N tickets into M candidates"));
     }
 
-    fn existing_item(status: &str, title: &str, excerpt: &str, proposal: bool) -> ExistingKnowledge {
+    fn existing_item(
+        status: &str,
+        title: &str,
+        excerpt: &str,
+        proposal: bool,
+    ) -> ExistingKnowledge {
         ExistingKnowledge {
             id: Uuid::new_v4(),
             status: status.into(),
@@ -662,8 +702,9 @@ mod tests {
 
     #[test]
     fn old_review_feedback_survives_many_later_comments() {
-        let mut newest_first: Vec<CompactionComment> =
-            (0..12).map(|i| comment("question", &format!("later {i}"))).collect();
+        let mut newest_first: Vec<CompactionComment> = (0..12)
+            .map(|i| comment("question", &format!("later {i}")))
+            .collect();
         newest_first.push(comment("review_feedback", "old feedback"));
         let picked = select_comments(newest_first);
         assert_eq!(picked.len(), MAX_COMMENTS_PER_TICKET);

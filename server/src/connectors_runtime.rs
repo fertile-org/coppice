@@ -258,7 +258,9 @@ impl ConnectorsRuntime {
         let spec = coppice_config::settings_catalog::catalog(desktop)
             .into_iter()
             .find(|spec| spec.path == path)
-            .ok_or_else(|| ConfigFileError::Setting("That isn't a setting Coppice knows.".into()))?;
+            .ok_or_else(|| {
+                ConfigFileError::Setting("That isn't a setting Coppice knows.".into())
+            })?;
         if let Some(value) = value {
             spec.check(value).map_err(ConfigFileError::Setting)?;
         }
@@ -386,9 +388,11 @@ fn persist_enabled(
     let mut doc = text
         .parse::<DocumentMut>()
         .map_err(|err| ConnectorConfigError::Toml(err.to_string()))?;
-    let command_if_missing =
-        matches!(descriptor.id, CURSOR | KILO_CODE | OPENCODE | COPILOT | QWEN_CODE | KIMI | GROK)
-            .then_some(descriptor.binary);
+    let command_if_missing = matches!(
+        descriptor.id,
+        CURSOR | KILO_CODE | OPENCODE | COPILOT | QWEN_CODE | KIMI | GROK
+    )
+    .then_some(descriptor.binary);
     coppice_config::connector_file::set_connector_enabled(
         &mut doc,
         &ConnectorFilePatch {
@@ -608,7 +612,10 @@ mod tests {
             .save_setting(&enabled, Some(&toml::Value::Boolean(true)), &revision)
             .unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text, "# keep me\n[agent.connectors.claude-code]\nenabled = true\n");
+        assert_eq!(
+            text,
+            "# keep me\n[agent.connectors.claude-code]\nenabled = true\n"
+        );
         assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
 
         // Same as the default, still written: the user chose it.
@@ -638,7 +645,11 @@ mod tests {
         let rt = runtime(Some(path.clone()));
         let revision = coppice_config::settings_file::content_revision(b"");
 
-        let unknown = rt.save_setting(&key("server.port"), Some(&toml::Value::Integer(1)), &revision);
+        let unknown = rt.save_setting(
+            &key("server.port"),
+            Some(&toml::Value::Integer(1)),
+            &revision,
+        );
         assert!(matches!(unknown, Err(ConfigFileError::Setting(_))));
         let wrong = rt.save_setting(
             &key("logs.retention_days"),
@@ -655,8 +666,14 @@ mod tests {
             Some(&toml::Value::Boolean(true)),
             &revision,
         );
-        assert!(matches!(stale, Err(ConfigFileError::Conflict { .. })), "{stale:?}");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# edited elsewhere\n");
+        assert!(
+            matches!(stale, Err(ConfigFileError::Conflict { .. })),
+            "{stale:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# edited elsewhere\n"
+        );
     }
 
     #[test]
