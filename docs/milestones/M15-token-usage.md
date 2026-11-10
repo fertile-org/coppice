@@ -4,7 +4,7 @@
 
 Show how many tokens agents spend, per LLM request, per run, per ticket and per agent, so a human can answer "what did this ticket cost to deliver, and which agent spent it?" without reading consoles.
 
-Status: **phase 1 implemented for Claude Code** and merged (storage, API, Runs tab; PR #215). Designed, not built: the [connector groundwork](#adding-connectors) that makes other connectors a reader and a descriptor change, and [phase 2](#phase-2-settings--usage) (Settings → Usage, chat-session totals, context-window meter). The remaining work is split into [deliverables](#delivery) that branch from `main`.
+Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connectors) and [phase 2](#phase-2-settings--usage) are built for Claude Code (deliverables D1–D6 and D8–D11). Still open: D0's manual check with a real Claude Code run, and the [deferred](#deferred) readers for other connectors (D7, D12+).
 
 ## Problem
 
@@ -73,7 +73,7 @@ CLI output event
 |---|---|---|
 | Descriptor | `connectors/src/lib.rs`: `UsageFormat`, `ConnectorDescriptor::usage`, `reports_usage()` | which format a connector speaks |
 | Readers | `server/src/providers/usage/`: `UsageReader` trait (`start_process`, `read`), `reader_for(format)`, `ClaudeStreamJsonReader`, `NormalizedReader` | one wire format each |
-| Domain | `server/src/domain/usage.rs`: `TokenCounts`, `UsageEvent` (`request` / `subagent` / `runTotal` / `runTotalUnknown`), `UsageTracker` | normalized usage only |
+| Domain | `server/src/domain/usage.rs`: `TokenCounts`, `UsageEvent` (`request` / `subagent` / `runTotal` with `byModel` / `runTotalUnknown` / `contextWindow`), `UsageTracker` | normalized usage only |
 | Stream | `server/src/sessions/run_registry.rs`: `track_usage`, `observe_usage`, `usage_snapshot`, `subscribe_usage` | a reader and a tracker per run |
 | Storage | `server/src/services/usage_service.rs`, migration `069_token_usage.sql` | snapshots, rollups |
 | API | `server/src/api/usage.rs` | — |
@@ -125,17 +125,17 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 | # | Deliverable | Needs | Verified by |
 |---|---|---|---|
 | D0 | **Close phase 1 on `main`.** The two open items in [Acceptance criteria (phase 1)](#acceptance-criteria-phase-1). | — | Manual: a real Claude Code ticket run shows tokens in the Runs tab. `make test`, clippy and `make web-test` pass on `main`. |
-| D1 | **Process context.** `start_process(&ProcessContext { resumed, cli_version })`; the Claude Code reader reads `resumed` from it. ([§ 2](#2-a-process-context-instead-of-a-flag)) | — | The existing `providers::usage` tests pass unchanged. A unit test shows the CLI version reaches the reader. |
-| D2 | **Usage hooks in the shared runners.** `cli_runner.rs` and `acp_connector.rs` call `track_usage` and `observe_usage`; adapters drop their calls. ([§ 1](#1-usage-hooks-live-in-the-shared-runners)) | D1 | No adapter under `server/src/providers/` calls a usage method. A `cli_runner` test replays a Claude Code capture through a stub program and stores the same snapshot as the reader test. A connector with `UsageFormat::None` stores no `run_usage` row. Manual: a Claude Code run shows the same tokens as before. |
-| D3 | **Reader test harness.** The table-driven test, a `.usage.json` for every Claude Code capture, and the invariants that do not need coverage. ([§ 5](#5-one-test-harness-for-every-reader)) | — | The harness passes on every capture. A case with a wrong expected file and a case with a negative count both fail. |
-| D4 | **Coverage per format.** `UsageFormat::coverage()`, `usageCoverage` on connector responses, and the harness check that events stay within coverage. ([§ 4](#4-coverage-declared-per-format)) | D3 | Every format has coverage (an exhaustive `match`, so a missing one does not compile). An API integration test reads `usageCoverage`. A harness case that emits a count outside coverage fails. |
-| D5 | **Run dimensions and usage that outlives runs.** `agent_runs.connector` written when every run starts; `run_usage` gets its own `id`, copies its [dimensions](#schema) when tracking starts, and keeps its rows when the run, ticket, agent or board is deleted; request and subagent rows hang off `run_usage.id`. | — | DB tests: every run type (ticket, plan, chat, compaction, connector check) stores its connector. Deleting a ticket, an agent and a board keeps their usage rows, with links set to NULL and names kept. Phase 1 endpoints return the same results as before for runs that still exist. |
-| D6 | **Per-model run totals.** `runTotal.byModel`, the `run_usage_models` migration written in the versioned snapshot, and the Claude Code reader emitting it. ([§ 3](#3-a-complete-event-vocabulary)) | D5 | Reader tests on the captures: `byModel` adds up to `tokens`, including a resumed process. DB test: a stale snapshot does not replace newer per-model rows. Integration: a MockProvider fixture with `byModel` stores its rows. |
+| D1 | **Done.** **Process context.** `start_process(&ProcessContext { resumed, cli_version })`; the Claude Code reader reads `resumed` from it. ([§ 2](#2-a-process-context-instead-of-a-flag)) | — | The existing `providers::usage` tests pass unchanged. A unit test shows the CLI version reaches the reader. |
+| D2 | **Done.** **Usage hooks in the shared runners.** `cli_runner.rs` and `acp_connector.rs` call `track_usage` and `observe_usage`; adapters drop their calls. ([§ 1](#1-usage-hooks-live-in-the-shared-runners)) | D1 | No adapter under `server/src/providers/` calls a usage method. A `cli_runner` test replays a Claude Code capture through a stub program and stores the same snapshot as the reader test. A connector with `UsageFormat::None` stores no `run_usage` row. Manual: a Claude Code run shows the same tokens as before. |
+| D3 | **Done.** **Reader test harness.** The table-driven test, a `.usage.json` for every Claude Code capture, and the invariants that do not need coverage. ([§ 5](#5-one-test-harness-for-every-reader)) | — | The harness passes on every capture. A case with a wrong expected file and a case with a negative count both fail. |
+| D4 | **Done.** **Coverage per format.** `UsageFormat::coverage()`, `usageCoverage` on connector responses, and the harness check that events stay within coverage. ([§ 4](#4-coverage-declared-per-format)) | D3 | Every format has coverage (an exhaustive `match`, so a missing one does not compile). An API integration test reads `usageCoverage`. A harness case that emits a count outside coverage fails. |
+| D5 | **Done.** **Run dimensions and usage that outlives runs.** `agent_runs.connector` written when every run starts; `run_usage` gets its own `id`, copies its [dimensions](#schema) when tracking starts, and keeps its rows when the run, ticket, agent or board is deleted; request and subagent rows hang off `run_usage.id`. | — | DB tests: every run type (ticket, plan, chat, compaction, connector check) stores its connector. Deleting a ticket, an agent and a board keeps their usage rows, with links set to NULL and names kept. Phase 1 endpoints return the same results as before for runs that still exist. |
+| D6 | **Done.** **Per-model run totals.** `runTotal.byModel`, the `run_usage_models` migration written in the versioned snapshot, and the Claude Code reader emitting it. ([§ 3](#3-a-complete-event-vocabulary)) | D5 | Reader tests on the captures: `byModel` adds up to `tokens`, including a resumed process. DB test: a stale snapshot does not replace newer per-model rows. Integration: a MockProvider fixture with `byModel` stores its rows. |
 | D7 | **Deferred. Codex reader.** The standard capture, a `UsageFormat` variant, its coverage, the reader and the descriptor's `usage`. Proves the groundwork against a second real format. | D2, D3, D4, a real Codex capture ([deferred](#deferred)) | The harness passes on the Codex captures. The diff touches only the reader, coverage, fixtures, descriptor and [What the CLIs report](#what-the-clis-report). Manual: a real Codex ticket run shows tokens in the Runs tab. |
-| D8 | **Context-window meter.** The `contextWindow` event, Claude Code's derived value, delivery on the run's WebSocket stream, and the console meter. ([Meter](#live-context-window-meter)) | D2, D4 | A reader test emits `contextWindow`. A stream test delivers it and stores nothing. Web tests: the meter with and without a window size, and hidden when coverage declares none. Manual: the meter grows during a real Claude Code run. |
-| D9 | **Slices and summary API.** The `usage_slices` view and `GET /api/usage/summary`. ([Slices](#slices)) | D5, D6 | DB tests with MockProvider fixtures at each level of detail (per request, per turn, run total only, subagent total only): each run's slices add up to its total. One test per `groupBy`. Day grouping is checked in two timezones around midnight. Untracked runs appear only in the coverage counts. Workspace runs are excluded by the board filter. Deleting a ticket leaves the totals unchanged. Tokens per Done ticket matches a hand-computed median over a split ticket tree. |
-| D10 | **Settings → Usage page.** Tiles, chart, grouped table, filters and the coverage line. ([Page](#page)) | D4, D9 | Web tests: for every group, the table rows add up to the Total tile. The coverage line names untracked connectors. "—" and "not reported" appear in the right cells. Filters change the query. Manual: a workspace with runs from two connectors. |
-| D11 | **Chat-session totals.** `GET /api/chat-sessions/{id}/usage` and the total in the chat header. | — | Integration test with MockProvider chat runs, where untracked runs are not counted. Web test for the header. |
+| D8 | **Done.** **Context-window meter.** The `contextWindow` event, Claude Code's derived value, delivery on the run's WebSocket stream, and the console meter. ([Meter](#live-context-window-meter)) | D2, D4 | A reader test emits `contextWindow`. A stream test delivers it and stores nothing. Web tests: the meter with and without a window size, and hidden when coverage declares none. Manual: the meter grows during a real Claude Code run. |
+| D9 | **Done.** **Slices and summary API.** The `usage_slices` view and `GET /api/usage/summary`. ([Slices](#slices)) | D5, D6 | DB tests with MockProvider fixtures at each level of detail (per request, per turn, run total only, subagent total only): each run's slices add up to its total. One test per `groupBy`. Day grouping is checked in two timezones around midnight. Untracked runs appear only in the coverage counts. Workspace runs are excluded by the board filter. Deleting a ticket leaves the totals unchanged. Tokens per Done ticket matches a hand-computed median over a split ticket tree. |
+| D10 | **Done.** **Settings → Usage page.** Tiles, chart, grouped table, filters and the coverage line. ([Page](#page)) | D4, D9 | Web tests: for every group, the table rows add up to the Total tile. The coverage line names untracked connectors. "—" and "not reported" appear in the right cells. Filters change the query. Manual: a workspace with runs from two connectors. |
+| D11 | **Done.** **Chat-session totals.** `GET /api/chat/sessions/{id}/usage` and the total in the chat header. | — | Integration test with MockProvider chat runs, where untracked runs are not counted. Web test for the header. |
 | D12+ | **Deferred. One deliverable per further connector:** Cursor, OpenCode CLI, Kilo Code, and one ACP reader covering every ACP connector. Each follows the [checklist](#checklist-for-a-new-connector). | D2, D3, D4, that connector's captures ([deferred](#deferred)) | The same checks as D7, for that connector. |
 
 D0, D1, D3, D5 and D11 can start now and run in parallel. D2 follows D1, D4 follows D3, and D6 follows D5. D8, D9 and D10 need only Claude Code and MockProvider, so none of them waits on the deferred readers.
@@ -217,11 +217,11 @@ Every connector records the same scenario: one prompt that runs a shell command 
 
 ### Acceptance (connector groundwork)
 
-- [ ] No adapter calls `track_usage` or `observe_usage`; the shared runners do.
-- [ ] `start_process` takes a `ProcessContext` with the CLI version.
-- [ ] `runTotal.byModel` is stored in `run_usage_models`, and the Claude Code reader emits it.
-- [ ] Every `UsageFormat` declares coverage, and the connector API serves it.
-- [ ] The harness runs every capture, including the existing Claude Code ones.
+- [x] No adapter calls `track_usage` or `observe_usage`; the shared runners do.
+- [x] `start_process` takes a `ProcessContext` with the CLI version.
+- [x] `runTotal.byModel` is stored in `run_usage_models`, and the Claude Code reader emits it.
+- [x] Every `UsageFormat` declares coverage, and the connector API serves it.
+- [x] The harness runs every capture, including the existing Claude Code ones.
 - [ ] Deferred (D7): Codex usage is tracked with changes only to its reader, coverage, fixtures and descriptor.
 
 ## Phase 2: Settings → Usage
@@ -247,10 +247,10 @@ Connectors report at different levels of detail: per request, per turn, or only 
 | Source | Tokens | Model | Time |
 |---|---|---|---|
 | `request` | Each `run_llm_requests` row (a request or a turn) | The row's | The row's `created_at` |
-| `subagent` | Each `run_subagents` row: its breakdown, or `total_tokens` when there is none | The row's | The row's `created_at` |
-| `remainder` | The run total minus the rows above, per count, when positive | Per `run_usage_models` when present, else the run's reported model, else "Model not reported" | The run's end time, else its start time |
+| `subagent` | Each `run_subagents` row with a breakdown. One with only `total_tokens` is `unsplit`, unless the run's total was reported, which already holds it | The row's | The row's `created_at` |
+| `remainder` | A reported total minus the rows above, per count | Per `run_usage_models` when the split covers every row's model and each model's rows fit inside it; else the run's reported model, else "Model not reported" | The run's last snapshot (`run_usage.updated_at`), when its final total arrived |
 
-With per-model totals, the remainder is split per model: each model's total minus the rows with that model. A subagent total without a breakdown is kept as `unsplit`, a sixth column next to the five counts, so the slice's total still adds up.
+`unsplit` is a sixth column next to the five counts, so a slice's total still adds up. A remainder below zero (rows above the reported total) is clamped to 0 in the view, and the reader harness fails any capture that would produce one.
 
 The slices of a run always add up to its total, for every connector and every level of detail. A connector that reports only totals shows up as `remainder` slices: coarser, but not missing. A partial run's total is the sum of its rows, so its remainder is 0.
 
@@ -259,10 +259,11 @@ Slices are a SQL view, `usage_slices`, that reads its dimensions from `run_usage
 ### Schema
 
 - `agent_runs.connector`: the connector id, written when the run starts.
-- `run_usage` gains its own `id` primary key. `run_id` becomes a nullable link with `ON DELETE SET NULL`. When tracking starts, the row copies the run's connector, `agent_id` and agent name, `job_type`, `ticket_id`, top-level ticket id, `board_id` and board name, `chat_session_id`, reported model, and start time; the end time is written with the final snapshot. Links to tickets, agents, boards and chat sessions use `ON DELETE SET NULL`.
+- `run_usage` gains its own `id` primary key, equal to the run's id when written. `run_id` becomes a nullable, unique link with `ON DELETE SET NULL`. Every snapshot write copies the run's connector, `agent_id` and agent name, `job_type`, `ticket_id`, top-level ticket id, `board_id` and board name, `chat_session_id`, reported model and creation time (`run_created_at`); a write for a run that no longer exists writes nothing. Links to tickets, agents, boards and chat sessions use `ON DELETE SET NULL` (migration `074_usage_dimensions.sql`).
 - `run_llm_requests` and `run_subagents` reference `run_usage.id` instead of `agent_runs.id`, so they survive with it.
-- `run_usage_models` (`usage_id`, `model`, the five counts): written from `runTotal.byModel` in the same versioned snapshot as `run_usage`.
-- `usage_slices`: a view, no stored data.
+- `run_usage_models` (`usage_id`, `model`, the five counts): replaced with every snapshot write of `run_usage` (`075_run_usage_models.sql`).
+- `tickets.done_at`: set by a trigger when a ticket moves to Done and cleared when it leaves. Tickets already Done take their `updated_at`, an approximation (`076_usage_slices.sql`).
+- `usage_slices`: a view, no stored data, with indexes on the request, subagent and usage times it filters by.
 
 ### Dimensions
 
@@ -282,39 +283,36 @@ Slices are a SQL view, `usage_slices`, that reads its dimensions from `run_usage
 - **Tiles:** total tokens, tracked runs, tokens per Done ticket (median, with the average in the tooltip) and active days.
 - **Chart:** tokens per day, stacked by the selected group.
 - **Table:** "Group by" Model, Agent, Board, Connector or Job type. Columns are In, Cached, Out, No breakdown, Total, % of total and Runs. Cached reads stay apart, as on the Runs tab. Rows with no model show as "Model not reported". Workspace overhead is its own row when grouping by job type, and Workspace is its own row when grouping by board.
-- **Coverage line:** "Counts 42 of 60 runs in this range. Not tracked: Cursor (12 runs), Kilo Code (6 runs)." Untracked runs are runs without a `run_usage` row, grouped by connector. A column shows "—" for a row only when no connector in that row can report the count, according to its coverage.
+- **Coverage line:** "Counts 42 of 60 runs in this range. Not tracked: Cursor (12 runs), Kilo Code (6 runs)." Tracked runs are usage rows created in the range; untracked runs are runs that started on a connector (`agent_runs.connector` set) and have no `run_usage` row, grouped by connector. Runs that never started are in neither count. A column shows "—" for a row only when no connector in that row can report the count, according to its coverage.
 - **Chat sessions:** a chat session's header shows its total. On this page, chat is a job type.
 
-Numbers use the same compact format as the Runs tab, with exact counts in a tooltip. The page has the same access as the other Settings tabs.
+Numbers use the same compact format as the Runs tab, with exact counts in a tooltip. The page is `/settings/usage`, admins only like the other Settings tabs. The chart shows the seven largest groups and folds the rest into "Other"; its colors are `--chart-series-*` tokens, checked for color-vision deficiency in both themes, and the table below it carries the same numbers.
 
 ### Live context-window meter
 
-The console header shows "Context 84k / 200k" from the latest `contextWindow` event, or "Context 84k" when the connector reports no window size. It travels over the run's existing WebSocket stream and is not stored. It is hidden for connectors whose coverage declares no context window.
+The console header shows "Context 84k / 200k" from the latest `contextWindow` event, or "Context 84k" when the connector reports no window size. The run stream publishes it as a `usage.contextWindow` event and stores nothing. It appears once a reading arrives, so connectors whose coverage declares no context window never show it. Claude Code's reading is a main-thread request's prompt: its input plus cache reads and writes, without its output.
 
 ### API
 
-- `GET /api/usage/summary?from&to&tz&groupBy=model|agent|board|connector|jobType&board&connector` → `{ totals, rows: [{ key, label, connector, tokens, unsplit, runs }], daily: [{ day, byKey }], coverage: { trackedRuns, untrackedRuns, untrackedByConnector }, perDoneTicket }`
-- `GET /api/chat-sessions/{id}/usage` → the same group shape as the ticket's `own`.
+- `GET /api/usage/summary?from&to&tz&groupBy=model|agent|board|connector|jobType&board&connector` (admins only) → `{ totals: { tokens, unsplit, total, runs, activeDays }, rows: [{ key, label, connector, tokens, unsplit, total, runs }], daily: [{ day, byKey }], coverage: { trackedRuns, untrackedRuns, untrackedByConnector }, perDoneTicket: { tickets, median, average } | null }`. Dates are days in `tz` (default `UTC`), both inclusive; a bad date, group or time zone is a 400.
+- `GET /api/chat/sessions/{id}/usage` (the session's owner) → the same group shape as the ticket's `own`, read from the usage rows.
 - Connector responses gain `usageCoverage`.
 
 ### Acceptance (phase 2)
 
-- [ ] For every group and range, the table rows add up to the Total tile, including for a connector that reports only run totals (MockProvider fixture).
-- [ ] Runs from untracked connectors are counted only in the coverage line.
-- [ ] Workspace overhead is shown apart and never included in a ticket total. The board filter excludes Workspace runs.
-- [ ] Deleting a ticket, agent or board does not change past totals.
-- [ ] Tokens per Done ticket is the median over top-level tickets, each counting its whole tree.
-- [ ] Days follow the viewer's timezone.
-- [ ] A chat session shows its total.
-- [ ] The console meter updates during a run and is hidden for connectors without a context window.
-- [ ] No dollar amounts.
+- [x] For every group and range, the table rows add up to the Total tile, including for a connector that reports only run totals (MockProvider fixture).
+- [x] Runs from untracked connectors are counted only in the coverage line.
+- [x] Workspace overhead is shown apart and never included in a ticket total. The board filter excludes Workspace runs.
+- [x] Deleting a ticket, agent or board does not change past totals.
+- [x] Tokens per Done ticket is the median over top-level tickets, each counting its whole tree.
+- [x] Days follow the viewer's timezone.
+- [x] A chat session shows its total.
+- [x] The console meter updates during a run and is hidden for connectors without a context window (web and stream tests; the manual check with a real run is part of D0).
+- [x] No dollar amounts.
 
 ## Open questions
 
-Settled questions are in [Decisions (phase 2)](#decisions-phase-2). These remain:
-
-- **A remainder below zero.** If a run's rows add up to more than the CLI's total for some count, the page clamps the remainder to 0 and the harness fails the capture in tests. Proposed, not yet confirmed.
-- **Claude Code's context-window value (decide within D8).** Whether `used` is the last request's input plus both cache counts, or also includes its output.
+Settled questions are in [Decisions (phase 2)](#decisions-phase-2). Two were settled while building: a remainder below zero is clamped to 0 in the view and fails the harness ([Slices](#slices)), and Claude Code's context reading leaves output out ([Meter](#live-context-window-meter)).
 
 ### Deferred
 
@@ -322,6 +320,7 @@ These need connector CLIs that are not available yet. They block only D7 and D12
 
 - **A real Codex capture (blocks D7).** `fixtures/codex/*.jsonl` looks hand-written: the counts are round, and it has a `cache_write_input_tokens` field that the Codex row above does not expect. A real capture must show whether `input_tokens` includes `cached_input_tokens`, whether `turn.completed.usage` is per turn or cumulative, whether a model is reported, and how subagents appear. This needs the Codex CLI installed and signed in.
 - **ACP captures beyond OpenCode (blocks the ACP reader).** In the real `fixtures/opencode-acp` capture, the prompt response's `totalTokens` (7897) is `inputTokens` 58 + `outputTokens` 14 + `cachedReadTokens` 7808 + `thoughtTokens` 17. Thought tokens are therefore outside `outputTokens`, and the reader must add them to `output`. `usage_update` reports `used` 7897 and `size` 200000. That capture has no subagent or resumed turn, so it is not the full standard capture. Copilot, Qwen Code, Kimi and Grok need their own captures before one ACP reader can claim to cover them.
+- **OpenCode speaks two wire formats.** OpenCode 2.0+ runs over ACP and older versions print `--format json` events, but one descriptor serves both, and `ConnectorDescriptor::usage` names one format. Its reader must pick the format per launch (the version is in the `ProcessContext`), or the descriptor must name one format per transport.
 
 ## Testing (phase 1)
 
