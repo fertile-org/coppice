@@ -34,7 +34,9 @@ import {
   useCreateChatSession,
   usePostChatMessage,
 } from './useChat';
+import { ChatSessionTokens } from './ChatSessionTokens';
 import { useChatRunLiveStream } from './useChatRunLiveStream';
+import { chatSessionUsageQueryKey } from './useChatSessionUsage';
 
 const CHAT_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,text/csv,application/json,application/pdf,.md,.csv,.json,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp';
@@ -369,7 +371,10 @@ function ChatTranscript({
     setActiveRunId(null);
     void refetch();
     void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-  }, [queryClient, refetch]);
+    if (sessionId) {
+      void queryClient.invalidateQueries({ queryKey: chatSessionUsageQueryKey(sessionId) });
+    }
+  }, [queryClient, refetch, sessionId]);
 
   const live = useChatRunLiveStream(activeRunId, { onFinished: onLiveFinished });
   pollRef.current.liveOpen = live.connection === 'open';
@@ -403,6 +408,7 @@ function ChatTranscript({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {sessionId ? <ChatSessionTokens sessionId={sessionId} /> : null}
           {sessionId && !chatUnavailable ? (
             <Button
               type="button"

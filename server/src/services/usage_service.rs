@@ -75,11 +75,12 @@ pub struct UsageGroup {
 }
 
 impl UsageGroup {
-    fn add(&mut self, run: &TicketRunUsage, usage: &RunUsage) {
+    /// Counts one tracked run; `finished` is false while it is queued or running.
+    fn add(&mut self, finished: bool, usage: &RunUsage) {
         self.runs += 1;
         match usage.status {
             UsageStatus::None => {
-                if run.finished {
+                if finished {
                     self.runs_not_reported += 1;
                 }
             }
@@ -87,7 +88,7 @@ impl UsageGroup {
                 self.runs_with_usage += 1;
                 self.tokens.add(&usage.tokens);
                 self.subagent_tokens = add_opt(self.subagent_tokens, usage.subagent_tokens);
-                if usage.status == UsageStatus::Partial && run.finished {
+                if usage.status == UsageStatus::Partial && finished {
                     self.partial_runs += 1;
                 }
             }
@@ -528,6 +529,37 @@ impl<'a> UsageService<'a> {
     }
 }
 
+impl UsageService<'_> {
+    /// Usage for a chat session's turns, counted like a ticket's own runs. Read
+    /// from the usage rows, so turns whose runs were deleted still count.
+    pub async fn chat_session_usage(&self, session_id: Uuid) -> Result<UsageGroup, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT u.status AS usage_status, u.input_tokens, u.cache_read_tokens,
+                   u.cache_write_tokens, u.output_tokens, u.reasoning_tokens,
+                   u.subagent_tokens, u.request_count, u.subagent_count,
+                   COALESCE(ar.status NOT IN ('queued', 'running'), true) AS finished
+            FROM run_usage u
+            LEFT JOIN agent_runs ar ON ar.id = u.run_id
+            WHERE u.chat_session_id = $1
+            "#,
+        )
+        .bind(session_id)
+        .fetch_all(self.pool)
+        .await?;
+        let mut group = UsageGroup {
+            key: "chat_session".into(),
+            ..UsageGroup::default()
+        };
+        for row in &rows {
+            if let Some(usage) = run_usage_from_row(row, "usage_status")? {
+                group.add(row.try_get("finished")?, &usage);
+            }
+        }
+        Ok(group)
+    }
+}
+
 /// Groups a ticket's runs. Pure, so the counting rules are unit-tested.
 fn rollup(runs: Vec<TicketRunUsage>, subtickets: Option<SubticketUsage>) -> TicketUsage {
     let mut own = UsageGroup {
@@ -556,7 +588,7 @@ fn rollup(runs: Vec<TicketRunUsage>, subtickets: Option<SubticketUsage>) -> Tick
                     ..UsageGroup::default()
                 }),
         ] {
-            group.add(run, usage);
+            group.add(run.finished, usage);
         }
     }
     let by_total = |groups: BTreeMap<String, UsageGroup>| {
