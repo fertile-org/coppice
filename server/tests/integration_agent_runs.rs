@@ -655,6 +655,21 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
     assert_eq!(run_connector.as_deref(), Some("mock"));
     assert_eq!(usage_connector.as_deref(), Some("mock"));
     assert!(agent_name.is_some());
+    // The fixture's run total is split by model; the split is stored with it.
+    let models: Vec<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT model, output_tokens FROM run_usage_models WHERE usage_id = $1 ORDER BY model",
+    )
+    .bind(run_uuid)
+    .fetch_all(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(
+        models,
+        [
+            ("mock-model".to_string(), Some(80)),
+            ("mock-small".to_string(), Some(40))
+        ]
+    );
 
     let (status, run) = get_json(
         &app,

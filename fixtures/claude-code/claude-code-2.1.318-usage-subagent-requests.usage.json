@@ -49,6 +49,18 @@
     }
   ],
   "totals": {
+    "byModel": [
+      {
+        "model": "claude-haiku-5-5",
+        "tokens": {
+          "cacheRead": 56813,
+          "cacheWrite": 33005,
+          "input": 8,
+          "output": 428,
+          "reasoning": 109
+        }
+      }
+    ],
     "costUsd": 0.0058863299999999995,
     "requestCount": 2,
     "status": "reported",

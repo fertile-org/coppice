@@ -34,7 +34,8 @@
 
 use super::{ProcessContext, UsageReader};
 use crate::domain::usage::{
-    Granularity, RequestUsage, RunTotalUsage, SubagentUsage, TokenCounts, UsageEvent,
+    add_model_tokens, Granularity, RequestUsage, RunTotalUsage, SubagentUsage, TokenCounts,
+    UsageEvent,
 };
 use serde_json::Value;
 use std::collections::HashSet;
@@ -232,10 +233,14 @@ impl ClaudeStreamJsonReader {
     }
 }
 
-/// Adds tokens and cost; the cost stays `None` only when neither side has one.
+/// Adds tokens, the per-model split and cost; the cost stays `None` only when
+/// neither side has one.
 fn add_total(sum: &mut Option<RunTotalUsage>, other: &RunTotalUsage) {
     let sum = sum.get_or_insert_with(RunTotalUsage::default);
     sum.tokens.add(&other.tokens);
+    for entry in &other.by_model {
+        add_model_tokens(&mut sum.by_model, &entry.model, &entry.tokens);
+    }
     sum.cost_usd = match (sum.cost_usd, other.cost_usd) {
         (None, None) => None,
         (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
@@ -286,20 +291,25 @@ fn api_usage(usage: &Value) -> TokenCounts {
     }
 }
 
-/// Claude Code `modelUsage`: per-model camelCase totals, summed over models.
+/// Claude Code `modelUsage`: per-model camelCase totals, summed over models
+/// and kept per model.
 fn model_usage(by_model: &Value) -> RunTotalUsage {
     let mut total = RunTotalUsage::default();
     let Some(models) = by_model.as_object() else {
         return total;
     };
-    for usage in models.values() {
-        total.tokens.add(&TokenCounts {
+    for (model, usage) in models {
+        let tokens = TokenCounts {
             input: int(usage, "inputTokens"),
             cache_read: int(usage, "cacheReadInputTokens"),
             cache_write: int(usage, "cacheCreationInputTokens"),
             output: int(usage, "outputTokens"),
             reasoning: int(usage, "thinkingTokens"),
-        });
+        };
+        total.tokens.add(&tokens);
+        if !tokens.is_empty() {
+            add_model_tokens(&mut total.by_model, model, &tokens);
+        }
         if let Some(cost) = usage.get("costUSD").and_then(Value::as_f64) {
             total.cost_usd = Some(total.cost_usd.unwrap_or(0.0) + cost);
         }
@@ -417,6 +427,13 @@ mod tests {
         assert_eq!(totals.tokens.reasoning, Some(137));
         assert_eq!(totals.cost_usd, Some(0.00401926));
         assert_eq!(totals.subagent_count, 1);
+        // The same total, split by the models that spent it.
+        let mut by_model = TokenCounts::default();
+        for entry in &totals.by_model {
+            by_model.add(&entry.tokens);
+        }
+        assert!(!totals.by_model.is_empty());
+        assert_eq!(by_model, totals.tokens);
     }
 
     #[test]
@@ -502,6 +519,9 @@ mod tests {
         };
         assert_eq!(total.tokens.output, Some(15));
         assert_eq!(total.cost_usd, Some(0.5));
+        assert_eq!(total.by_model.len(), 1);
+        assert_eq!(total.by_model[0].model, "m");
+        assert_eq!(total.by_model[0].tokens.output, Some(15));
     }
 
     #[test]

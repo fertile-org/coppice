@@ -11,6 +11,11 @@
     { "kind": "subagent", "id": "sub-1", "agentType": "explore", "description": "Look around", "status": "running" },
     { "kind": "request", "id": "req-2", "model": "mock-model", "tokens": { "input": 5, "cacheRead": 1200, "output": 30, "reasoning": 10 } },
     { "kind": "subagent", "id": "sub-1", "model": "mock-model", "status": "completed", "tokens": { "input": 3, "output": 40 }, "toolUses": 2, "durationMs": 900 },
-    { "kind": "runTotal", "tokens": { "input": 18, "cacheRead": 2200, "cacheWrite": 200, "output": 120, "reasoning": 10 }, "costUsd": 0.0123 }
+    { "kind": "runTotal", "tokens": { "input": 18, "cacheRead": 2200, "cacheWrite": 200, "output": 120, "reasoning": 10 },
+      "byModel": [
+        { "model": "mock-model", "tokens": { "input": 15, "cacheRead": 2200, "cacheWrite": 200, "output": 80, "reasoning": 10 } },
+        { "model": "mock-small", "tokens": { "input": 3, "output": 40 } }
+      ],
+      "costUsd": 0.0123 }
   ]
 }

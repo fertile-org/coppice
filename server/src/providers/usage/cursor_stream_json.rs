@@ -69,6 +69,8 @@ impl CursorStreamJsonReader {
         let process_total = RunTotalUsage {
             tokens,
             cost_usd: None,
+            // Cursor names no model in its totals.
+            by_model: Vec::new(),
         };
         self.process.total = Some(process_total.clone());
         let mut run_total = self.finished.clone();

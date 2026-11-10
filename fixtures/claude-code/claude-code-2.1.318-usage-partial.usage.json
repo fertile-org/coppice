@@ -31,6 +31,18 @@
   ],
   "subagents": [],
   "totals": {
+    "byModel": [
+      {
+        "model": "claude-haiku-5-5",
+        "tokens": {
+          "cacheRead": 35213,
+          "cacheWrite": 6729,
+          "input": 4,
+          "output": 102,
+          "reasoning": 0
+        }
+      }
+    ],
     "costUsd": 0.00174933,
     "requestCount": 2,
     "status": "reported",

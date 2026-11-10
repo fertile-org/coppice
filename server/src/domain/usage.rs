@@ -151,9 +151,36 @@ impl SubagentUsage {
 pub struct RunTotalUsage {
     #[serde(default)]
     pub tokens: TokenCounts,
+    /// The same total split by model, when the CLI reports it that way.
+    /// Empty when it does not; when present, it adds up to `tokens`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_model: Vec<ModelTokens>,
     /// Stored for later; not shown.
     #[serde(default)]
     pub cost_usd: Option<f64>,
+}
+
+/// Tokens one model spent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTokens {
+    pub model: String,
+    #[serde(default)]
+    pub tokens: TokenCounts,
+}
+
+/// Adds `tokens` to `model`'s entry, keeping the list ordered by model.
+pub fn add_model_tokens(list: &mut Vec<ModelTokens>, model: &str, tokens: &TokenCounts) {
+    match list.binary_search_by(|entry| entry.model.as_str().cmp(model)) {
+        Ok(i) => list[i].tokens.add(tokens),
+        Err(i) => list.insert(
+            i,
+            ModelTokens {
+                model: model.to_string(),
+                tokens: *tokens,
+            },
+        ),
+    }
 }
 
 /// One normalized usage report.
@@ -211,6 +238,9 @@ pub struct RunUsageTotals {
     pub subagent_tokens: Option<i64>,
     pub request_count: i64,
     pub subagent_count: i64,
+    /// A reported total split by model; empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_model: Vec<ModelTokens>,
     pub cost_usd: Option<f64>,
 }
 
@@ -340,12 +370,18 @@ impl UsageTracker {
                 (UsageStatus::Partial, sum, unbroken, None)
             }
         };
+        let by_model = self
+            .reported
+            .as_ref()
+            .map(|total| total.by_model.clone())
+            .unwrap_or_default();
         RunUsageTotals {
             status,
             tokens,
             subagent_tokens,
             request_count: self.requests.len() as i64,
             subagent_count: self.subagents.len() as i64,
+            by_model,
             cost_usd,
         }
     }
@@ -464,6 +500,7 @@ mod tests {
         tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
             tokens: counts(500, 500),
             cost_usd: None,
+            ..RunTotalUsage::default()
         }));
         assert_eq!(tracker.snapshot().totals.subagent_tokens, None);
     }
@@ -479,6 +516,7 @@ mod tests {
         tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
             tokens: counts(100, 100),
             cost_usd: Some(0.5),
+            ..RunTotalUsage::default()
         }));
         tracker.apply(UsageEvent::RunTotalUnknown);
         let snap = tracker.snapshot();
@@ -495,6 +533,7 @@ mod tests {
         tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
             tokens: counts(100, 100),
             cost_usd: Some(0.5),
+            ..RunTotalUsage::default()
         }));
         let totals = tracker.snapshot().totals;
         assert_eq!(totals.status, UsageStatus::Reported);
@@ -511,12 +550,48 @@ mod tests {
         tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
             tokens: TokenCounts::default(),
             cost_usd: Some(0.5),
+            ..RunTotalUsage::default()
         }));
         let snap = tracker.snapshot();
         assert_eq!(snap.totals.status, UsageStatus::Partial);
         assert_eq!(snap.totals.tokens, counts(11, 12));
         assert_eq!(snap.totals.cost_usd, None);
         assert_eq!(snap.version, 2);
+    }
+
+    #[test]
+    fn a_reported_total_keeps_its_split_by_model() {
+        let mut tracker = UsageTracker::new();
+        tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
+            tokens: counts(30, 3),
+            by_model: vec![
+                ModelTokens {
+                    model: "a".into(),
+                    tokens: counts(10, 1),
+                },
+                ModelTokens {
+                    model: "b".into(),
+                    tokens: counts(20, 2),
+                },
+            ],
+            cost_usd: None,
+        }));
+        assert_eq!(tracker.snapshot().totals.by_model.len(), 2);
+        // A total that no longer covers the run drops its split too.
+        tracker.apply(request(Some("m1"), counts(1, 1)));
+        tracker.apply(UsageEvent::RunTotalUnknown);
+        assert!(tracker.snapshot().totals.by_model.is_empty());
+    }
+
+    #[test]
+    fn model_tokens_add_up_per_model() {
+        let mut list = Vec::new();
+        add_model_tokens(&mut list, "b", &counts(1, 1));
+        add_model_tokens(&mut list, "a", &counts(2, 2));
+        add_model_tokens(&mut list, "b", &counts(3, 3));
+        let models: Vec<_> = list.iter().map(|m| m.model.as_str()).collect();
+        assert_eq!(models, ["a", "b"]);
+        assert_eq!(list[1].tokens, counts(4, 4));
     }
 
     #[test]

@@ -129,6 +129,19 @@ pub(super) fn invariant_errors(snapshot: &UsageSnapshot) -> Vec<String> {
     if totals.subagent_tokens.is_some_and(|t| t < 0) {
         errors.push("run total: subagent tokens are negative".into());
     }
+    if !totals.by_model.is_empty() {
+        let mut sum = TokenCounts::default();
+        for entry in &totals.by_model {
+            errors.extend(counts_errors(&format!("model {}", entry.model), &entry.tokens));
+            sum.add(&entry.tokens);
+        }
+        if sum != totals.tokens {
+            errors.push(format!(
+                "the split by model ({sum:?}) does not add up to the run total ({:?})",
+                totals.tokens
+            ));
+        }
+    }
     if totals.status == UsageStatus::Reported {
         // The CLI's total covers every row: requests, subagent breakdowns and
         // subagent totals without a breakdown.
@@ -333,6 +346,7 @@ fn broken_counts_are_reported() {
             ..TokenCounts::default()
         },
         cost_usd: None,
+        ..RunTotalUsage::default()
     }));
     let errors = invariant_errors(&tracker.snapshot());
     assert!(errors.iter().any(|e| e.contains("more output")), "{errors:?}");
@@ -382,4 +396,24 @@ fn results_outside_the_coverage_are_reported() {
     };
     let errors = coverage_errors(&snapshot, &total_only);
     assert!(errors.iter().any(|e| e.contains("breakdown from a total-only")), "{errors:?}");
+}
+
+#[test]
+fn a_split_by_model_that_does_not_add_up_is_reported() {
+    use crate::domain::usage::{ModelTokens, RunTotalUsage, UsageEvent};
+    let output = |n| TokenCounts {
+        output: Some(n),
+        ..TokenCounts::default()
+    };
+    let mut tracker = UsageTracker::new();
+    tracker.apply(UsageEvent::RunTotal(RunTotalUsage {
+        tokens: output(10),
+        by_model: vec![ModelTokens {
+            model: "m".into(),
+            tokens: output(9),
+        }],
+        cost_usd: None,
+    }));
+    let errors = invariant_errors(&tracker.snapshot());
+    assert!(errors.iter().any(|e| e.contains("does not add up")), "{errors:?}");
 }

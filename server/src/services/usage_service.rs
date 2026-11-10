@@ -231,6 +231,34 @@ impl<'a> UsageService<'a> {
             return Ok(false);
         }
 
+        // The split by model belongs to the totals: replaced with them.
+        sqlx::query("DELETE FROM run_usage_models WHERE usage_id = $1")
+            .bind(run_id)
+            .execute(&mut *tx)
+            .await?;
+        if !totals.by_model.is_empty() {
+            let models = &totals.by_model;
+            sqlx::query(
+                r#"
+                INSERT INTO run_usage_models (
+                    usage_id, model,
+                    input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens
+                )
+                SELECT $1::uuid, m.*
+                FROM UNNEST($2::text[], $3::int8[], $4::int8[], $5::int8[], $6::int8[], $7::int8[]) AS m
+                "#,
+            )
+            .bind(run_id)
+            .bind(models.iter().map(|m| m.model.clone()).collect::<Vec<_>>())
+            .bind(models.iter().map(|m| m.tokens.input).collect::<Vec<_>>())
+            .bind(models.iter().map(|m| m.tokens.cache_read).collect::<Vec<_>>())
+            .bind(models.iter().map(|m| m.tokens.cache_write).collect::<Vec<_>>())
+            .bind(models.iter().map(|m| m.tokens.output).collect::<Vec<_>>())
+            .bind(models.iter().map(|m| m.tokens.reasoning).collect::<Vec<_>>())
+            .execute(&mut *tx)
+            .await?;
+        }
+
         let changed = |versions: &[i64]| -> Vec<usize> {
             (0..versions.len())
                 .filter(|&i| versions[i] > stored)
@@ -812,6 +840,16 @@ mod tests {
                 }),
                 UsageEvent::RunTotal(RunTotalUsage {
                     tokens: output(12),
+                    by_model: vec![
+                        crate::domain::usage::ModelTokens {
+                            model: "big".into(),
+                            tokens: output(5),
+                        },
+                        crate::domain::usage::ModelTokens {
+                            model: "small".into(),
+                            tokens: output(7),
+                        },
+                    ],
                     cost_usd: Some(0.01),
                 }),
             ]);
@@ -839,6 +877,18 @@ mod tests {
             assert_eq!(detail.requests.len(), 1);
             assert_eq!(detail.requests[0].id.as_deref(), Some("m1"));
             assert_eq!(detail.subagents[0].tool_uses, Some(2));
+            // The older snapshot had no split by model; the newer one's stays.
+            let models: Vec<(String, Option<i64>)> = sqlx::query_as(
+                "SELECT model, output_tokens FROM run_usage_models WHERE usage_id = $1 ORDER BY model",
+            )
+            .bind(run)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                models,
+                [("big".to_string(), Some(5)), ("small".to_string(), Some(7))]
+            );
         }
 
         #[tokio::test]
@@ -910,6 +960,7 @@ mod tests {
                 UsageEvent::RunTotal(RunTotalUsage {
                     tokens: output(20),
                     cost_usd: None,
+                    ..RunTotalUsage::default()
                 }),
             ]);
             assert!(service.save_snapshot(run, &snap).await.unwrap());
@@ -985,6 +1036,7 @@ mod tests {
                 let snap = snapshot(vec![UsageEvent::RunTotal(RunTotalUsage {
                     tokens: output(n),
                     cost_usd: None,
+                    ..RunTotalUsage::default()
                 })]);
                 service.save_snapshot(run, &snap).await.unwrap();
             }
