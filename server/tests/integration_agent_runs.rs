@@ -618,7 +618,8 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
         return;
     }
 
-    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage").await;
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage", |_| {}).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -636,6 +637,24 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
         Duration::from_secs(10),
     )
     .await;
+
+    // The connector is recorded on the run and copied onto its usage.
+    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+    let (run_connector, usage_connector, agent_name): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT ar.connector, u.connector, u.agent_name
+         FROM agent_runs ar JOIN run_usage u ON u.run_id = ar.id WHERE ar.id = $1",
+    )
+    .bind(run_uuid)
+    .fetch_one(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(run_connector.as_deref(), Some("mock"));
+    assert_eq!(usage_connector.as_deref(), Some("mock"));
+    assert!(agent_name.is_some());
 
     let (status, run) = get_json(
         &app,
@@ -1006,7 +1025,8 @@ async fn usage_counts_follow_stored_rows_not_connectors() {
         if let Some(status) = usage {
             let output = (status == "reported").then_some(5_i64);
             sqlx::query(
-                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, $2, 1, $3)",
+                "INSERT INTO run_usage (id, run_id, status, version, output_tokens)
+                 VALUES ($1, $1, $2, 1, $3)",
             )
             .bind(run_id)
             .bind(status)

@@ -3,6 +3,10 @@
 //! Works only with normalized usage (`domain::usage`); it never looks at which
 //! connector produced it. A run is tracked when it has a `run_usage` row: the
 //! stream handle stores one as soon as a reader is attached.
+//!
+//! A usage row's id is its run's id. The row copies what it is grouped by
+//! (connector, agent, ticket, board, ...) from the run on every write, and
+//! keeps it when the run, ticket, agent or board is deleted.
 
 use crate::domain::usage::{
     Granularity, RequestUsage, SubagentUsage, TokenCounts, UsageSnapshot, UsageStatus,
@@ -143,7 +147,7 @@ impl<'a> UsageService<'a> {
         // With no row yet, a concurrent first insert is still settled by the
         // version guard below; missing it here only writes more rows than needed.
         let stored: Option<i64> =
-            sqlx::query_scalar("SELECT version FROM run_usage WHERE run_id = $1 FOR UPDATE")
+            sqlx::query_scalar("SELECT version FROM run_usage WHERE id = $1 FOR UPDATE")
                 .bind(run_id)
                 .fetch_optional(&mut *tx)
                 .await?;
@@ -154,15 +158,33 @@ impl<'a> UsageService<'a> {
         }
         let stored = stored.unwrap_or(0);
         let totals = &snapshot.totals;
+        // Nothing is written for a run that no longer exists.
         let written = sqlx::query(
             r#"
-            INSERT INTO run_usage (
-                run_id, status, version,
-                input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
-                subagent_tokens, request_count, subagent_count, reported_cost_usd, updated_at
+            WITH RECURSIVE up AS (
+                SELECT t.id, t.parent_ticket_id
+                FROM tickets t JOIN agent_runs ar ON ar.ticket_id = t.id
+                WHERE ar.id = $1
+                UNION ALL
+                SELECT p.id, p.parent_ticket_id FROM up JOIN tickets p ON p.id = up.parent_ticket_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::float8, now())
-            ON CONFLICT (run_id) DO UPDATE SET
+            INSERT INTO run_usage (
+                id, run_id, status, version,
+                input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
+                subagent_tokens, request_count, subagent_count, reported_cost_usd, updated_at,
+                connector, agent_id, agent_name, job_type, ticket_id, root_ticket_id,
+                board_id, board_name, chat_session_id, reported_model, run_created_at
+            )
+            SELECT $1, ar.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::float8, now(),
+                   ar.connector, ar.agent_id, a.name, ar.job_type, ar.ticket_id,
+                   (SELECT id FROM up WHERE parent_ticket_id IS NULL LIMIT 1),
+                   t.board_id, b.name, ar.chat_session_id, ar.reported_model, ar.created_at
+            FROM agent_runs ar
+            LEFT JOIN agents a ON a.id = ar.agent_id
+            LEFT JOIN tickets t ON t.id = ar.ticket_id
+            LEFT JOIN boards b ON b.id = t.board_id
+            WHERE ar.id = $1
+            ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 version = EXCLUDED.version,
                 input_tokens = EXCLUDED.input_tokens,
@@ -174,7 +196,17 @@ impl<'a> UsageService<'a> {
                 request_count = EXCLUDED.request_count,
                 subagent_count = EXCLUDED.subagent_count,
                 reported_cost_usd = EXCLUDED.reported_cost_usd,
-                updated_at = now()
+                updated_at = now(),
+                connector = EXCLUDED.connector,
+                agent_id = EXCLUDED.agent_id,
+                agent_name = EXCLUDED.agent_name,
+                job_type = EXCLUDED.job_type,
+                ticket_id = EXCLUDED.ticket_id,
+                root_ticket_id = EXCLUDED.root_ticket_id,
+                board_id = EXCLUDED.board_id,
+                board_name = EXCLUDED.board_name,
+                chat_session_id = EXCLUDED.chat_session_id,
+                reported_model = EXCLUDED.reported_model
             WHERE run_usage.version < EXCLUDED.version
             "#,
         )
@@ -211,7 +243,7 @@ impl<'a> UsageService<'a> {
             sqlx::query(
                 r#"
                 INSERT INTO run_llm_requests (
-                    run_id, seq, external_id, granularity, model,
+                    usage_id, seq, external_id, granularity, model,
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens
                 )
                 SELECT $1::uuid, r.*
@@ -219,7 +251,7 @@ impl<'a> UsageService<'a> {
                     $2::int4[], $3::text[], $4::text[], $5::text[],
                     $6::int8[], $7::int8[], $8::int8[], $9::int8[], $10::int8[]
                 ) AS r
-                ON CONFLICT (run_id, seq) DO UPDATE SET
+                ON CONFLICT (usage_id, seq) DO UPDATE SET
                     external_id = EXCLUDED.external_id,
                     granularity = EXCLUDED.granularity,
                     model = EXCLUDED.model,
@@ -250,7 +282,7 @@ impl<'a> UsageService<'a> {
             sqlx::query(
                 r#"
                 INSERT INTO run_subagents (
-                    run_id, seq, external_id, agent_type, description, model, status,
+                    usage_id, seq, external_id, agent_type, description, model, status,
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
                     total_tokens, tool_uses, duration_ms
                 )
@@ -260,7 +292,7 @@ impl<'a> UsageService<'a> {
                     $8::int8[], $9::int8[], $10::int8[], $11::int8[], $12::int8[],
                     $13::int8[], $14::int4[], $15::int8[]
                 ) AS s
-                ON CONFLICT (run_id, seq) DO UPDATE SET
+                ON CONFLICT (usage_id, seq) DO UPDATE SET
                     external_id = EXCLUDED.external_id,
                     agent_type = EXCLUDED.agent_type,
                     description = EXCLUDED.description,
@@ -336,7 +368,7 @@ impl<'a> UsageService<'a> {
             r#"
             SELECT external_id, granularity, model, input_tokens, cache_read_tokens,
                    cache_write_tokens, output_tokens, reasoning_tokens
-            FROM run_llm_requests WHERE run_id = $1 ORDER BY seq
+            FROM run_llm_requests WHERE usage_id = $1 ORDER BY seq
             "#,
         )
         .bind(run_id)
@@ -363,7 +395,7 @@ impl<'a> UsageService<'a> {
             SELECT external_id, agent_type, description, model, status,
                    input_tokens, cache_read_tokens, cache_write_tokens, output_tokens,
                    reasoning_tokens, total_tokens, tool_uses, duration_ms
-            FROM run_subagents WHERE run_id = $1 ORDER BY seq
+            FROM run_subagents WHERE usage_id = $1 ORDER BY seq
             "#,
         )
         .bind(run_id)
@@ -539,6 +571,22 @@ fn run_usage_from_row(
         request_count: row.try_get::<i32, _>("request_count")?.into(),
         subagent_count: row.try_get::<i32, _>("subagent_count")?.into(),
     }))
+}
+
+/// Starts usage tracking for a run that is about to run on `connector`: records
+/// the connector on the run, then writes every usage snapshot the run's stream
+/// publishes. The connector is written first, so a run that reports nothing
+/// still stores it with its usage row.
+pub async fn track_run(pool: &PgPool, run_id: Uuid, connector: &str, stream: &RunStreamHandle) {
+    let saved = sqlx::query("UPDATE agent_runs SET connector = $2 WHERE id = $1")
+        .bind(run_id)
+        .bind(connector)
+        .execute(pool)
+        .await;
+    if let Err(err) = saved {
+        tracing::warn!(%run_id, error = %err, "failed to record the run's connector");
+    }
+    spawn_usage_writer(pool.clone(), run_id, stream);
 }
 
 /// Writes the run's usage as the connector reports it, so a running row shows
@@ -830,6 +878,101 @@ mod tests {
                 .map(|r| r.tokens.output)
                 .collect();
             assert_eq!(outputs, [Some(1), Some(20), Some(3)]);
+        }
+
+        #[tokio::test]
+        async fn usage_outlives_its_run_ticket_agent_and_board() {
+            let Some(pool) = pool().await else { return };
+            let (agent, [parent, _, grandchild]) = tree(&pool).await;
+            let board: Uuid = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
+                .bind(parent)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            let run = insert_run(&pool, grandchild, agent).await;
+            sqlx::query("UPDATE agent_runs SET connector = 'mock', reported_model = 'm1' WHERE id = $1")
+                .bind(run)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let service = UsageService::new(&pool);
+            let snap = snapshot(vec![
+                UsageEvent::Request(RequestUsage {
+                    id: Some("r1".into()),
+                    tokens: output(5),
+                    ..RequestUsage::default()
+                }),
+                UsageEvent::Subagent(SubagentUsage {
+                    id: "s1".into(),
+                    total_tokens: Some(7),
+                    ..SubagentUsage::default()
+                }),
+                UsageEvent::RunTotal(RunTotalUsage {
+                    tokens: output(20),
+                    cost_usd: None,
+                }),
+            ]);
+            assert!(service.save_snapshot(run, &snap).await.unwrap());
+
+            let dims = |pool: PgPool| async move {
+                sqlx::query(
+                    "SELECT run_id, connector, agent_id, agent_name, job_type, ticket_id,
+                            root_ticket_id, board_id, board_name, reported_model, output_tokens,
+                            (SELECT count(*) FROM run_llm_requests WHERE usage_id = u.id) AS requests,
+                            (SELECT count(*) FROM run_subagents WHERE usage_id = u.id) AS subagents
+                     FROM run_usage u WHERE id = $1",
+                )
+                .bind(run)
+                .fetch_one(&pool)
+                .await
+                .expect("usage row")
+            };
+            let row = dims(pool.clone()).await;
+            assert_eq!(row.get::<Option<Uuid>, _>("run_id"), Some(run));
+            assert_eq!(row.get::<Option<String>, _>("connector").as_deref(), Some("mock"));
+            assert_eq!(row.get::<Option<Uuid>, _>("agent_id"), Some(agent));
+            assert_eq!(row.get::<Option<String>, _>("agent_name").as_deref(), Some("usage agent"));
+            assert_eq!(row.get::<Option<String>, _>("job_type").as_deref(), Some("work_on_ticket"));
+            assert_eq!(row.get::<Option<Uuid>, _>("ticket_id"), Some(grandchild));
+            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), Some(parent));
+            assert_eq!(row.get::<Option<Uuid>, _>("board_id"), Some(board));
+            assert_eq!(row.get::<Option<String>, _>("board_name").as_deref(), Some("usage"));
+            assert_eq!(row.get::<Option<String>, _>("reported_model").as_deref(), Some("m1"));
+
+            // Deleting the ticket deletes the run; its usage stays.
+            sqlx::query("DELETE FROM tickets WHERE id = $1")
+                .bind(grandchild)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let row = dims(pool.clone()).await;
+            assert_eq!(row.get::<Option<Uuid>, _>("run_id"), None);
+            assert_eq!(row.get::<Option<Uuid>, _>("ticket_id"), None);
+            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), Some(parent));
+            assert_eq!(row.get::<Option<i64>, _>("output_tokens"), Some(20));
+            assert_eq!(row.get::<i64, _>("requests"), 1);
+            assert_eq!(row.get::<i64, _>("subagents"), 1);
+            // A snapshot for a run that is gone writes nothing.
+            assert!(!service.save_snapshot(run, &snap).await.unwrap());
+
+            sqlx::query("DELETE FROM agents WHERE id = $1")
+                .bind(agent)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM boards WHERE id = $1")
+                .bind(board)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let row = dims(pool.clone()).await;
+            assert_eq!(row.get::<Option<Uuid>, _>("agent_id"), None);
+            assert_eq!(row.get::<Option<String>, _>("agent_name").as_deref(), Some("usage agent"));
+            assert_eq!(row.get::<Option<Uuid>, _>("board_id"), None);
+            assert_eq!(row.get::<Option<String>, _>("board_name").as_deref(), Some("usage"));
+            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), None);
+            assert_eq!(row.get::<Option<String>, _>("connector").as_deref(), Some("mock"));
+            assert_eq!(row.get::<i64, _>("requests"), 1);
         }
 
         #[tokio::test]

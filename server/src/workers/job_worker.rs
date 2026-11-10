@@ -341,7 +341,7 @@ async fn execute_job(
     // runs finished and unregistered before a client could attach.
     let stream = state.run_streams.register(run.id);
     crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
-    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
+    crate::services::usage_service::track_run(pool, run.id, &agent.connector, &stream).await;
     let cancel_rx = stream.cancelled_rx();
 
     run_svc
@@ -1107,7 +1107,7 @@ async fn execute_chat_turn(
 
     let stream = state.run_streams.register(run.id);
     crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
-    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
+    crate::services::usage_service::track_run(pool, run.id, &agent.connector, &stream).await;
     let cancel_rx = stream.cancelled_rx();
 
     run_svc

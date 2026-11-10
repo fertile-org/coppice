@@ -530,12 +530,15 @@ async fn compaction_run_creates_pending_candidates_without_notifications() {
     assert!(fx.queue_rows().await.is_empty());
 
     let run_id = batch.run_id.unwrap();
-    let run_status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
-        .bind(run_id)
-        .fetch_one(fx.pool())
-        .await
-        .unwrap();
+    let (run_status, connector): (String, Option<String>) =
+        sqlx::query_as("SELECT status, connector FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(fx.pool())
+            .await
+            .unwrap();
     assert_eq!(run_status, "succeeded");
+    // Recorded when the run started.
+    assert_eq!(connector.as_deref(), Some("mock"));
 
     let items: Vec<(String, String, Option<Uuid>, Option<Uuid>, String)> = sqlx::query_as(
         r#"
