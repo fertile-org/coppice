@@ -245,7 +245,10 @@ async fn approving_a_split_plan_starts_child_one_and_reports_progress() {
     assert_eq!(second_progress["position"], 2);
     assert_eq!(second_progress["count"], 2);
     assert_eq!(second_progress["children"][0]["position"], 1);
-    assert_eq!(second_progress["children"][1]["id"], split.children[1].to_string());
+    assert_eq!(
+        second_progress["children"][1]["id"],
+        split.children[1].to_string()
+    );
     assert_eq!(second_progress["children"][1]["position"], 2);
 }
 
