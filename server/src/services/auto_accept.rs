@@ -14,6 +14,7 @@ use crate::domain::substatus::TicketStatus;
 use crate::services::accept_service::{AcceptError, AcceptService};
 use crate::services::comment_service::CommentService;
 use crate::services::git_flow::Actor;
+use crate::services::ticket_git_service::{TicketGitError, TicketGitService};
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
 use crate::AppState;
 
@@ -67,27 +68,55 @@ pub fn skip_review_eligibility(facts: &SkipReviewFacts) -> Result<(), SkipReview
     Ok(())
 }
 
-/// Record that a reviewer or Tech Lead passed the ticket out of In Review.
-/// `at` is the approving comment's time, so that comment is not read as a
-/// change request. With no comment the database clock is used.
+/// The ticket branch head the pass covers. `Ok(None)` for a ticket with no
+/// repo. An error means the head can't be read.
+async fn current_head(
+    state: &AppState,
+    pool: &PgPool,
+    ticket_id: Uuid,
+) -> Result<Option<String>, TicketGitError> {
+    TicketGitService::from_state(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+}
+
+/// Record that a reviewer or Tech Lead passed the ticket out of In Review,
+/// bound to the branch head they saw. `at` is the approving comment's time, so
+/// that comment is not read as a change request. With no comment the database
+/// clock is used. Without `state` (or with an unreadable head) no SHA is
+/// stored, and a repo ticket then never counts as passed.
 pub async fn record_agent_review_pass(
     pool: &PgPool,
+    state: Option<&AppState>,
     ticket_id: Uuid,
     at: Option<OffsetDateTime>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE tickets SET agent_review_passed_at = COALESCE($2, now()) WHERE id = $1")
-        .bind(ticket_id)
-        .bind(at)
-        .execute(pool)
-        .await?;
+    let head = match state {
+        Some(state) => current_head(state, pool, ticket_id)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::warn!(%ticket_id, error = %err, "could not read the reviewed head");
+                None
+            }),
+        None => None,
+    };
+    sqlx::query(
+        "UPDATE tickets SET agent_review_passed_at = COALESCE($2, now()), \
+         agent_review_passed_sha = $3 WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .bind(at)
+    .bind(head)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 /// Forget an earlier pass: the code or the review changed since.
 pub async fn clear_agent_review_pass(pool: &PgPool, ticket_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE tickets SET agent_review_passed_at = NULL \
-         WHERE id = $1 AND agent_review_passed_at IS NOT NULL",
+        "UPDATE tickets SET agent_review_passed_at = NULL, agent_review_passed_sha = NULL \
+         WHERE id = $1 AND (agent_review_passed_at IS NOT NULL OR agent_review_passed_sha IS NOT NULL)",
     )
     .bind(ticket_id)
     .execute(pool)
@@ -106,7 +135,7 @@ pub async fn try_auto_accept(state: &Arc<AppState>, ticket_id: Uuid) -> Result<b
     if ticket.ticket.status != TicketStatus::WaitForFinalReview {
         return Ok(false);
     }
-    let facts = load_facts(pool, &ticket)
+    let facts = load_facts(state, pool, &ticket)
         .await
         .map_err(TicketError::Database)?;
     match skip_review_eligibility(&facts) {
@@ -128,19 +157,35 @@ pub async fn try_auto_accept(state: &Arc<AppState>, ticket_id: Uuid) -> Result<b
 }
 
 async fn load_facts(
+    state: &AppState,
     pool: &PgPool,
     ticket: &TicketWithDisplay,
 ) -> Result<SkipReviewFacts, sqlx::Error> {
     let ticket_id = ticket.ticket.id;
-    let passed_at: Option<OffsetDateTime> =
-        sqlx::query_scalar("SELECT agent_review_passed_at FROM tickets WHERE id = $1")
-            .bind(ticket_id)
-            .fetch_one(pool)
-            .await?;
+    let (passed_at, passed_sha): (Option<OffsetDateTime>, Option<String>) = sqlx::query_as(
+        "SELECT agent_review_passed_at, agent_review_passed_sha FROM tickets WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await?;
+    // The pass covers only the code the reviewer saw. Status changes outside
+    // a run (a drag, a stale acceptance) don't clear it, so compare heads.
+    let agent_review_passed = match passed_at {
+        None => false,
+        Some(_) => match current_head(state, pool, ticket_id).await {
+            Ok(head) => head == passed_sha,
+            Err(err) => {
+                tracing::debug!(%ticket_id, error = %err, "reviewed head unreadable; not passed");
+                false
+            }
+        },
+    };
     // Every reviewer comment is `review_feedback`, approvals included. The
     // approval that set `agent_review_passed_at` shares its timestamp, so only
     // earlier feedback counts as a change request. Any earlier review comment
     // counts, even an earlier approval: the ticket came back for more work.
+    // A `blocked` agent comment at or after the pass means an agent stopped
+    // on the ticket since the review.
     let changes_requested: bool = sqlx::query_scalar(
         r#"
         SELECT EXISTS (
@@ -150,6 +195,7 @@ async fn load_facts(
               AND (
                   intent = 'qa_failed'
                   OR (intent = 'review_feedback' AND ($2::timestamptz IS NULL OR created_at < $2))
+                  OR (intent = 'blocked' AND $2::timestamptz IS NOT NULL AND created_at >= $2)
               )
         )
         "#,
@@ -165,7 +211,7 @@ async fn load_facts(
             .await?;
     Ok(SkipReviewFacts {
         flagged: ticket.ticket.skip_human_review,
-        agent_review_passed: passed_at.is_some(),
+        agent_review_passed,
         changes_requested,
         split: ticket.split_parent || has_children,
     })

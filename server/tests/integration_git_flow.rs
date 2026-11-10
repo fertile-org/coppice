@@ -1305,12 +1305,28 @@ async fn add_agent_comment(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) {
     .unwrap();
 }
 
-async fn mark_review_passed(pool: &sqlx::PgPool, ticket_id: Uuid) {
-    sqlx::query("UPDATE tickets SET agent_review_passed_at = now() WHERE id = $1")
-        .bind(ticket_id)
-        .execute(pool)
-        .await
-        .unwrap();
+/// An agent review passed the worktree's current commit.
+async fn mark_review_passed(fx: &MergeFixture, pool: &sqlx::PgPool, ticket_id: Uuid) {
+    sqlx::query(
+        "UPDATE tickets SET agent_review_passed_at = now(), agent_review_passed_sha = $2 \
+         WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .bind(rev(&fx.worktree_path, "HEAD"))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn review_pass_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> (bool, Option<String>) {
+    let (at, sha): (Option<time::OffsetDateTime>, Option<String>) = sqlx::query_as(
+        "SELECT agent_review_passed_at, agent_review_passed_sha FROM tickets WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (at.is_some(), sha)
 }
 
 async fn status_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> String {
@@ -1398,7 +1414,7 @@ async fn unflagged_ticket_waits() {
         return;
     }
     let (fx, pool, id) = final_review_fixture(false).await;
-    mark_review_passed(&pool, id).await;
+    mark_review_passed(&fx, &pool, id).await;
 
     assert!(!try_auto_accept(&fx.state, id).await.unwrap());
     assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
@@ -1418,7 +1434,7 @@ async fn review_feedback_blocks_auto_accept() {
     }
     let (fx, pool, id) = final_review_fixture(true).await;
     add_agent_comment(&pool, id, "review_feedback").await;
-    mark_review_passed(&pool, id).await;
+    mark_review_passed(&fx, &pool, id).await;
 
     assert!(!try_auto_accept(&fx.state, id).await.unwrap());
     // A second check in the same final review posts nothing new.
@@ -1437,7 +1453,7 @@ async fn qa_failed_blocks_auto_accept() {
         return;
     }
     let (fx, pool, id) = final_review_fixture(true).await;
-    mark_review_passed(&pool, id).await;
+    mark_review_passed(&fx, &pool, id).await;
     add_agent_comment(&pool, id, "qa_failed").await;
 
     assert!(!try_auto_accept(&fx.state, id).await.unwrap());
@@ -1455,7 +1471,7 @@ async fn split_ticket_blocks_auto_accept() {
         return;
     }
     let (fx, pool, id) = final_review_fixture(true).await;
-    mark_review_passed(&pool, id).await;
+    mark_review_passed(&fx, &pool, id).await;
     let child = common::create_test_ticket(&fx.app, &fx.board_id, &fx.cookie, &fx.csrf).await;
     sqlx::query("UPDATE tickets SET parent_ticket_id = $2 WHERE id = $1")
         .bind(Uuid::parse_str(&child).unwrap())
@@ -1479,7 +1495,7 @@ async fn auto_accept_without_merge_notifies_not_merged() {
         return;
     }
     let (fx, pool, id) = final_review_fixture(true).await;
-    mark_review_passed(&pool, id).await;
+    mark_review_passed(&fx, &pool, id).await;
 
     assert!(try_auto_accept(&fx.state, id).await.unwrap());
     assert_eq!(status_of(&pool, id).await, "done");
@@ -1531,6 +1547,15 @@ async fn scope_b_path_without_review_waits() {
     .execute(&pool)
     .await
     .unwrap();
+    // A stale pass from an earlier review round.
+    sqlx::query(
+        "UPDATE tickets SET agent_review_passed_at = now(), agent_review_passed_sha = 'stale' \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
     RunService::new(&pool)
         .start_run_for_agent(id, engineer, "work_on_ticket", StartRunOptions::default())
         .await
@@ -1538,6 +1563,11 @@ async fn scope_b_path_without_review_waits() {
 
     wait_for_comment(&pool, id, SKIP_REVIEW_NO_AGENT_REVIEW).await;
     assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        review_pass_of(&pool, id).await,
+        (false, None),
+        "the implementer run clears the earlier pass"
+    );
     assert_eq!(
         skip_review_notices(&pool, id).await,
         vec![SKIP_REVIEW_NO_AGENT_REVIEW.to_string()]
@@ -1547,4 +1577,51 @@ async fn scope_b_path_without_review_waits() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn new_commit_after_review_pass_blocks_auto_accept() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    mark_review_passed(&fx, &pool, id).await;
+    // New code lands after the review, then the ticket reaches final review
+    // without another review (a drag, a stale acceptance, a failed run).
+    std::fs::write(fx.worktree_path.join("unreviewed.txt"), "unreviewed\n").unwrap();
+    git(&fx.worktree_path, &["add", "unreviewed.txt"]);
+    git(&fx.worktree_path, &["commit", "-m", "unreviewed"]);
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(status_of(&pool, id).await, "wait_for_final_review");
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_NO_AGENT_REVIEW.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn blocked_agent_after_pass_blocks_auto_accept() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, pool, id) = final_review_fixture(true).await;
+    mark_review_passed(&fx, &pool, id).await;
+    sqlx::query(
+        "INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at) \
+         VALUES ($1, $2, 'agent', 'Blocked on a defect.', 'blocked', now() + interval '1 second')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(!try_auto_accept(&fx.state, id).await.unwrap());
+    assert_eq!(
+        skip_review_notices(&pool, id).await,
+        vec![SKIP_REVIEW_CHANGES_REQUESTED.to_string()]
+    );
 }

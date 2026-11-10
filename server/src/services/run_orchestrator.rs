@@ -328,6 +328,7 @@ impl<'a> RunOrchestrator<'a> {
             if approving_review {
                 crate::services::auto_accept::record_agent_review_pass(
                     self.pool,
+                    self.app_state.map(|state| state.as_ref()),
                     ticket_id,
                     comment.as_ref().map(|posted| posted.created_at),
                 )
@@ -517,7 +518,18 @@ impl<'a> RunOrchestrator<'a> {
         if current_status != TicketStatus::WaitForFinalReview
             && ticket.ticket.status == TicketStatus::WaitForFinalReview
         {
-            self.try_auto_accept(ticket_id).await;
+            // Another agent still has work on this ticket: leave the decision
+            // to a person.
+            let follow_up = action
+                .enqueue_jobs
+                .iter()
+                .any(|job| job.agent_id != run.agent_id)
+                || matches!(action.new_assignee_id, Some(Some(id)) if id != run.agent_id);
+            if follow_up {
+                tracing::info!(%ticket_id, "follow-up work queued; skipping auto-accept");
+            } else {
+                self.try_auto_accept(ticket_id).await;
+            }
         }
 
         self.handle_terminal_run(&finished_run).await;
@@ -529,6 +541,7 @@ impl<'a> RunOrchestrator<'a> {
     /// leaves it waiting for a person.
     async fn try_auto_accept(&self, ticket_id: Uuid) {
         let Some(state) = self.app_state else {
+            tracing::debug!(%ticket_id, "no app state; auto-accept not checked");
             return;
         };
         if let Err(err) = crate::services::auto_accept::try_auto_accept(state, ticket_id).await {
@@ -1828,6 +1841,85 @@ mod tests {
         assert!(action.new_status.is_none());
         assert!(action.new_assignee_id.is_none());
         assert!(action.pending_recommendation.is_none());
+    }
+
+    /// A reviewer finishes a run on an In Review ticket that an earlier
+    /// review passed. Returns whether a pass is recorded afterwards.
+    async fn review_pass_after_reviewer_run(contract: AgentRunResult) -> Option<(bool, bool)> {
+        let pool = test_pool().await?;
+        let fx = insert_fixture(&pool).await;
+        let reviewer_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, 'Reviewer', 'Reviewer', '{}', 'prompt', 'mock', 'reviewer')
+            "#,
+        )
+        .bind(reviewer_id)
+        .execute(&pool)
+        .await
+        .expect("insert reviewer");
+        sqlx::query(
+            "UPDATE tickets SET status = 'in_review', assignee_agent_id = $2, \
+             agent_review_passed_at = now() - interval '1 hour', agent_review_passed_sha = 'old' \
+             WHERE id = $1",
+        )
+        .bind(fx.ticket_id)
+        .bind(reviewer_id)
+        .execute(&pool)
+        .await
+        .expect("ticket in review");
+        sqlx::query("UPDATE agent_runs SET agent_id = $2 WHERE id = $1")
+            .bind(fx.run_id)
+            .bind(reviewer_id)
+            .execute(&pool)
+            .await
+            .expect("reviewer run");
+        let mut run = test_run(reviewer_id, "work_on_ticket");
+        run.id = fx.run_id;
+        run.ticket_id = Some(fx.ticket_id);
+        let mut apply = succeeded_apply("Review", &[]);
+        apply.comment.intent = CommentIntent::ReviewFeedback;
+        let workflow = WorkflowConfig {
+            auto_start_runs: false,
+            ..WorkflowConfig::default()
+        };
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(&run, &contract, apply, None, None)
+            .await
+            .expect("finish review run");
+        let (at, sha): (Option<time::OffsetDateTime>, Option<String>) = sqlx::query_as(
+            "SELECT agent_review_passed_at, agent_review_passed_sha FROM tickets WHERE id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load pass");
+        // A fresh pass with no repo has no SHA; the old SHA must never survive.
+        assert_ne!(sha.as_deref(), Some("old"));
+        Some((at.is_some(), sha.is_some()))
+    }
+
+    #[tokio::test]
+    async fn review_that_requests_changes_clears_the_earlier_pass() {
+        let mut contract = done_with_mentions(&["backend_engineer"]);
+        if let AgentRunResult::Done { blockers, .. } = &mut contract {
+            blockers.push("Missing a test".into());
+        }
+        let Some(pass) = review_pass_after_reviewer_run(contract).await else {
+            return;
+        };
+        assert_eq!(pass, (false, false));
+    }
+
+    #[tokio::test]
+    async fn approving_review_records_a_pass() {
+        let Some(pass) = review_pass_after_reviewer_run(done_with_mentions(&[])).await else {
+            return;
+        };
+        assert_eq!(pass, (true, false), "no repo, so no SHA");
     }
 
     #[tokio::test]
