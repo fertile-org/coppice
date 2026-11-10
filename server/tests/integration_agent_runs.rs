@@ -1089,3 +1089,67 @@ async fn usage_counts_follow_stored_rows_not_connectors() {
         assert!(old["usage"].is_null(), "{connector}");
     }
 }
+
+/// Settings → Usage reads the workspace summary: admins only, inputs checked,
+/// and a tracked run shows up grouped by model with its coverage.
+#[tokio::test]
+async fn usage_summary_groups_tracked_runs_for_admins() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, summary) = get_json(
+        &app,
+        "/api/usage/summary?groupBy=model&connector=mock&tz=Asia/Ho_Chi_Minh",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let rows = summary["rows"].as_array().unwrap();
+    let models: Vec<_> = rows.iter().map(|r| r["label"].as_str().unwrap_or("")).collect();
+    assert!(models.contains(&"mock-model"), "{summary}");
+    assert!(models.contains(&"mock-small"), "{summary}");
+    assert!(rows.iter().all(|r| r["connector"] == "mock"), "{summary}");
+    let row_total: i64 = rows.iter().map(|r| r["total"].as_i64().unwrap()).sum();
+    assert_eq!(row_total, summary["totals"]["total"].as_i64().unwrap());
+    assert!(summary["coverage"]["trackedRuns"].as_i64().unwrap() >= 1, "{summary}");
+    assert!(summary["daily"].as_array().is_some_and(|d| !d.is_empty()));
+
+    for bad in [
+        "/api/usage/summary?groupBy=nope",
+        "/api/usage/summary?from=2026-13-01",
+        "/api/usage/summary?from=2026-03-02&to=2026-03-01",
+        "/api/usage/summary?tz=Nowhere/Special",
+    ] {
+        let (status, body) = get_json(&app, bad, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {body}");
+        assert!(body["message"].is_string(), "{bad}: {body}");
+    }
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+    let (status, _) = get_json(&app, "/api/usage/summary", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
