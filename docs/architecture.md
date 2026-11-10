@@ -294,6 +294,31 @@ workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 
 **Config env:** `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories. `AGENT_DEFAULT_PROVIDER` / `agent.default_connector` are obsolete and ignored.
 
+## Ticket git flow
+
+Two per-repository switches in Settings → Repositories drive what happens after a ticket is accepted. Both are off by default, so existing repos behave as before.
+
+- **Merge after accept** merges the ticket branch into the repo's default branch when the ticket is accepted, by a human or by auto-accept.
+- **Push after merge** pushes the default branch after any successful merge to it, automatic or manual. It pushes the whole branch, so other unpushed local commits go out too. It is unavailable when `git.push_enabled` is false or the repo has no remote. A merge into another branch never pushes.
+
+```text
+domain/git_state.rs               TicketGitState, GitOutcome, needs_action()
+services/git_chain.rs             the chain and the per-repo lock (repo_lock)
+services/git_state_service.rs     stored outcome, recheck against local git
+services/auto_accept.rs           skip human review decision
+services/notification_service.rs  create_for_git_needs_action
+```
+
+**Chain.** Accept runs merge, then worktree cleanup (always on, via `worktree_cleanup::spawn_cleanup`), then push. A step runs only if the one before it succeeded and its switch is on. The merge is the existing `TicketGitService::merge_ticket_branch`, so the reviewed-commit guard, the clean main checkout rule and the conflict abort still apply. Chains hold a per-repo lock (`git_chain::repo_lock`), so two accepts on one repo never merge at the same time.
+
+**Git state.** The server derives one state per ticket: `InReview`, `NotMerged`, `Conflict`, `MainDirty`, `ChangedAfterReview`, `NotPushed`, `WorktreeKept` or `Merged`. Every state except `InReview` and `Merged` needs action (`needs_action()`). `NotPushed` only counts when push after merge is on. The web renders the state and its next action; it does not decide it.
+
+**Stored outcome.** The chain stores its last failure (`GitOutcome`: conflict, main dirty, not pushed, worktree kept) with a reason, so board lists read it without running git per card. `git_state_service.rs` rechecks the stored outcome against local git when a ticket's git info is read, after a default-branch push from Settings → Sync, and in the hourly worktree sweep. `NotPushed` clears once the local default branch is no longer ahead of its remote-tracking ref (no fetch). `WorktreeKept` clears once the worktree is gone. A merge recorded by `pr_merge_sync` counts as merged. A successful retry clears `Conflict` and `MainDirty`.
+
+**Notification.** A ticket entering a needs-action state creates a `git_needs_action` notification for every user. Merges, pushes and auto-accepts never notify. Tickets already in a needs-action state when the feature shipped get the flag but no notification.
+
+**Skip human review.** A ticket's `skip human review` flag makes `auto_accept.rs` accept it when it would enter `wait_for_final_review`, recorded as accepted by Coppice, then the chain runs. It requires a reviewer or tech-lead pass bound to the reviewed commit, no review round on the ticket requesting changes, and a ticket that was not split. Otherwise the ticket waits for a human with a system comment saying why. Children of a split do not inherit the flag.
+
 ## Web frontend
 
 ```text
