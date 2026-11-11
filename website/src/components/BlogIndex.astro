@@ -1,28 +1,35 @@
 ---
-import { BLOG_INDEX, formatBlogDate } from '../lib/blog';
+import { formatBlogDate, publicPosts } from '../lib/blog';
 import { blogIndexSchema } from '../lib/page-schema';
 import { hrefFor, useI18n } from '../i18n/runtime';
-import { englishEntries } from '../lib/blog-runtime';
+import { blogEntries } from '../lib/blog-runtime';
 import Base from '../layouts/Base.astro';
 
 const ctx = useI18n(Astro);
-const posts = englishEntries().map((entry) => entry.post);
+const posts = publicPosts(
+  blogEntries().map((entry) => entry.post),
+  ctx.locale,
+);
 ---
 
-<Base title={BLOG_INDEX.title} description={BLOG_INDEX.description} structuredData={blogIndexSchema(Astro, ctx, BLOG_INDEX.description, posts)}>
+<Base
+  title={ctx.ui.nav.blog}
+  description={ctx.ui.blog.description}
+  structuredData={blogIndexSchema(Astro, ctx, ctx.ui.blog.description, posts, ctx.ui.blog.name, ctx.ui.nav.blog)}
+>
   <div class="shell landing">
     <header class="promise">
-      <h1>{BLOG_INDEX.title}</h1>
+      <h1>{ctx.ui.nav.blog}</h1>
     </header>
     {
       posts.length === 0 ? (
-        <p>{BLOG_INDEX.empty}</p>
+        <p>{ctx.ui.blog.empty}</p>
       ) : (
         <ul class="blog-list">
           {posts.map((post) => (
             <li>
               <a class="blog-list-title" href={hrefFor(ctx.locale, post.englishPath)}>{post.title}</a>
-              <time class="blog-list-date" datetime={post.updated ?? post.published}>{formatBlogDate(post.updated ?? post.published)}</time>
+              <time class="blog-list-date" datetime={post.updated ?? post.published}>{formatBlogDate(post.updated ?? post.published, ctx.code)}</time>
               <p>{post.description}</p>
             </li>
           ))}

@@ -51,4 +51,12 @@ export const ui: Ui = {
     close: '閉じる',
     noResults: '「{query}」に一致する結果はありません。',
   },
+  blog: {
+    description:
+      'Coppice チームの記事です。Claude Code や Codex などのコーディングエージェントを、実際のプロジェクトで使う方法を扱います。',
+    empty: '公開された記事はまだありません。',
+    published: '公開',
+    updated: '更新',
+    name: 'Coppice ブログ',
+  },
 };

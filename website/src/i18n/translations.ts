@@ -19,12 +19,16 @@ const localePageKeys = Object.keys(import.meta.glob('../pages/*/**/*.{astro,md,m
 const pageStringKeys = Object.keys(import.meta.glob('./pages/*.ts', { eager: false })).map(
   (file) => `src/i18n/pages/${file.split('/').pop()}`,
 );
+const uiStringKeys = Object.keys(import.meta.glob('./ui/*.ts', { eager: false })).map(
+  (file) => `src/i18n/ui/${file.split('/').pop()}`,
+);
 
 export const catalog = buildCatalog([
   ...Object.keys(docModules),
   ...publishedTranslationSources(blogPosts),
   ...localePageKeys,
   ...pageStringKeys,
+  ...uiStringKeys,
 ]);
 
 function findModule<T>(modules: Record<string, T>, suffix: string): T | null {

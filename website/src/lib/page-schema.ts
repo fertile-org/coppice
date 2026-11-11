@@ -38,10 +38,10 @@ export function softwareSchema(astro: AstroLike, ctx: PageI18n, description: str
   ];
 }
 
-function blogCrumbs(locale: string, ctx: PageI18n, title?: string) {
+function blogCrumbs(locale: string, ctx: PageI18n, blogName: string, title?: string) {
   const crumbs = [
     { name: 'Coppice', pathname: localizedPath(locale, '/') },
-    { name: 'Blog', pathname: localizedPath(locale, '/blog') },
+    { name: blogName, pathname: localizedPath(locale, '/blog') },
   ];
   if (title && ctx.englishPath !== '/blog') crumbs.push({ name: title, pathname: localizedPath(locale, ctx.englishPath) });
   return crumbs;
@@ -53,24 +53,26 @@ export function blogIndexSchema(
   ctx: PageI18n,
   description: string,
   posts: readonly { title: string; englishPath: string }[],
+  name = 'Coppice blog',
+  crumb = 'Blog',
 ): Thing[] {
   const ref = siteRef(astro);
   if (!ref) return [];
   const { locale, code } = contentLocale(ctx);
   return [
     blog(ref, {
-      name: 'Coppice blog',
+      name,
       description,
       pathname: localizedPath(locale, '/blog'),
       inLanguage: code,
       posts: posts.map((post) => ({ headline: post.title, pathname: localizedPath(locale, post.englishPath) })),
     }),
-    breadcrumbList(ref, blogCrumbs(locale, ctx)),
+    breadcrumbList(ref, blogCrumbs(locale, ctx, crumb)),
   ];
 }
 
 /** One blog article. `dateModified` is `updated`, or `published` when the note was not updated. */
-export function blogPostSchema(astro: AstroLike, ctx: PageI18n, post: BlogPost): Thing[] {
+export function blogPostSchema(astro: AstroLike, ctx: PageI18n, post: BlogPost, crumb = 'Blog'): Thing[] {
   const ref = siteRef(astro);
   if (!ref) return [];
   const { locale, code } = contentLocale(ctx);
@@ -89,7 +91,7 @@ export function blogPostSchema(astro: AstroLike, ctx: PageI18n, post: BlogPost):
       image: post.image?.startsWith('https://') ? post.image : absolute(astro, imagePath),
       keywords: post.keywords,
     }),
-    breadcrumbList(ref, blogCrumbs(locale, ctx, post.title)),
+    breadcrumbList(ref, blogCrumbs(locale, ctx, crumb, post.title)),
   ];
 }
 

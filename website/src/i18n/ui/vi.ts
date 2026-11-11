@@ -51,4 +51,12 @@ export const ui: Ui = {
     close: 'Đóng',
     noResults: 'Không có kết quả cho “{query}”.',
   },
+  blog: {
+    description:
+      'Bài viết của nhóm Coppice về coding agent như Claude Code và Codex, và cách đưa chúng vào việc trên dự án thật.',
+    empty: 'Chưa có bài nào được đăng.',
+    published: 'Đăng ngày',
+    updated: 'Cập nhật',
+    name: 'Blog Coppice',
+  },
 };

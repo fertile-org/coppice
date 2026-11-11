@@ -20,7 +20,7 @@ const showUpdated = Boolean(post.updated && post.updated !== post.published);
   title={post.metaTitle || post.title}
   description={post.description}
   ogType="article"
-  structuredData={blogPostSchema(Astro, ctx, post)}
+  structuredData={blogPostSchema(Astro, ctx, post, ctx.ui.nav.blog)}
   keywords={post.keywords}
   tags={post.keywords}
   publishedTime={post.published}
@@ -28,17 +28,17 @@ const showUpdated = Boolean(post.updated && post.updated !== post.published);
 >
   <div class="shell landing">
     <article class="prose">
-      <nav class="docs-breadcrumbs" aria-label="Breadcrumb">
+      <nav class="docs-breadcrumbs" aria-label={ctx.ui.docs.breadcrumbLabel}>
         <ol>
           <li><a href={hrefFor(ctx.locale, '/')}>Coppice</a></li>
-          <li><a href={hrefFor(ctx.locale, '/blog')}>Blog</a></li>
+          <li><a href={hrefFor(ctx.locale, '/blog')}>{ctx.ui.nav.blog}</a></li>
           <li aria-current="page">{post.title}</li>
         </ol>
       </nav>
       <h1>{post.title}</h1>
       <p class="blog-meta">
-        <time datetime={post.published}>Published {formatBlogDate(post.published)}</time>
-        {showUpdated && <time datetime={post.updated}>Updated {formatBlogDate(post.updated!)}</time>}
+        <time datetime={post.published}>{ctx.ui.blog.published} {formatBlogDate(post.published, ctx.code)}</time>
+        {showUpdated && <time datetime={post.updated}>{ctx.ui.blog.updated} {formatBlogDate(post.updated!, ctx.code)}</time>}
         <span>{post.author}</span>
       </p>
       <p class="blog-answer">{post.answer}</p>

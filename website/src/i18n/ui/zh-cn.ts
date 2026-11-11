@@ -51,4 +51,12 @@ export const ui: Ui = {
     close: '关闭',
     noResults: '没有找到“{query}”的结果。',
   },
+  blog: {
+    description:
+      'Coppice 团队的文章，谈 Claude Code、Codex 这类编程智能体，以及怎样把它们用在真实项目上。每篇只回答一个问题。',
+    empty: '还没有发布的文章。',
+    published: '发布于',
+    updated: '更新于',
+    name: 'Coppice 博客',
+  },
 };

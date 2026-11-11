@@ -20,7 +20,14 @@ export function localeFromDistFile(relativePath) {
 }
 
 function isSitePath(pathname) {
-  return pathname === '/' || pathname === '/download' || pathname === '/docs' || pathname.startsWith('/docs/');
+  return (
+    pathname === '/' ||
+    pathname === '/download' ||
+    pathname === '/blog' ||
+    pathname.startsWith('/blog/') ||
+    pathname === '/docs' ||
+    pathname.startsWith('/docs/')
+  );
 }
 
 /**

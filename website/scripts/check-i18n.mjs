@@ -142,6 +142,8 @@ function shippedTranslations(englishPath) {
     let found = false;
     if (englishPath === '/' || englishPath === '/download') {
       found = fs.existsSync(path.join(root, 'src/i18n/pages', `${locale}.ts`));
+    } else if (englishPath === '/blog') {
+      found = fs.existsSync(path.join(root, 'src/i18n/ui', `${locale}.ts`));
     } else if (englishPath.startsWith('/blog/')) {
       const slug = englishPath.slice('/blog/'.length);
       found = blogPublished('en', slug) && blogPublished(locale, slug);
@@ -188,6 +190,25 @@ function checkHead(html, { lang, canonicalPath, hreflangs, absent = [], site, en
   for (const code of absent) {
     if (alternates.some((link) => link.hreflang.toLowerCase() === code.toLowerCase())) {
       fail(`hreflang includes ${code}`);
+    }
+  }
+}
+
+/** A locale index links to that locale's published notes and to no other blog post. */
+function assertBlogIndex(outDir, locale) {
+  const route = locale === 'en' ? '/blog' : `/${locale}/blog`;
+  const html = readHtml(outDir, route);
+  if (!html) {
+    fail(`missing ${route}`);
+    return;
+  }
+  for (const slug of publishedEnglishBlogSlugs()) {
+    const localized = locale === 'en' ? `/blog/${slug}` : `/${locale}/blog/${slug}`;
+    const linked = html.includes(`href="${localized}"`);
+    const published = locale === 'en' || shippedTranslations(`/blog/${slug}`).some(([, have]) => have === localized);
+    if (published && !linked) fail(`${route} does not list ${localized}`);
+    if (!published && (linked || html.includes(`href="/blog/${slug}"`))) {
+      fail(`${route} links to a post that is not published in ${locale}`);
     }
   }
 }
@@ -341,11 +362,13 @@ function checkBuild(outDir, { translated, site }) {
         ['en', '/blog'],
         ['x-default', '/blog'],
       ],
-      absent: ['ja', 'vi', 'zh-CN', 'fr'],
     });
     if (blogIndex.includes('data-pagefind-body')) fail('/blog is in the docs search index');
+    if (!blogIndex.includes('value="/zh-cn/blog"') || !blogIndex.includes('value="/ja/blog"')) {
+      fail('language switcher on /blog does not stay on the index');
+    }
   }
-  checkFallback(outDir, 'ja', '/blog', site);
+  for (const locale of ['en', ...locales]) assertBlogIndex(outDir, locale);
 
   for (const slug of publishedEnglishBlogSlugs()) {
     const englishPath = `/blog/${slug}`;
@@ -365,6 +388,9 @@ function checkBuild(outDir, { translated, site }) {
       ],
     });
     if (article.includes('data-pagefind-body')) fail(`${englishPath} is in the docs search index`);
+    if (!article.includes(`value="/zh-cn${englishPath}"`) || !article.includes(`value="/ja${englishPath}"`)) {
+      fail(`language switcher on ${englishPath} does not keep the post`);
+    }
     for (const locale of locales) {
       const localized = `/${locale}${englishPath}`;
       if (shippedTranslations(englishPath).some(([code, have]) => have === localized)) {
@@ -408,7 +434,11 @@ function checkBuild(outDir, { translated, site }) {
     for (const localized of fallbacks) {
       if (locs.includes(localized)) fail(`sitemap includes fallback ${localized}`);
     }
-    for (const englishPath of baseline.filter((route) => route.startsWith('/docs'))) {
+    const indexed = [
+      ...baseline.filter((route) => route.startsWith('/docs') || route === '/blog'),
+      ...publishedEnglishBlogSlugs().map((slug) => `/blog/${slug}`),
+    ];
+    for (const englishPath of indexed) {
       for (const [, localized] of shippedTranslations(englishPath)) {
         if (!locs.includes(localized)) fail(`sitemap missing translated ${localized}`);
       }
