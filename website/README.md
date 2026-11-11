@@ -18,7 +18,7 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 
 Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. Asset URLs live in `src/content/downloads.ts`. Homepage and download wording live in `src/i18n/pages/en.ts`.
 
-The blog index and article pages are generated from `src/content/blog/`. See [BLOG.md](BLOG.md). The homepage does not link to `/blog` yet.
+The blog index and article pages are generated from `src/content/blog/`. A locale index, such as `/zh-cn/blog`, lists only the posts published in that locale. See [BLOG.md](BLOG.md). The homepage does not link to `/blog` yet.
 
 English keeps those URLs. `vi`, `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
 

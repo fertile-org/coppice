@@ -1,13 +1,7 @@
 import { lastCommitDate } from './lastmod.ts';
 import { LOCALES, type LocalePath } from '../i18n/paths.ts';
 
-/** English blog index copy. Article pages do not reuse this description. */
-export const BLOG_INDEX = {
-  title: 'Blog',
-  description:
-    'Articles from the Coppice team on coding agents such as Claude Code and Codex, and how to put them to work on real projects.',
-  empty: 'No notes are published yet.',
-} as const;
+export { BLOG_INDEX } from './blog-index.ts';
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -68,11 +62,12 @@ export function renderedTitle(title: string, metaTitle?: string): string {
   return chosen.includes('Coppice') ? chosen : `${chosen} · Coppice`;
 }
 
-export function formatBlogDate(iso: string): string {
+/** `locale` is a BCP 47 code (`en`, `zh-CN`). The index and a translated article pass the page locale. */
+export function formatBlogDate(iso: string, locale = 'en'): string {
   const match = DATE.exec(iso);
   if (!match) return iso;
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  return new Intl.DateTimeFormat('en', { dateStyle: 'long', timeZone: 'UTC' }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'UTC' }).format(date);
 }
 
 /** Repo-relative `src/content/blog/...` path, or the original string when it is not one. */
@@ -329,12 +324,20 @@ function latest(dates: readonly (string | undefined)[]): string | undefined {
 
 /**
  * Sitemap `lastmod`. Articles use the author-supplied `updated` or `published` date.
- * The index uses the later of that date and the index page's git commit, when git has one.
+ * Each locale index uses that locale's notes, then the later of those dates and the
+ * index page's git commit, when git has one. A locale with no notes does not borrow
+ * the English dates.
  */
 export function blogLastmod(posts: readonly BlogPost[], locale: string, englishPath: string): string | undefined {
   if (englishPath === '/blog') {
-    const authored = publicPosts(posts, 'en').map((post) => post.updated ?? post.published);
-    return latest([...authored, lastCommitDate(['src/pages/blog/index.astro', 'src/components/BlogIndex.astro'])]);
+    const found = LOCALES.find((item) => item.path === locale);
+    const authored = found
+      ? publicPosts(posts, found.path as LocalePath).map((post) => post.updated ?? post.published)
+      : [];
+    return latest([
+      ...authored,
+      lastCommitDate(['src/pages/blog/index.astro', 'src/components/BlogIndex.astro', `src/i18n/ui/${locale}.ts`]),
+    ]);
   }
   if (!englishPath.startsWith('/blog/')) return undefined;
   const slug = englishPath.slice('/blog/'.length);

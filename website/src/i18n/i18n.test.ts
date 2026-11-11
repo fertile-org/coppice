@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildCatalog, englishRoutesFromPages, matchTranslation, pageStringLocale } from './catalog.ts';
+import { blogIndexLocale, buildCatalog, englishRoutesFromPages, matchTranslation, pageStringLocale } from './catalog.ts';
 import { fillMissing } from './fill-missing.ts';
 import { prefixHref, rewriteLocaleHtml } from './locale-html.mjs';
 import { LOCALES } from './locales.mjs';
@@ -156,9 +156,13 @@ describe('translation sources', () => {
     assert.equal(matchTranslation('src/pages/zh-hk/download.astro'), null);
     assert.equal(pageStringLocale('src/i18n/pages/ja.ts'), 'ja');
     assert.equal(pageStringLocale('src/i18n/pages/en.ts'), null);
-    const pages = buildCatalog(['src/i18n/pages/ja.ts']);
+    assert.equal(blogIndexLocale('src/i18n/ui/zh-cn.ts'), 'zh-cn');
+    assert.equal(blogIndexLocale('src/i18n/ui/en.ts'), null);
+    const pages = buildCatalog(['src/i18n/pages/ja.ts', 'src/i18n/ui/ja.ts', 'src/i18n/ui/en.ts']);
     assert.equal(pages.get('/')?.has('ja'), true);
     assert.equal(pages.get('/download')?.has('ja'), true);
+    assert.equal(pages.get('/blog')?.has('ja'), true);
+    assert.equal(pages.get('/blog')?.has('en'), false);
     assert.equal(matchTranslation('src/pages/ja/index.astro'), null);
     assert.equal(matchTranslation('src/pages/docs/concepts.md'), null);
     assert.deepEqual(matchTranslation('src/content/blog/ja/worktrees.md'), {
@@ -194,6 +198,9 @@ describe('locale anchors', () => {
     assert.equal(prefixHref('/coppice/docs/install', 'ja', '/coppice'), '/coppice/ja/docs/install');
     assert.equal(prefixHref('/', 'fr', '/'), '/fr');
     assert.equal(prefixHref('/ja/docs/faq', 'ja', '/'), '/ja/docs/faq');
+    assert.equal(prefixHref('/blog', 'ja', '/'), '/ja/blog');
+    assert.equal(prefixHref('/blog/worktrees', 'zh-cn', '/'), '/zh-cn/blog/worktrees');
+    assert.equal(prefixHref('/ja/blog/worktrees', 'ja', '/'), '/ja/blog/worktrees');
     assert.equal(prefixHref('/logo.svg', 'ja', '/'), '/logo.svg');
     assert.equal(prefixHref('https://github.com/fertile-org/coppice', 'ja', '/'), 'https://github.com/fertile-org/coppice');
 

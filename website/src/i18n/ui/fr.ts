@@ -51,4 +51,12 @@ export const ui: Ui = {
     close: 'Fermer',
     noResults: 'Aucun résultat pour « {query} ».',
   },
+  blog: {
+    description:
+      'Articles de l’équipe Coppice sur les agents de code, comme Claude Code et Codex, et sur la façon de les mettre au travail dans de vrais projets.',
+    empty: 'Aucun article n’est publié pour le moment.',
+    published: 'Publié le',
+    updated: 'Mis à jour le',
+    name: 'Blog Coppice',
+  },
 };

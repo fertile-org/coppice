@@ -2,16 +2,18 @@
 
 Before you plan or write a post, read [.agents/skills/blog-writing/SKILL.md](../.agents/skills/blog-writing/SKILL.md). It covers the topic, the structure, and how much Coppice detail to include. This file covers the mechanics.
 
-English articles live in `src/content/blog/en/`. The index at `/blog` and each article page are built from those files. Adding a note does not require an edit to the index, the sitemap, or the layout.
+English articles live in `src/content/blog/en/`. The index at `/blog` and each article page are built from those files. A locale index lists only the notes published in that locale. Adding a note does not require an edit to the index, the sitemap, or the layout.
 
-This directory ships with no articles. The example below is the schema, not a post.
+The example below is the schema, not a post.
 
 ## Routes
 
 | URL | Source |
 | --- | --- |
 | `https://getcoppice.app/blog` | `src/pages/blog/index.astro` |
+| `https://getcoppice.app/<locale>/blog` | the same index, listing notes in `src/content/blog/<locale>/` |
 | `https://getcoppice.app/blog/<slug>` | `src/content/blog/en/<slug>.md` |
+| `https://getcoppice.app/<locale>/blog/<slug>` | `src/content/blog/<locale>/<slug>.md` when that file is published |
 
 `<slug>` is the filename without `.md`. Use lowercase words and hyphens: `worktrees.md` is `/blog/worktrees`. `index` is reserved. A directory named `<slug>` with `index.md` inside is the same article, for notes that keep files beside the markdown.
 
@@ -56,7 +58,7 @@ keywords:
 
 Unknown keys fail the build. A translation file with no English article at the same slug also fails the build.
 
-JSON-LD on an article is `BlogPosting`: `datePublished` is `published`, and `dateModified` is `updated` or, when you omit `updated`, the same published date. The author is the `author` string. The canonical URL is `https://getcoppice.app/blog/<slug>`. The index is a `Blog` and lists published English notes. With no notes, it does not emit an empty `blogPost` list.
+JSON-LD on an article is `BlogPosting`: `datePublished` is `published`, and `dateModified` is `updated` or, when you omit `updated`, the same published date. The author is the `author` string. The canonical URL of an English note is `https://getcoppice.app/blog/<slug>`. A published translation canonicalizes to `https://getcoppice.app/<locale>/blog/<slug>`. A locale URL with no published translation renders the English note and canonicalizes to the English URL. Each locale index is a `Blog` and lists the notes published in that locale. With no notes, it does not emit an empty `blogPost` list.
 
 ## Images
 
@@ -70,9 +72,11 @@ Put screenshots in `public/blog/<slug>/` and refer to them from the root:
 
 ## Translation
 
-Add `src/content/blog/<locale>/<slug>.md` only when that translation exists. `<locale>` is `vi`, `zh-cn`, `zh-tw`, `zh-hk`, `ja`, or `fr`. Use the same slug as the English file. `hreflang` and the sitemap then include that locale. A locale with no file is not listed. The index at `/blog` stays English until a separate index translation exists; `/ja/blog` currently shows the English index and points its canonical URL at `https://getcoppice.app/blog`.
+Add `src/content/blog/<locale>/<slug>.md` only when that translation exists. `<locale>` is `vi`, `zh-cn`, `zh-tw`, `zh-hk`, `ja`, or `fr`. Use the same slug as the English file. `hreflang` and the sitemap then include that locale. A locale with no published file is not listed on the article. The index at `/<locale>/blog` lists only that locale's published notes. It does not link to a missing translation. Opening a missing translation directly, for example `/ja/blog/<slug>`, renders the English note and points the canonical URL at `https://getcoppice.app/blog/<slug>`.
 
-Labels on the article page (`Published`, `Updated`, `Blog`) are English in this foundation.
+`draft: true` is per file. A draft translation is not an alternate, and it does not appear on that locale's index.
+
+Labels on the index and the article page (`Published`, `Updated`, the index description, and the empty state) come from `src/i18n/ui/<locale>.ts`. `Blog` in the nav and the breadcrumb is `nav.blog` in that same file. Headings inside the note, including "Which one to pick", stay in the markdown.
 
 ## Checks
 

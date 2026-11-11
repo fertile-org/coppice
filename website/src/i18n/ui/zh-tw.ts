@@ -51,4 +51,12 @@ export const ui: Ui = {
     close: '關閉',
     noResults: '找不到與「{query}」相關的結果。',
   },
+  blog: {
+    description:
+      'Coppice 團隊的文章，談 Claude Code、Codex 這類程式設計代理，以及如何在實際專案裡使用。每篇只回答一個問題。',
+    empty: '還沒有發佈的文章。',
+    published: '發佈於',
+    updated: '更新於',
+    name: 'Coppice 部落格',
+  },
 };

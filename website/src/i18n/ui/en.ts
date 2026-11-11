@@ -5,6 +5,7 @@ import {
   SEARCH_LABEL,
   SEARCH_PLACEHOLDER,
 } from '../../lib/docs-search';
+import { BLOG_INDEX } from '../../lib/blog-index';
 
 export const locale = 'en';
 
@@ -56,5 +57,12 @@ export const ui = {
     footer: SEARCH_FOOTER,
     close: SEARCH_CLOSE,
     noResults: 'No results for "{query}".',
+  },
+  blog: {
+    description: BLOG_INDEX.description,
+    empty: BLOG_INDEX.empty,
+    published: 'Published',
+    updated: 'Updated',
+    name: 'Coppice blog',
   },
 };

@@ -17,6 +17,12 @@ import {
   validateBlogSource,
 } from './blog.ts';
 import { blogHeadingErrors, isBlogMarkdown, transformBlogImages } from './blog-figures.mjs';
+import { ui as frenchUi } from '../i18n/ui/fr.ts';
+import { ui as japaneseUi } from '../i18n/ui/ja.ts';
+import { ui as vietnameseUi } from '../i18n/ui/vi.ts';
+import { ui as simplifiedUi } from '../i18n/ui/zh-cn.ts';
+import { ui as hongKongUi } from '../i18n/ui/zh-hk.ts';
+import { ui as taiwanUi } from '../i18n/ui/zh-tw.ts';
 
 const DESCRIPTION = BLOG_INDEX.description;
 
@@ -35,10 +41,23 @@ function post(locale: string, slug: string, extra: Record<string, unknown> = {})
 }
 
 describe('blog index copy', () => {
-  it('keeps the index description inside the search-result width', () => {
+  it('keeps every locale index description inside the search-result width', () => {
     const width = displayWidth(BLOG_INDEX.description);
-    assert.ok(width >= 100 && width <= 160, String(width));
+    assert.ok(width >= 100 && width <= 160, `en description ${width}`);
     assert.ok(displayWidth(renderedTitle(BLOG_INDEX.title)) <= 60);
+    const catalogs = [
+      ['fr', frenchUi],
+      ['ja', japaneseUi],
+      ['vi', vietnameseUi],
+      ['zh-cn', simplifiedUi],
+      ['zh-hk', hongKongUi],
+      ['zh-tw', taiwanUi],
+    ] as const;
+    for (const [locale, ui] of catalogs) {
+      const localeWidth = displayWidth(ui.blog.description);
+      assert.ok(localeWidth >= 100 && localeWidth <= 160, `${locale} description ${localeWidth}`);
+      assert.ok(displayWidth(renderedTitle(ui.nav.blog)) <= 60, `${locale} title`);
+    }
   });
 });
 
@@ -93,6 +112,14 @@ describe('blog frontmatter', () => {
       publicPosts(posts, 'en').map((item) => item.slug),
       ['worktrees'],
     );
+    assert.deepEqual(
+      publicPosts(posts, 'ja').map((item) => item.slug),
+      ['worktrees'],
+    );
+    assert.deepEqual(
+      publicPosts(posts, 'fr').map((item) => item.slug),
+      [],
+    );
     assert.deepEqual(blogLocalesForSlug(posts, 'worktrees'), ['en', 'ja']);
     assert.deepEqual(englishArticlePaths(posts), ['/blog/worktrees']);
   });
@@ -106,6 +133,17 @@ describe('blog frontmatter', () => {
     assert.equal(blogLastmod(posts, 'ja', '/blog/worktrees'), '2026-03-05');
     assert.equal(blogLastmod(posts, 'fr', '/blog/worktrees'), undefined);
     assert.equal(formatBlogDate('2026-03-09'), 'March 9, 2026');
+    assert.equal(formatBlogDate('2026-11-11', 'zh-CN'), '2026年11月11日');
+  });
+
+  it('dates a locale index from that locale’s notes, not the English ones', () => {
+    const { posts } = collectBlogPosts([
+      post('en', 'worktrees', { updated: '2026-03-09' }),
+      post('ja', 'worktrees', { published: '2026-03-05', updated: '2099-01-02' }),
+    ]);
+    assert.equal(blogLastmod(posts, 'ja', '/blog'), '2099-01-02');
+    assert.notEqual(blogLastmod(posts, 'en', '/blog'), '2099-01-02');
+    assert.notEqual(blogLastmod(posts, 'fr', '/blog'), '2099-01-02');
   });
 });
 
@@ -119,7 +157,7 @@ describe('blog sitemap alternates', () => {
       post('vi', 'hidden'),
     ];
     const { posts } = collectBlogPosts(sources);
-    const catalog = buildCatalog(publishedTranslationSources(posts));
+    const catalog = buildCatalog([...publishedTranslationSources(posts), 'src/i18n/ui/ja.ts', 'src/i18n/ui/fr.ts']);
     assert.deepEqual(publishedTranslationSources(posts), ['src/content/blog/ja/worktrees.md']);
     assert.deepEqual(englishArticlePaths(posts), ['/blog/worktrees']);
     assert.deepEqual(blogLocalesForSlug(posts, 'hidden'), []);
@@ -132,8 +170,10 @@ describe('blog sitemap alternates', () => {
     });
     assert.match(xml, /<loc>https:\/\/getcoppice\.app\/blog\/worktrees<\/loc>\n    <lastmod>2026-03-02<\/lastmod>/);
     assert.match(xml, /<loc>https:\/\/getcoppice\.app\/ja\/blog\/worktrees<\/loc>/);
+    assert.match(xml, /<loc>https:\/\/getcoppice\.app\/ja\/blog<\/loc>/);
+    assert.match(xml, /<loc>https:\/\/getcoppice\.app\/fr\/blog<\/loc>/);
     assert.doesNotMatch(xml, /\/fr\/blog\/worktrees/);
-    assert.doesNotMatch(xml, /hreflang="fr"/);
+    assert.doesNotMatch(xml, /blog\/worktrees<\/loc>[\s\S]*?hreflang="fr"/);
     assert.doesNotMatch(xml, /\/blog\/hidden/);
     assert.doesNotMatch(xml, /hreflang="vi"/);
     assert.match(xml, /hreflang="ja" href="https:\/\/getcoppice\.app\/ja\/blog\/worktrees"/);

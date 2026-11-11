@@ -59,6 +59,14 @@ export function pageStringLocale(file: string): LocalePath | null {
   return match[1];
 }
 
+/** `src/i18n/ui/<locale>.ts` supplies the blog index. English is the default, not a translation file. */
+export function blogIndexLocale(file: string): LocalePath | null {
+  const path = normalizeSourcePath(file);
+  const match = path.match(/(?:^|\/)i18n\/ui\/([^/]+)\.ts$/) ?? path.match(/^ui\/([^/]+)\.ts$/);
+  if (!match || match[1] === 'en' || !LOCALE_SET.has(match[1]) || !isLocalePath(match[1])) return null;
+  return match[1];
+}
+
 export function buildCatalog(files: readonly string[]): Map<string, Set<LocalePath>> {
   const catalog = new Map<string, Set<LocalePath>>();
   const add = (englishPath: string, locale: LocalePath) => {
@@ -71,6 +79,11 @@ export function buildCatalog(files: readonly string[]): Map<string, Set<LocalePa
     if (pageLocale) {
       add('/', pageLocale);
       add('/download', pageLocale);
+      continue;
+    }
+    const blogLocale = blogIndexLocale(file);
+    if (blogLocale) {
+      add('/blog', blogLocale);
       continue;
     }
     const hit = matchTranslation(file);
