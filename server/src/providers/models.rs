@@ -453,6 +453,10 @@ fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
         ],
         "fable" => vec![
             KnownModel {
+                id: "claude-fable-5-2",
+                name: "Claude Fable 5.2",
+            },
+            KnownModel {
                 id: "claude-fable-5-1",
                 name: "Claude Fable 5.1",
             },
@@ -475,7 +479,7 @@ mod tests {
         assert_eq!(first("opus"), "claude-opus-5-5");
         assert_eq!(first("sonnet"), "claude-sonnet-5-5");
         assert_eq!(first("haiku"), "claude-haiku-5-5");
-        assert_eq!(first("fable"), "claude-fable-5-1");
+        assert_eq!(first("fable"), "claude-fable-5-2");
         for provider in ["opus", "sonnet", "haiku", "fable"] {
             let models = known_claude_code_models(provider);
             assert!(
@@ -488,6 +492,14 @@ mod tests {
         assert!(known_claude_code_models("opus")
             .iter()
             .any(|m| m.id == "claude-opus-4-8"));
+        let fable: Vec<_> = known_claude_code_models("fable")
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            fable,
+            ["claude-fable-5-2", "claude-fable-5-1", "claude-fable-5"]
+        );
     }
 
     #[tokio::test]
