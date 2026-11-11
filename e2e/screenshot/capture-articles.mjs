@@ -31,7 +31,23 @@ const BOARD_NAME = 'Demo';
 const REPO_NAME = 'Demo';
 const TICKET_TITLE = 'Note a setting in the demo checkout';
 
+const KNOWLEDGE_TITLE = 'Settings theme controls use the existing theme hook';
+const KNOWLEDGE_BODY =
+  'A dark mode toggle in Settings uses the theme hook the rest of the app already uses. Keep the control from storing its own theme. Include a settings test.';
+
 const SHOTS = [
+  {
+    file: 'add-note.png',
+    article: 'website/src/content/blog/en/stop-repeating-mistakes.md',
+    alt: 'Add knowledge dialog for the acme-web board. The note says a dark mode toggle in Settings uses the existing theme hook and includes a settings test.',
+    caption: 'The note names the theme hook, on the acme-web board.',
+  },
+  {
+    file: 'pending-note.png',
+    article: 'website/src/content/blog/en/stop-repeating-mistakes.md',
+    alt: 'Pending Knowledge note on the acme-web board, titled Settings theme controls use the existing theme hook, with Approve.',
+    caption: 'The note stays pending until you approve it.',
+  },
   {
     file: 'connectors.png',
     article: 'website/src/content/blog/en/claude-code-and-codex.md',
@@ -239,6 +255,12 @@ async function demoGit(mode, short) {
   return run(composeArgs(args), { input: script });
 }
 
+async function heroGit(mode) {
+  const script = await readFile(path.join(HERE, 'seed-hero-repo.sh'), 'utf8');
+  const args = ['exec', '-T', '-u', serverUser(), 'server', 'sh', '-s', '--', mode];
+  return run(composeArgs(args), { input: script });
+}
+
 async function seedScene(auth) {
   await resetMarketingWorkspace();
   const existing = await api('GET', '/api/agents', auth);
@@ -415,6 +437,79 @@ async function showDone(page) {
   });
 }
 
+async function assertKnowledgeClean(page, label) {
+  const bodyText = await page.locator('body').innerText();
+  if (/sign out/i.test(bodyText) || bodyText.includes('admin@localhost')) {
+    fail(`${label} still shows account chrome`);
+  }
+  if (/\/home\/|\/Users\/|should-not-appear|sk-/.test(bodyText)) {
+    fail(`${label} shows a host path or secret`);
+  }
+  if (/\bmock\b/i.test(bodyText)) fail(`${label} shows Mock`);
+  if (!bodyText.includes('acme-web')) fail(`${label} is missing acme-web`);
+}
+
+async function prepareKnowledge(page, label) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.addStyleTag({
+    content:
+      'html,body{overflow:hidden!important}*{scrollbar-width:none!important}*{caret-color:transparent!important}::-webkit-scrollbar{display:none!important}',
+  });
+  await assertKnowledgeClean(page, label);
+}
+
+async function seedKnowledgeScene(auth) {
+  await resetMarketingWorkspace();
+  await heroGit('init');
+  const repo = await api('POST', '/api/repos', auth, {
+    name: 'acme-web',
+    localPath: REPO_PATH,
+    defaultBranch: 'main',
+  });
+  if (repo.verificationStatus !== 'ready') {
+    fail(`repo is not ready: ${repo.verificationStatus} ${repo.verificationError ?? ''}`);
+  }
+  const board = await api('POST', '/api/boards', auth, { name: 'acme-web' });
+  await api('POST', `/api/boards/${board.id}/tickets`, auth, {
+    title: 'Add a dark mode toggle to Settings',
+    description:
+      'Settings should offer a dark mode toggle and follow the same theme preference as the rest of the app.',
+    priority: 'medium',
+  });
+  return { board, repo };
+}
+
+async function captureKnowledge(page, auth) {
+  await seedKnowledgeScene(auth);
+  await page.goto(`${WEB}/knowledge`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'Knowledge', level: 1 }).waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Add knowledge' }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Add knowledge' });
+  await dialog.waitFor();
+  await dialog.locator('#knowledge-title').fill(KNOWLEDGE_TITLE);
+  await dialog.locator('#knowledge-content').fill(KNOWLEDGE_BODY);
+  await selectCombobox(page, 'knowledge-type', 'Review feedback');
+  await selectCombobox(page, 'knowledge-board', 'acme-web');
+  await dialog.getByText('acme-web', { exact: true }).waitFor();
+  await prepareKnowledge(page, 'add knowledge');
+  await shoot(page, 'add-note.png');
+  await dialog.getByRole('button', { name: 'Add to Pending' }).click();
+  await dialog.waitFor({ state: 'hidden', timeout: 15_000 });
+  const toast = page.getByText('Knowledge added to Pending.');
+  await toast.waitFor({ timeout: 10_000 });
+  await toast.waitFor({ state: 'hidden', timeout: 10_000 });
+  const card = page.getByRole('article').filter({ hasText: KNOWLEDGE_TITLE });
+  await card.waitFor({ timeout: 15_000 });
+  await card.getByText('No close matches').waitFor({ timeout: 15_000 });
+  await card.getByRole('button', { name: 'Approve', exact: true }).waitFor();
+  await card.evaluate((node) => node.scrollIntoView({ block: 'start' }));
+  await prepareKnowledge(page, 'pending knowledge');
+  if (!(await card.getByText('acme-web', { exact: true }).count())) {
+    fail('pending note is not scoped to acme-web');
+  }
+  await shoot(page, 'pending-note.png');
+}
+
 async function captureDone(page, scene) {
   const short = scene.ticket.id.split('-')[0];
   await demoGit('worktree', short);
@@ -473,6 +568,7 @@ async function main() {
     await captureNewAgent(page);
     await captureDrawer(page, scene);
     await captureDone(page, scene);
+    await captureKnowledge(page, auth);
   } finally {
     await browser.close();
   }
@@ -480,6 +576,41 @@ async function main() {
   console.log(`screenshot: mapping ${path.join(OUT, 'mapping.json')}`);
 }
 
-main().catch((err) => {
+async function browserPage() {
+  const browser = await launchBrowser();
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+    reducedMotion: 'reduce',
+    locale: 'en-US',
+    timezoneId: 'UTC',
+  });
+  await context.addInitScript(() => {
+    localStorage.setItem('coppice.theme', 'light');
+    localStorage.setItem('coppice.sidebar.collapsed', '0');
+  });
+  const page = await context.newPage();
+  return { browser, page };
+}
+
+async function mainKnowledgeOnly() {
+  await mkdir(OUT, { recursive: true });
+  await waitForOk(`${API}/health`, 'API');
+  await waitForOk(WEB, 'web');
+  const auth = await desktopSession();
+  const { browser, page } = await browserPage();
+  try {
+    await captureKnowledge(page, auth);
+  } finally {
+    await browser.close();
+  }
+  const shots = SHOTS.filter((shot) => shot.article.endsWith('stop-repeating-mistakes.md'));
+  await writeFile(path.join(OUT, 'mapping.json'), `${JSON.stringify({ shots }, null, 2)}\n`);
+  console.log(`screenshot: mapping ${path.join(OUT, 'mapping.json')}`);
+}
+
+const entry = process.env.COPPICE_ARTICLE_ONLY === 'knowledge' ? mainKnowledgeOnly : main;
+entry().catch((err) => {
   fail(err instanceof Error ? err.stack ?? err.message : String(err));
 });
