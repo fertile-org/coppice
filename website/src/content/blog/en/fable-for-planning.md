@@ -4,7 +4,7 @@ metaTitle: Plan with Fable, code with a cheaper model
 description: "Use Fable 5.2 for the plan and Opus or Sonnet for the code. Claude Code has no Fable-then-cheaper setting. Coppice can set one model per agent."
 answer: "Use Fable 5.2 for the plan and a cheaper model, Opus or Sonnet, for the code. Claude Code has no setting that does this: opusplan is still Opus then Sonnet, so plan with /model fable and switch, or give a subagent its own model. In Coppice, each agent has its own model, so the PM can plan on Fable and the engineer can build on Opus or Sonnet."
 published: "2026-11-11"
-draft: true
+draft: false
 author: Coppice
 authorType: Organization
 keywords:
