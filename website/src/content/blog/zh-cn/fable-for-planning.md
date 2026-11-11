@@ -4,7 +4,7 @@ metaTitle: 用 Fable 规划，用便宜模型写代码
 description: "规划用 Fable 5.2，写代码用 Opus 或 Sonnet。Claude Code 没有先 Fable 再换便宜模型的设置。Coppice 可以给每个智能体单独设模型。"
 answer: "规划用 Fable 5.2，写代码用更便宜的 Opus 或 Sonnet。Claude Code 没有这项设置：opusplan 仍是先 Opus 再 Sonnet。可以先用 /model fable 做规划再切换，或给 subagent 单独指定模型。在 Coppice 里，每个智能体有自己的模型，PM 可以用 Fable 规划，工程师用 Opus 或 Sonnet 写代码。"
 published: "2026-11-11"
-draft: true
+draft: false
 author: Coppice
 authorType: Organization
 keywords:
