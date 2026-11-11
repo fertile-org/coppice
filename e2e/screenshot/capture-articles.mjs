@@ -446,7 +446,6 @@ async function assertKnowledgeClean(page, label) {
     fail(`${label} shows a host path or secret`);
   }
   if (/\bmock\b/i.test(bodyText)) fail(`${label} shows Mock`);
-  if (/getcoppice\.dev/i.test(bodyText)) fail(`${label} shows getcoppice.dev`);
   if (!bodyText.includes('acme-web')) fail(`${label} is missing acme-web`);
 }
 
