@@ -403,7 +403,7 @@ describe('board keyboard navigation', () => {
     await act(async () => {
       fireEvent.submit(input.closest('form')!);
     });
-    expect(createTicket).toHaveBeenCalledWith({ title: 'New gate', skipHumanReview: false });
+    expect(createTicket).toHaveBeenCalledWith({ title: 'New gate' });
 
     card('Alpha').focus();
     press('l');

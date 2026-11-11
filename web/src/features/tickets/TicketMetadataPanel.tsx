@@ -9,6 +9,7 @@ import { useConfirm } from '../../components/ui/confirm-dialog';
 import { Combobox } from '../../components/ui/combobox';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Switch } from '../../components/ui/switch';
 import {
   SUBSTATUSES,
   SUBSTATUS_LABELS,
@@ -464,6 +465,30 @@ export function TicketMetadataPanel({ ticket, onViewRuns }: TicketMetadataPanelP
           />
           {PLAN_COPY.skipPlanning}
         </label>
+      </div>
+
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Label htmlFor="ticket-skip-human-review">{PLAN_COPY.skipHumanReview}</Label>
+          <p className="mt-0.5 font-body text-xs text-text-muted">
+            {PLAN_COPY.skipHumanReviewHelp}
+          </p>
+        </div>
+        <Switch
+          id="ticket-skip-human-review"
+          checked={Boolean(ticket.skipHumanReview)}
+          disabled={formDisabled}
+          onCheckedChange={(checked) => {
+            void updateTicket
+              .mutateAsync({ skipHumanReview: checked })
+              .catch((err: unknown) => {
+                toast.error(
+                  parseApiErrorMessage(err, PLAN_COPY.skipHumanReviewFailed),
+                );
+              });
+          }}
+          className="mt-0.5"
+        />
       </div>
 
       <div className="space-y-2">

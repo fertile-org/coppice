@@ -183,15 +183,11 @@ async function fetchTickets(
   return res.json() as Promise<Ticket[]>;
 }
 
-async function createTicket(
-  boardId: string,
-  title: string,
-  skipHumanReview = false,
-): Promise<Ticket> {
+async function createTicket(boardId: string, title: string): Promise<Ticket> {
   const res = await apiFetch(`/api/boards/${boardId}/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(skipHumanReview ? { title, skipHumanReview } : { title }),
+    body: JSON.stringify({ title }),
   });
   return res.json() as Promise<Ticket>;
 }
@@ -224,13 +220,7 @@ export function useCreateTicket(boardId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      title,
-      skipHumanReview,
-    }: {
-      title: string;
-      skipHumanReview?: boolean;
-    }) => createTicket(boardId, title, skipHumanReview),
+    mutationFn: ({ title }: { title: string }) => createTicket(boardId, title),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ticketsQueryKey(boardId),

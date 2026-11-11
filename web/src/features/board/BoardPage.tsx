@@ -452,11 +452,8 @@ export function BoardPage() {
   }
 
   const handleQuickAdd = useStableCallback(
-    async (title: string, options?: { skipHumanReview?: boolean }) => {
-      await createTicket.mutateAsync({
-        title,
-        skipHumanReview: options?.skipHumanReview,
-      });
+    async (title: string) => {
+      await createTicket.mutateAsync({ title });
     },
   );
 

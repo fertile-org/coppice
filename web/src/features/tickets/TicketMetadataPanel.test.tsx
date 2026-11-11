@@ -10,6 +10,7 @@ import { TicketMetadataPanel } from './TicketMetadataPanel';
 
 const approveSplits = vi.fn();
 const assignAgent = vi.fn();
+const updateTicket = vi.fn();
 
 vi.mock('./TicketGitActions', () => ({
   TicketGitActions: () => null,
@@ -37,7 +38,7 @@ vi.mock('./useTicket', () => ({
   useAssignAgent: () => ({ mutateAsync: assignAgent, isPending: false }),
   useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useTicketGitInfo: () => ({ data: undefined }),
-  useUpdateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateTicket: () => ({ mutateAsync: updateTicket, isPending: false }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -139,5 +140,38 @@ describe('TicketMetadataPanel split confirm', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(approveSplits).toHaveBeenCalled());
+  });
+});
+
+describe('TicketMetadataPanel skip human review', () => {
+  beforeEach(() => {
+    updateTicket.mockReset();
+    updateTicket.mockResolvedValue(undefined);
+  });
+
+  it('turns the flag on with a switch', async () => {
+    renderPanel(makeTicket({ pendingSplitRecommendation: null }));
+
+    const toggle = screen.getByRole('switch', { name: PLAN_COPY.skipHumanReview });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateTicket).toHaveBeenCalledWith({ skipHumanReview: true }),
+    );
+  });
+
+  it('shows the stored flag and turns it off', async () => {
+    renderPanel(
+      makeTicket({ pendingSplitRecommendation: null, skipHumanReview: true }),
+    );
+
+    const toggle = screen.getByRole('switch', { name: PLAN_COPY.skipHumanReview });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateTicket).toHaveBeenCalledWith({ skipHumanReview: false }),
+    );
   });
 });

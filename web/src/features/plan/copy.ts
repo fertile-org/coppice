@@ -12,6 +12,9 @@ export const PLAN_COPY = {
   askPlaceholder: 'What should change?',
   skipPlanning: 'Skip planning',
   skipHumanReview: 'Skip human review',
+  skipHumanReviewHelp:
+    "Coppice accepts the ticket when the agent's code review approves it and nobody asked for changes.",
+  skipHumanReviewFailed: "Couldn't change Skip human review. Try again.",
   suggestedByPlanner: 'Suggested by the planner',
   skipFailed: "Couldn't change Skip planning. Try again.",
   approvedPlan: 'Approved plan',
