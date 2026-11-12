@@ -240,13 +240,13 @@ describe('GitStatusRow', () => {
   it('treats a missing human review as in review before Done', () => {
     gitInfoState.data = { ...gitInfo, gitState: undefined };
     renderRow(makeTicket('merged', { humanReview: null, status: 'in_review' }));
-    expect(screen.getByText('In review')).toBeInTheDocument();
+    expect(screen.getByText('No action')).toBeInTheDocument();
   });
 
   it('shows no status or actions for a Done ticket without a review, but keeps the branch', () => {
     gitInfoState.data = { ...gitInfo, gitState: 'in_review' };
     renderRow(makeTicket('in_review', { humanReview: null }));
-    expect(screen.queryByText('In review')).not.toBeInTheDocument();
+    expect(screen.queryByText('No action')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Rebase…' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More git actions' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: gitInfo.ticketBranch })).toBeInTheDocument();
