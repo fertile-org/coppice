@@ -14,7 +14,7 @@ export const gitStateCopy: Record<
   TicketGitState,
   { label: string; primary: string | null; tone: GitStateTone }
 > = {
-  in_review: { label: 'In review', primary: 'Rebase…', tone: 'neutral' },
+  in_review: { label: 'No action', primary: 'Rebase…', tone: 'neutral' },
   not_merged: { label: 'Not merged', primary: 'Merge', tone: 'warning' },
   conflict: { label: 'Conflict', primary: 'Ask agent', tone: 'danger' },
   main_dirty: { label: 'Main changed', primary: 'Retry merge', tone: 'warning' },
