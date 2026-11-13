@@ -5,8 +5,18 @@ use time::OffsetDateTime;
 
 const COPPICE_RUN_PROMPT: &str = "Read .agent/context.md and complete the task described there. When finished, call the coppice result_submit tool with your result.";
 
+const COPPICE_PLAN_RUN_PROMPT: &str = "Open `.agent/context.md`. Follow **Must do** (step 3 is mandatory). Do not end the run until `result_submit` succeeds with the plan in `summary`.";
+
 pub fn coppice_run_prompt() -> &'static str {
     COPPICE_RUN_PROMPT
+}
+
+pub fn coppice_run_prompt_for(job_type: &str) -> &'static str {
+    if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        COPPICE_PLAN_RUN_PROMPT
+    } else {
+        COPPICE_RUN_PROMPT
+    }
 }
 
 pub fn session_status_from_sse(event: &serde_json::Value, session_id: &str) -> Option<String> {
@@ -292,11 +302,20 @@ pub fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
     use crate::sessions::session_snapshot::SessionSnapshot;
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/opencode-events")
+    }
+
+    #[test]
+    fn plan_runs_get_a_shorter_launch_prompt() {
+        let plan = coppice_run_prompt_for(JOB_TYPE_PLAN_TICKET);
+        assert!(plan.contains("Must do"));
+        assert!(plan.contains("result_submit"));
+        assert_ne!(plan, coppice_run_prompt());
     }
 
     #[test]

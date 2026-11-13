@@ -9,7 +9,7 @@ use super::{
     worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::coppice_run_prompt;
+use crate::sessions::opencode_events::coppice_run_prompt_for;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -170,7 +170,7 @@ impl AgentProvider for AcpCliProvider {
         if self.spec.add_dir {
             args.extend(ticket_attachments::add_dir_args(&staged));
         }
-        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged);
         let model = super::model_flag::selected_model(input.model.as_deref()).map(str::to_string);
         let input = AgentRunInput {
             read_only_tools: read_only,

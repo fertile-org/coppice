@@ -11,7 +11,7 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::opencode_events::{coppice_run_prompt_for, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CodexProviderConfig;
@@ -179,7 +179,7 @@ impl AgentProvider for CodexProvider {
         let exit = match run_cli_with_stdin(
             invocation,
             Some(ticket_attachments::launch_prompt(
-                coppice_run_prompt(),
+                coppice_run_prompt_for(&input.job_type),
                 &staged,
             )),
             &mut handler,

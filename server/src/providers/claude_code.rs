@@ -13,7 +13,7 @@ use crate::domain::agent::ThinkingLevel;
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::coppice_run_prompt;
+use crate::sessions::opencode_events::coppice_run_prompt_for;
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::ClaudeCodeProviderConfig;
@@ -149,7 +149,7 @@ impl AgentProvider for ClaudeCodeProvider {
             input.artifacts_dir.as_deref(),
             input.ticket_id.as_deref(),
         );
-        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged);
         let argv = contract.argv(&coppice_connectors::LaunchSubst {
             read_only: read_only_tools,
             plan: planning,

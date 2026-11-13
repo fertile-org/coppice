@@ -589,6 +589,7 @@ async fn execute_job(
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: context_thread_excerpt,
         has_attachments: false,
+        planning_run: false,
     };
     let skills = state.skills.skills_for(&plugin_ids);
     let required = required_skill(
@@ -971,6 +972,7 @@ fn chat_context_input_base<'a>(
         assignee_agent_key: None,
         thread_excerpt: None,
         has_attachments: false,
+        planning_run: false,
     }
 }
 

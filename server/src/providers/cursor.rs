@@ -11,7 +11,7 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::coppice_run_prompt;
+use crate::sessions::opencode_events::coppice_run_prompt_for;
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
@@ -58,7 +58,10 @@ impl AgentProvider for CursorProvider {
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
             Some(version.as_str()),
-            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
+            &ticket_attachments::launch_prompt(
+                coppice_run_prompt_for(&input.job_type),
+                &staged,
+            ),
         );
         args.extend(ticket_attachments::add_dir_args(&staged));
 
@@ -588,7 +591,7 @@ fn result_event_is_error(value: &serde_json::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::opencode_events::extract_result_from_text;
+    use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {

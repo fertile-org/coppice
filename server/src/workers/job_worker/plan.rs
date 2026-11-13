@@ -343,6 +343,7 @@ async fn drive_plan_run(
         // Empty excerpt keeps this out of the "work on ticket" path.
         thread_excerpt: Some(""),
         has_attachments: false,
+        planning_run: true,
     };
     let plugin_ids = super::run_plugin_snapshot(pool, run).await;
     let skills = state.skills.skills_for(&plugin_ids);
@@ -362,6 +363,9 @@ async fn drive_plan_run(
         append_plan_sections(pool, ticket_id, revision_input.as_ref(), &mut markdown).await?;
         if has_design_skill(&skills) {
             markdown.push_str(&format!("\n{}\n", plan::PLAN_DESIGN_INSTRUCTION));
+        }
+        if let Some(note) = plan::connector_plan_finish_note(connector_name) {
+            markdown.push_str(&format!("\n{note}\n"));
         }
     }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(

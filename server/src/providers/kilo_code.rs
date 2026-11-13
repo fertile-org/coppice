@@ -9,7 +9,7 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::opencode_events::{coppice_run_prompt_for, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::KiloCodeProviderConfig;
@@ -115,7 +115,7 @@ impl AgentProvider for KiloCodeProvider {
         );
         let mut args = contract.with_prompt(
             pinned,
-            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
+            &ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged),
         );
 
         self.push_model_arg(&mut args, &input);

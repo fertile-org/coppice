@@ -5,7 +5,7 @@ use super::{
 };
 use crate::services::ticket_attachments;
 use crate::sessions::opencode_client::OpenCodeClient;
-use crate::sessions::opencode_events::coppice_run_prompt;
+use crate::sessions::opencode_events::coppice_run_prompt_for;
 use crate::sessions::opencode_run_server::{opencode_run_config, OpenCodeRunServers};
 use async_trait::async_trait;
 use coppice_config::OpenCodeProviderConfig;
@@ -125,7 +125,7 @@ impl AgentProvider for OpenCodeProvider {
         )?;
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         if let Some(model) = cli_model {
-            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged);
             return super::opencode_cli::run(
                 input,
                 super::opencode_cli::RunSpec {
@@ -141,7 +141,7 @@ impl AgentProvider for OpenCodeProvider {
             .await;
         }
         if acp {
-            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged);
             return super::opencode_acp::run(
                 input,
                 super::opencode_acp::RunSpec {
@@ -182,7 +182,7 @@ impl AgentProvider for OpenCodeProvider {
                 input.model_provider.as_deref(),
                 input.model.as_deref(),
                 input.resume_session_id.as_deref(),
-                &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
+                &ticket_attachments::launch_prompt(coppice_run_prompt_for(&input.job_type), &staged),
                 input.stream,
                 input.cancel_rx,
                 input.session_created_tx,

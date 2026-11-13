@@ -37,6 +37,8 @@ pub struct ContextInput<'a> {
     pub thread_excerpt: Option<&'a str>,
     // Chat replies: whether the rendered transcript or latest message lists attachments.
     pub has_attachments: bool,
+    /// Planning runs carry **Must do** under `# Plan`; omit duplicate tool boilerplate.
+    pub planning_run: bool,
 }
 
 /// Slim `.agent/context.md`: who the agent is, what the task is, and where to
@@ -74,24 +76,32 @@ pub fn build_tool_first_context(
         out.push_str(&format!("Load `{required}` before starting.\n"));
     }
 
-    out.push_str(
-        "\n# Coppice tools\n\n\
-         Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.\n\
-         Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.\n\
-         Use `board_agents` to find agent keys for handoff.\n\
-         ",
-    );
-    if matches!(
-        input.context_profile,
-        ContextProfile::Full | ContextProfile::HumanAgent
-    ) {
+    if input.planning_run {
         out.push_str(
-            "If you learn a durable rule a different ticket would need, propose it with `knowledge_propose`; skip ticket outcomes.\n",
+            "\n# Coppice tools\n\n\
+             This is a planning run: follow **Must do** under `# Plan`. \
+             Use MCP for ticket data, skills, and design tools when the plan section says so.\n",
+        );
+    } else {
+        out.push_str(
+            "\n# Coppice tools\n\n\
+             Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.\n\
+             Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.\n\
+             Use `board_agents` to find agent keys for handoff.\n\
+             ",
+        );
+        if matches!(
+            input.context_profile,
+            ContextProfile::Full | ContextProfile::HumanAgent
+        ) {
+            out.push_str(
+                "If you learn a durable rule a different ticket would need, propose it with `knowledge_propose`; skip ticket outcomes.\n",
+            );
+        }
+        out.push_str(
+            "Finish by calling `result_submit` with your result; fix and resubmit if it returns errors.\n",
         );
     }
-    out.push_str(
-        "Finish by calling `result_submit` with your result; fix and resubmit if it returns errors.\n",
-    );
     out
 }
 
@@ -353,6 +363,7 @@ mod tests {
             assignee_agent_key,
             thread_excerpt,
             has_attachments: false,
+            planning_run: false,
         }
     }
 
@@ -376,6 +387,16 @@ mod tests {
             path: std::path::PathBuf::from(format!("/skills/{id}")),
         })
         .collect()
+    }
+
+    #[test]
+    fn planning_run_uses_compact_coppice_tools_section() {
+        let mut input = fixture_full_input();
+        input.planning_run = true;
+        let md = build_tool_first_context(&input, &test_skills(), None);
+        assert!(md.contains("follow **Must do** under `# Plan`"));
+        assert!(!md.contains("Use `ticket_get` / `ticket_comments` / `ticket_runs`"));
+        assert!(!md.contains("Finish by calling `result_submit`"));
     }
 
     #[test]

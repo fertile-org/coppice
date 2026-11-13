@@ -4829,6 +4829,7 @@ mod tests {
             assignee_agent_key: None,
             thread_excerpt: None,
             has_attachments: false,
+            planning_run: false,
         };
         let built = build_tool_first_context(&context_input, &[], None);
         write_context_document(worktree.path(), &built).expect("write context");

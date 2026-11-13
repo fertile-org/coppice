@@ -83,6 +83,21 @@ pub const EMPTY_APPROACH: &str = "No approach was written.";
 pub const PLAN_TASK: &str =
     "Write a plan for this ticket. Do not edit files, commit, push, or create or change a branch.";
 
+pub const PLAN_MUST_DO_HEADING: &str = "## Must do";
+
+/// Ordered finish contract for every planning connector. Launch prompts point here.
+pub const PLAN_MUST_DO: &str = "1. Read this file, then call `ticket_get` and `skill_load` for any skills you need before you draft.\n2. Write the plan in the format below. Do not edit files, commit, push, or create or change a branch.\n3. **Finish only with `result_submit`:** `status` `done`, full plan markdown in `summary`. Chat text, printed JSON, or a connector's native plan tool does not count — Coppice saves the plan only from `result_submit`.\n4. If `result_submit` returns errors, fix the payload and call it again before you stop.";
+
+/// When Cursor `--mode plan` ends on `createPlanToolCall` without `result_submit`.
+pub const PLAN_CURSOR_FINISH_NOTE: &str = "**Cursor:** Do not stop after `createPlan` or other native plan-mode tools. After the plan is written, call Coppice `result_submit`.";
+
+pub fn connector_plan_finish_note(connector_id: &str) -> Option<&'static str> {
+    match connector_id {
+        "cursor" => Some(PLAN_CURSOR_FINISH_NOTE),
+        _ => None,
+    }
+}
+
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
 
 /// Criteria are the contract Human Review checks the finished change against.
@@ -447,7 +462,7 @@ pub struct PlanRevision<'a> {
 /// Instructions appended to a planning run.
 pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n{PLAN_LENGTH_INSTRUCTION}\n",
+        "{PLAN_TASK}\n\n{PLAN_MUST_DO_HEADING}\n\n{PLAN_MUST_DO}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n{PLAN_LENGTH_INSTRUCTION}\n",
         plan_template()
     );
     let Some(revision) = revision else {
@@ -635,6 +650,29 @@ mod tests {
         };
         assert!(plan_instructions(Some(&revision)).contains(PLAN_LENGTH_INSTRUCTION));
         assert!(text.contains("full repo-relative path"));
+    }
+
+    #[test]
+    fn instructions_lead_with_must_do() {
+        let text = plan_instructions(None);
+        let must = text.find(PLAN_MUST_DO_HEADING).expect("must do heading");
+        let format = text.find(PLAN_FORMAT_INSTRUCTION).expect("format");
+        assert!(
+            must < format,
+            "Must do should appear before the template block"
+        );
+        assert!(text.contains("native plan tool"));
+        assert!(text.contains("result_submit"));
+    }
+
+    #[test]
+    fn cursor_gets_an_extra_finish_note() {
+        assert_eq!(
+            connector_plan_finish_note("cursor"),
+            Some(PLAN_CURSOR_FINISH_NOTE)
+        );
+        assert_eq!(connector_plan_finish_note("claude-code"), None);
+        assert!(PLAN_CURSOR_FINISH_NOTE.contains("createPlan"));
     }
 
     #[test]
