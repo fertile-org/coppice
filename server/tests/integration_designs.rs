@@ -2615,6 +2615,51 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     assert_eq!(set["selected"]["label"], "B");
 }
 
+/// A revision that publishes new options supersedes the old set, and the
+/// revised plan links to the new set's recommended option.
+#[tokio::test]
+async fn revision_that_republishes_supersedes_the_old_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, first_set) = plan_review_with_set().await;
+    let plans = planning(&fx);
+    plans
+        .ask_for_changes(fx.ticket_id, "Make it a table.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let second_set = publish_plan_options(&fx, run_id, fx.agent_id).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            PICK_PLAN,
+            Some(run_id),
+            false,
+            false,
+        )
+        .await
+        .expect("revised plan");
+    set_run_status(&fx, run_id, "succeeded").await;
+
+    let superseded_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT superseded_by FROM design_sets WHERE id = $1")
+            .bind(first_set)
+            .fetch_one(&fx.pool)
+            .await
+            .expect("first set");
+    assert_eq!(superseded_by, Some(second_set));
+
+    let plan = plans
+        .latest_plan(fx.ticket_id)
+        .await
+        .expect("latest")
+        .expect("plan");
+    assert_eq!(plan.design_set_id, Some(second_set));
+    assert_eq!(plan.design_option_id.as_deref(), Some("a"));
+}
+
 /// Plan v1 published options. Plan v2 says nothing visible changed, so the
 /// Detail card (live sets only) and `selectedDesign` both go away. The old
 /// sets stay on the ticket as read-only history.

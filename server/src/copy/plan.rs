@@ -105,7 +105,7 @@ pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, archit
 
 /// Added when the agent has the design skill. Guidance only: Plan Review does
 /// not wait for a choice, and a person can ask for plan changes after picking.
-pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. If `design__list` shows a selected option, write the plan around that one and don't publish new options unless a change request asks for them. When the plan has no visible change, including after a change request drops the UI work, call `result_submit` with `noVisibleChange` set to true and do not publish options.";
+pub const PLAN_DESIGN_INSTRUCTION: &str = "If this ticket changes what people see, load `design:design-ui-options` and publish 2–3 design options before you submit the plan, marking the one you recommend, then write the plan around it and say which one it is. On a revision, use only the newest change request: if it alters what people see, republish 2–3 options and write the plan around the new set's recommended option; if it only picks an option (\"Update the plan to use design option …\") or does not touch what people see, keep the current set and write the plan around `selectedDesign` in `ticket_get`. When the plan has no visible change, including after a change request drops the UI work, call `result_submit` with `noVisibleChange` set to true and do not publish options.";
 
 /// Planner hint. A human still decides at plan approval.
 pub const PLAN_SKIP_REVIEW_INSTRUCTION: &str = "Set suggestSkipHumanReview to true only when the change is trivial: a small, low-risk edit such as copy, config, or a one-file fix with no behavior change. Leave it false when unsure.";
@@ -447,7 +447,7 @@ pub fn approved_plan_section_body(plan_comment: &str) -> String {
 /// Heading a revised plan opens with, one line per change request.
 pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
 
-pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. If requests conflict, the later one wins; say so on the earlier one's line. The design to use is `selectedDesign` in `ticket_get`, whichever option the requests name. Then write the full plan in the format above.";
+pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't, and whether you republished design options or kept them. If requests conflict, the later one wins; say so on the earlier one's line. Only the last numbered request decides whether to republish — earlier requests were already answered by the current options. If that newest request alters what people see, republish 2–3 options and set `recommendedOptionId` to the option the revised plan follows; if it only picks an option or does not touch what people see, keep the current set — the design to use is `selectedDesign` in `ticket_get`, whichever option the requests name. Then write the full plan in the format above.";
 
 /// A revision run: the plan it replaces and every change request on this
 /// ticket's plans, oldest first. The last one is the newest.
@@ -726,6 +726,38 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("`selectedDesign` in `ticket_get`"), "{text}");
+        assert!(
+            text.contains("Only the last numbered request decides whether to republish"),
+            "{text}"
+        );
+        assert!(
+            text.contains("whether you republished design options or kept them"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn design_guidance_republishes_when_the_newest_request_changes_what_people_see() {
+        assert!(PLAN_DESIGN_INSTRUCTION.contains("design:design-ui-options"));
+        assert!(PLAN_DESIGN_INSTRUCTION.contains("noVisibleChange"));
+        assert!(
+            PLAN_DESIGN_INSTRUCTION
+                .contains("use only the newest change request"),
+            "{PLAN_DESIGN_INSTRUCTION}"
+        );
+        assert!(
+            PLAN_DESIGN_INSTRUCTION.contains("republish 2–3 options"),
+            "{PLAN_DESIGN_INSTRUCTION}"
+        );
+        assert!(
+            PLAN_DESIGN_INSTRUCTION
+                .contains("Update the plan to use design option"),
+            "{PLAN_DESIGN_INSTRUCTION}"
+        );
+        assert!(
+            REVISION_INSTRUCTION.contains("recommendedOptionId"),
+            "{REVISION_INSTRUCTION}"
+        );
     }
 
     #[test]
