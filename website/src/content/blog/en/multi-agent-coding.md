@@ -38,7 +38,7 @@ git worktree add ../my-project-search -b search
 
 Start an agent in each folder so they do not edit the same files. When a task is done, review that branch and merge it, then remove the folder with `git worktree remove`.
 
-This runs agents in parallel without a board. You still track one terminal per agent and merge by hand. Two tasks that touch a shared file, such as a lockfile, can conflict when the branches come together.
+You still track one terminal per agent and merge by hand. Two tasks that touch a shared file, such as a lockfile, can conflict when the branches come together.
 
 ## Option 3: A subagent inside one CLI
 
