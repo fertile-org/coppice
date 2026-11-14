@@ -26,6 +26,14 @@ description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cu
 
 相容性資訊會隨著我們測試更多 CLI 版本而更新。
 
+<a id="not-supported-yet"></a>
+
+### 尚未支援
+
+Coppice 尚未支援 **Antigravity**（`agy`），也就是 Google 用於 Gemini 模型的 CLI。每次執行都會取得一條連到 Coppice 的專屬 MCP 連線，代理透過它讀取工單並回報結果。Antigravity 只會從自己的設定檔讀取 MCP 伺服器，這些設定檔位於你的家目錄或專案中。Coppice 不會修改其中任何一處，因此無法為 Antigravity 的執行提供這條連線。如果 Antigravity 之後提供為單次執行設定 MCP 的方式，我們會加入支援。
+
+若要用自己的 API 金鑰使用 Gemini 模型，請使用 OpenCode。參見[使用自己的 API 金鑰或其他提供商](#use-your-own-api-key-or-another-provider)。
+
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="代理上的模型選擇器，列出該代理 CLI 提供的模型。">
 <figcaption>選擇一個模型，或保留預設值。</figcaption>
