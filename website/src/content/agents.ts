@@ -14,5 +14,8 @@ export const AGENT_CLIS = [
   'Grok',
 ] as const;
 
-/** Search phrase the site leads with, ahead of the CLI names. */
-export const PRIMARY_KEYWORD = 'AI coding agent board';
+/** Search phrase the site leads with, ahead of the CLI names. Matches the homepage title. */
+export const PRIMARY_KEYWORD = 'multi-agent coding';
+
+/** Second search phrase: what the app looks like once it is open. */
+export const SECONDARY_KEYWORD = 'AI coding agent board';

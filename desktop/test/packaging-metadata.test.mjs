@@ -61,7 +61,7 @@ describe('AppStream metainfo', () => {
 
   it('carries the store name, copy, homepage, and hero screenshot', () => {
     assert.match(xml, /<name>Coppice<\/name>/);
-    assert.match(xml, /<summary>Local board for your AI agent team<\/summary>/);
+    assert.match(xml, /<summary>Desktop app for multi-agent coding<\/summary>/);
     assert.match(
       xml,
       /<p>Hire specialists\. Keep the final say\. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex\. No Coppice account, no Docker\.<\/p>/,

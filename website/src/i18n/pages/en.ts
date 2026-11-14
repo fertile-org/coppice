@@ -8,7 +8,7 @@ export const pages = {
       'Coppice is a desktop app for multi-agent coding. You write tickets, approve the plan, and accept the diff. Agents run CLIs such as Claude Code and Codex.',
     worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
-    lede: 'A desktop app for multi-agent coding with Claude Code, Codex, and more. Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
+    lede: 'A desktop app for multi-agent coding. Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
     hero: {
       stillAlt: 'Coppice board with tickets for the acme-web repository',
       videoAlt:
@@ -76,7 +76,7 @@ export const pages = {
     title: 'Download Coppice',
     metaTitle: 'Download Coppice for macOS and Linux',
     description:
-      'Download Coppice, the free, open source AI coding agent board, for macOS (Apple Silicon or Intel) and Linux. It runs on your machine without a Coppice account.',
+      'Download Coppice, the free, open source desktop app for multi-agent coding, for macOS and Linux. It runs on your machine without a Coppice account.',
     intro: "Coppice is free. It runs on your machine, and you don't need a Coppice account.",
     groups: [
       {
@@ -120,7 +120,7 @@ export type Pages = typeof pages;
 export const homeEntry = {
   whatTitle: 'What Coppice is',
   whatBody:
-    'Coppice is a local desktop board for coding agents. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
+    'Coppice is a desktop app for multi-agent coding. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
   guidesTitle: 'Guides',
   guides: [
     {

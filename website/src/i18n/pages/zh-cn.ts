@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice 是用于多智能体编程的桌面应用。你写工单、批准计划，并接受 diff。Claude Code、Codex 等智能体在你的电脑上运行。',
     worksWith: '支持',
     h1: '雇用专家，你来拍板。',
-    lede: '这是用于多智能体编程的桌面应用，支持 Claude Code、Codex 等。你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
+    lede: '这是用于多智能体编程的桌面应用。你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 仓库的工单',
       videoAlt:
@@ -73,7 +73,7 @@ export const pages: Pages = {
     title: '下载 Coppice',
     metaTitle: '下载 Coppice（macOS 和 Linux）',
     description:
-      '下载 Coppice：免费开源的 AI 编程智能体看板，支持 macOS（Apple Silicon 或 Intel）和 Linux。本地运行，无需 Coppice 账号。',
+      '下载 Coppice：免费开源的多智能体编程桌面应用，支持 macOS（Apple Silicon 或 Intel）和 Linux。本地运行，无需 Coppice 账号。',
     intro: '免费，在你自己的电脑上运行，无需 Coppice 账号。',
     groups: [
       {

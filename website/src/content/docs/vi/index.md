@@ -1,6 +1,6 @@
 ---
 title: Tài liệu
-metaTitle: "Tài liệu Coppice: chạy AI coding agent trên một bảng"
+metaTitle: "Tài liệu Coppice: multi-agent coding trên một bảng"
 description: "Coppice gom cả đội coding agent lên một bảng: chia việc thành ticket, để agent làm trên branch riêng, và review từng diff. Bắt đầu từ trang Cài đặt."
 ---
 

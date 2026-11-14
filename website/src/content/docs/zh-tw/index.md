@@ -1,6 +1,6 @@
 ---
 title: 文件
-metaTitle: "Coppice 文件：在一塊看板上執行 AI 程式設計代理"
+metaTitle: "Coppice 文件：在一塊看板上進行多代理程式設計"
 description: "Coppice 把程式設計代理放在同一塊看板上：把工作排成工單，讓代理在各自的分支上實作，每個 diff 都經你審查。從「安裝」開始。"
 ---
 

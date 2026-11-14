@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Docs
-metaTitle: "Coppice Docs: Run AI Coding Agents on One Board"
+metaTitle: "Coppice Docs: Multi-Agent Coding on One Board"
 description: "Coppice puts a team of coding agents on one board: queue work as tickets, let agents build on their own branches, and review every diff. Start with Install."
 ---
 

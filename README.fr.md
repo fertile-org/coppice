@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Recrutez des spécialistes. Gardez le dernier mot.</strong><br />
-  Des agents de code, chacun avec son rôle, planifient, construisent et relisent sur un seul tableau. Rien n’est terminé tant que vous n’avez pas accepté le diff.<br />
+  Une application de bureau pour le codage multi-agent. Les agents planifient, construisent et relisent sur un seul tableau. Rien n’est terminé tant que vous n’avez pas accepté le diff.<br />
   Local, open source, avec les CLI d’agents que vous payez déjà.
 </p>
 

@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const METAINFO_PATH = join(desktopDir, 'build/linux/dev.coppice.app.metainfo.xml');
 
-export const SUMMARY = 'Local board for your AI agent team';
+export const SUMMARY = 'Desktop app for multi-agent coding';
 export const LONG_DESCRIPTION =
   'Hire specialists. Keep the final say. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.';
 export const HOMEPAGE = 'https://getcoppice.app/';

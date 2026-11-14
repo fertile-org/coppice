@@ -1,4 +1,4 @@
-import { AGENT_CLIS, PRIMARY_KEYWORD } from '../content/agents.ts';
+import { AGENT_CLIS, PRIMARY_KEYWORD, SECONDARY_KEYWORD } from '../content/agents.ts';
 import { publicHref } from '../i18n/paths.ts';
 
 /** schema.org JSON-LD. Pages share one Organization, WebSite and SoftwareApplication, linked by `@id`. */
@@ -62,9 +62,9 @@ export function softwareApplication(
     image: options.image,
     screenshot: options.screenshot,
     inLanguage: options.inLanguage,
-    keywords: [PRIMARY_KEYWORD, ...AGENT_CLIS].join(', '),
+    keywords: [PRIMARY_KEYWORD, SECONDARY_KEYWORD, ...AGENT_CLIS].join(', '),
     featureList: [
-      'Coding agents with roles plan, build and review on one board',
+      'Multi-agent coding: agents with roles plan, build and review on one board',
       'Each ticket runs in its own git worktree',
       'Human review of every diff before it counts as done',
       `Works with ${AGENT_CLIS.join(', ')}`,

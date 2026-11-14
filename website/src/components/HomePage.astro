@@ -1,5 +1,5 @@
 ---
-import { AGENT_CLIS, PRIMARY_KEYWORD } from '../content/agents';
+import { AGENT_CLIS, PRIMARY_KEYWORD, SECONDARY_KEYWORD } from '../content/agents';
 import { pagesFor } from '../i18n/pages';
 import { homeEntry } from '../i18n/pages/en';
 import { hrefFor, useI18n } from '../i18n/runtime';
@@ -16,7 +16,7 @@ const copy = pagesFor(ctx.locale).home;
   title={copy.title}
   description={copy.description}
   structuredData={softwareSchema(Astro, ctx, copy.description)}
-  keywords={[PRIMARY_KEYWORD, ...AGENT_CLIS]}
+  keywords={[PRIMARY_KEYWORD, SECONDARY_KEYWORD, ...AGENT_CLIS]}
 >
   <div class="shell landing">
     <header class="promise">

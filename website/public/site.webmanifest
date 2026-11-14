@@ -1,7 +1,7 @@
 {
   "name": "Coppice",
   "short_name": "Coppice",
-  "description": "The AI coding agent board. Agents plan, build and review on one board, and nothing is done until you accept the diff.",
+  "description": "The desktop app for multi-agent coding. Agents plan, build and review on one board, and nothing is done until you accept the diff.",
   "start_url": "/",
   "display": "browser",
   "background_color": "#faf7f2",

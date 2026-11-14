@@ -40,7 +40,7 @@ linux:
   icon: build/icons
   # Debian short description (first line of control Description). The long
   # description is package.json "description".
-  synopsis: Local board for your AI agent team
+  synopsis: Desktop app for multi-agent coding
   desktop:
     entry:
       # Electron 35 sets WM_CLASS to ("coppice", "Coppice"): the instance is the

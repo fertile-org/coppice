@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice 是多代理程式設計的桌面應用程式。你寫工單、批准計劃，並接受 diff。Claude Code、Codex 等代理在你的電腦上執行。',
     worksWith: '支援',
     h1: '僱用專家，你來拍板。',
-    lede: '這是多代理程式設計的桌面應用程式，支援 Claude Code、Codex 等。你的 PM 代理起草計劃，由你批准。專業代理並行實作。你接受 diff 之前，都不算完成。',
+    lede: '這是多代理程式設計的桌面應用程式。你的 PM 代理起草計劃，由你批准。專業代理並行實作。你接受 diff 之前，都不算完成。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 倉庫的工單',
       videoAlt:
@@ -73,7 +73,7 @@ export const pages: Pages = {
     title: '下載 Coppice',
     metaTitle: '下載 Coppice（macOS 和 Linux）',
     description:
-      '下載 Coppice：免費開源的 AI 程式設計代理看板，支援 macOS（Apple Silicon 或 Intel）和 Linux。在本機執行，不需要 Coppice 帳號。',
+      '下載 Coppice：免費開源的多代理程式設計桌面應用程式，支援 macOS（Apple Silicon 或 Intel）和 Linux。在本機執行，不需要 Coppice 帳號。',
     intro: '免費，在你自己的電腦上執行，不需要 Coppice 帳號。',
     groups: [
       {
