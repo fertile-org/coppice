@@ -27,6 +27,12 @@ Coppice does not install these CLIs. Install the command from the vendor guide i
 
 We will update this list as we test more CLI versions.
 
+### Not supported yet
+
+Coppice doesn't support **Antigravity** (`agy`), Google's CLI for Gemini models. Each run gets its own MCP connection to Coppice, which the agent uses to read the ticket and report its result. Antigravity reads MCP servers only from its own config files, in your home folder or in the project. Coppice doesn't change either one, so it can't give an Antigravity run that connection. We'll add Antigravity if it gets a way to set MCP for a single run.
+
+To use Gemini models with your own API key, use OpenCode. See [Use your own API key or another provider](#use-your-own-api-key-or-another-provider).
+
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="The model picker on an agent, listing the models from the agent's CLI.">
 <figcaption>Pick a model, or leave it on the default.</figcaption>
