@@ -11,6 +11,7 @@ export const ui: Ui = {
     blog: '網誌',
     github: 'GitHub',
     download: '下載',
+    menu: '選單',
   },
   footer: {
     tagline: '僱用專家，你來拍板。',

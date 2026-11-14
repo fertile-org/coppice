@@ -11,6 +11,7 @@ export const ui: Ui = {
     blog: 'ブログ',
     github: 'GitHub',
     download: 'ダウンロード',
+    menu: 'メニュー',
   },
   footer: {
     tagline: '専門家を雇い、最終判断はあなたに。',
