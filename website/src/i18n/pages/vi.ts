@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice là ứng dụng desktop cho multi-agent coding. Bạn viết ticket, duyệt kế hoạch và chấp nhận diff. Claude Code, Codex và các CLI khác chạy trên máy bạn.',
     worksWith: 'Dùng được với',
     h1: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',
-    lede: 'Ứng dụng desktop cho multi-agent coding với Claude Code, Codex và hơn thế. Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
+    lede: 'Ứng dụng desktop cho multi-agent coding. Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
     hero: {
       stillAlt: 'Bảng Coppice với các ticket của repository acme-web',
       videoAlt:
@@ -77,7 +77,7 @@ export const pages: Pages = {
     title: 'Tải Coppice',
     metaTitle: 'Tải Coppice cho macOS và Linux',
     description:
-      'Tải Coppice, bảng điều phối AI coding agent miễn phí và mã nguồn mở, cho macOS (Apple Silicon hoặc Intel) và Linux. Chạy trên máy bạn, không cần tài khoản.',
+      'Tải Coppice, ứng dụng desktop miễn phí, mã nguồn mở cho multi-agent coding, cho macOS và Linux. Chạy trên máy bạn, không cần tài khoản.',
     intro: 'Miễn phí, chạy ngay trên máy bạn, không cần tài khoản Coppice.',
     groups: [
       {

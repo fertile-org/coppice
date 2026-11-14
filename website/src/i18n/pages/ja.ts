@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice はマルチエージェント開発のデスクトップアプリです。計画を承認し、diff を受け入れます。Claude Code や Codex などがパソコンで動きます。',
     worksWith: '対応 CLI：',
     h1: '専門家を雇い、最終判断はあなたに。',
-    lede: 'Claude Code、Codex などに対応した、マルチエージェント開発のデスクトップアプリです。PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
+    lede: 'マルチエージェント開発のデスクトップアプリです。PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
     hero: {
       stillAlt: 'acme-web リポジトリのチケットが並ぶ Coppice のボード',
       videoAlt:
@@ -77,7 +77,7 @@ export const pages: Pages = {
     title: 'Coppice をダウンロード',
     metaTitle: 'Coppice をダウンロード（macOS・Linux）',
     description:
-      '無料でオープンソースの AI コーディングエージェントボード Coppice を、macOS（Apple Silicon・Intel）と Linux 向けに配布しています。アカウント不要。',
+      '無料でオープンソースのマルチエージェント開発デスクトップアプリ Coppice を、macOS（Apple Silicon・Intel）と Linux 向けに配布しています。アカウント不要。',
     intro: '無料で、あなたのマシンで動きます。Coppice アカウントは不要です。',
     groups: [
       {

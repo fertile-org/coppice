@@ -43,7 +43,7 @@ const ctx = useI18n(Astro);
 // Titles that already name the product keep their wording.
 const fullTitle = title.includes('Coppice') ? title : `${title} · Coppice`;
 const image = Astro.site ? new URL(withBase(ogCard), Astro.site).href : undefined;
-const imageAlt = 'Coppice, the AI coding agent board: agents plan, build and review on one board.';
+const imageAlt = 'Coppice, the desktop app for multi-agent coding: agents plan, build and review on one board.';
 const alternateOgLocales = ctx.alternates
   .filter((link) => link.hreflang !== 'x-default' && link.hreflang !== ctx.code)
   .map((link) => ogLocale(link.hreflang));

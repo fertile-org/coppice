@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Thuê chuyên gia. Bạn là người quyết định cuối cùng.</strong><br />
-  Mỗi coding agent đảm nhận một vai trò. Các agent lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.<br />
+  Ứng dụng desktop cho multi-agent coding. Các agent lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.<br />
   Chạy ngay trên máy bạn, mã nguồn mở, dùng các agent CLI bạn đang trả phí.
 </p>
 

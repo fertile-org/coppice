@@ -1,6 +1,6 @@
 ---
 title: 文档
-metaTitle: "Coppice 文档：在一块看板上运行 AI 编程智能体"
+metaTitle: "Coppice 文档：在一块看板上进行多智能体编程"
 description: "Coppice 把编程智能体放到同一块看板上：把工作排成工单，让智能体在各自的分支上构建，每个 diff 都经你审核。从“安装”开始。"
 ---
 

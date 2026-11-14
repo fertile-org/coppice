@@ -11,6 +11,7 @@ export const ui: Ui = {
     blog: 'Blog',
     github: 'GitHub',
     download: 'Tải xuống',
+    menu: 'Menu',
   },
   footer: {
     tagline: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',

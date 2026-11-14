@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice est une application de bureau pour le codage multi-agent. Vous approuvez le plan et le diff. Claude Code, Codex et d’autres tournent sur votre machine.',
     worksWith: 'Fonctionne avec',
     h1: 'Recrutez des spécialistes. Gardez le dernier mot.',
-    lede: 'Une application de bureau pour le codage multi-agent, avec Claude Code, Codex et d’autres. Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
+    lede: 'Une application de bureau pour le codage multi-agent. Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
     hero: {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:
@@ -77,7 +77,7 @@ export const pages: Pages = {
     title: 'Télécharger Coppice',
     metaTitle: 'Télécharger Coppice pour macOS et Linux',
     description:
-      'Téléchargez Coppice, le tableau d’agents de code IA gratuit et open source, pour macOS (Apple Silicon ou Intel) et Linux. Tourne en local, sans compte.',
+      'Téléchargez Coppice, l’application de bureau gratuite et open source pour le codage multi-agent, pour macOS et Linux. Tourne en local, sans compte.',
     intro: 'Gratuit, tourne sur votre propre machine, sans compte Coppice.',
     groups: [
       {

@@ -5,7 +5,7 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
   <name>Coppice</name>
-  <summary>Local board for your AI agent team</summary>
+  <summary>Desktop app for multi-agent coding</summary>
   <description>
     <p>Hire specialists. Keep the final say. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.</p>
   </description>

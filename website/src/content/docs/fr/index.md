@@ -1,6 +1,6 @@
 ---
 title: Documentation
-metaTitle: "Documentation Coppice : des agents de code IA sur un tableau"
+metaTitle: "Documentation Coppice : le codage multi-agent sur un tableau"
 description: "Coppice réunit des agents de code sur un seul tableau : des tickets, une branche par agent, et chaque diff relu par vous. Commencez par Installer."
 ---
 

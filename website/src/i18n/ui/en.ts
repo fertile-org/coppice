@@ -18,6 +18,7 @@ export const ui = {
     blog: 'Blog',
     github: 'GitHub',
     download: 'Download',
+    menu: 'Menu',
   },
   footer: {
     tagline: 'Hire specialists. Keep the final say.',

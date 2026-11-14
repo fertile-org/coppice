@@ -23,12 +23,47 @@ const blogActive = ctx.englishPath === '/blog' || ctx.englishPath.startsWith('/b
       />
       <span>Coppice</span>
     </a>
-    <nav class="primary-nav" data-pagefind-ignore aria-label="Primary">
+    <div class="header-actions">
+      <a class="btn btn-small" href={hrefFor(ctx.locale, '/download')} aria-current={downloadActive ? 'page' : undefined}>{ctx.ui.nav.download}</a>
+      <button class="nav-toggle" type="button" aria-controls="primary-nav" aria-expanded="false" hidden data-nav-toggle>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+          <path class="nav-toggle-open" d="M4 7h16M4 12h16M4 17h16" />
+          <path class="nav-toggle-close" d="M6 6l12 12M18 6L6 18" />
+        </svg>
+        <span class="visually-hidden">{ctx.ui.nav.menu}</span>
+      </button>
+    </div>
+    <nav class="primary-nav" data-pagefind-ignore id="primary-nav" aria-label="Primary">
       <a href={hrefFor(ctx.locale, '/docs')} aria-current={docsActive ? 'page' : undefined}>{ctx.ui.nav.docs}</a>
       <a href={hrefFor(ctx.locale, '/blog')} aria-current={blogActive ? 'page' : undefined}>{ctx.ui.nav.blog}</a>
       <a href="https://github.com/fertile-org/coppice">{ctx.ui.nav.github}</a>
-      <a class="btn btn-small" href={hrefFor(ctx.locale, '/download')} aria-current={downloadActive ? 'page' : undefined}>{ctx.ui.nav.download}</a>
+      <a class="btn btn-small nav-download" href={hrefFor(ctx.locale, '/download')} aria-current={downloadActive ? 'page' : undefined}>{ctx.ui.nav.download}</a>
       <LanguageSwitch />
     </nav>
   </div>
 </header>
+
+<script>
+  // Small screens collapse the nav behind a menu button. Without JS the button
+  // stays hidden and the nav wraps under the logo instead.
+  const header = document.querySelector('.site-header');
+  const toggle = document.querySelector('[data-nav-toggle]');
+  if (header instanceof HTMLElement && toggle instanceof HTMLButtonElement) {
+    const setOpen = (open: boolean) => {
+      toggle.setAttribute('aria-expanded', String(open));
+      header.toggleAttribute('data-nav-open', open);
+    };
+    header.classList.add('has-nav-toggle');
+    toggle.hidden = false;
+    toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && header.hasAttribute('data-nav-open')) {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+    window.matchMedia('(min-width: 641px)').addEventListener('change', (event) => {
+      if (event.matches) setOpen(false);
+    });
+  }
+</script>

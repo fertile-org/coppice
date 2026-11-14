@@ -1,6 +1,6 @@
 ---
 import { downloadPageFor } from '../content/downloads';
-import { AGENT_CLIS, PRIMARY_KEYWORD } from '../content/agents';
+import { AGENT_CLIS, PRIMARY_KEYWORD, SECONDARY_KEYWORD } from '../content/agents';
 import { pagesFor } from '../i18n/pages';
 import { useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
@@ -16,7 +16,7 @@ const downloadPage = downloadPageFor(copy);
   title={copy.metaTitle}
   description={copy.description}
   structuredData={softwareSchema(Astro, ctx, copy.description)}
-  keywords={[PRIMARY_KEYWORD, ...AGENT_CLIS]}
+  keywords={[PRIMARY_KEYWORD, SECONDARY_KEYWORD, ...AGENT_CLIS]}
 >
   <div class="shell landing">
     <header class="promise">
