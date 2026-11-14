@@ -17,7 +17,7 @@ keywords:
 
 ## Why this is hard
 
-You correct the agent. The next task starts clean, and the mistake shows up again. A coding agent does not keep that correction once the chat ends. Something has to put it in front of the next run, or a check has to fail when the mistake comes back.
+You correct the agent. The next task starts clean, and the mistake shows up again. The gap is wider in [multi-agent coding](/blog/multi-agent-coding), where the next agent never saw the correction. A coding agent does not keep that correction once the chat ends. Something has to put it in front of the next run, or a check has to fail when the mistake comes back.
 
 ## Option 1: A rules file in the project
 

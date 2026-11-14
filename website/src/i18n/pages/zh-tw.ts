@@ -5,12 +5,12 @@ export const locale = 'zh-tw';
 /** 繁體中文（台灣） homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice：在本機執行的開源 AI 程式設計代理看板',
+    title: 'Coppice：多代理程式設計的桌面應用程式',
     description:
-      'Coppice 是在本機執行的開源 AI 程式設計代理看板。Claude Code、Codex、Cursor 等代理會並行規劃、實作和審查，每個 diff 都由你接受。',
+      'Coppice 是多代理程式設計的桌面應用程式。你寫工單、批准計劃，並接受 diff。Claude Code、Codex 等代理在你的電腦上執行。',
     worksWith: '支援',
     h1: '僱用專家，你來拍板。',
-    lede: '你的 PM 代理起草計劃，由你批准。專業代理並行實作。你接受 diff 之前，都不算完成。',
+    lede: '這是多代理程式設計的桌面應用程式，支援 Claude Code、Codex 等。你的 PM 代理起草計劃，由你批准。專業代理並行實作。你接受 diff 之前，都不算完成。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 倉庫的工單',
       videoAlt:

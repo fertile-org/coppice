@@ -17,7 +17,7 @@ keywords:
 
 ## Why it's hard
 
-Two agents in the same folder edit the same files, and one breaks the other's work. Git worktrees fix that: each agent gets its own folder and branch.
+Two agents in the same folder edit the same files, and one breaks the other's work. Git worktrees fix that: each agent gets its own folder and branch. Keeping those folders apart is one part of [multi-agent coding](/blog/multi-agent-coding).
 
 Then the hard part moves. You have one terminal per agent, you have to remember which one is done and which one is waiting for you, and you merge the branches one by one. Two tasks that touch the same files can still conflict when you merge them.
 

@@ -5,12 +5,12 @@ export const locale = 'ja';
 /** 日本語 homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice：オープンソースの AI コーディングエージェントボード',
+    title: 'Coppice：マルチエージェント開発のデスクトップアプリ',
     description:
-      'Coppice はローカルで動くオープンソースの AI コーディングエージェントボード。Claude Code、Codex、Cursor などが並行して計画・実装・レビュー。diff はあなたが承認。',
+      'Coppice はマルチエージェント開発のデスクトップアプリです。計画を承認し、diff を受け入れます。Claude Code や Codex などがパソコンで動きます。',
     worksWith: '対応 CLI：',
     h1: '専門家を雇い、最終判断はあなたに。',
-    lede: 'PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
+    lede: 'Claude Code、Codex などに対応した、マルチエージェント開発のデスクトップアプリです。PM エージェントが計画を下書きし、あなたが承認します。専門のエージェントが並行して作ります。あなたが diff を承認するまで、何も完了にはなりません。',
     hero: {
       stillAlt: 'acme-web リポジトリのチケットが並ぶ Coppice のボード',
       videoAlt:

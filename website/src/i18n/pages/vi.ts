@@ -5,12 +5,12 @@ export const locale = 'vi';
 /** Tiếng Việt homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice: Bảng điều phối AI coding agent, mã nguồn mở',
+    title: 'Coppice: ứng dụng desktop cho multi-agent coding',
     description:
-      'Coppice là bảng điều phối AI coding agent chạy ngay trên máy bạn. Claude Code, Codex, Cursor… lên kế hoạch, viết code và review; bạn chấp nhận từng diff.',
+      'Coppice là ứng dụng desktop cho multi-agent coding. Bạn viết ticket, duyệt kế hoạch và chấp nhận diff. Claude Code, Codex và các CLI khác chạy trên máy bạn.',
     worksWith: 'Dùng được với',
     h1: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',
-    lede: 'Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
+    lede: 'Ứng dụng desktop cho multi-agent coding với Claude Code, Codex và hơn thế. Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.',
     hero: {
       stillAlt: 'Bảng Coppice với các ticket của repository acme-web',
       videoAlt:

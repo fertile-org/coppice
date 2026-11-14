@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Hire specialists. Keep the final say.</strong><br />
-  Coding agents, each with a role, plan, build, and review on one board. Nothing is done until you accept the diff.<br />
+  A desktop app for multi-agent coding. Agents plan, build, and review on one board. Nothing is done until you accept the diff.<br />
   It runs on your machine, it is open source, and it uses the agent CLIs you already pay for.
 </p>
 
