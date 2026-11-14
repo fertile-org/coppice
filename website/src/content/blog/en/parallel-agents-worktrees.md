@@ -8,6 +8,7 @@ updated: "2026-11-09"
 author: Coppice
 authorType: Organization
 draft: false
+pinned: 2
 keywords:
   - git worktree
   - parallel agents

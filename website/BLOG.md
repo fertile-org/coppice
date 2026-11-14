@@ -37,6 +37,7 @@ author: The byline you want on the page
 authorType: Person
 image: /blog/short-heading/board.webp
 draft: false
+pinned: 1
 keywords:
   - worktree
 ---
@@ -54,7 +55,10 @@ keywords:
 | `authorType` | no | `Person` (the default in the JSON-LD) or `Organization`. |
 | `image` | no | A site path starting with `/`, or an `https` URL. Used in `BlogPosting` JSON-LD. The social card stays the site card. |
 | `draft` | no | `true` keeps the file out of the index, the route, `hreflang`, and the sitemap. A draft English article has no public URL, and a draft translation is not listed as an alternate. |
+| `pinned` | no | Keeps the note at the top of the index, marked Pinned. `1` comes first, then `2`, and so on. Each number is used once. Set it on the English file only; translations follow it. |
 | `keywords` | no | Up to 8 strings. Omitted from the page when absent. |
+
+The index lists pinned notes first, then the rest by `published`, newest first. Each entry shows its `published` date, so the order matches the dates. An `updated` date does not move a note up the list.
 
 Unknown keys fail the build. A translation file with no English article at the same slug also fails the build.
 

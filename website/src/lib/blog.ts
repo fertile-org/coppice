@@ -16,6 +16,7 @@ const KEYS = new Set([
   'authorType',
   'image',
   'draft',
+  'pinned',
   'keywords',
 ]);
 
@@ -44,6 +45,8 @@ export type BlogPost = {
   authorType: BlogAuthorType;
   image?: string;
   draft: boolean;
+  /** Position at the top of the index, 1 first. Set on the English file; translations inherit it. */
+  pinned?: number;
   keywords: string[];
 };
 
@@ -217,6 +220,17 @@ export function validateBlogSource(file: string, data: unknown): { post?: BlogPo
     else draft = record.draft;
   }
 
+  let pinned: number | undefined;
+  if (record.pinned !== undefined) {
+    if (!Number.isInteger(record.pinned) || (record.pinned as number) < 1) {
+      errors.push('pinned must be a whole number, 1 or higher');
+    } else if (identity.locale !== 'en') {
+      errors.push('pinned goes on the English file only; translations follow it');
+    } else {
+      pinned = record.pinned as number;
+    }
+  }
+
   const keywords: string[] = [];
   if (record.keywords !== undefined) {
     if (!Array.isArray(record.keywords) || record.keywords.some((item) => typeof item !== 'string' || !item.trim())) {
@@ -248,6 +262,7 @@ export function validateBlogSource(file: string, data: unknown): { post?: BlogPo
       authorType,
       ...(image ? { image } : {}),
       draft,
+      ...(pinned ? { pinned } : {}),
       keywords,
     },
   };
@@ -266,11 +281,19 @@ export function collectBlogPosts(sources: readonly BlogSource[]): { posts: BlogP
     seen.add(key);
     posts.push(result.post);
   }
-  const english = new Set(posts.filter((post) => post.locale === 'en').map((post) => post.slug));
+  const english = new Map(posts.filter((post) => post.locale === 'en').map((post) => [post.slug, post]));
+  const pins = new Map<number, string>();
+  for (const post of english.values()) {
+    if (post.pinned === undefined) continue;
+    const other = pins.get(post.pinned);
+    if (other) errors.push(`${post.file}: pinned ${post.pinned} is also used by ${other}`);
+    pins.set(post.pinned, post.file);
+  }
   for (const post of posts) {
-    if (post.locale !== 'en' && !english.has(post.slug)) {
-      errors.push(`${post.file}: translation has no English article at the same slug`);
-    }
+    if (post.locale === 'en') continue;
+    const source = english.get(post.slug);
+    if (!source) errors.push(`${post.file}: translation has no English article at the same slug`);
+    else if (source.pinned !== undefined) post.pinned = source.pinned;
   }
   return { posts, errors };
 }
@@ -281,7 +304,11 @@ export function loadBlogPosts(sources: readonly BlogSource[]): BlogPost[] {
   return posts;
 }
 
+/** Pinned notes first, by their `pinned` number. Then newest `published` first, then slug. */
 export function comparePosts(a: BlogPost, b: BlogPost): number {
+  const pinA = a.pinned ?? Infinity;
+  const pinB = b.pinned ?? Infinity;
+  if (pinA !== pinB) return pinA < pinB ? -1 : 1;
   if (a.published !== b.published) return a.published < b.published ? 1 : -1;
   return a.slug.localeCompare(b.slug);
 }

@@ -29,7 +29,10 @@ const posts = publicPosts(
           {posts.map((post) => (
             <li>
               <a class="blog-list-title" href={hrefFor(ctx.locale, post.englishPath)}>{post.title}</a>
-              <time class="blog-list-date" datetime={post.updated ?? post.published}>{formatBlogDate(post.updated ?? post.published, ctx.code)}</time>
+              <p class="blog-list-meta">
+                {post.pinned !== undefined && <span class="blog-list-pin">{ctx.ui.blog.pinned}</span>}
+                <time datetime={post.published}>{formatBlogDate(post.published, ctx.code)}</time>
+              </p>
               <p>{post.description}</p>
             </li>
           ))}

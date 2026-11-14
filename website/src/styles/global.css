@@ -939,11 +939,23 @@ a:hover {
   text-decoration: none;
 }
 
-.blog-list-date {
-  display: block;
+.blog-list .blog-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
   margin-top: 0.35rem;
   color: var(--color-bark-600);
   font-size: 0.95rem;
+}
+
+.blog-list-pin {
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  background: var(--color-moss-100);
+  color: var(--color-moss-700);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .blog-list p {

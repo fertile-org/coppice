@@ -124,6 +124,42 @@ describe('blog frontmatter', () => {
     assert.deepEqual(englishArticlePaths(posts), ['/blog/worktrees']);
   });
 
+  it('lists pinned notes first by number, then the rest newest first', () => {
+    const { posts, errors } = collectBlogPosts([
+      post('en', 'old', { published: '2026-01-01' }),
+      post('en', 'new', { published: '2026-05-01', updated: '2026-05-02' }),
+      post('en', 'mid', { published: '2026-03-01', updated: '2026-06-01' }),
+      post('en', 'pin-two', { published: '2026-06-01', pinned: 2 }),
+      post('en', 'pin-one', { published: '2026-02-01', pinned: 1 }),
+      post('ja', 'pin-two'),
+      post('ja', 'new'),
+    ]);
+    assert.equal(errors.length, 0);
+    assert.deepEqual(
+      publicPosts(posts, 'en').map((item) => item.slug),
+      ['pin-one', 'pin-two', 'new', 'mid', 'old'],
+    );
+    assert.deepEqual(
+      publicPosts(posts, 'ja').map((item) => item.slug),
+      ['pin-two', 'new'],
+    );
+  });
+
+  it('rejects a bad, repeated, or translated pinned value', () => {
+    const { errors } = collectBlogPosts([
+      post('en', 'a', { pinned: 1 }),
+      post('en', 'b', { pinned: 1 }),
+      post('en', 'c', { pinned: 0 }),
+      post('en', 'd', { pinned: 'top' }),
+      post('ja', 'a', { pinned: 2 }),
+    ]);
+    const text = errors.join('\n');
+    assert.match(text, /en\/b\.md: pinned 1 is also used by src\/content\/blog\/en\/a\.md/);
+    assert.match(text, /en\/c\.md: pinned must be a whole number/);
+    assert.match(text, /en\/d\.md: pinned must be a whole number/);
+    assert.match(text, /ja\/a\.md: pinned goes on the English file only/);
+  });
+
   it('uses the author date for an article and does not invent a locale lastmod', () => {
     const { posts } = collectBlogPosts([
       post('en', 'worktrees', { updated: '2026-03-09' }),

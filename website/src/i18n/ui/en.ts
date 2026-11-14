@@ -64,6 +64,7 @@ export const ui = {
     empty: BLOG_INDEX.empty,
     published: 'Published',
     updated: 'Updated',
+    pinned: 'Pinned',
     name: 'Coppice blog',
   },
 };

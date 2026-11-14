@@ -58,6 +58,7 @@ export const ui: Ui = {
     empty: 'Chưa có bài nào được đăng.',
     published: 'Đăng ngày',
     updated: 'Cập nhật',
+    pinned: 'Đã ghim',
     name: 'Blog Coppice',
   },
 };

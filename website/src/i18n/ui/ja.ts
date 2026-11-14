@@ -58,6 +58,7 @@ export const ui: Ui = {
     empty: '公開された記事はまだありません。',
     published: '公開',
     updated: '更新',
+    pinned: '固定',
     name: 'Coppice ブログ',
   },
 };

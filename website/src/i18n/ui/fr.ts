@@ -58,6 +58,7 @@ export const ui: Ui = {
     empty: 'Aucun article n’est publié pour le moment.',
     published: 'Publié le',
     updated: 'Mis à jour le',
+    pinned: 'Épinglé',
     name: 'Blog Coppice',
   },
 };

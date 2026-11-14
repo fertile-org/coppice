@@ -7,6 +7,7 @@ published: "2026-11-09"
 author: Coppice
 authorType: Organization
 draft: false
+pinned: 1
 keywords:
   - AI coding agents
   - planning

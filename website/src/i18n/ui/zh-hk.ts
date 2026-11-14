@@ -58,6 +58,7 @@ export const ui: Ui = {
     empty: '還沒有發佈的文章。',
     published: '發佈於',
     updated: '更新於',
+    pinned: '置頂',
     name: 'Coppice 網誌',
   },
 };

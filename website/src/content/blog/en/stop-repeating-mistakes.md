@@ -5,6 +5,7 @@ description: "Put the correction in a rules file, a failing check, the task, or 
 answer: "Write the correction where the next session will see it. A rules file such as CLAUDE.md, AGENTS.md, or a Cursor rule is loaded into later sessions. A test or lint check fails when the mistake returns. You can also put it in the task, or in a skill the agent loads when the task fits. In Coppice, save it as a Knowledge note and approve it. On a later ticket whose words match, the agent is told to read that note."
 published: "2026-11-11"
 draft: false
+pinned: 3
 author: Coppice
 authorType: Organization
 keywords:
