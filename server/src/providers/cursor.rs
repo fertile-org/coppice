@@ -29,6 +29,18 @@ impl CursorProvider {
     }
 }
 
+/// When Cursor `--mode plan` ends on `createPlanToolCall` without `result_submit`.
+pub const PLAN_FINISH_NOTE: &str = "**Cursor:** Do not stop after `createPlan` or other native plan-mode tools. After the plan is written, call Coppice `result_submit`.";
+
+/// Extra planning line for Cursor. Every other connector id gets `None`.
+pub fn plan_finish_note(connector_id: &str) -> Option<&'static str> {
+    if connector_id == coppice_connectors::CURSOR {
+        Some(PLAN_FINISH_NOTE)
+    } else {
+        None
+    }
+}
+
 #[async_trait]
 impl AgentProvider for CursorProvider {
     fn id(&self) -> &str {
