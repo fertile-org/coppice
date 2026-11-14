@@ -5,12 +5,12 @@ export const locale = 'zh-cn';
 /** 简体中文 homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice：本地开源的 AI 编程智能体看板',
+    title: 'Coppice：多智能体编程的桌面应用',
     description:
-      'Coppice 是本地运行的开源 AI 编程智能体看板。Claude Code、Codex、Cursor 等智能体并行规划、构建和审核，每个 diff 都由你接受。',
+      'Coppice 是用于多智能体编程的桌面应用。你写工单、批准计划，并接受 diff。Claude Code、Codex 等智能体在你的电脑上运行。',
     worksWith: '支持',
     h1: '雇用专家，你来拍板。',
-    lede: '你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
+    lede: '这是用于多智能体编程的桌面应用，支持 Claude Code、Codex 等。你的 PM 智能体起草计划，由你批准。专业智能体并行构建。你接受 diff 之前，什么都不算完成。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 仓库的工单',
       videoAlt:

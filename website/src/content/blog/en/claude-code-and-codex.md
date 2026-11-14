@@ -19,7 +19,7 @@ keywords:
 
 Claude Code and Codex are both coding agents that run in your terminal. You might want one to plan and the other to write the code, or you might want a second model to review what the first one changed. The hard part is not running them. It is keeping their changes apart so you can tell who changed what.
 
-There are three common ways to set this up.
+There are three common ways to set this up. Two tools on one project is a small case of [multi-agent coding](/blog/multi-agent-coding).
 
 ## Option 1: Two terminals, one checkout
 

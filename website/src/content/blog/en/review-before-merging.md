@@ -16,7 +16,7 @@ keywords:
 
 ## Why it's hard
 
-Agents write code faster than you can read it. A small request can come back as a large diff, with changes you didn't ask for, and a summary that says everything works. Reading every line takes too long. Skimming lets mistakes through.
+Agents write code faster than you can read it. A small request can come back as a large diff, with changes you didn't ask for, and a summary that says everything works. Reading every line takes too long. Skimming lets mistakes through. The same gap grows when [several agents](/blog/multi-agent-coding) can change the code.
 
 The hard part is knowing what the agent was supposed to do. Without that, you can't tell whether a change belongs in the diff or is scope nobody asked for.
 

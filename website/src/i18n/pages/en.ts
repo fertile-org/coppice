@@ -3,12 +3,12 @@ export const locale = 'en';
 /** English homepage and download copy. A locale file in this folder overrides any keys it sets. */
 export const pages = {
   home: {
-    title: 'Coppice: AI Coding Agent Board, Local and Open Source',
+    title: 'Coppice: desktop app for multi-agent coding',
     description:
-      'Coppice is a local board for coding agents. You write tickets, approve the plan, and accept the diff. Agents run CLIs such as Claude Code and Codex.',
+      'Coppice is a desktop app for multi-agent coding. You write tickets, approve the plan, and accept the diff. Agents run CLIs such as Claude Code and Codex.',
     worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
-    lede: 'Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
+    lede: 'A desktop app for multi-agent coding with Claude Code, Codex, and more. Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. Nothing is done until you accept the diff.',
     hero: {
       stillAlt: 'Coppice board with tickets for the acme-web repository',
       videoAlt:

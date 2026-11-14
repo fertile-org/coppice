@@ -16,7 +16,7 @@ keywords:
 
 ## Why plan first
 
-When an agent goes straight to code, a misunderstanding shows up only in the diff. By then the agent has built the wrong thing, and you spend your time reading it, explaining what you meant, and waiting for another attempt. A plan shows the same misunderstanding in a few lines you can read in a minute.
+When an agent goes straight to code, a misunderstanding shows up only in the diff. By then the agent has built the wrong thing, and you spend your time reading it, explaining what you meant, and waiting for another attempt. A plan shows the same misunderstanding in a few lines you can read in a minute. That check matters more once several agents share the work, which is the subject of [multi-agent coding](/blog/multi-agent-coding).
 
 Getting a plan is easy: any agent writes one if you ask. Making it useful is the hard part. The request is vague, the agent guesses instead of asking, the plan lists steps without the decisions behind them, and once coding starts, nobody checks the code against it.
 

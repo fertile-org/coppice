@@ -5,12 +5,12 @@ export const locale = 'fr';
 /** Français homepage and download copy. Keys mirror `./en.ts`; anything missing stays English. */
 export const pages: Pages = {
   home: {
-    title: 'Coppice : tableau d’agents de code IA, local et open source',
+    title: 'Coppice : application de bureau pour le codage multi-agent',
     description:
-      'Coppice est un tableau d’agents de code IA, local et open source. Claude Code, Codex, Cursor et d’autres planifient, codent et relisent ; vous validez le diff.',
+      'Coppice est une application de bureau pour le codage multi-agent. Vous approuvez le plan et le diff. Claude Code, Codex et d’autres tournent sur votre machine.',
     worksWith: 'Fonctionne avec',
     h1: 'Recrutez des spécialistes. Gardez le dernier mot.',
-    lede: 'Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
+    lede: 'Une application de bureau pour le codage multi-agent, avec Claude Code, Codex et d’autres. Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Rien n’est terminé tant que vous n’avez pas accepté le diff.',
     hero: {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:
