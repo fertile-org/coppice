@@ -27,12 +27,6 @@ Coppice does not install these CLIs. Install the command from the vendor guide i
 
 We will update this list as we test more CLI versions.
 
-### Not supported yet
-
-Coppice doesn't support **Antigravity** (`agy`), Google's CLI for Gemini models. Each run gets its own MCP connection to Coppice, which the agent uses to read the ticket and report its result. Antigravity reads MCP servers only from its own config files, in your home folder or in the project. Coppice doesn't change either one, so it can't give an Antigravity run that connection. We'll add Antigravity if it gets a way to set MCP for a single run.
-
-To use Gemini models with your own API key, use OpenCode. See [Use your own API key or another provider](#use-your-own-api-key-or-another-provider).
-
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="The model picker on an agent, listing the models from the agent's CLI.">
 <figcaption>Pick a model, or leave it on the default.</figcaption>
@@ -40,9 +34,19 @@ To use Gemini models with your own API key, use OpenCode. See [Use your own API 
 
 Pick a model for this agent, or leave it on the default. If you installed a new model, click **Refresh models**.
 
+---
+
+## Not supported yet
+
+| Connector | Command | Why |
+| --- | --- | --- |
+| Antigravity | `agy` | Coppice can't give it an MCP connection for a single run. |
+
+To use Gemini models with your own API key, use OpenCode. See [Use your own API key or another provider](#use-your-own-api-key-or-another-provider).
+
 ## Connect your agent CLI
 
-1. Install the CLI from the guide in the table above. Coppice does not install it for you.
+1. Install the CLI from its guide in [Supported connectors](#supported-connectors). Coppice does not install it for you.
 2. Sign in to that CLI in your terminal, the same way you normally would. Do this before a ticket runs. Coppice never asks for or stores the provider API key.
 3. Pick your agent CLI when you create an agent, and Coppice turns it on.
 

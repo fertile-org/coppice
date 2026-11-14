@@ -26,20 +26,24 @@ Coppice は、あなたがすでに使っているコーディングエージェ
 
 互換性の情報は、ほかの CLI バージョンをテストするにつれて随時更新します。
 
-<a id="not-supported-yet"></a>
-
-### まだ対応していない CLI
-
-Coppice は、Google の Gemini モデル用 CLI である **Antigravity**（`agy`）に対応していません。Coppice は実行ごとに専用の MCP 接続を用意し、エージェントはそれを使ってチケットを読み、結果を報告します。Antigravity は、MCP サーバーを自身の設定ファイルからしか読み込みません。設定ファイルは、ホームフォルダーかプロジェクトの中にあります。Coppice はどちらも変更しないため、Antigravity の実行にはこの接続を渡せません。Antigravity で 1 回の実行だけに MCP を設定できるようになれば、対応を追加します。
-
-自分の API キーで Gemini モデルを使うには、OpenCode を使ってください。詳しくは[自分の API キーや別のプロバイダーを使う](#use-your-own-api-key-or-another-provider)を参照してください。
-
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="エージェントのモデル選択。エージェントの CLI が提供するモデルが並んでいる。">
 <figcaption>モデルを選ぶか、既定のままにします。</figcaption>
 </figure>
 
 このエージェントのモデルを選ぶか、既定のままにします。新しいモデルを入れたら、**Refresh models** をクリックしてください。
+
+---
+
+<a id="not-supported-yet"></a>
+
+## まだ対応していないコネクタ
+
+| コネクタ | コマンド | 理由 |
+| --- | --- | --- |
+| Antigravity | `agy` | 1 回の実行だけに Coppice の MCP 接続を設定できません。 |
+
+自分の API キーで Gemini モデルを使うには、OpenCode を使ってください。詳しくは[自分の API キーや別のプロバイダーを使う](#use-your-own-api-key-or-another-provider)を参照してください。
 
 <a id="connect-your-agent-cli"></a>
 

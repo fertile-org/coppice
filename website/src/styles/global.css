@@ -490,6 +490,12 @@ a:hover {
   margin-top: 2.5rem;
 }
 
+.prose hr {
+  margin: 3rem 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-bark-200);
+}
+
 .block p,
 .prose p,
 .prose li {

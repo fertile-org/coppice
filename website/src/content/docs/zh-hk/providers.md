@@ -26,20 +26,24 @@ Coppice 執行你已經在用的程式設計代理 CLI，並把工作放在同�
 
 相容性資訊會隨著我們測試更多 CLI 版本而持續更新。
 
-<a id="not-supported-yet"></a>
-
-### 暫未支援
-
-Coppice 暫未支援 **Antigravity**（`agy`），即 Google 用於 Gemini 模型的 CLI。每次執行都會取得一條連到 Coppice 的專屬 MCP 連線，代理透過它讀取工單並回報結果。Antigravity 只會從自己的設定檔案讀取 MCP 伺服器，這些檔案位於你的主目錄或專案內。Coppice 不會修改其中任何一處，所以無法為 Antigravity 的執行提供這條連線。如果 Antigravity 日後提供為單次執行設定 MCP 的方法，我們會加入支援。
-
-如要用自己的 API 金鑰使用 Gemini 模型，請使用 OpenCode。參閱[使用自己的 API 金鑰或其他供應商](#use-your-own-api-key-or-another-provider)。
-
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="代理上的模型選擇器，列出該代理 CLI 提供的模型。">
 <figcaption>選擇一個模型，或保留預設值。</figcaption>
 </figure>
 
 為這個代理選擇一個模型，或保留預設值。裝了新模型？按 Refresh models（重新整理模型）。
+
+---
+
+<a id="not-supported-yet"></a>
+
+## 暫未支援
+
+| 連接器 | 命令 | 原因 |
+| --- | --- | --- |
+| Antigravity | `agy` | 無法只為單次執行設定 Coppice 的 MCP 連線。 |
+
+如要用自己的 API 金鑰使用 Gemini 模型，請使用 OpenCode。參閱[使用自己的 API 金鑰或其他供應商](#use-your-own-api-key-or-another-provider)。
 
 <a id="connect-your-agent-cli"></a>
 

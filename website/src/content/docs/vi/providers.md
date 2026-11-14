@@ -26,20 +26,24 @@ Coppice chạy các coding agent CLI bạn đang dùng và gom việc của chú
 
 Thông tin tương thích sẽ được cập nhật dần khi chúng tôi thử thêm các phiên bản CLI khác.
 
-<a id="not-supported-yet"></a>
-
-### Chưa hỗ trợ
-
-Coppice chưa hỗ trợ **Antigravity** (`agy`), CLI của Google cho các model Gemini. Mỗi lần chạy, Coppice cấp cho agent một kết nối MCP riêng để agent đọc ticket và báo kết quả. Antigravity chỉ đọc MCP server từ các file cấu hình của chính nó, nằm trong thư mục home của bạn hoặc trong project. Coppice không sửa hai chỗ này, nên không thể cấp kết nối đó cho một lần chạy Antigravity. Chúng tôi sẽ hỗ trợ Antigravity khi CLI này có cách cấu hình MCP cho từng lần chạy.
-
-Muốn dùng model Gemini với API key của riêng bạn, hãy dùng OpenCode. Xem [Dùng API key riêng hoặc nhà cung cấp khác](#use-your-own-api-key-or-another-provider).
-
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="Ô chọn model của một agent, liệt kê các model lấy từ CLI của agent đó.">
 <figcaption>Chọn một model, hoặc để mặc định.</figcaption>
 </figure>
 
 Chọn model cho agent này, hoặc để mặc định. Mới cài thêm model? Bấm Refresh models.
+
+---
+
+<a id="not-supported-yet"></a>
+
+## Chưa hỗ trợ
+
+| Connector | Lệnh | Lý do |
+| --- | --- | --- |
+| Antigravity | `agy` | Không cấu hình được kết nối MCP của Coppice cho từng lần chạy. |
+
+Muốn dùng model Gemini với API key của riêng bạn, hãy dùng OpenCode. Xem [Dùng API key riêng hoặc nhà cung cấp khác](#use-your-own-api-key-or-another-provider).
 
 <a id="connect-your-agent-cli"></a>
 

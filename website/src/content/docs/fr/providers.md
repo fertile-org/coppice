@@ -26,20 +26,24 @@ Coppice pilote les CLI d’agents de code que vous utilisez déjà et réunit le
 
 Les informations de compatibilité seront mises à jour au fil du temps, à mesure que nous testons d’autres versions des CLI.
 
-<a id="not-supported-yet"></a>
-
-### Pas encore pris en charge
-
-Coppice ne prend pas en charge **Antigravity** (`agy`), la CLI de Google pour les modèles Gemini. Chaque exécution reçoit sa propre connexion MCP à Coppice. L’agent s’en sert pour lire le ticket et rendre son résultat. Antigravity ne lit les serveurs MCP que dans ses propres fichiers de configuration, dans votre dossier personnel ou dans le projet. Coppice ne modifie ni l’un ni l’autre, et ne peut donc pas donner cette connexion à une exécution Antigravity. Nous ajouterons Antigravity si cette CLI permet un jour de définir les serveurs MCP pour une seule exécution.
-
-Pour utiliser les modèles Gemini avec votre propre clé d’API, utilisez OpenCode. Voir [Utiliser votre propre clé d’API ou un autre fournisseur](#use-your-own-api-key-or-another-provider).
-
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="Le sélecteur de modèle d’un agent, avec les modèles de la CLI de l’agent.">
 <figcaption>Choisissez un modèle, ou laissez celui par défaut.</figcaption>
 </figure>
 
 Choisissez un modèle pour cet agent, ou laissez celui par défaut. Après avoir installé un nouveau modèle, cliquez sur **Refresh models**.
+
+---
+
+<a id="not-supported-yet"></a>
+
+## Pas encore pris en charge
+
+| Connecteur | Commande | Raison |
+| --- | --- | --- |
+| Antigravity | `agy` | Impossible de lui donner une connexion MCP à Coppice pour une seule exécution. |
+
+Pour utiliser les modèles Gemini avec votre propre clé d’API, utilisez OpenCode. Voir [Utiliser votre propre clé d’API ou un autre fournisseur](#use-your-own-api-key-or-another-provider).
 
 <a id="connect-your-agent-cli"></a>
 
