@@ -1585,10 +1585,7 @@ fn should_finalize_worktree_git(
     agent: &crate::domain::agent::Agent,
     ticket_status: TicketStatus,
 ) -> bool {
-    if is_qc_agent(agent) && ticket_status == TicketStatus::InQa {
-        return false;
-    }
-    true
+    !(is_qc_agent(agent) && ticket_status == TicketStatus::InQa)
 }
 
 /// Implementation done-results carry the reviewer brief. Review, QC verification,
