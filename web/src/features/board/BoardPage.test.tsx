@@ -629,6 +629,13 @@ describe('BoardPage split swimlanes', () => {
     ).toBeNull();
   });
 
+  it('keeps the board scroller positioned so swimlane sr-only labels stay inside it', () => {
+    renderBoard();
+
+    expect(screen.getByTestId('swimlane-row')).toBeVisible();
+    expect(document.getElementById('board')).toHaveClass('relative');
+  });
+
   it('collapses and expands the lane without moving an ordinary ticket', () => {
     renderBoard();
 
