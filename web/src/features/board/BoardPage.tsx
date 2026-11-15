@@ -534,7 +534,7 @@ export function BoardPage() {
           <div className="sr-only" aria-live="polite" aria-atomic="true">
             {moveAnnouncement}
           </div>
-          <div id="board" className="-mx-8 overflow-x-auto px-8 pb-4">
+          <div id="board" className="relative -mx-8 overflow-x-auto px-8 pb-4">
             <div className="flex min-w-max flex-col gap-3">
               {lanes.map((lane) => (
                 <SplitLaneRow
