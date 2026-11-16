@@ -13,7 +13,7 @@ Coppice does not install these CLIs. Install the command from the vendor guide i
 
 ## Supported connectors
 
-| Connector | Command Coppice looks for | Install | Tested versions |
+| Connector | Command Coppice looks for | Install | Minimum version |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [Install guide](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [Install guide](https://developers.openai.com/codex/cli) | 0.163.0 |
