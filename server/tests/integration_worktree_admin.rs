@@ -296,6 +296,71 @@ async fn active_run_blocks_one_item_while_others_succeed() {
 }
 
 #[tokio::test]
+async fn list_survives_a_queued_chat_run_with_null_ticket_id() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (_git, _env, state, app, cookie, csrf, _ticket_id, _repo, _worktree) = setup().await;
+    let pool = state.db.clone().unwrap();
+
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Chat Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let owner_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let session_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO chat_sessions (id, owner_user_id, agent_id, status)
+        VALUES ($1, $2, $3, 'active')
+        "#,
+    )
+    .bind(session_id)
+    .bind(owner_id)
+    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, chat_session_id, agent_id, job_type, status, sandbox_profile_id
+        )
+        VALUES ($1, NULL, $2, $3, 'chat_turn', 'queued', 'permissive')
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(session_id)
+    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/worktrees",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert!(body["worktrees"].as_array().unwrap().len() >= 1);
+}
+
+#[tokio::test]
 async fn rejects_path_traversal_in_remove_body() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

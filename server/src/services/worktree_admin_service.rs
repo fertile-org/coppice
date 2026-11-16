@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 const SIZE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const DIRTY_CHECK_CONCURRENCY: usize = 8;
+const SIZE_WALK_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone)]
 struct CachedSize {
@@ -29,6 +30,7 @@ struct CachedSize {
 pub struct WorktreeSizeCache {
     entries: RwLock<HashMap<String, CachedSize>>,
     in_flight: Mutex<HashSet<String>>,
+    walk_slots: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl Default for WorktreeSizeCache {
@@ -42,16 +44,21 @@ impl WorktreeSizeCache {
         Self {
             entries: RwLock::new(HashMap::new()),
             in_flight: Mutex::new(HashSet::new()),
+            walk_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(SIZE_WALK_CONCURRENCY)),
         }
     }
 
-    fn get_fresh(&self, folder: &str) -> Option<u64> {
+    /// Cached bytes if any, and whether a background remeasure should start.
+    /// Stale entries still return their last value so the SPA does not flash "…".
+    fn get_for_list(&self, folder: &str) -> (Option<u64>, bool) {
         let guard = self.entries.read().unwrap_or_else(|e| e.into_inner());
-        let cached = guard.get(folder)?;
-        if cached.measured_at.elapsed() > SIZE_CACHE_TTL {
-            return None;
+        match guard.get(folder) {
+            Some(cached) if cached.measured_at.elapsed() > SIZE_CACHE_TTL => {
+                (Some(cached.bytes), true)
+            }
+            Some(cached) => (Some(cached.bytes), false),
+            None => (None, true),
         }
-        Some(cached.bytes)
     }
 
     fn store(&self, folder: String, bytes: u64) {
@@ -78,7 +85,7 @@ impl WorktreeSizeCache {
             .remove(folder);
     }
 
-    /// Start a single-flight measurement when the cache misses. Safe to call often.
+    /// Start a single-flight measurement when the cache misses or is stale.
     pub fn ensure_measuring(self: &std::sync::Arc<Self>, root: PathBuf, folder: String) {
         {
             let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
@@ -87,14 +94,20 @@ impl WorktreeSizeCache {
             }
         }
         let cache = std::sync::Arc::clone(self);
+        let slots = std::sync::Arc::clone(&self.walk_slots);
         tokio::spawn(async move {
+            let Ok(_permit) = slots.acquire().await else {
+                cache
+                    .in_flight
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&folder);
+                return;
+            };
             let path = root.join(&folder);
             let measured = tokio::task::spawn_blocking(move || dir_size_bytes(&path)).await;
             match measured {
-                Ok(Ok(bytes)) => cache.store(folder.clone(), bytes),
-                Ok(Err(err)) => {
-                    tracing::warn!(folder = %folder, error = %err, "worktree size walk failed");
-                }
+                Ok(bytes) => cache.store(folder.clone(), bytes),
                 Err(err) => {
                     tracing::warn!(folder = %folder, error = %err, "worktree size task failed");
                 }
@@ -108,15 +121,20 @@ impl WorktreeSizeCache {
     }
 }
 
-fn dir_size_bytes(path: &Path) -> std::io::Result<u64> {
+/// Sum file sizes under `path`. Skip entries that error (unreadable dirs, races).
+fn dir_size_bytes(path: &Path) -> u64 {
     let mut total = 0u64;
     for entry in walkdir::WalkDir::new(path).follow_links(false) {
-        let entry = entry?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         if entry.file_type().is_file() {
-            total = total.saturating_add(entry.metadata()?.len());
+            if let Ok(meta) = entry.metadata() {
+                total = total.saturating_add(meta.len());
+            }
         }
     }
-    Ok(total)
+    total
 }
 
 /// `TICKET-<8 hex>-<slug>` — skips `chat/`, `plan-scratch/`, `knowledge-compaction/`.
@@ -245,8 +263,8 @@ impl<'a> WorktreeAdminService<'a> {
                 .map(|t| t.format(&Rfc3339).unwrap_or_else(|_| t.to_string()))
                 .unwrap_or_else(|| folder_mtime_rfc3339(&path));
 
-            let size_bytes = self.state.worktree_sizes.get_fresh(folder);
-            if size_bytes.is_none() {
+            let (size_bytes, refresh) = self.state.worktree_sizes.get_for_list(folder);
+            if refresh {
                 self.state
                     .worktree_sizes
                     .ensure_measuring(root.clone(), folder.clone());
@@ -310,11 +328,7 @@ impl<'a> WorktreeAdminService<'a> {
         user_id: Uuid,
         path_to_ticket: &HashMap<PathBuf, &TicketMatch>,
     ) -> RemoveResult {
-        if !is_ticket_worktree_folder(folder_name)
-            || folder_name.contains('/')
-            || folder_name.contains('\\')
-            || folder_name.contains("..")
-        {
+        if !is_ticket_worktree_folder(folder_name) {
             return RemoveResult {
                 folder_name: folder_name.to_string(),
                 status: RemoveStatus::Error,
@@ -524,8 +538,11 @@ impl<'a> WorktreeAdminService<'a> {
         let mut ticket_ids = HashSet::new();
         let mut paths = HashSet::new();
         for row in rows {
-            let ticket_id: Uuid = row.get("ticket_id");
-            ticket_ids.insert(ticket_id);
+            // Chat runs have ticket_id NULL (migration 020); Row::get panics on NULL.
+            let ticket_id: Option<Uuid> = row.get("ticket_id");
+            if let Some(ticket_id) = ticket_id {
+                ticket_ids.insert(ticket_id);
+            }
             let worktree_path: Option<String> = row.get("worktree_path");
             if let Some(p) = worktree_path {
                 if !p.is_empty() {
@@ -756,5 +773,48 @@ mod tests {
         let mut archived = progress.clone();
         archived.archived = true;
         assert!(compute_finished(&archived));
+    }
+
+    #[test]
+    fn dir_size_skips_unreadable_subdirectory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("ok.txt"), b"hi").expect("write");
+        let secret = tmp.path().join("secret");
+        std::fs::create_dir(&secret).expect("mkdir");
+        std::fs::write(secret.join("hidden.bin"), b"xx").expect("hidden");
+
+        // Missing root: walk errors must not panic or fail the call.
+        assert_eq!(dir_size_bytes(Path::new("/no/such/worktree-admin-size")), 0);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000))
+                .expect("chmod");
+            let size = dir_size_bytes(tmp.path());
+            let still_blocked = std::fs::read_dir(&secret).is_err();
+            std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod restore");
+            if still_blocked {
+                assert_eq!(size, 2, "should count only the readable file");
+            } else {
+                // Root can still read mode 000 dirs; at least the walk completed.
+                assert!(size >= 2);
+            }
+        }
+    }
+
+    #[test]
+    fn size_cache_returns_stale_bytes_while_refreshing() {
+        let cache = WorktreeSizeCache::new();
+        cache.store("TICKET-aaaaaaaa-repo".into(), 42);
+        {
+            let mut guard = cache.entries.write().unwrap();
+            guard.get_mut("TICKET-aaaaaaaa-repo").unwrap().measured_at =
+                Instant::now() - SIZE_CACHE_TTL - Duration::from_secs(1);
+        }
+        let (bytes, refresh) = cache.get_for_list("TICKET-aaaaaaaa-repo");
+        assert_eq!(bytes, Some(42));
+        assert!(refresh);
     }
 }

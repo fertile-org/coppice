@@ -305,7 +305,7 @@ export function WorktreesTab() {
                     <td className="px-4 py-3">
                       <div className="font-body text-sm font-medium text-text-primary">
                         {row.ticketTitle ?? (
-                          <span className="text-text-muted">Ticket no longer exists</span>
+                          <span className="text-text-muted">No ticket</span>
                         )}
                       </div>
                       <div className="mt-0.5 font-mono text-xs text-text-muted">
@@ -358,8 +358,8 @@ export function WorktreesTab() {
       </div>
 
       <p className="font-body text-xs text-text-muted">
-        Largest first. Select finished ticks worktrees of Done, archived, or unmatched
-        folders that have no uncommitted changes.
+        Largest first. Select finished ticks worktrees of Done, merged, archived, or
+        unmatched folders that have no uncommitted changes.
       </p>
 
       {selectedCount > 0 && (
