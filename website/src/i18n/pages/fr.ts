@@ -48,7 +48,6 @@ export const pages: Pages = {
           'Revue de code d’un interrupteur de thème : le plan approuvé, le fichier modifié, et un commentaire sur une ligne du diff.',
       },
     ],
-    howClose: 'Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de compte Coppice.',
     whyTitle: 'Pourquoi Coppice',
     reasons: [
       {

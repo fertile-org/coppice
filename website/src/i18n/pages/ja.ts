@@ -46,7 +46,6 @@ export const pages: Pages = {
         imageAlt: 'テーマ切り替えのコードレビュー。承認済みの計画、変更されたファイル、diff の 1 行へのコメントです。',
       },
     ],
-    howClose: 'ダウンロードして、開いて、作業するだけです。準備は要りません。Docker も Coppice アカウントも不要です。',
     whyTitle: 'Coppice を選ぶ理由',
     reasons: [
       {

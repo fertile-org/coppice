@@ -45,7 +45,6 @@ export const pages: Pages = {
         imageAlt: '主題開關的程式碼審查：已批准的計劃、改動的檔案，以及 diff 某一行上的評論。',
       },
     ],
-    howClose: '下載、開啟、開始做。不用另外設定：沒有 Docker，也沒有 Coppice 帳號。',
     whyTitle: '為什麼選擇 Coppice',
     reasons: [
       {
