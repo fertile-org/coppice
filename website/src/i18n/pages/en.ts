@@ -123,7 +123,7 @@ export const homeEntry = {
   whatTitle: 'What Coppice is',
   whatBody:
     'Coppice is a desktop app for multi-agent coding. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
-  learnBefore: 'When you want the first ticket, start with ',
+  learnBefore: 'New here? Start with ',
   learnLabel: 'Getting started',
   learnAfter: '.',
 };
