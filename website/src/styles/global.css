@@ -342,23 +342,6 @@ a:hover {
   background: var(--color-moss-600);
 }
 
-.hero-captions {
-  margin: 0.85rem 0 0;
-  padding-left: 1.3rem;
-  max-width: 42rem;
-}
-
-.hero-captions li {
-  margin: 0.4rem 0 0;
-  color: var(--color-bark-900);
-  font-size: 0.98rem;
-}
-
-.hero-captions li::marker {
-  color: var(--color-bark-700);
-  font-weight: 650;
-}
-
 .hero-support {
   margin: 1.05rem 0 0;
   color: var(--color-bark-900);
@@ -502,49 +485,69 @@ a:hover {
   max-width: 42rem;
 }
 
-.plain-list,
-.steps {
+.plain-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.plain-list li,
-.steps li {
+.plain-list li {
   margin: 0;
   padding: 0.85rem 0;
   border-top: 1px solid var(--color-bark-200);
 }
 
-.plain-list li:last-child,
-.steps li:last-child {
+.plain-list li:last-child {
   border-bottom: 1px solid var(--color-bark-200);
 }
 
-.steps {
-  counter-reset: step;
-  margin-bottom: 1rem;
+.how-steps {
+  margin: 0.25rem 0 1.25rem;
+  padding: 0;
+  list-style: none;
 }
 
-.steps li {
+.how-step {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.9rem;
-  align-items: baseline;
-}
-
-.steps li::before {
-  counter-increment: step;
-  content: counter(step);
-  color: var(--color-moss-700);
-  font-family: var(--font-display);
-  font-size: 1.35rem;
-  font-weight: 560;
-}
-
-.steps li p {
+  gap: 0.85rem;
   margin: 0;
-  max-width: none;
+  padding: 1.6rem 0 0;
+}
+
+.how-step img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1440 / 900;
+  border: 1px solid var(--color-bark-200);
+  border-radius: 14px;
+  background: var(--color-paper-100);
+  box-shadow: var(--shadow-shot);
+}
+
+.how-step h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.block .how-step p {
+  margin: 0;
+  max-width: 36rem;
+}
+
+@media (min-width: 880px) {
+  .how-step {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 2rem;
+    align-items: center;
+    padding-top: 2.4rem;
+  }
+
+  .how-step:nth-child(even) .how-step-copy {
+    order: -1;
+  }
 }
 
 .feature-grid {

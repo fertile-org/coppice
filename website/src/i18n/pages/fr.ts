@@ -15,15 +15,6 @@ export const pages: Pages = {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:
         'Coppice : écrivez un ticket, comparez les options de design, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté.',
-      captions: [
-        'Écrivez un ticket.',
-        'Votre agent PM rédige un plan.',
-        'Il vous montre des options de design.',
-        'Vous l’approuvez.',
-        'Les agents construisent, relisent et testent.',
-        'Relisez le diff. Commentez n’importe quelle ligne.',
-        'Rien n’est terminé tant que vous ne l’avez pas accepté.',
-      ],
     },
     support: 'Open source (Apache 2.0). Tourne en local, sans compte Coppice.',
     downloads: {
@@ -34,16 +25,27 @@ export const pages: Pages = {
     howTitle: 'Comment ça marche',
     steps: [
       {
-        title: 'Confiez le travail.',
-        body: 'Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez le plan avant le début du codage, sauf si vous choisissez Skip planning.',
+        title: 'Planifier avec l’agent PM',
+        body: 'Votre agent PM lit le ticket et rédige un plan : l’approche, les étapes, et comment le changement sera vérifié. Vous approuvez ce plan avant que le code commence.',
+        imageAlt:
+          'Plan Review pour un interrupteur de mode sombre. L’agent PM est assigné, et le plan proposé liste l’approche et les étapes.',
       },
       {
-        title: 'Laissez les agents construire.',
-        body: 'Chaque ticket a son propre worktree git, donc les agents qui travaillent en parallèle ne touchent jamais à votre checkout principal. Suivez n’importe quel lancement en direct.',
+        title: 'Approuver le design',
+        body: 'Quand le ticket change ce que les gens voient, l’agent montre quelques mises en page et indique celle qu’il recommande. Vous en choisissez une, et le plan suit ce choix.',
+        imageAlt:
+          'Options de design pour le contrôle de thème des Settings, avec trois mises en page et un aperçu de l’option recommandée.',
       },
       {
-        title: 'Human Review.',
-        body: 'Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté.',
+        title: 'Laisser les agents construire',
+        body: 'Des agents spécialisés construisent, relisent et testent le ticket. Chaque ticket a son propre worktree git, donc le travail en parallèle reste hors de votre checkout principal. Vous pouvez suivre un lancement pendant qu’il avance.',
+        imageAlt: 'Le tableau, avec des tickets en cours, en revue, en QA, et un ticket qui attend une personne.',
+      },
+      {
+        title: 'Relire les changements de code',
+        body: 'Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté. Accepter et Merge restent deux choix distincts.',
+        imageAlt:
+          'Revue de code d’un interrupteur de thème : le plan approuvé, le fichier modifié, et un commentaire sur une ligne du diff.',
       },
     ],
     howClose: 'Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de compte Coppice.',

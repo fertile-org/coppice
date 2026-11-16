@@ -13,10 +13,9 @@ import { withBase } from '../lib/url';
 interface Props {
   stillAlt: string;
   videoAlt: string;
-  captions: readonly string[];
 }
 
-const { stillAlt, videoAlt, captions } = Astro.props;
+const { stillAlt, videoAlt } = Astro.props;
 const sizes = '(min-width: 1112px) 1080px, calc(100vw - 2rem)';
 const srcset = (list: string) =>
   list
@@ -64,24 +63,6 @@ const srcset = (list: string) =>
       <span class="hero-progress-fill"></span>
     </div>
   </div>
-  <figcaption>
-    <ol class="hero-captions">
-      {
-        captions.map((caption) => {
-          const splitAt = caption.indexOf(': ');
-          if (splitAt === -1) return <li>{caption}</li>;
-          const label = caption.slice(0, splitAt + 1);
-          const rest = caption.slice(splitAt + 1);
-          return (
-            <li>
-              <strong>{label}</strong>
-              {rest}
-            </li>
-          );
-        })
-      }
-    </ol>
-  </figcaption>
 </figure>
 <script is:inline>
   const video = document.querySelector('.hero-video');
