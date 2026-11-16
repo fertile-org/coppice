@@ -5,16 +5,22 @@ import { MemoryRouter } from 'react-router-dom';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import type { Repo } from '../../lib/schemas/repo';
 import { RepositoriesPage } from './RepositoriesPage';
+import type { DefaultBranchSyncStatus } from './useRepos';
 
 const mocks = vi.hoisted(() => ({
   role: 'admin' as 'admin' | 'member',
   repos: [] as Repo[],
+  syncStatus: undefined as DefaultBranchSyncStatus | undefined,
+  syncEnabledCalls: [] as Array<{ repoId: string; enabled: boolean }>,
   create: vi.fn(),
   update: vi.fn(),
   remove: vi.fn(),
   verify: vi.fn(),
   setToken: vi.fn(),
   clearToken: vi.fn(),
+  fetch: vi.fn(),
+  pull: vi.fn(),
+  push: vi.fn(),
 }));
 
 const sampleRepo: Repo = {
@@ -32,6 +38,28 @@ const sampleRepo: Repo = {
   createdAt: '2026-09-04T00:00:00Z',
   updatedAt: '2026-09-04T00:00:00Z',
 };
+
+function baseSyncStatus(
+  overrides: Partial<DefaultBranchSyncStatus> = {},
+): DefaultBranchSyncStatus {
+  return {
+    defaultBranch: 'main',
+    localSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    remoteSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    aheadCount: 0,
+    behindCount: 2,
+    workingTreeClean: true,
+    pushEnabled: true,
+    forgeTokenConfigured: true,
+    canFetch: true,
+    canPush: false,
+    canPull: true,
+    fetchDisabledReason: null,
+    pushDisabledReason: 'Local default branch is not ahead of remote',
+    pullDisabledReason: null,
+    ...overrides,
+  };
+}
 
 function mutation(mutateAsync: ReturnType<typeof vi.fn>) {
   return { mutateAsync, isPending: false };
@@ -57,10 +85,13 @@ vi.mock('./useRepos', () => ({
   useVerifyRepo: () => mutation(mocks.verify),
   useInspectRepoPath: () => mutation(vi.fn()),
   useSetForgeToken: () => mutation(mocks.setToken),
-  useDefaultBranchSync: () => ({ data: undefined, isLoading: false }),
-  useFetchDefaultBranch: () => mutation(vi.fn()),
-  usePushDefaultBranch: () => mutation(vi.fn()),
-  usePullDefaultBranch: () => mutation(vi.fn()),
+  useDefaultBranchSync: (repoId: string, enabled: boolean) => {
+    mocks.syncEnabledCalls.push({ repoId, enabled });
+    return { data: enabled ? mocks.syncStatus : undefined, isLoading: false };
+  },
+  useFetchDefaultBranch: () => mutation(mocks.fetch),
+  usePushDefaultBranch: () => mutation(mocks.push),
+  usePullDefaultBranch: () => mutation(mocks.pull),
 }));
 
 vi.mock('./useWorktrees', () => ({
@@ -92,12 +123,21 @@ describe('RepositoriesPage', () => {
     vi.clearAllMocks();
     mocks.role = 'admin';
     mocks.repos = [sampleRepo];
+    mocks.syncStatus = baseSyncStatus();
+    mocks.syncEnabledCalls = [];
     mocks.create.mockResolvedValue(sampleRepo);
     mocks.update.mockResolvedValue(sampleRepo);
     mocks.remove.mockResolvedValue(undefined);
     mocks.verify.mockResolvedValue(sampleRepo);
     mocks.setToken.mockResolvedValue(sampleRepo);
     mocks.clearToken.mockResolvedValue(sampleRepo);
+    mocks.fetch.mockResolvedValue(baseSyncStatus({ canPull: true }));
+    mocks.pull.mockResolvedValue({
+      defaultBranch: 'main',
+      message: 'Pulled main',
+      status: baseSyncStatus({ aheadCount: 0, behindCount: 0, canPull: false }),
+    });
+    mocks.push.mockResolvedValue(undefined);
   });
 
   it('shows a list-only page for admins without a side form or token selector', () => {
@@ -193,6 +233,9 @@ describe('RepositoriesPage', () => {
       screen.queryByRole('button', { name: 'Add repository' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('repo-git-status')).not.toBeInTheDocument();
+    expect(screen.getByText('—')).toBeVisible();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Token')).not.toBeInTheDocument();
     expect(
@@ -201,6 +244,74 @@ describe('RepositoriesPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Remove' }),
     ).not.toBeInTheDocument();
+    expect(mocks.syncEnabledCalls.every((c) => !c.enabled)).toBe(true);
+  });
+
+  it('shows GIT status and Sync for ready admin rows without Push', () => {
+    renderPage();
+
+    expect(screen.getByRole('columnheader', { name: 'Git' })).toBeVisible();
+    expect(screen.getByTestId('repo-git-status')).toHaveTextContent(
+      'ahead 0, behind 2',
+    );
+    const sync = screen.getByRole('button', { name: 'Sync' });
+    expect(sync).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Push to remote' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Fetch' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pull' })).not.toBeInTheDocument();
+  });
+
+  it('disables Sync when the working tree is dirty', () => {
+    mocks.syncStatus = baseSyncStatus({
+      workingTreeClean: false,
+      canFetch: true,
+      canPull: false,
+    });
+    renderPage();
+
+    expect(screen.getByTestId('repo-git-status')).toHaveTextContent(
+      'working tree dirty',
+    );
+    expect(screen.getByRole('button', { name: 'Sync' })).toBeDisabled();
+  });
+
+  it('Sync fetches then pulls when post-fetch canPull', async () => {
+    const afterFetch = baseSyncStatus({ canPull: true, behindCount: 2 });
+    mocks.fetch.mockResolvedValue(afterFetch);
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
+
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.pull).toHaveBeenCalled());
+  });
+
+  it('Sync fetches only when post-fetch cannot pull', async () => {
+    mocks.fetch.mockResolvedValue(
+      baseSyncStatus({ canPull: false, aheadCount: 0, behindCount: 0 }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
+
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(mocks.pull).not.toHaveBeenCalled();
+  });
+
+  it('keeps Fetch / Pull / Push in the edit drawer', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit repository' });
+    const sync = within(dialog).getByTestId('default-branch-sync');
+    expect(within(sync).getByRole('button', { name: 'Fetch' })).toBeVisible();
+    expect(within(sync).getByRole('button', { name: 'Pull' })).toBeVisible();
+    expect(
+      within(sync).getByRole('button', { name: 'Push to remote' }),
+    ).toBeVisible();
   });
 
   it('canceling remove repository leaves it in place', async () => {

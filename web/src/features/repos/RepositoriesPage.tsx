@@ -2,7 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { useConfirm } from '../../components/ui/confirm-dialog';
-import { ApiError } from '../../lib/api';
+import { useToast } from '../../components/ToastProvider';
+import {
+  ApiError,
+  apiErrorToastMessage,
+  parseApiErrorMessage,
+} from '../../lib/api';
 import { cn } from '../../lib/utils';
 import { openCodeReview } from '../code/openCodeReview';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
@@ -13,12 +18,19 @@ import {
   type VerificationStatus,
 } from '../../lib/schemas/repo';
 import { useSession } from '../auth/useSession';
-import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
+import {
+  DefaultBranchSyncControls,
+  syncSummaryParts,
+} from './DefaultBranchSyncControls';
 import { RepoDrawer, RepoGitFlowSection } from './RepoDrawer';
 import {
+  type DefaultBranchSyncStatus,
   useCreateRepo,
+  useDefaultBranchSync,
   useDeleteRepo,
+  useFetchDefaultBranch,
   useInspectRepoPath,
+  usePullDefaultBranch,
   useRepos,
   useSetForgeToken,
   useUpdateRepo,
@@ -440,6 +452,175 @@ interface EditRepoActionsProps {
   onRemoved: () => void;
 }
 
+function RepoGitCell({
+  status,
+  isLoading,
+}: {
+  status: DefaultBranchSyncStatus | undefined;
+  isLoading: boolean;
+}) {
+  if (isLoading && !status) {
+    return (
+      <span className="font-body text-xs text-text-muted">…</span>
+    );
+  }
+  if (!status) {
+    return <span className="font-body text-xs text-text-muted">—</span>;
+  }
+  const parts = syncSummaryParts(status);
+  if (parts.length === 0) {
+    return (
+      <span className="font-body text-xs text-text-muted">
+        {status.defaultBranch} sync
+      </span>
+    );
+  }
+  return (
+    <span className="font-body text-xs text-text-muted" data-testid="repo-git-status">
+      {parts.map((part, i) => (
+        <span key={part}>
+          {i > 0 && ' · '}
+          <span
+            className={
+              part === 'working tree dirty'
+                ? 'text-warning'
+                : part.startsWith('ahead ')
+                  ? 'font-medium text-text-primary'
+                  : undefined
+            }
+          >
+            {part}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+interface RepoTableRowProps {
+  repo: Repo;
+  isAdmin: boolean;
+  onEdit: () => void;
+}
+
+function RepoTableRow({ repo, isAdmin, onEdit }: RepoTableRowProps) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const ready = repo.verificationStatus === 'ready';
+  const syncEnabled = ready && isAdmin;
+  const { data: status, isLoading } = useDefaultBranchSync(repo.id, syncEnabled);
+  const fetchMutation = useFetchDefaultBranch(repo.id);
+  const pullMutation = usePullDefaultBranch(repo.id);
+  const busy = fetchMutation.isPending || pullMutation.isPending;
+  const canSync =
+    syncEnabled &&
+    status != null &&
+    status.canFetch &&
+    status.workingTreeClean &&
+    !busy;
+
+  async function handleSync() {
+    try {
+      const afterFetch = await fetchMutation.mutateAsync();
+      if (afterFetch.canPull) {
+        const result = await pullMutation.mutateAsync();
+        toast.success(result.message);
+      } else {
+        toast.success('Remote refs updated');
+      }
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Sync failed.');
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  return (
+    <tr className="border-b border-border last:border-b-0">
+      <td className="px-4 py-3">
+        <div className="font-body text-sm font-medium text-text-primary">
+          {repo.name}
+        </div>
+        {repo.remoteUrl && (
+          <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
+            {repo.remoteUrl}
+          </div>
+        )}
+        <div className="mt-0.5 font-body text-xs text-text-muted">
+          Branch: {repo.defaultBranch}
+        </div>
+      </td>
+      <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
+        {repo.localPath}
+      </td>
+      <td className="px-4 py-3">
+        <span className={statusPillClass(repo.verificationStatus)}>
+          {STATUS_LABELS[repo.verificationStatus]}
+        </span>
+        {repo.verificationError && (
+          <p
+            className="mt-1 max-w-xs font-body text-xs text-danger"
+            title={repo.verificationError}
+          >
+            {repo.verificationError}
+          </p>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        {syncEnabled ? (
+          <RepoGitCell status={status} isLoading={isLoading} />
+        ) : (
+          <span className="font-body text-xs text-text-muted">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 font-body text-xs text-text-muted">
+        {formatDate(repo.lastVerifiedAt)}
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {isAdmin && (
+            <Button
+              type="button"
+              size="sm"
+              disabled={!canSync}
+              title={
+                !ready
+                  ? 'Repository is not ready'
+                  : status && !status.workingTreeClean
+                    ? 'Working tree is dirty'
+                    : status && !status.canFetch
+                      ? (status.fetchDisabledReason ?? 'Fetch unavailable')
+                      : 'Fetch remote, then fast-forward pull when behind'
+              }
+              onClick={() => void handleSync()}
+            >
+              {busy ? 'Syncing…' : 'Sync'}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!ready}
+            onClick={() => {
+              openCodeReview(`/code?repoId=${repo.id}`, navigate);
+            }}
+          >
+            View code
+          </Button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
   const verifyRepo = useVerifyRepo();
   const deleteRepo = useDeleteRepo();
@@ -507,7 +688,6 @@ export function RepositoriesPage() {
   const { user, loading } = useSession();
   const { data: repos, isLoading, isError, refetch } = useRepos();
   const { data: worktrees } = useWorktrees();
-  const navigate = useNavigate();
   const [tab, setTab] = useState<PageTab>('repos');
   const [drawer, setDrawer] = useState<DrawerState>({ type: 'closed' });
   const isAdmin = user?.role === 'admin';
@@ -650,6 +830,9 @@ export function RepositoriesPage() {
                         Status
                       </th>
                       <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Git
+                      </th>
+                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
                         Last verified
                       </th>
                       <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
@@ -659,70 +842,14 @@ export function RepositoriesPage() {
                   </thead>
                   <tbody>
                     {repos.map((repo) => (
-                      <tr
+                      <RepoTableRow
                         key={repo.id}
-                        className="border-b border-border last:border-b-0"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-body text-sm font-medium text-text-primary">
-                            {repo.name}
-                          </div>
-                          {repo.remoteUrl && (
-                            <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
-                              {repo.remoteUrl}
-                            </div>
-                          )}
-                          <div className="mt-0.5 font-body text-xs text-text-muted">
-                            Branch: {repo.defaultBranch}
-                          </div>
-                        </td>
-                        <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
-                          {repo.localPath}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={statusPillClass(repo.verificationStatus)}
-                          >
-                            {STATUS_LABELS[repo.verificationStatus]}
-                          </span>
-                          {repo.verificationError && (
-                            <p
-                              className="mt-1 max-w-xs font-body text-xs text-danger"
-                              title={repo.verificationError}
-                            >
-                              {repo.verificationError}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-body text-xs text-text-muted">
-                          {formatDate(repo.lastVerifiedAt)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={repo.verificationStatus !== 'ready'}
-                              onClick={() => {
-                                openCodeReview(`/code?repoId=${repo.id}`, navigate);
-                              }}
-                            >
-                              View code
-                            </Button>
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDrawer({ type: 'edit', repoId: repo.id })
-                                }
-                                className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-                              >
-                                Edit
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                        repo={repo}
+                        isAdmin={isAdmin}
+                        onEdit={() =>
+                          setDrawer({ type: 'edit', repoId: repo.id })
+                        }
+                      />
                     ))}
                   </tbody>
                 </table>

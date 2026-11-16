@@ -17,7 +17,7 @@ function shortSha(sha: string | null): string {
   return sha.slice(0, 7);
 }
 
-function syncSummaryParts(status: DefaultBranchSyncStatus): string[] {
+export function syncSummaryParts(status: DefaultBranchSyncStatus): string[] {
   const parts: string[] = [];
   if (!status.workingTreeClean) {
     parts.push('working tree dirty');
@@ -36,7 +36,7 @@ function syncSummaryParts(status: DefaultBranchSyncStatus): string[] {
   return parts;
 }
 
-function syncSummary(status: DefaultBranchSyncStatus): string {
+export function syncSummary(status: DefaultBranchSyncStatus): string {
   return syncSummaryParts(status).join(' · ') || `${status.defaultBranch} sync`;
 }
 
