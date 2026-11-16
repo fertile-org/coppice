@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { useConfirm } from '../../components/ui/confirm-dialog';
 import { ApiError } from '../../lib/api';
+import { cn } from '../../lib/utils';
 import { openCodeReview } from '../code/openCodeReview';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import {
@@ -23,6 +24,10 @@ import {
   useUpdateRepo,
   useVerifyRepo,
 } from './useRepos';
+import { useWorktrees } from './useWorktrees';
+import { WorktreesTab } from './WorktreesTab';
+
+type PageTab = 'repos' | 'worktrees';
 
 const STATUS_LABELS: Record<VerificationStatus, string> = {
   ready: 'Ready',
@@ -501,7 +506,9 @@ function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
 export function RepositoriesPage() {
   const { user, loading } = useSession();
   const { data: repos, isLoading, isError, refetch } = useRepos();
+  const { data: worktrees } = useWorktrees();
   const navigate = useNavigate();
+  const [tab, setTab] = useState<PageTab>('repos');
   const [drawer, setDrawer] = useState<DrawerState>({ type: 'closed' });
   const isAdmin = user?.role === 'admin';
 
@@ -541,7 +548,7 @@ export function RepositoriesPage() {
               : 'Registered git checkouts available for tickets and agent runs.'}
           </p>
         </div>
-        {isAdmin && (
+        {isAdmin && tab === 'repos' && (
           <Button
             type="button"
             onClick={() => setDrawer({ type: 'create' })}
@@ -551,128 +558,190 @@ export function RepositoriesPage() {
         )}
       </div>
 
-      <div className="mt-8">
-        {isLoading && (
-          <p className="font-body text-sm text-text-muted">
-            Loading repositories…
-          </p>
-        )}
-
-        {isError && (
-          <div className="rounded-lg border border-danger-muted bg-danger-muted/50 p-4">
-            <p className="font-body text-sm text-danger">
-              Unable to load repositories.
-            </p>
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
-            >
-              Try again
-            </button>
-          </div>
-        )}
-
-        {!isLoading && !isError && repos && (
-          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
-            {repos.length === 0 ? (
-              <p className="px-4 py-8 text-center font-body text-sm text-text-muted">
-                No repositories registered yet.
-              </p>
-            ) : (
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-border bg-paper-100">
-                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Name
-                    </th>
-                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Local path
-                    </th>
-                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Last verified
-                    </th>
-                    <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repos.map((repo) => (
-                    <tr
-                      key={repo.id}
-                      className="border-b border-border last:border-b-0"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="font-body text-sm font-medium text-text-primary">
-                          {repo.name}
-                        </div>
-                        {repo.remoteUrl && (
-                          <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
-                            {repo.remoteUrl}
-                          </div>
-                        )}
-                        <div className="mt-0.5 font-body text-xs text-text-muted">
-                          Branch: {repo.defaultBranch}
-                        </div>
-                      </td>
-                      <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
-                        {repo.localPath}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={statusPillClass(repo.verificationStatus)}
-                        >
-                          {STATUS_LABELS[repo.verificationStatus]}
-                        </span>
-                        {repo.verificationError && (
-                          <p
-                            className="mt-1 max-w-xs font-body text-xs text-danger"
-                            title={repo.verificationError}
-                          >
-                            {repo.verificationError}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-body text-xs text-text-muted">
-                        {formatDate(repo.lastVerifiedAt)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={repo.verificationStatus !== 'ready'}
-                            onClick={() => {
-                              openCodeReview(`/code?repoId=${repo.id}`, navigate);
-                            }}
-                          >
-                            View code
-                          </Button>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDrawer({ type: 'edit', repoId: repo.id })
-                              }
-                              className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div
+        role="tablist"
+        aria-label="Repositories"
+        className="mt-8 flex gap-1 border-b border-border"
+      >
+        {(
+          [
+            {
+              id: 'repos' as const,
+              label: 'Repositories',
+              count: repos?.length,
+            },
+            {
+              id: 'worktrees' as const,
+              label: 'Worktrees',
+              count: worktrees?.length,
+            },
+          ] as const
+        ).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`repos-tab-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-controls={`repos-panel-${item.id}`}
+            onClick={() => setTab(item.id)}
+            className={cn(
+              '-mb-px border-b-2 px-3 py-2 font-body text-sm font-medium transition-colors',
+              tab === item.id
+                ? 'border-moss-700 text-moss-700'
+                : 'border-transparent text-text-muted hover:text-text-primary',
             )}
-          </div>
-        )}
+          >
+            {item.label}
+            {typeof item.count === 'number' && (
+              <span className="ml-1.5 font-body text-xs text-text-muted">
+                {item.count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
+
+      {tab === 'repos' && (
+        <div
+          role="tabpanel"
+          id="repos-panel-repos"
+          aria-labelledby="repos-tab-repos"
+          className="mt-6"
+        >
+          {isLoading && (
+            <p className="font-body text-sm text-text-muted">
+              Loading repositories…
+            </p>
+          )}
+
+          {isError && (
+            <div className="rounded-lg border border-danger-muted bg-danger-muted/50 p-4">
+              <p className="font-body text-sm text-danger">
+                Unable to load repositories.
+              </p>
+              <button
+                type="button"
+                onClick={() => void refetch()}
+                className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {!isLoading && !isError && repos && (
+            <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
+              {repos.length === 0 ? (
+                <p className="px-4 py-8 text-center font-body text-sm text-text-muted">
+                  No repositories registered yet.
+                </p>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-border bg-paper-100">
+                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Local path
+                      </th>
+                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Last verified
+                      </th>
+                      <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repos.map((repo) => (
+                      <tr
+                        key={repo.id}
+                        className="border-b border-border last:border-b-0"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-body text-sm font-medium text-text-primary">
+                            {repo.name}
+                          </div>
+                          {repo.remoteUrl && (
+                            <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
+                              {repo.remoteUrl}
+                            </div>
+                          )}
+                          <div className="mt-0.5 font-body text-xs text-text-muted">
+                            Branch: {repo.defaultBranch}
+                          </div>
+                        </td>
+                        <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
+                          {repo.localPath}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={statusPillClass(repo.verificationStatus)}
+                          >
+                            {STATUS_LABELS[repo.verificationStatus]}
+                          </span>
+                          {repo.verificationError && (
+                            <p
+                              className="mt-1 max-w-xs font-body text-xs text-danger"
+                              title={repo.verificationError}
+                            >
+                              {repo.verificationError}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-body text-xs text-text-muted">
+                          {formatDate(repo.lastVerifiedAt)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={repo.verificationStatus !== 'ready'}
+                              onClick={() => {
+                                openCodeReview(`/code?repoId=${repo.id}`, navigate);
+                              }}
+                            >
+                              View code
+                            </Button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDrawer({ type: 'edit', repoId: repo.id })
+                                }
+                                className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'worktrees' && (
+        <div
+          role="tabpanel"
+          id="repos-panel-worktrees"
+          aria-labelledby="repos-tab-worktrees"
+          className="mt-6"
+        >
+          <WorktreesTab />
+        </div>
+      )}
 
       {isAdmin && (
         <RepoDrawer

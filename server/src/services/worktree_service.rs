@@ -118,7 +118,9 @@ pub fn format_git_comment_footer(state: &WorktreeGitState) -> String {
     }
 }
 
-async fn worktree_dirty_excluding_agent(worktree: &Path) -> Result<bool, WorktreeError> {
+pub(crate) async fn worktree_dirty_excluding_agent(
+    worktree: &Path,
+) -> Result<bool, WorktreeError> {
     let output = crate::services::git_cmd::output(
         Some(worktree),
         &["status", "--porcelain", "--", ".", ":!.agent"],

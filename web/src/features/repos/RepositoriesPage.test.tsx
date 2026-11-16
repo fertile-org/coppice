@@ -63,6 +63,16 @@ vi.mock('./useRepos', () => ({
   usePullDefaultBranch: () => mutation(vi.fn()),
 }));
 
+vi.mock('./useWorktrees', () => ({
+  useWorktrees: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+  useRemoveWorktrees: () => mutation(vi.fn()),
+}));
+
 vi.mock('../../components/ToastProvider', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
