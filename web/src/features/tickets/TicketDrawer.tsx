@@ -40,6 +40,57 @@ import {
 
 type DrawerTab = DrawerSection;
 
+const skeletonBar = (className: string) => (
+  <div className={`motion-safe:animate-pulse bg-border ${className}`} />
+);
+
+function TicketDetailSkeleton() {
+  return (
+    <div
+      data-testid="ticket-detail-skeleton"
+      aria-busy="true"
+      className="grid h-full min-h-64 gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]"
+    >
+      <span className="sr-only">Loading ticket…</span>
+      <div className="min-h-0 space-y-2.5 overflow-y-auto px-6 py-5">
+        {skeletonBar('h-3 w-full rounded-md')}
+        {skeletonBar('h-3 w-[96%] rounded-md')}
+        {skeletonBar('h-3 w-[88%] rounded-md')}
+        {skeletonBar('h-3 w-[60%] rounded-md')}
+        <div className="mt-6 flex gap-2.5">
+          {skeletonBar('h-7 w-7 shrink-0 rounded-full')}
+          <div className="min-w-0 flex-1 space-y-2.5">
+            {skeletonBar('h-2.5 w-[30%] rounded-md')}
+            {skeletonBar('h-3 w-[92%] rounded-md')}
+            {skeletonBar('h-3 w-[70%] rounded-md')}
+          </div>
+        </div>
+        <div className="mt-6 flex gap-2.5">
+          {skeletonBar('h-7 w-7 shrink-0 rounded-full')}
+          <div className="min-w-0 flex-1 space-y-2.5">
+            {skeletonBar('h-2.5 w-[24%] rounded-md')}
+            {skeletonBar('h-3 w-[84%] rounded-md')}
+          </div>
+        </div>
+      </div>
+      <div className="min-h-0 space-y-4 overflow-y-auto border-border px-4 py-5 md:border-l">
+        {skeletonBar('mb-2 h-3 w-[90px] rounded-md')}
+        {[
+          ['w-[72px]', 'w-[110px]'],
+          ['w-[72px]', 'w-20'],
+          ['w-[72px]', 'w-[130px]'],
+          ['w-[72px]', 'w-[60px]'],
+        ].map(([label, value]) => (
+          <div key={value} className="flex items-center justify-between gap-3">
+            {skeletonBar(`h-2.5 ${label} rounded-md`)}
+            {skeletonBar(`h-3 ${value} rounded-md`)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface TicketDrawerProps {
   /** Keep the drawer mounted and toggle this so the exit animation plays. */
   open?: boolean;
@@ -426,11 +477,7 @@ function TicketDrawerPanel({
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {isLoading && (
-          <p className="px-6 py-5 font-body text-sm text-text-muted">
-            Loading ticket…
-          </p>
-        )}
+        {isLoading && <TicketDetailSkeleton />}
 
         {isError && (
           <div className="px-6 py-5">
@@ -449,15 +496,7 @@ function TicketDrawerPanel({
           </div>
         )}
 
-        {ticket && !detailLoaded && tab === 'detail' && (
-          <div
-            data-testid="ticket-detail-skeleton"
-            aria-busy="true"
-            className="h-full min-h-64 px-6 py-5"
-          >
-            <span className="sr-only">Loading ticket…</span>
-          </div>
-        )}
+        {ticket && !detailLoaded && tab === 'detail' && <TicketDetailSkeleton />}
 
         {ticket && detailLoaded && tab === 'detail' && (
           <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]">

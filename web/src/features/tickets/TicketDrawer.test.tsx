@@ -15,7 +15,7 @@ import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 import type { Connector } from '../../lib/schemas/connector';
 
-const ticketState: { ticket: Ticket; placeholder?: boolean } = {
+const ticketState: { ticket: Ticket; placeholder?: boolean; loading?: boolean } = {
   ticket: {
     id: '00000000-0000-0000-0000-000000000001',
     boardId: '00000000-0000-0000-0000-000000000002',
@@ -113,9 +113,9 @@ const runMocks = vi.hoisted(() => ({
 vi.mock('./useTicket', () => ({
   ticketQueryKey: (ticketId: string) => ['ticket', ticketId],
   useTicket: () => ({
-    data: ticketState.ticket,
+    data: ticketState.loading ? undefined : ticketState.ticket,
     isPlaceholderData: ticketState.placeholder ?? false,
-    isLoading: false,
+    isLoading: ticketState.loading ?? false,
     isError: false,
     refetch: vi.fn(),
   }),
@@ -1036,6 +1036,7 @@ describe('TicketDrawer first frame', () => {
     runsState.runs = [];
     childrenState.children = [];
     ticketState.placeholder = false;
+    ticketState.loading = false;
     ticketState.ticket = {
       ...ticketState.ticket,
       status: 'backlog',
@@ -1047,6 +1048,7 @@ describe('TicketDrawer first frame', () => {
 
   afterEach(() => {
     ticketState.placeholder = false;
+    ticketState.loading = false;
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -1059,12 +1061,35 @@ describe('TicketDrawer first frame', () => {
     const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
     expect(within(dialog).getByRole('heading', { name: 'Test ticket' })).toBeVisible();
     expect(within(dialog).queryByText('Loading…')).toBeNull();
-    expect(screen.getByTestId('ticket-detail-skeleton')).toBeInTheDocument();
+    const skeleton = screen.getByTestId('ticket-detail-skeleton');
+    expect(skeleton).toBeInTheDocument();
+    expect(skeleton).toHaveAttribute('aria-busy', 'true');
+    expect(within(skeleton).getByText('Loading ticket…')).toBeInTheDocument();
+    expect(skeleton.querySelectorAll('[class*="animate-pulse"]').length).toBeGreaterThan(0);
     // No editable description or metadata panel on list data.
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByText('Comments')).toBeNull();
     expect(screen.getByRole('button', { name: 'Run Agent' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+  });
+
+  it('shows a pulsing skeleton on cold load with no list placeholder', () => {
+    ticketState.loading = true;
+    renderDrawer();
+
+    const skeleton = screen.getByTestId('ticket-detail-skeleton');
+    expect(skeleton).toHaveAttribute('aria-busy', 'true');
+    expect(within(skeleton).getByText('Loading ticket…')).toBeInTheDocument();
+    expect(screen.queryByText('Ticket description')).toBeNull();
+  });
+
+  it('skips the skeleton when detail data is already warm', () => {
+    ticketState.placeholder = false;
+    ticketState.loading = false;
+    renderDrawer();
+
+    expect(screen.queryByTestId('ticket-detail-skeleton')).toBeNull();
+    expect(screen.getByText('Ticket description')).toBeInTheDocument();
   });
 
   it('mounts comments only after the sheet fade ends', () => {
