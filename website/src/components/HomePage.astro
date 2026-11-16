@@ -5,8 +5,16 @@ import { homeEntry } from '../i18n/pages/en';
 import { hrefFor, useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
 import { softwareSchema } from '../lib/page-schema';
+import { withBase } from '../lib/url';
 import DownloadLinks from './DownloadLinks.astro';
 import HeroMedia from './HeroMedia.astro';
+
+const shots = [
+  { src: '/home/plan.png', width: 1440, height: 800 },
+  { src: '/home/design.png', width: 1408, height: 764 },
+  { src: '/home/build.png', width: 1440, height: 800 },
+  { src: '/home/review.png', width: 1440, height: 800 },
+];
 
 const ctx = useI18n(Astro);
 const copy = pagesFor(ctx.locale).home;
@@ -24,7 +32,7 @@ const copy = pagesFor(ctx.locale).home;
       <p class="lede">{copy.lede}</p>
     </header>
 
-    <HeroMedia stillAlt={copy.hero.stillAlt} videoAlt={copy.hero.videoAlt} captions={copy.hero.captions} />
+    <HeroMedia stillAlt={copy.hero.stillAlt} videoAlt={copy.hero.videoAlt} />
 
     <p class="hero-support">{copy.support}</p>
 
@@ -38,34 +46,35 @@ const copy = pagesFor(ctx.locale).home;
 
     {
       ctx.locale === 'en' && (
-        <>
-          <section class="block" aria-labelledby="what-coppice-is">
-            <h2 id="what-coppice-is">{homeEntry.whatTitle}</h2>
-            <p>{homeEntry.whatBody}</p>
-          </section>
-          <section class="block pair-follow" aria-labelledby="guides">
-            <h2 id="guides">{homeEntry.guidesTitle}</h2>
-            <ul class="plain-list">
-              {homeEntry.guides.map((guide) => (
-                <li>
-                  <a href={hrefFor(ctx.locale, guide.href)}>{guide.label}</a> {guide.note}
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
+        <section class="block" aria-labelledby="what-coppice-is">
+          <h2 id="what-coppice-is">{homeEntry.whatTitle}</h2>
+          <p>
+            {homeEntry.whatBody} {homeEntry.learnBefore}
+            <a href={hrefFor(ctx.locale, '/docs/getting-started')}>{homeEntry.learnLabel}</a>
+            {homeEntry.learnAfter}
+          </p>
+        </section>
       )
     }
 
     <section class="block" aria-labelledby="how-it-works">
       <h2 id="how-it-works">{copy.howTitle}</h2>
-      <ol class="steps">
+      <ol class="how-steps">
         {
-          copy.steps.map((step) => (
-            <li>
-              <p>
-                <strong>{step.title}</strong> {step.body}
-              </p>
+          copy.steps.map((step, index) => (
+            <li class="how-step">
+              <img
+                src={withBase(shots[index].src)}
+                width={shots[index].width}
+                height={shots[index].height}
+                alt={step.imageAlt}
+                loading="lazy"
+                decoding="async"
+              />
+              <div class="how-step-copy">
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </div>
             </li>
           ))
         }

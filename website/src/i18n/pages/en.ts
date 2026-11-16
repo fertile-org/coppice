@@ -13,15 +13,6 @@ export const pages = {
       stillAlt: 'Coppice board with tickets for the acme-web repository',
       videoAlt:
         'Coppice: write a ticket, compare design options, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it.',
-      captions: [
-        'Write a ticket.',
-        'Your PM agent drafts a plan.',
-        'It shows you design options.',
-        'You approve it.',
-        'Agents build, review, and test.',
-        'Review the diff. Comment on any line.',
-        'Nothing is done until you accept it.',
-      ],
     },
     support: "Open source (Apache 2.0). It runs on your machine, and you don't need a Coppice account.",
     downloads: {
@@ -32,16 +23,27 @@ export const pages = {
     howTitle: 'How it works',
     steps: [
       {
-        title: 'Hand off the work.',
-        body: 'Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve the plan before coding starts, unless you choose Skip planning.',
+        title: 'Planning with the PM agent',
+        body: 'Your PM agent reads the ticket and drafts a plan: the approach, the steps, and how the change will be checked. You approve that plan before any code is written.',
+        imageAlt:
+          'Plan Review for a dark mode toggle. The PM agent is assigned, and the proposed plan lists the approach and the steps.',
       },
       {
-        title: 'Let agents build.',
-        body: 'Each ticket gets its own git worktree, so parallel agents never touch your main checkout. Once you start a ticket, agents can continue automatically through the workflow. Follow any run live.',
+        title: 'Approve the design',
+        body: 'When the ticket changes what people see, the agent shows a few layouts and marks the one it recommends. You choose one, and the plan follows that choice.',
+        imageAlt:
+          'Design options for a Settings theme control, with three layouts and a preview of the recommended switch.',
       },
       {
-        title: 'Human Review.',
-        body: 'Read the diff in the app and comment on any line. Nothing counts as done until you accept it. Accept and Merge are separate choices.',
+        title: 'Let agents build',
+        body: 'Specialist agents build, review, and test the ticket. Each ticket gets its own git worktree, so parallel work stays off your main checkout. You can follow a run while it happens.',
+        imageAlt: 'The board, with tickets in progress, in review, in QA, and waiting for a person.',
+      },
+      {
+        title: 'Review the code changes',
+        body: 'Read the diff in the app and comment on any line. Nothing counts as done until you accept it. Accept and Merge stay separate choices.',
+        imageAlt:
+          'Code review for a theme toggle: the approved plan, the changed file, and a comment on one line of the diff.',
       },
     ],
     howClose:
@@ -121,32 +123,7 @@ export const homeEntry = {
   whatTitle: 'What Coppice is',
   whatBody:
     'Coppice is a desktop app for multi-agent coding. You write tickets on your own machine. The agents run CLIs you already use, such as Claude Code, Codex, and Cursor, and each ticket gets its own git worktree. You don\'t need a Coppice account. Coppice does not ask for or store a provider API key.',
-  guidesTitle: 'Guides',
-  guides: [
-    {
-      href: '/docs/install',
-      label: 'Install',
-      note: 'Packages by platform and architecture, with links to the setup steps.',
-    },
-    {
-      href: '/docs/getting-started',
-      label: 'Getting started',
-      note: 'What to install, how to sign in, and the first ticket.',
-    },
-    {
-      href: '/docs/providers',
-      label: 'Providers',
-      note: 'Supported agent CLIs, and which sign-ins Coppice can check.',
-    },
-    {
-      href: '/docs/concepts',
-      label: 'Concepts',
-      note: 'How a ticket moves, including Accept and Merge.',
-    },
-    {
-      href: '/docs/faq',
-      label: 'FAQ',
-      note: 'Beta limits, Docker, Windows, and what Coppice is not.',
-    },
-  ],
+  learnBefore: 'New here? Start with ',
+  learnLabel: 'Getting started',
+  learnAfter: '.',
 };

@@ -15,15 +15,6 @@ export const pages: Pages = {
       stillAlt: 'Bảng Coppice với các ticket của repository acme-web',
       videoAlt:
         'Coppice: viết ticket, so sánh các phương án thiết kế, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Chỉ khi bạn chấp nhận thì việc mới tính là xong.',
-      captions: [
-        'Viết một ticket.',
-        'Agent PM soạn kế hoạch.',
-        'Agent PM đưa ra các phương án thiết kế.',
-        'Bạn duyệt.',
-        'Các agent viết code, review và test.',
-        'Xem diff, góp ý ở bất kỳ dòng nào.',
-        'Bạn chấp nhận thì mới tính là xong.',
-      ],
     },
     support: 'Mã nguồn mở (Apache 2.0). Chạy ngay trên máy bạn, không cần tài khoản Coppice.',
     downloads: {
@@ -34,16 +25,25 @@ export const pages: Pages = {
     howTitle: 'Cách hoạt động',
     steps: [
       {
-        title: 'Giao việc.',
-        body: 'Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện. Bạn duyệt kế hoạch trước khi bắt đầu viết code, trừ khi bạn chọn Skip planning.',
+        title: 'Lên kế hoạch với agent PM',
+        body: 'Agent PM đọc ticket và soạn kế hoạch: cách làm, các bước, và cách kiểm tra thay đổi. Bạn duyệt kế hoạch trước khi có code được viết.',
+        imageAlt:
+          'Plan Review cho nút chuyển dark mode. Agent PM là người được giao, và kế hoạch đề xuất ghi cách làm cùng các bước.',
       },
       {
-        title: 'Để các agent làm việc.',
-        body: 'Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ thay đổi bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.',
+        title: 'Duyệt thiết kế',
+        body: 'Khi ticket đổi phần người dùng nhìn thấy, agent đưa ra vài bố cục và đánh dấu phương án nó đề xuất. Bạn chọn một, và kế hoạch đi theo lựa chọn đó.',
+        imageAlt: 'Các phương án thiết kế cho nút theme trong Settings, với ba bố cục và bản xem trước của phương án được đề xuất.',
       },
       {
-        title: 'Human Review.',
-        body: 'Đọc diff ngay trong ứng dụng, góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong.',
+        title: 'Để các agent làm việc',
+        body: 'Các agent chuyên môn viết code, review và test ticket. Mỗi ticket có git worktree riêng, nên việc làm song song không đụng bản checkout chính. Bạn xem được một lần chạy khi nó đang diễn ra.',
+        imageAlt: 'Bảng, với ticket đang làm, đang review, đang QA, và ticket đang chờ một người.',
+      },
+      {
+        title: 'Xem các thay đổi trong code',
+        body: 'Đọc diff ngay trong ứng dụng và góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong. Accept và Merge là hai lựa chọn riêng.',
+        imageAlt: 'Review code của nút theme: kế hoạch đã duyệt, file đã đổi, và một góp ý trên một dòng của diff.',
       },
     ],
     howClose: 'Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, không tài khoản Coppice.',
