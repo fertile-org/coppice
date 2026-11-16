@@ -147,11 +147,6 @@ export default {
             border: 'var(--column-done-border)',
             accent: 'var(--column-done-accent)',
           },
-          blocked: {
-            bg: 'var(--column-blocked-bg)',
-            border: 'var(--column-blocked-border)',
-            accent: 'var(--column-blocked-accent)',
-          },
         },
       },
       spacing: {

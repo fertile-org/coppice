@@ -174,14 +174,13 @@ async fn assert_blocked_with_comment(
         .await
         .expect("ticket");
     assert!(
-        !matches!(
+        matches!(
             ticket.ticket.status,
             TicketStatus::InProgress | TicketStatus::InReview | TicketStatus::InQa
         ),
-        "ticket stayed {}",
+        "ticket left working column {}",
         status_to_str(ticket.ticket.status)
     );
-    assert_eq!(ticket.ticket.status, TicketStatus::Blocked);
     assert_eq!(ticket.ticket.substatus, Some(Substatus::BlockedByError));
 
     let comments = CommentService::new(pool)

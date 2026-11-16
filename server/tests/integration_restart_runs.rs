@@ -232,7 +232,8 @@ async fn sweep_keeps_the_worktree_and_waits_for_a_choice() {
     sweep_orphaned_runs(&state).await;
 
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "blocked");
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["substatus"], "blocked_by_error");
     assert!(tree.worktree.join("notes.txt").exists());
     assert!(tree.worktree.join(".agent").join("context.md").exists());
 
@@ -437,7 +438,8 @@ async fn cancel_removes_a_clean_worktree() {
     assert_eq!(cancelled.status(), StatusCode::OK);
     assert!(!tree.worktree.exists());
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "blocked");
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["substatus"], "blocked_by_error");
 }
 
 #[tokio::test]
@@ -623,7 +625,14 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
         .fetch_one(&pool)
         .await
         .expect("ticket status");
-    assert_eq!(status, "blocked");
+    assert_eq!(status, "in_progress");
+    let substatus: Option<String> =
+        sqlx::query_scalar("SELECT substatus FROM tickets WHERE id = $1")
+            .bind(ticket_id)
+            .fetch_one(&pool)
+            .await
+            .expect("ticket substatus");
+    assert_eq!(substatus.as_deref(), Some("blocked_by_error"));
     let bodies: Vec<String> =
         sqlx::query_scalar("SELECT body FROM ticket_comments WHERE ticket_id = $1")
             .bind(ticket_id)
@@ -655,4 +664,92 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
         .execute(&admin)
         .await;
     admin.close().await;
+}
+
+#[tokio::test]
+async fn remove_blocked_status_migration_remaps_open_and_archived_tickets() {
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let open_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let archived_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let agent_id =
+        common::create_test_agent_from_preset(&app, "Migration Agent", &cookie, &csrf).await;
+    let open = Uuid::parse_str(&open_id).unwrap();
+    let archived = Uuid::parse_str(&archived_id).unwrap();
+    let agent = Uuid::parse_str(&agent_id).unwrap();
+
+    sqlx::query("UPDATE tickets SET status = 'blocked', substatus = 'blocked_by_error' WHERE id = $1")
+        .bind(open)
+        .execute(pool)
+        .await
+        .expect("force open blocked");
+    sqlx::query(
+        "UPDATE tickets SET status = 'blocked', substatus = 'blocked_by_permission', archived_at = now() WHERE id = $1",
+    )
+    .bind(archived)
+    .execute(pool)
+    .await
+    .expect("force archived blocked");
+
+    let run_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+        )
+        VALUES ($1, $2, $3, 'work_on_ticket', 'failed', 'permissive-default')
+        "#,
+    )
+    .bind(run_id)
+    .bind(open)
+    .bind(agent)
+    .execute(pool)
+    .await
+    .expect("insert run for restart decision");
+    sqlx::query(
+        r#"
+        INSERT INTO run_restart_decisions (run_id, ticket_id, changed_files, previous_status)
+        VALUES ($1, $2, 0, 'in_progress')
+        "#,
+    )
+    .bind(run_id)
+    .bind(open)
+    .execute(pool)
+    .await
+    .expect("open restart decision");
+
+    let migration = include_str!("../migrations/073_remove_blocked_status.sql");
+    sqlx::raw_sql(migration)
+        .execute(pool)
+        .await
+        .expect("rerun blocked-status remap");
+
+    let open_status: String = sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+        .bind(open)
+        .fetch_one(pool)
+        .await
+        .expect("open status");
+    let open_sub: Option<String> =
+        sqlx::query_scalar("SELECT substatus FROM tickets WHERE id = $1")
+            .bind(open)
+            .fetch_one(pool)
+            .await
+            .expect("open substatus");
+    assert_eq!(open_status, "in_progress");
+    assert_eq!(open_sub.as_deref(), Some("blocked_by_error"));
+
+    let archived_status: String = sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+        .bind(archived)
+        .fetch_one(pool)
+        .await
+        .expect("archived status");
+    let archived_sub: Option<String> =
+        sqlx::query_scalar("SELECT substatus FROM tickets WHERE id = $1")
+            .bind(archived)
+            .fetch_one(pool)
+            .await
+            .expect("archived substatus");
+    assert_eq!(archived_status, "backlog");
+    assert_eq!(archived_sub.as_deref(), Some("blocked_by_permission"));
 }

@@ -203,7 +203,12 @@ export const TicketCard = memo(function TicketCard({
         <div className="mt-2 flex flex-wrap gap-1.5">
           {ticket.substatusDisplay && (
             <span
-              className="inline-flex max-w-full items-center gap-1 rounded-full border border-info-muted bg-info-muted px-2 py-0.5 font-body text-xs text-info"
+              className={[
+                'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 font-body text-xs',
+                ticket.substatus?.startsWith('blocked_by_')
+                  ? 'border-danger-muted bg-danger-muted text-danger'
+                  : 'border-info-muted bg-info-muted text-info',
+              ].join(' ')}
               title={ticket.substatusDisplay.detail}
             >
               <span className="truncate">{ticket.substatusDisplay.label}</span>

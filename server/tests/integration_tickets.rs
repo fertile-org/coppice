@@ -545,20 +545,20 @@ async fn unassigned_backlog_ticket_suggests_the_pm() {
     let planning: serde_json::Value = common::json_body(planning).await;
     assert_eq!(suggested_id(&planning), Some(pm_id.as_str()));
 
-    let blocked = app
+    let left_backlog = app
         .clone()
         .oneshot(common::json_request(
             "PATCH",
             &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"blocked"}"#,
+            r#"{"status":"in_review"}"#,
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(blocked.status(), StatusCode::OK);
-    let blocked: serde_json::Value = common::json_body(blocked).await;
-    assert!(suggested_id(&blocked).is_none());
+    assert_eq!(left_backlog.status(), StatusCode::OK);
+    let left_backlog: serde_json::Value = common::json_body(left_backlog).await;
+    assert!(suggested_id(&left_backlog).is_none());
 
     let backlog = app
         .clone()

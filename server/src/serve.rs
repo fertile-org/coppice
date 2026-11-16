@@ -49,10 +49,9 @@ async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &s
 
 /// In Progress, In Review, and In QA mean an agent is working. Reviewer,
 /// tech-lead, and QC runs stay in those columns, and a person can drag a
-/// ticket there while a run is still live. Once that run is interrupted,
-/// Blocked is the existing column for work that cannot continue until a
-/// person acts. Wait for Human Review, Done, Ready, Backlog, and an already
-/// Blocked ticket stay put; the quit comment is still added.
+/// ticket there while a run is still live. Once that run is interrupted, keep
+/// the column and flag BlockedByError so a person can resume. Wait for Human
+/// Review, Done, Ready, and Backlog stay put; the quit comment is still added.
 fn quit_blocks_status(status: TicketStatus) -> bool {
     matches!(
         status,
@@ -73,7 +72,7 @@ async fn block_working_ticket(state: &AppState, run: &crate::domain::run::AgentR
             match ticket_svc
                 .update_status(
                     ticket_id,
-                    TicketStatus::Blocked,
+                    ticket.ticket.status,
                     Some(Some(Substatus::BlockedByError)),
                     Some(None),
                 )
@@ -85,7 +84,7 @@ async fn block_working_ticket(state: &AppState, run: &crate::domain::run::AgentR
                         error = %err,
                         %ticket_id,
                         run_id = %run.id,
-                        "failed to move interrupted run's ticket to Blocked"
+                        "failed to flag interrupted run's ticket as blocked"
                     );
                 }
             }
@@ -157,8 +156,8 @@ pub async fn sweep_orphaned_runs(state: &AppState) {
     }
 }
 
-/// Startup after a crash. One comment, ticket to Blocked, worktree untouched.
-/// Does not call `handle_terminal_run`, so deferred work is not replayed.
+/// Startup after a crash. One comment, blocked substatus in-column, worktree
+/// untouched. Does not call `handle_terminal_run`, so deferred work is not replayed.
 async fn interrupt_restarted_run(state: &AppState, run: crate::domain::run::AgentRun) {
     let changed = if let Some(pool) = state.db.as_ref() {
         restart_service::changed_file_count(pool, &run).await
@@ -210,13 +209,11 @@ async fn note_restart(
 
     let waiting = if previous == TicketStatus::Done {
         false
-    } else if previous == TicketStatus::Blocked {
-        true
-    } else {
+    } else if quit_blocks_status(previous) {
         match ticket_svc
             .update_status(
                 ticket_id,
-                TicketStatus::Blocked,
+                previous,
                 Some(Some(Substatus::BlockedByError)),
                 Some(None),
             )
@@ -231,11 +228,13 @@ async fn note_restart(
                     error = %err,
                     %ticket_id,
                     run_id = %run.id,
-                    "failed to move restarted run's ticket to Blocked"
+                    "failed to flag restarted run's ticket as blocked"
                 );
                 false
             }
         }
+    } else {
+        false
     };
     leave_restart_comment(pool, ticket_id, run.id, comment).await;
     if waiting {

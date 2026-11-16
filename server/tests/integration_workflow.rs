@@ -179,7 +179,6 @@ async fn direct_status_change_cannot_reach_done() {
         "in_review",
         "in_qa",
         "wait_for_final_review",
-        "blocked",
     ];
     for status in sources {
         if status == "ready" || status == "in_progress" {
@@ -313,7 +312,7 @@ async fn done_ticket_cannot_be_dragged_to_another_column() {
         .unwrap();
     assert_eq!(approve.status(), StatusCode::OK);
 
-    for status in ["in_progress", "in_review", "backlog", "ready", "blocked"] {
+    for status in ["in_progress", "in_review", "backlog", "ready"] {
         let denied = app
             .clone()
             .oneshot(common::json_request(

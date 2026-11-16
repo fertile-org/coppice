@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { BOARD_COLUMNS } from './columns';
 
 describe('BOARD_COLUMNS', () => {
-  it('has nine columns in spec order', () => {
+  it('has eight columns in spec order', () => {
     expect(BOARD_COLUMNS.map((c) => c.status)).toEqual([
       'backlog',
       'plan_review',
@@ -12,7 +12,6 @@ describe('BOARD_COLUMNS', () => {
       'in_qa',
       'wait_for_final_review',
       'done',
-      'blocked',
     ]);
     expect(BOARD_COLUMNS.map((c) => c.label)).toEqual([
       'Backlog',
@@ -23,7 +22,6 @@ describe('BOARD_COLUMNS', () => {
       'In QA',
       'Wait for Human Review',
       'Done',
-      'Blocked',
     ]);
   });
 });

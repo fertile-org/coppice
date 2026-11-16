@@ -662,7 +662,6 @@ export function statusLabel(status: TicketStatus): string {
     in_qa: 'In QA',
     wait_for_final_review: 'Wait for Human Review',
     done: 'Done',
-    blocked: 'Blocked',
   };
   return labels[status];
 }

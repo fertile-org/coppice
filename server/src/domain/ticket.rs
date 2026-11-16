@@ -54,7 +54,6 @@ pub fn status_to_str(status: TicketStatus) -> &'static str {
         TicketStatus::InQa => "in_qa",
         TicketStatus::WaitForFinalReview => "wait_for_final_review",
         TicketStatus::Done => "done",
-        TicketStatus::Blocked => "blocked",
     }
 }
 
@@ -68,7 +67,6 @@ pub fn status_from_str(s: &str) -> Option<TicketStatus> {
         "in_qa" => Some(TicketStatus::InQa),
         "wait_for_final_review" => Some(TicketStatus::WaitForFinalReview),
         "done" => Some(TicketStatus::Done),
-        "blocked" => Some(TicketStatus::Blocked),
         _ => None,
     }
 }
@@ -116,5 +114,27 @@ pub fn priority_from_str(s: &str) -> Option<TicketPriority> {
         "high" => Some(TicketPriority::High),
         "critical" => Some(TicketPriority::Critical),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocked_is_not_a_ticket_status() {
+        assert!(status_from_str("blocked").is_none());
+        for status in [
+            TicketStatus::Backlog,
+            TicketStatus::Ready,
+            TicketStatus::PlanReview,
+            TicketStatus::InProgress,
+            TicketStatus::InReview,
+            TicketStatus::InQa,
+            TicketStatus::WaitForFinalReview,
+            TicketStatus::Done,
+        ] {
+            assert_ne!(status_to_str(status), "blocked");
+        }
     }
 }

@@ -264,7 +264,7 @@ export function TicketDetailPanel({
         </div>
       </div>
 
-      {ticket.status === 'blocked' && !isArchived && (
+      {ticket.substatus === 'blocked_by_error' && !isArchived && (
         <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />
       )}
 

@@ -36,7 +36,6 @@ pub fn ticket_status_from_next_status(label: &str) -> Option<TicketStatus> {
         "In QA" | "in_qa" => Some(TicketStatus::InQa),
         "Wait for Human Review" => Some(TicketStatus::WaitForFinalReview),
         "Done" | "done" => Some(TicketStatus::Done),
-        "Blocked" | "blocked" => Some(TicketStatus::Blocked),
         _ => None,
     }
 }

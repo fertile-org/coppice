@@ -2063,7 +2063,8 @@ mod tests {
             .get(fx.ticket_id)
             .await
             .expect("load ticket");
-        assert_eq!(ticket.ticket.status, TicketStatus::Blocked);
+        assert_eq!(ticket.ticket.status, TicketStatus::Backlog);
+        assert_eq!(ticket.ticket.substatus, Some(Substatus::BlockedByError));
 
         let comments = CommentService::new(&pool)
             .list_by_ticket(fx.ticket_id)

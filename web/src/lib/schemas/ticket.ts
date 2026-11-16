@@ -10,7 +10,6 @@ export const ticketStatusSchema = z.enum([
   'in_qa',
   'wait_for_final_review',
   'done',
-  'blocked',
 ]);
 
 export type TicketStatusValue = z.infer<typeof ticketStatusSchema>;

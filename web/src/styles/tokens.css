@@ -162,10 +162,6 @@
   --column-done-border: #6b9b7a;
   --column-done-accent: #2d5a3d;
 
-  --column-blocked-bg: #f5e6e6;
-  --column-blocked-border: #c49a9a;
-  --column-blocked-accent: #9b3d3d;
-
   /* ── Substatus / badge variants ── */
   --badge-priority-low-bg: var(--color-moss-100);
   --badge-priority-low-text: var(--color-moss-800);
@@ -332,10 +328,6 @@
   --column-done-bg: #122018;
   --column-done-border: #2d5a3d;
   --column-done-accent: #8fb89a;
-
-  --column-blocked-bg: #1f1212;
-  --column-blocked-border: #7f1d1d;
-  --column-blocked-accent: #f87171;
 
   --badge-priority-medium-text: #fbbf24;
   --badge-priority-medium-border: #854d0e;

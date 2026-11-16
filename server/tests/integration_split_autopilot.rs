@@ -317,7 +317,7 @@ async fn pause_blocked_and_merged_elsewhere_control_auto_start() {
         .oneshot(common::json_request(
             "PATCH",
             &format!("/api/tickets/{}/status", split.children[1]),
-            r#"{"status":"blocked"}"#,
+            r#"{"status":"ready","substatus":"blocked_by_error"}"#,
             &split.cookie,
             &split.csrf,
         ))
@@ -340,7 +340,10 @@ async fn pause_blocked_and_merged_elsewhere_control_auto_start() {
     .await;
     assert_eq!(started.status(), StatusCode::OK, "start next");
     assert_eq!(child_status(&split, split.children[2]).await, "ready");
-    assert_eq!(child_status(&split, split.children[1]).await, "blocked");
+    assert_eq!(child_status(&split, split.children[1]).await, "ready");
+    let blocked_id = split.children[1].to_string();
+    let child = common::get_ticket(&split.app, &blocked_id, &split.cookie, &split.csrf).await;
+    assert_eq!(child["substatus"], "blocked_by_error");
 }
 
 #[tokio::test]

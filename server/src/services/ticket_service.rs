@@ -24,8 +24,8 @@ pub struct TicketService<'a> {
 enum StatusWrite {
     Direct,
     Accept,
-    /// Continue a column a crash moved to Blocked. Skips the plan gate:
-    /// the ticket was already in that column.
+    /// Clear the blocked substatus after a crash so a run can start again.
+    /// Requires an open restart decision; skips the plan gate.
     RestartResume,
 }
 
@@ -556,15 +556,15 @@ impl<'a> TicketService<'a> {
         .await
     }
 
-    /// Put a ticket back in the column it occupied when Coppice restarted.
-    pub async fn restore_interrupted_column(
+    /// Clear the blocked substatus left by a crash so the run can resume.
+    pub async fn clear_interrupted_block(
         &self,
         ticket_id: Uuid,
-        status: TicketStatus,
     ) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
         self.write_status(
             ticket_id,
-            status,
+            current.ticket.status,
             Some(None),
             Some(None),
             StatusWrite::RestartResume,
@@ -619,7 +619,18 @@ impl<'a> TicketService<'a> {
                 }
             }
             StatusWrite::RestartResume => {
-                if current.ticket.status != TicketStatus::Blocked {
+                let pending: bool = sqlx::query_scalar(
+                    r#"
+                    SELECT EXISTS(
+                        SELECT 1 FROM run_restart_decisions
+                        WHERE ticket_id = $1 AND resolved_at IS NULL
+                    )
+                    "#,
+                )
+                .bind(ticket_id)
+                .fetch_one(self.pool)
+                .await?;
+                if !pending {
                     return Err(TicketError::Validation(
                         "ticket is not waiting after a restart".into(),
                     ));

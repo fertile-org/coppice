@@ -287,7 +287,6 @@ describe('board keyboard navigation', () => {
       'In QA',
       'Wait for Human Review',
       'Done',
-      'Blocked',
     ]) {
       expect(screen.getByRole('region', { name })).toBeVisible();
     }
@@ -342,13 +341,13 @@ describe('board keyboard navigation', () => {
     );
 
     press('g');
-    press('9');
+    press('8');
     expect(document.activeElement).toBe(
-      screen.getByRole('heading', { name: 'Blocked', level: 2 }),
+      screen.getByRole('heading', { name: 'Done', level: 2 }),
     );
     press('l');
     expect(document.activeElement).toBe(
-      screen.getByRole('heading', { name: 'Blocked', level: 2 }),
+      screen.getByRole('heading', { name: 'Done', level: 2 }),
     );
 
     press('g');

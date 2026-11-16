@@ -228,6 +228,26 @@ describe('TicketCard assignee and priority', () => {
     expect(resolveAssigneeName('agent-1', agents)).toBe('FE');
     expect(resolveAssigneeName('missing', agents)).toBe('Unknown agent');
   });
+
+  it('renders blocked substatus pills in danger red', () => {
+    renderCard(undefined, {
+      substatus: 'blocked_by_error',
+      substatusDisplay: { label: 'Blocked — error' },
+    });
+    expect(screen.getByText('Blocked — error').parentElement).toHaveClass(
+      'text-danger',
+    );
+  });
+
+  it('keeps waiting substatus pills info blue', () => {
+    renderCard(undefined, {
+      substatus: 'waiting_for_human',
+      substatusDisplay: { label: 'Waiting for you' },
+    });
+    expect(screen.getByText('Waiting for you').parentElement).toHaveClass(
+      'text-info',
+    );
+  });
 });
 
 describe('TicketCard plan labels', () => {

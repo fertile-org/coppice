@@ -92,7 +92,7 @@ impl<'a> RestartService<'a> {
         };
         let changed_files: i32 = row.get("changed_files");
         let previous_status: String = row.get("previous_status");
-        let previous_status = status_from_str(&previous_status).unwrap_or(TicketStatus::Blocked);
+        let previous_status = status_from_str(&previous_status).unwrap_or(TicketStatus::Backlog);
         let changed = u32::try_from(changed_files).unwrap_or(0);
         let (other_label, confirm) = if changed == 0 {
             (ACTION_CANCEL, None)
@@ -115,32 +115,26 @@ impl<'a> RestartService<'a> {
     ) -> Result<crate::domain::run::AgentRun, RestartError> {
         let choice = self.require_open(ticket_id).await?;
         let tickets = TicketService::new(self.pool);
-        let restored = choice.previous_status != TicketStatus::Blocked;
-        if restored {
-            tickets
-                .restore_interrupted_column(ticket_id, choice.previous_status)
-                .await?;
-        }
+        let cleared = tickets.clear_interrupted_block(ticket_id).await?;
+        let column = cleared.ticket.status;
         let started = RunService::new(self.pool).start_run(ticket_id).await;
         let run = match started {
             Ok(run) => run,
             Err(err) => {
-                if restored {
-                    if let Err(rollback_err) = tickets
-                        .update_status(
-                            ticket_id,
-                            TicketStatus::Blocked,
-                            Some(Some(Substatus::BlockedByError)),
-                            Some(None),
-                        )
-                        .await
-                    {
-                        tracing::warn!(
-                            error = %rollback_err,
-                            %ticket_id,
-                            "failed to put the ticket back in Blocked after resume failed"
-                        );
-                    }
+                if let Err(rollback_err) = tickets
+                    .update_status(
+                        ticket_id,
+                        column,
+                        Some(Some(Substatus::BlockedByError)),
+                        Some(None),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        error = %rollback_err,
+                        %ticket_id,
+                        "failed to restore blocked substatus after resume failed"
+                    );
                 }
                 return Err(err.into());
             }

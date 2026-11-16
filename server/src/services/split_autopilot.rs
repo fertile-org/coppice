@@ -12,8 +12,8 @@ use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::domain::substatus::TicketStatus;
-use crate::domain::ticket::{status_from_str, status_to_str};
+use crate::domain::substatus::{Substatus, TicketStatus};
+use crate::domain::ticket::{status_from_str, status_to_str, substatus_from_str};
 use crate::domain::workflow::JOB_TYPE_VERIFY_PARENT;
 use crate::services::human_review_service::{HumanReviewError, HumanReviewService};
 use crate::services::planning_service::{PlanError, PlanningService};
@@ -68,6 +68,7 @@ struct ChildSnap {
     id: Uuid,
     title: String,
     status: TicketStatus,
+    substatus: Option<Substatus>,
     archived: bool,
     merged: bool,
     accepted: bool,
@@ -294,6 +295,7 @@ impl<'a> SplitAutopilot<'a> {
                 child.id AS child_id,
                 child.title AS child_title,
                 child.status AS child_status,
+                child.substatus AS child_substatus,
                 child.archived_at IS NOT NULL AS archived,
                 review.merged_at IS NOT NULL AS merged,
                 review.ticket_id IS NOT NULL AS accepted
@@ -335,11 +337,13 @@ impl<'a> SplitAutopilot<'a> {
                 });
             }
             let status: String = row.get("child_status");
+            let substatus: Option<String> = row.get("child_substatus");
             let family = families.last_mut().expect("family just pushed");
             family.children.push(ChildSnap {
                 id: row.get("child_id"),
                 title: row.get("child_title"),
                 status: status_from_str(&status).unwrap_or(TicketStatus::Backlog),
+                substatus: substatus.as_deref().and_then(substatus_from_str),
                 archived: row.get("archived"),
                 merged: row.get("merged"),
                 accepted: row.get("accepted"),
@@ -389,10 +393,16 @@ fn active_child(children: &[ChildSnap]) -> Option<&ChildSnap> {
     children.iter().find(|child| !finished(child))
 }
 
+fn child_is_blocked(child: &ChildSnap) -> bool {
+    child
+        .substatus
+        .is_some_and(Substatus::is_blocked)
+}
+
 fn any_blocked(children: &[ChildSnap]) -> bool {
     children
         .iter()
-        .any(|child| !child.archived && child.status == TicketStatus::Blocked)
+        .any(|child| !child.archived && child_is_blocked(child))
 }
 
 /// The next Backlog child, only when every child before it is finished.
@@ -413,7 +423,7 @@ fn next_in_order(children: &[ChildSnap]) -> Option<&ChildSnap> {
 /// continue past it. An in-flight child still holds the line.
 fn next_manual(children: &[ChildSnap]) -> Option<&ChildSnap> {
     for child in children {
-        if finished(child) || child.status == TicketStatus::Blocked {
+        if finished(child) || child_is_blocked(child) {
             continue;
         }
         if child.status == TicketStatus::Backlog {
@@ -448,8 +458,11 @@ fn next_actor(family: &Family) -> &'static str {
             _ => ACTOR_NONE,
         };
     };
+    if child_is_blocked(active) {
+        return ACTOR_YOU;
+    }
     match active.status {
-        TicketStatus::Blocked | TicketStatus::WaitForFinalReview | TicketStatus::Done => ACTOR_YOU,
+        TicketStatus::WaitForFinalReview | TicketStatus::Done => ACTOR_YOU,
         TicketStatus::Backlog if !family.auto_start => ACTOR_YOU,
         _ => ACTOR_AGENT,
     }
@@ -470,10 +483,17 @@ mod tests {
             id: Uuid::nil(),
             title: String::new(),
             status,
+            substatus: None,
             archived,
             merged,
             accepted: false,
         }
+    }
+
+    fn blocked_child(status: TicketStatus) -> ChildSnap {
+        let mut child = child(status, false, false);
+        child.substatus = Some(Substatus::BlockedByError);
+        child
     }
 
     #[test]
@@ -490,7 +510,7 @@ mod tests {
 
         let held = vec![
             child(TicketStatus::Done, false, true),
-            child(TicketStatus::Blocked, false, false),
+            blocked_child(TicketStatus::Ready),
             child(TicketStatus::Backlog, false, false),
         ];
         assert!(next_in_order(&held).is_none());

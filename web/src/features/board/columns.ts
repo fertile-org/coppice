@@ -8,8 +8,7 @@ export type TicketStatus =
   | 'in_review'
   | 'in_qa'
   | 'wait_for_final_review'
-  | 'done'
-  | 'blocked';
+  | 'done';
 
 export type ColumnColorKey =
   | 'backlog'
@@ -19,8 +18,7 @@ export type ColumnColorKey =
   | 'in-review'
   | 'in-qa'
   | 'wait-final'
-  | 'done'
-  | 'blocked';
+  | 'done';
 
 export interface BoardColumnDef {
   status: TicketStatus;
@@ -41,7 +39,6 @@ export const BOARD_COLUMNS: BoardColumnDef[] = [
     colorKey: 'wait-final',
   },
   { status: 'done', label: 'Done', colorKey: 'done' },
-  { status: 'blocked', label: 'Blocked', colorKey: 'blocked' },
 ];
 
 export const TICKET_STATUSES = new Set<string>(
@@ -96,11 +93,6 @@ export const COLUMN_COLOR_CLASSES: Record<
     bg: 'bg-column-done-bg',
     border: 'border-column-done-border',
     accent: 'text-column-done-accent',
-  },
-  blocked: {
-    bg: 'bg-column-blocked-bg',
-    border: 'border-column-blocked-border',
-    accent: 'text-column-blocked-accent',
   },
 };
 

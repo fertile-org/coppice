@@ -25,15 +25,15 @@ function ticket(overrides: Partial<Ticket> = {}): Ticket {
 }
 
 describe('ticket shortcut rules', () => {
-  it('steps columns from Backlog through Blocked and stops at the ends', () => {
+  it('steps columns from Backlog through Done and stops at the ends', () => {
     expect(adjacentColumn('backlog', 1)?.label).toBe('Plan Review');
     expect(adjacentColumn('backlog', -1)).toBeNull();
-    expect(adjacentColumn('done', 1)?.label).toBe('Blocked');
-    expect(adjacentColumn('blocked', 1)).toBeNull();
+    expect(adjacentColumn('done', 1)).toBeNull();
+    expect(adjacentColumn('wait_for_final_review', 1)?.label).toBe('Done');
     expect(adjacentColumn('in_qa', 1)?.label).toBe('Wait for Human Review');
     expect(adjacentColumn('wait_for_final_review', -1)?.label).toBe('In QA');
     expect(moveTargetStatus(ticket({ status: 'backlog' }), 1)).toBe('plan_review');
-    expect(moveTargetStatus(ticket({ status: 'blocked' }), 1)).toBeNull();
+    expect(moveTargetStatus(ticket({ status: 'done' }), 1)).toBeNull();
     expect(
       moveTargetStatus(
         ticket({ status: 'backlog', archivedAt: '2026-10-15T00:00:00.000Z' }),

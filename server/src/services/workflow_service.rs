@@ -56,24 +56,15 @@ impl WorkflowService {
             (Backlog, Ready)
                 | (Backlog, InProgress)
                 | (Backlog, InReview)
-                | (Backlog, Blocked)
                 | (Ready, PlanReview)
                 | (Ready, InProgress)
                 | (Ready, InReview)
-                | (Ready, Blocked)
                 | (PlanReview, InProgress)
                 | (PlanReview, Ready)
-                | (PlanReview, Blocked)
                 | (InProgress, InReview)
-                | (InProgress, Blocked)
                 | (InReview, InQa)
                 | (InReview, WaitForFinalReview)
-                | (InReview, Blocked)
                 | (InQa, WaitForFinalReview)
-                | (InQa, Blocked)
-                | (Blocked, Ready)
-                | (Blocked, InProgress)
-                | (Blocked, Backlog)
                 | (WaitForFinalReview, InReview)
                 | (Done, InReview)
         )
@@ -199,7 +190,8 @@ impl WorkflowService {
                 // completion should still advance via the succeeded gate when assignTo
                 // is wrong or names an agent not on the board (e.g. frontend_engineer).
                 if unknown_assign_to_blocks_ticket(ctx.current_status, &ctx.agent_role) {
-                    action.new_status = Some(TicketStatus::Blocked);
+                    action.substatus = Some(Some(Substatus::BlockedByError));
+                    action.substatus_metadata = Some(None);
                     action.system_comments.push(unknown_assign_to_notice(
                         &assign_key,
                         &ctx.board_agent_keys,
@@ -900,7 +892,6 @@ mod tests {
             InQa,
             WaitForFinalReview,
             Done,
-            Blocked,
         ];
         for from in statuses {
             assert!(
@@ -951,7 +942,6 @@ mod tests {
             InReview,
             InQa,
             WaitForFinalReview,
-            Blocked,
         ];
         for to in destinations {
             assert_eq!(
@@ -1023,7 +1013,6 @@ mod tests {
             InQa,
             WaitForFinalReview,
             Done,
-            Blocked,
         ];
         let roles = [
             "PM",
@@ -1351,7 +1340,8 @@ mod tests {
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(action.new_status, Some(TicketStatus::Blocked));
+        assert!(action.new_status.is_none());
+        assert_eq!(action.substatus, Some(Some(Substatus::BlockedByError)));
         assert_eq!(action.system_comments.len(), 1);
         assert!(action.system_comments[0].contains("frontend_engineer"));
         assert!(action.system_comments[0].contains("Workflow blocked"));

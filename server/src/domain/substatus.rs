@@ -13,7 +13,6 @@ pub enum TicketStatus {
     InQa,
     WaitForFinalReview,
     Done,
-    Blocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +26,18 @@ pub enum Substatus {
     BlockedByMissingSecret,
     BlockedByPermission,
     BlockedByError,
+}
+
+impl Substatus {
+    pub fn is_blocked(self) -> bool {
+        matches!(
+            self,
+            Self::BlockedByMissingCapability
+                | Self::BlockedByMissingSecret
+                | Self::BlockedByPermission
+                | Self::BlockedByError
+        )
+    }
 }
 
 pub fn substatus_label(s: Substatus) -> &'static str {
