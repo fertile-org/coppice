@@ -5,6 +5,7 @@ use axum::{
 };
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::services::connector_probe_service::ConnectorProbes;
+use coppice_server::services::worktree_admin_service::WorktreeSizeCache;
 use coppice_server::{db, AppConfig, AppState};
 use http_body_util::BodyExt;
 use std::net::SocketAddr;
@@ -252,6 +253,7 @@ where
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
         git_chain_locks: Default::default(),
+        worktree_sizes: Arc::new(WorktreeSizeCache::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -309,6 +311,7 @@ where
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
         git_chain_locks: Default::default(),
+        worktree_sizes: Arc::new(WorktreeSizeCache::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -364,6 +367,7 @@ where
             coppice_server::services::marketplace_service::MarketplaceCatalog::new(),
         ),
         git_chain_locks: Default::default(),
+        worktree_sizes: Arc::new(WorktreeSizeCache::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),

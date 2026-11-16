@@ -26,6 +26,7 @@ mod tool_connectors;
 mod tools;
 mod usage;
 mod users;
+mod worktrees;
 mod ws;
 
 use crate::middleware::{csrf, host_guard, request_log, session};
@@ -66,6 +67,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tool_connectors::routes())
         .merge(plugins::routes())
         .merge(marketplace::routes())
+        .merge(worktrees::routes())
         .merge(init_wizard::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(
