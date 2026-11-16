@@ -45,7 +45,6 @@ export const pages: Pages = {
         imageAlt: '主题开关的代码审查：已批准的计划、改动的文件，以及 diff 某一行上的评论。',
       },
     ],
-    howClose: '下载、打开、开始工作。无需任何配置：不用 Docker，也不用 Coppice 账号。',
     whyTitle: '为什么选择 Coppice',
     reasons: [
       {

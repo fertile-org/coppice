@@ -46,8 +46,6 @@ export const pages = {
           'Code review for a theme toggle: the approved plan, the changed file, and a comment on one line of the diff.',
       },
     ],
-    howClose:
-      "Download the app and open it. You don't need Docker or a Coppice account. You do need a local git checkout and one supported agent CLI, signed in with that CLI.",
     whyTitle: 'Why Coppice',
     reasons: [
       {

@@ -46,7 +46,6 @@ export const pages: Pages = {
         imageAlt: 'Review code của nút theme: kế hoạch đã duyệt, file đã đổi, và một góp ý trên một dòng của diff.',
       },
     ],
-    howClose: 'Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, không tài khoản Coppice.',
     whyTitle: 'Vì sao chọn Coppice',
     reasons: [
       {
