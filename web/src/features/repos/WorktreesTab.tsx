@@ -6,8 +6,8 @@ import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import type { WorktreeAdminEntry } from '../../lib/schemas/worktree';
 import { cn } from '../../lib/utils';
 import { formatRelativeTime } from '../tools/connectorFormat';
+import type { TicketStatus } from '../board/columns';
 import { statusLabel } from '../tickets/useTicket';
-import type { TicketStatus } from '../../lib/schemas/ticket';
 import { useRemoveWorktrees, useWorktrees } from './useWorktrees';
 
 function formatBytes(bytes: number | null): string {
