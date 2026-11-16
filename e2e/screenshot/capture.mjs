@@ -152,7 +152,8 @@ const TICKETS = [
   {
     title: 'Verify the Claude Code connector',
     description: 'Live CLI check is still outstanding.',
-    status: 'blocked',
+    status: 'in_progress',
+    substatus: 'blocked_by_error',
     priority: 'critical',
     agent: 'PM',
   },
@@ -166,7 +167,6 @@ const COLUMN_LABELS = [
   'In QA',
   'Wait for Human Review',
   'Done',
-  'Blocked',
 ];
 
 const FRAME_ORDER = [
@@ -311,9 +311,11 @@ async function seedBoard(auth, agentIds) {
       });
       await api('POST', `/api/tickets/${created.id}/final-approve`, auth, {});
     } else if (ticket.status !== 'backlog') {
-      await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
-        status: ticket.status,
-      });
+      const body = { status: ticket.status };
+      if (ticket.substatus) {
+        body.substatus = ticket.substatus;
+      }
+      await api('PATCH', `/api/tickets/${created.id}/status`, auth, body);
     }
     const agentId = agentIds[ticket.agent];
     if (!agentId) fail(`missing agent ${ticket.agent}`);
