@@ -50,24 +50,29 @@ PM エージェントが計画を下書きし、あなたが承認します。�
 
 ## 使い方
 
-1. **作業を任せる。** チケットを書くか、エージェントが提案したチケットを承認します。PM エージェントに割り当てると、そのエージェントが計画を下書きし、UI の変更にはデザイン案も提示します。コーディングが始まる前に、あなたが計画を承認します。**Skip planning** を選んだ場合を除きます。**Skip planning** をオンにすると、チケットは直接 Ready に進みます。
-2. **エージェントに作らせる。** チケットごとに専用の git worktree があるので、並行して動くエージェントがメインのチェックアウトに触れることはありません。どの実行もライブで追えます。
-3. **Human Review。** アプリで diff を読み、どの行にもコメントできます。あなたが承認するまで、何も完了にはなりません。
+### PM エージェントと計画する
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="ボード：Backlog、Plan Review、Ready、In Progress の列とチケットのカード" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="デザイン案のポップアップ：3 つの案がタブで並び、プレビュー、Recommended バッジ、Choose ボタンがある" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM エージェントがチケットに下書きした計画：アプローチ、手順、リスク、対象外" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="コードレビュー：承認済みの計画、変更されたファイル、行コメント付きの diff" /></td>
-  </tr>
-  <tr>
-    <td align="center">すべてのエージェントを 1 つのボードに</td>
-    <td align="center">デザイン案を比較</td>
-    <td align="center">まず計画を承認</td>
-    <td align="center">diff を 1 行ずつレビュー</td>
-  </tr>
-</table>
+PM エージェントがチケットを読み、方針、手順、変更の確認方法を計画に下書きします。コードを書き始める前に、あなたがその計画を承認します。
+
+<img src="website/public/home/plan.png" alt="ダークモード切り替えの Plan Review。PM エージェントが担当し、提案された計画に方針と手順が並んでいます。" width="720" />
+
+### デザインを承認する
+
+チケットが画面の見た目を変えるとき、エージェントはいくつかのレイアウトを見せ、おすすめを示します。あなたが一つを選ぶと、計画はその選択に沿います。
+
+<img src="website/public/home/design.png" alt="Settings のテーマ切り替えのデザイン案。3 つのレイアウトと、おすすめのプレビューがあります。" width="720" />
+
+### エージェントに作らせる
+
+専門のエージェントがチケットを作り、レビューし、テストします。チケットごとに専用の git worktree があるので、並行作業はメインのチェックアウトに触れません。
+
+<img src="website/public/home/build.png" alt="ボード。進行中、レビュー中、QA、人の確認待ちのチケットがあります。" width="720" />
+
+### コードの変更をレビューする
+
+アプリで diff を読み、どの行にもコメントできます。あなたが承認するまで何も完了にはならず、Accept と Merge は別の操作です。
+
+<img src="website/public/home/review.png" alt="テーマ切り替えのコードレビュー。承認済みの計画、変更されたファイル、diff の 1 行へのコメントです。" width="720" />
 
 ## いつもの CLI で動く
 

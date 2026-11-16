@@ -50,24 +50,29 @@
 
 ## 工作方式
 
-1. **把工作交出去。** 写一个工单，或批准智能体建议的工单。把工单指派给 PM 智能体。PM 智能体会起草计划，并为界面改动提供设计方案。开始写代码之前，你先批准计划，除非你选择 **Skip planning**（跳过规划）。打开 **Skip planning**（跳过规划），工单会直接进入 Ready。
-2. **让智能体去构建。** 每个工单都有自己的 git worktree，并行的智能体永远不会碰你的主检出目录。你可以实时查看任何一次运行。
-3. **人工审核。** 在应用里阅读 diff，可以评论任意一行。你接受之前，什么都不算完成。
+### 和 PM 智能体一起规划
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 列，以及工单卡片" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="设计方案弹窗：三个方案以标签页排列，带预览、Recommended 标记和 Choose 按钮" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM 智能体在工单上起草的计划：方法、步骤、风险和不在范围内的内容" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="代码审查：已批准的计划、改动的文件，以及带行内评论的 diff" /></td>
-  </tr>
-  <tr>
-    <td align="center">所有智能体，一块看板</td>
-    <td align="center">比较设计方案</td>
-    <td align="center">先批准计划</td>
-    <td align="center">逐行审查 diff</td>
-  </tr>
-</table>
+PM 智能体阅读工单并起草计划：做法、步骤，以及如何检查这次改动。开始写代码之前，你先批准这份计划。
+
+<img src="website/public/home/plan.png" alt="深色模式开关的计划审核。PM 智能体是负责人，提议的计划列出了做法和步骤。" width="720" />
+
+### 批准设计
+
+当工单会改变人们看到的界面时，智能体会给出几个布局，并标出它推荐的一个。你选定一个，计划就按这个选择来写。
+
+<img src="website/public/home/design.png" alt="Settings 主题控件的设计方案，有三种布局，以及推荐开关的预览。" width="720" />
+
+### 让智能体去构建
+
+专业智能体负责构建、审查和测试。每个工单都有自己的 git worktree，并行的工作不会碰到你的主检出目录。
+
+<img src="website/public/home/build.png" alt="看板，上面有进行中、审查中、测试中，以及等你处理的工单。" width="720" />
+
+### 审查代码改动
+
+在应用里阅读 diff，可以评论任意一行。你接受之前，什么都不算完成，接受和合并是两件分开的事。
+
+<img src="website/public/home/review.png" alt="主题开关的代码审查：已批准的计划、改动的文件，以及 diff 某一行上的评论。" width="720" />
 
 ## 用你已经在用的 CLI
 

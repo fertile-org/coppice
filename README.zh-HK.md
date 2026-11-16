@@ -50,24 +50,29 @@
 
 ## 工作方式
 
-1. **把工作交出去。** 寫一個工單，或批准代理建議的工單。把它指派給你的 PM 代理，它會起草一份計劃，並為介面改動提供設計方案。你批准計劃後才開始寫程式碼，除非你選擇 **Skip planning**（跳過規劃）。開啟 **Skip planning**，工單會直接進入 Ready。
-2. **讓代理去構建。** 每個工單都有自己的 git worktree，並行的代理永遠不會碰你的主檢出目錄。任何一次執行都可以即時查看。
-3. **人工審查。** 在應用裏閱讀 diff，可以評論任意一行。你接受之前，甚麼都不算完成。
+### 和 PM 代理一起規劃
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="看板：Backlog、Plan Review、Ready 和 In Progress 欄，以及工單卡片" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="設計方案彈窗：三個方案以分頁排列，附預覽、Recommended 標記和 Choose 按鈕" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="PM 代理在工單上起草的計劃：方法、步驟、風險和不在範圍內的內容" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="程式碼審查：已批准的計劃、改動的檔案，以及帶行內評論的 diff" /></td>
-  </tr>
-  <tr>
-    <td align="center">所有代理，一塊看板</td>
-    <td align="center">比較設計方案</td>
-    <td align="center">先批准計劃</td>
-    <td align="center">逐行審查 diff</td>
-  </tr>
-</table>
+PM 代理閱讀工單並起草計劃：做法、步驟，以及如何檢查這次改動。開始寫程式碼之前，你先批准這份計劃。
+
+<img src="website/public/home/plan.png" alt="深色模式開關的計劃審查。PM 代理是負責人，提議的計劃列出了做法和步驟。" width="720" />
+
+### 批准設計
+
+當工單會改變人們看到的介面時，代理會給出幾個版面，並標出它推薦的一個。你選定一個，計劃就照這個選擇來寫。
+
+<img src="website/public/home/design.png" alt="Settings 主題控件的設計方案，有三種版面，以及推薦開關的預覽。" width="720" />
+
+### 讓代理去構建
+
+專業代理負責構建、審查和測試。每個工單都有自己的 git worktree，並行的工作不會碰到你的主檢出目錄。
+
+<img src="website/public/home/build.png" alt="看板，上面有進行中、審查中、測試中，以及等人處理的工單。" width="720" />
+
+### 審查程式碼改動
+
+在應用裏閱讀 diff，可以評論任意一行。你接受之前，甚麼都不算完成，接受和合併是兩件分開的事。
+
+<img src="website/public/home/review.png" alt="主題開關的程式碼審查：已批准的計劃、改動的檔案，以及 diff 某一行上的評論。" width="720" />
 
 ## 用你已經在用的 CLI
 

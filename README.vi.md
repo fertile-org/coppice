@@ -50,24 +50,29 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
 
 ## Cách hoạt động
 
-1. **Giao việc.** Viết một ticket, hoặc duyệt ticket mà agent đề xuất. Giao cho agent PM. Agent PM sẽ soạn kế hoạch và đưa ra các phương án thiết kế cho thay đổi giao diện. Bạn duyệt kế hoạch trước khi bắt đầu viết code, trừ khi bạn chọn **Skip planning**. Bật **Skip planning** nếu muốn ticket đi thẳng sang Ready.
-2. **Để các agent làm việc.** Mỗi ticket có git worktree riêng, nên các agent chạy song song không bao giờ thay đổi bản checkout chính. Bạn xem trực tiếp được mọi lần chạy.
-3. **Human Review.** Đọc diff ngay trong ứng dụng, góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong.
+### Lên kế hoạch với agent PM
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="Bảng: các cột Backlog, Plan Review, Ready và In Progress với các thẻ ticket" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="Cửa sổ phương án thiết kế: ba phương án dạng tab, có xem trước, nhãn Recommended và nút Choose" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="Kế hoạch do agent PM soạn trên một ticket: hướng làm, các bước, rủi ro và phần ngoài phạm vi" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Code review: kế hoạch đã duyệt, các file thay đổi và diff kèm một góp ý trên dòng code" /></td>
-  </tr>
-  <tr>
-    <td align="center">Mọi agent trên một bảng</td>
-    <td align="center">So sánh các phương án thiết kế</td>
-    <td align="center">Duyệt kế hoạch trước khi viết code, trừ khi chọn Skip planning</td>
-    <td align="center">Review diff từng dòng</td>
-  </tr>
-</table>
+Agent PM đọc ticket và soạn kế hoạch: cách làm, các bước, và cách kiểm tra thay đổi. Bạn duyệt kế hoạch trước khi có code được viết.
+
+<img src="website/public/home/plan.png" alt="Plan Review cho nút chuyển dark mode. Agent PM là người được giao, và kế hoạch đề xuất ghi cách làm cùng các bước." width="720" />
+
+### Duyệt thiết kế
+
+Khi ticket đổi phần người dùng nhìn thấy, agent đưa ra vài bố cục và đánh dấu phương án nó đề xuất. Bạn chọn một, và kế hoạch đi theo lựa chọn đó.
+
+<img src="website/public/home/design.png" alt="Các phương án thiết kế cho nút theme trong Settings, với ba bố cục và bản xem trước của phương án được đề xuất." width="720" />
+
+### Để các agent làm việc
+
+Các agent chuyên môn viết code, review và test ticket. Mỗi ticket có git worktree riêng, nên việc làm song song không đụng bản checkout chính.
+
+<img src="website/public/home/build.png" alt="Bảng, với ticket đang làm, đang review, đang QA, và ticket đang chờ một người." width="720" />
+
+### Xem các thay đổi trong code
+
+Đọc diff ngay trong ứng dụng và góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong, và Accept với Merge là hai lựa chọn riêng.
+
+<img src="website/public/home/review.png" alt="Review code của nút theme: kế hoạch đã duyệt, file đã đổi, và một góp ý trên một dòng của diff." width="720" />
 
 ## Dùng luôn các CLI bạn đang có
 

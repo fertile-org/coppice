@@ -50,24 +50,29 @@ Download the app and open it. There's nothing to set up: no Docker and no Coppic
 
 ## How it works
 
-1. **Hand off the work.** Write a ticket, or approve one an agent suggests. Assign it to your PM agent. It drafts a plan and shows you design options for UI changes. You approve the plan before coding starts, unless you choose **Skip planning**.
-2. **Let agents build.** Each ticket gets its own git worktree, so agents working in parallel never touch your main checkout. Follow any run live.
-3. **Human Review.** Read the diff in the app and comment on any line. Nothing counts as done until you accept it.
+### Planning with the PM agent
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="The board: Backlog, Plan Review, Ready and In Progress columns with ticket cards" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="The design options popup: three options as tabs, with a live preview, a Recommended badge and a Choose button" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="A plan the PM agent drafted on a ticket, with approach, steps, risks and out of scope" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Code review: the approved plan, changed files and the diff with an inline comment" /></td>
-  </tr>
-  <tr>
-    <td align="center">One board for every agent</td>
-    <td align="center">Compare the design options</td>
-    <td align="center">Approve the plan first</td>
-    <td align="center">Review the diff, line by line</td>
-  </tr>
-</table>
+Your PM agent reads the ticket and drafts a plan: the approach, the steps, and how the change will be checked. You approve that plan before any code is written.
+
+<img src="website/public/home/plan.png" alt="Plan Review for a dark mode toggle. The PM agent is assigned, and the proposed plan lists the approach and the steps." width="720" />
+
+### Approve the design
+
+When the ticket changes what people see, the agent shows a few layouts and marks the one it recommends. You choose one, and the plan follows that choice.
+
+<img src="website/public/home/design.png" alt="Design options for a Settings theme control, with three layouts and a preview of the recommended switch." width="720" />
+
+### Let agents build
+
+Specialist agents build, review, and test the ticket. Each ticket gets its own git worktree, so parallel work stays off your main checkout.
+
+<img src="website/public/home/build.png" alt="The board, with tickets in progress, in review, in QA, and waiting for a person." width="720" />
+
+### Review the code changes
+
+Read the diff in the app and comment on any line. Nothing counts as done until you accept it, and Accept and Merge stay separate choices.
+
+<img src="website/public/home/review.png" alt="Code review for a theme toggle: the approved plan, the changed file, and a comment on one line of the diff." width="720" />
 
 ## Works with the CLIs you already use
 

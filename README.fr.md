@@ -50,24 +50,29 @@ Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de c
 
 ## Comment ça marche
 
-1. **Confiez le travail.** Écrivez un ticket, ou approuvez celui qu’un agent propose. Assignez-le à votre agent PM. Cet agent rédige un plan et vous montre des options de design pour les changements d’interface. Vous approuvez le plan avant le début du codage, sauf si vous choisissez **Skip planning**.
-2. **Laissez les agents construire.** Chaque ticket a son propre worktree git, donc les agents qui travaillent en parallèle ne touchent jamais à votre checkout principal. Suivez n’importe quel lancement en direct.
-3. **Human Review.** Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté.
+### Planifier avec l’agent PM
 
-<table>
-  <tr>
-    <td width="25%"><img src="static/screenshots/07-board.png" alt="Le tableau : colonnes Backlog, Plan Review, Ready et In Progress avec des cartes de tickets" /></td>
-    <td width="25%"><img src="static/screenshots/08-design-options.png" alt="La fenêtre des options de design : trois options en onglets, avec aperçu, badge Recommended et bouton Choose" /></td>
-    <td width="25%"><img src="static/screenshots/02-plan.png" alt="Un plan rédigé par l’agent PM sur un ticket : approche, étapes, risques et hors périmètre" /></td>
-    <td width="25%"><img src="static/screenshots/05-diff.png" alt="Revue de code : le plan approuvé, les fichiers modifiés et le diff avec un commentaire sur une ligne" /></td>
-  </tr>
-  <tr>
-    <td align="center">Un tableau pour tous les agents</td>
-    <td align="center">Comparez les options de design</td>
-    <td align="center">Approuvez d’abord le plan</td>
-    <td align="center">Relisez le diff, ligne par ligne</td>
-  </tr>
-</table>
+Votre agent PM lit le ticket et rédige un plan : l’approche, les étapes, et comment le changement sera vérifié. Vous approuvez ce plan avant que le code commence.
+
+<img src="website/public/home/plan.png" alt="Plan Review pour un interrupteur de mode sombre. L’agent PM est assigné, et le plan proposé liste l’approche et les étapes." width="720" />
+
+### Approuver le design
+
+Quand le ticket change ce que les gens voient, l’agent montre quelques mises en page et indique celle qu’il recommande. Vous en choisissez une, et le plan suit ce choix.
+
+<img src="website/public/home/design.png" alt="Options de design pour le contrôle de thème des Settings, avec trois mises en page et un aperçu de l’option recommandée." width="720" />
+
+### Laisser les agents construire
+
+Des agents spécialisés construisent, relisent et testent le ticket. Chaque ticket a son propre worktree git, donc le travail en parallèle reste hors de votre checkout principal.
+
+<img src="website/public/home/build.png" alt="Le tableau, avec des tickets en cours, en revue, en QA, et un ticket qui attend une personne." width="720" />
+
+### Relire les changements de code
+
+Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté, et accepter et Merge restent deux choix distincts.
+
+<img src="website/public/home/review.png" alt="Revue de code d’un interrupteur de thème : le plan approuvé, le fichier modifié, et un commentaire sur une ligne du diff." width="720" />
 
 ## Avec les CLI que vous utilisez déjà
 
