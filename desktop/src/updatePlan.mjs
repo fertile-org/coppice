@@ -1,3 +1,5 @@
+import { DOWNLOAD_PAGE_URL } from './updateEndpoints.mjs';
+
 export const UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // Signed macOS hides the banner until the zip is on disk. Anything else
@@ -14,7 +16,7 @@ export function bannerForUpdate({ platform, macInPlaceUpdates, availability, dow
   if (!availability?.version) return null;
   if (platform === 'linux') return { kind: 'linux', version: availability.version };
   if (platform === 'darwin') {
-    return { kind: 'download', version: availability.version, url: availability.url };
+    return { kind: 'download', version: availability.version, url: DOWNLOAD_PAGE_URL };
   }
   return null;
 }

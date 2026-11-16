@@ -4,6 +4,9 @@
 // query. Packaging calls this and the build fails when the value is rejected.
 export const DEFAULT_UPDATE_BASE = 'https://apt.getcoppice.app';
 
+// Manual-download landing page for macOS builds without in-place updates.
+export const DOWNLOAD_PAGE_URL = 'https://getcoppice.app/download';
+
 function rejectUpdateBase(detail) {
   throw new Error(`COPPICE_UPDATE_BASE must be an https origin with no path: ${detail}`);
 }

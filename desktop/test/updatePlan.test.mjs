@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { DOWNLOAD_PAGE_URL } from '../src/updateEndpoints.mjs';
 import { UPDATE_INTERVAL_MS, bannerForUpdate, startUpdateLoop } from '../src/updatePlan.mjs';
 
 const available = { version: '1.4.0-rc.2', url: 'https://example/rc' };
@@ -25,10 +26,10 @@ test('linux offers restart once apt has installed the newer package', () => {
   );
 });
 
-test('unsigned macOS offers the release page', () => {
+test('unsigned macOS offers the website download page', () => {
   assert.deepEqual(
     bannerForUpdate({ platform: 'darwin', macInPlaceUpdates: false, availability: available, download: null }),
-    { kind: 'download', version: '1.4.0-rc.2', url: 'https://example/rc' },
+    { kind: 'download', version: '1.4.0-rc.2', url: DOWNLOAD_PAGE_URL },
   );
 });
 
