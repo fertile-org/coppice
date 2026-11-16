@@ -30,8 +30,12 @@ async fn list_presets_has_ten_entries() {
     let first = &body["items"][0];
     let template = first["systemPromptTemplate"].as_str().unwrap();
     assert!(
-        template.contains("# SOUL"),
-        "expected SOUL template, got: {template}"
+        template.contains("# Operating posture"),
+        "expected composed operating posture, got: {template}"
+    );
+    assert!(
+        template.contains("Hard never (without explicit human approval)"),
+        "expected hard-never list in composed template, got: {template}"
     );
 }
 

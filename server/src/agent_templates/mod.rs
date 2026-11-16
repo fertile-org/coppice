@@ -3,6 +3,9 @@ use std::path::Path;
 
 use thiserror::Error;
 
+const POSTURE: &str = include_str!("../../agent_templates/posture.md");
+const POSTURE_PLACEHOLDER: &str = "{{posture}}";
+
 #[derive(Debug, Error)]
 pub enum AgentTemplateError {
     #[error("failed to read agent templates directory: {0}")]
@@ -25,7 +28,10 @@ pub fn templates_dir_from(env: Option<&str>) -> std::path::PathBuf {
     }
 }
 
-/// Load all `*.md` files; map key = file stem (e.g. `pm.md` → `"pm"`).
+/// Load all agent `*.md` templates; map key = file stem (e.g. `pm.md` → `"pm"`).
+///
+/// `posture.md` is not a template key: its content is embedded via `include_str!`
+/// and substituted for `{{posture}}` in every loaded file.
 pub fn load(dir: &Path) -> Result<HashMap<String, String>, AgentTemplateError> {
     let mut out = HashMap::new();
     for entry in std::fs::read_dir(dir)? {
@@ -39,7 +45,11 @@ pub fn load(dir: &Path) -> Result<HashMap<String, String>, AgentTemplateError> {
             .and_then(|s| s.to_str())
             .ok_or_else(|| AgentTemplateError::InvalidFileName(path.clone()))?
             .to_string();
-        let content = std::fs::read_to_string(&path)?;
+        if key == "posture" {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path)?;
+        let content = raw.replace(POSTURE_PLACEHOLDER, POSTURE);
         out.insert(key, content);
     }
     Ok(out)
@@ -67,13 +77,57 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn templates_dir_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agent_templates")
+    }
+
     #[test]
     fn load_pm_template_from_disk() {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agent_templates");
-        let templates = load(&dir).expect("load templates");
+        let templates = load(&templates_dir_path()).expect("load templates");
         let pm = templates.get("pm").expect("pm template");
-        assert!(pm.contains("# SOUL"));
+        assert!(pm.contains("# Operating posture"));
+        assert!(
+            pm.contains("Hard never (without explicit human approval)"),
+            "expected hard-never list in composed prompt"
+        );
         assert!(pm.contains("## Mission"));
+        assert!(!pm.contains(POSTURE_PLACEHOLDER));
+    }
+
+    #[test]
+    fn posture_is_single_sourced_and_not_a_template_key() {
+        let templates = load(&templates_dir_path()).expect("load templates");
+        assert!(
+            !templates.contains_key("posture"),
+            "posture.md must not be exposed as an agent-template key"
+        );
+        assert!(
+            templates.len() >= 10,
+            "expected all role templates, got {}",
+            templates.len()
+        );
+        for (key, content) in &templates {
+            assert!(
+                content.contains("# Operating posture"),
+                "{key} missing composed posture"
+            );
+            assert!(
+                content.contains("Hard never (without explicit human approval)"),
+                "{key} missing hard-never list"
+            );
+            assert!(
+                content.contains("Escalate when ambiguity would change the solution"),
+                "{key} missing escalation triggers"
+            );
+            assert!(
+                !content.contains(POSTURE_PLACEHOLDER),
+                "{key} still has unsubstituted placeholder"
+            );
+        }
+        assert_eq!(
+            POSTURE.trim(),
+            include_str!("../../agent_templates/posture.md").trim()
+        );
     }
 
     #[test]
