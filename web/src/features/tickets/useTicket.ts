@@ -544,7 +544,9 @@ export function useRemoveWorktree(ticketId: string) {
     mutationFn: () => postRemoveWorktree(ticketId),
     onSuccess: (info) => {
       queryClient.setQueryData(gitInfoQueryKey(ticketId), info);
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
 }

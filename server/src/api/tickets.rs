@@ -2069,6 +2069,9 @@ async fn remove_ticket_worktree(
     svc.remove_worktree(ticket_id)
         .await
         .map_err(map_ticket_git_error_response)?;
+    if let Err(err) = GitStateService::new(&state, pool).recheck(ticket_id).await {
+        tracing::warn!(%ticket_id, error = %err, "git state recheck failed");
+    }
 
     let comment_body = format!("**Worktree removed:** `{}`", info_before.worktree_path);
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)

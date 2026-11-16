@@ -646,6 +646,68 @@ async fn cleanup_keeps_a_dirty_worktree_and_says_so() {
 }
 
 #[tokio::test]
+async fn remove_worktree_clears_worktree_kept_and_publishes() {
+    use coppice_server::events::AppEvent;
+    use coppice_server::services::human_review_service::HumanReviewService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_git, _env, state, app, cookie, csrf, ticket_id, _repo, worktree) =
+        setup_finished_ticket().await;
+    let pool = state.db.clone().unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_human_reviews (
+            ticket_id, head_sha, merged_sha, merged_at,
+            git_outcome, git_outcome_reason, git_outcome_at
+        )
+        VALUES ($1, 'abc', 'abc', now(), 'worktree_kept', 'Kept worktree', now())
+        "#,
+    )
+    .bind(ticket_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut events = state.event_bus.subscribe();
+    let removed = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/remove-worktree"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(removed).await;
+    assert_eq!(body["gitState"].as_str(), Some("merged"));
+    assert!(!worktree.exists());
+
+    let review = HumanReviewService::new(&pool)
+        .get(ticket_id)
+        .await
+        .unwrap()
+        .expect("review row");
+    assert_eq!(review.git_outcome, None);
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(AppEvent::TicketUpdated { ticket_id: id, .. })) if id == ticket_id => break,
+            Ok(Ok(_)) => {}
+            other => panic!("missing ticket.updated after remove-worktree: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
 async fn an_active_run_blocks_cleanup_and_manual_remove() {
     use coppice_server::services::ticket_git_service::WorktreeCleanup;
     let _guard = common::DB_TEST_LOCK.lock().await;
