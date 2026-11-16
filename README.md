@@ -78,7 +78,7 @@ Read the diff in the app and comment on any line. Nothing counts as done until y
 
 Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
 
-| CLI | Command | Tested versions |
+| CLI | Command | Minimum version |
 | --- | --- | --- |
 | Claude Code | `claude` | 2.1.309 |
 | Codex | `codex` | 0.163.0 |

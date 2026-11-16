@@ -12,7 +12,7 @@ Coppice は、あなたがすでに使っているコーディングエージェ
 
 ## 対応しているコネクタ
 
-| コネクタ | Coppice が探すコマンド | インストール | テスト済みバージョン |
+| コネクタ | Coppice が探すコマンド | インストール | 最小バージョン |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [インストールガイド](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [インストールガイド](https://developers.openai.com/codex/cli) | 0.163.0 |

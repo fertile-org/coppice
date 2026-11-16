@@ -12,7 +12,7 @@ Coppice chạy các coding agent CLI bạn đang dùng và gom việc của chú
 
 ## Các connector được hỗ trợ
 
-| Connector | Lệnh Coppice tìm | Cài đặt | Phiên bản đã thử |
+| Connector | Lệnh Coppice tìm | Cài đặt | Phiên bản tối thiểu |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [Hướng dẫn cài](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [Hướng dẫn cài](https://developers.openai.com/codex/cli) | 0.163.0 |

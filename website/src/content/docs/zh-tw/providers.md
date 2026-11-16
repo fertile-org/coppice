@@ -12,7 +12,7 @@ description: "Coppice 執行你已在用的代理 CLI：Claude Code、Codex、Cu
 
 ## 支援的連接器
 
-| 連接器 | Coppice 查詢的命令 | 安裝 | 已測試版本 |
+| 連接器 | Coppice 查詢的命令 | 安裝 | 最低版本 |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [安裝指南](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [安裝指南](https://developers.openai.com/codex/cli) | 0.163.0 |

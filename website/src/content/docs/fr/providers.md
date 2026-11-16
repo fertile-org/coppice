@@ -12,7 +12,7 @@ Coppice pilote les CLI d’agents de code que vous utilisez déjà et réunit le
 
 ## Connecteurs pris en charge
 
-| Connecteur | Commande que Coppice cherche | Installation | Versions testées |
+| Connecteur | Commande que Coppice cherche | Installation | Version minimale |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [Guide d’installation](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [Guide d’installation](https://developers.openai.com/codex/cli) | 0.163.0 |

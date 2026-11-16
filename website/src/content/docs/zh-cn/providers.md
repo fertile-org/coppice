@@ -12,7 +12,7 @@ Coppice 运行你已经在用的编程智能体 CLI，把它们的工作放到�
 
 ## 支持的连接器
 
-| 连接器 | Coppice 查找的命令 | 安装 | 已测试版本 |
+| 连接器 | Coppice 查找的命令 | 安装 | 最低版本 |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | [安装指南](https://docs.anthropic.com/en/docs/claude-code/setup) | 2.1.309 |
 | Codex | `codex` | [安装指南](https://developers.openai.com/codex/cli) | 0.163.0 |
