@@ -7,5 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Cap forks for 16 GB hosts (jsdom workers are ~0.5 GiB each; see docs/testing.md memory caps).
+    maxWorkers: 4,
   },
 })

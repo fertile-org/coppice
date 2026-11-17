@@ -131,6 +131,8 @@ make web-test
 make web-test
 ```
 
+`web/vitest.config.ts` sets `maxWorkers: 4` so default `yarn test` / `npm test` stays within ~16 GB alongside jsdom (same intent as the nextest caps above).
+
 Focus: Zod schemas (`lib/schemas/`), pure helpers (`features/board/columns.ts`), `lib/api.ts`.
 
 ## E2E smoke
