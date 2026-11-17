@@ -415,30 +415,28 @@ async fn read_only_run_refuses_shell_and_writes_despite_project_allow() {
             !nested_fired.exists(),
             "{job_type}: nested .claude hook ran"
         );
-        let submitted = gateway.submitted.lock().expect("submitted").clone();
-        if job_type == "chat_turn" {
-            let submitted = submitted.expect("result_submit was not called");
-            assert_eq!(submitted["status"], "done", "{job_type}");
-            assert!(
-                submitted["summary"]
-                    .as_str()
-                    .is_some_and(|s| s.contains("first line of readme")),
-                "{job_type}: {submitted}"
-            );
-        }
-        // Plan mode writes a plan and often skips result_submit. The hook
-        // and write checks still prove the deny; require a finished turn.
+        let submitted = gateway
+            .submitted
+            .lock()
+            .expect("submitted")
+            .clone()
+            .expect(&format!("{job_type}: result_submit was not called"));
+        assert_eq!(submitted["status"], "done", "{job_type}");
+        assert!(
+            submitted["summary"]
+                .as_str()
+                .is_some_and(|s| s.contains("first line of readme")),
+            "{job_type}: {submitted}"
+        );
         match result.expect("turn") {
             AgentRunResult::Done { summary, .. } => {
-                if job_type == "chat_turn" {
-                    assert!(
-                        summary.contains("first line of readme"),
-                        "{job_type}: {summary}"
-                    );
-                }
+                assert!(
+                    summary.contains("first line of readme"),
+                    "{job_type}: {summary}"
+                );
             }
             other => panic!("{job_type} probe did not complete: {other:?}"),
         }
     }
-    eprintln!("live probe passed on cursor-agent {version} (ask and plan)");
+    eprintln!("live probe passed on cursor-agent {version} (chat and planning use ask)");
 }

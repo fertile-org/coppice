@@ -406,7 +406,7 @@ pub const CURSOR: RunContract = RunContract {
         read_only_min_version: None,
         min_version: None,
         gate: false,
-        reason: "Write runs use --force, which Coppice already passed. Read-only chat uses --mode ask and omits --force. Plan runs use --mode plan. --sandbox exists and is left for a later milestone.",
+        reason: "Write runs use --force, which Coppice already passed. Read-only runs, including planning, use --mode ask and omit --force. Native plan mode often finishes on createPlan without calling Coppice result_submit, so planning does not use it. --sandbox exists and is left for a later milestone.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -428,8 +428,9 @@ pub const CURSOR: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
-    // Cursor's plan mode. Chat stays on `--mode ask` via read_only.
-    plan_mode: Some(&["--mode", "plan"]),
+    // Planning uses read-only `--mode ask`, like chat. Native `--mode plan`
+    // often ends on createPlan without `result_submit`.
+    plan_mode: None,
     thinking_level: None,
 };
 
@@ -765,7 +766,7 @@ mod tests {
     #[test]
     fn read_only_plan_invocation_is_pinned_per_connector() {
         assert!(CLAUDE_CODE.plan_mode.is_none());
-        assert_eq!(CURSOR.plan_mode, Some(&["--mode", "plan"][..]));
+        assert!(CURSOR.plan_mode.is_none());
         assert!(CODEX.plan_mode.is_none());
         assert_eq!(
             KILO_CODE.plan_mode,
@@ -784,9 +785,12 @@ mod tests {
         assert!(!claude.iter().any(|arg| arg == "plan"));
         assert!(!claude.iter().any(|arg| arg == "bypassPermissions"));
 
-        let cursor = CURSOR.argv(&planned);
-        assert!(cursor.windows(2).any(|w| w == ["--mode", "plan"]));
-        assert!(!cursor.windows(2).any(|w| w == ["--mode", "ask"]));
+        let cursor = CURSOR.argv(&LaunchSubst {
+            read_only: true,
+            ..planned
+        });
+        assert!(cursor.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(!cursor.windows(2).any(|w| w == ["--mode", "plan"]));
         assert!(!cursor.iter().any(|arg| arg == "--force"));
 
         let write = CLAUDE_CODE.argv(&subst(None, false));

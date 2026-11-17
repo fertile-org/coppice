@@ -88,13 +88,6 @@ pub const PLAN_MUST_DO_HEADING: &str = "## Must do";
 /// Ordered finish contract for every planning connector. Launch prompts point here.
 pub const PLAN_MUST_DO: &str = "1. Read this file, then call `ticket_get` and `skill_load` for any skills you need before you draft.\n2. Write the plan in the format below. Do not edit files, commit, push, or create or change a branch.\n3. **Finish only with `result_submit`:** `status` `done`, full plan markdown in `summary`. Chat text, printed JSON, or a connector's native plan tool does not count — Coppice saves the plan only from `result_submit`.\n4. If `result_submit` returns errors, fix the payload and call it again before you stop.";
 
-pub use crate::providers::cursor::PLAN_FINISH_NOTE as PLAN_CURSOR_FINISH_NOTE;
-
-/// Extra planning line for a connector, when that connector needs one.
-pub fn connector_plan_finish_note(connector_id: &str) -> Option<&'static str> {
-    crate::providers::cursor::plan_finish_note(connector_id)
-}
-
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
 
 /// Criteria are the contract Human Review checks the finished change against.
@@ -660,16 +653,6 @@ mod tests {
         );
         assert!(text.contains("native plan tool"));
         assert!(text.contains("result_submit"));
-    }
-
-    #[test]
-    fn cursor_gets_an_extra_finish_note() {
-        assert_eq!(
-            connector_plan_finish_note("cursor"),
-            Some(PLAN_CURSOR_FINISH_NOTE)
-        );
-        assert_eq!(connector_plan_finish_note("claude-code"), None);
-        assert!(PLAN_CURSOR_FINISH_NOTE.contains("createPlan"));
     }
 
     #[test]

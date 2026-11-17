@@ -29,18 +29,6 @@ impl CursorProvider {
     }
 }
 
-/// When Cursor `--mode plan` ends on `createPlanToolCall` without `result_submit`.
-pub const PLAN_FINISH_NOTE: &str = "**Cursor:** Do not stop after `createPlan` or other native plan-mode tools. After the plan is written, call Coppice `result_submit`.";
-
-/// Extra planning line for Cursor. Every other connector id gets `None`.
-pub fn plan_finish_note(connector_id: &str) -> Option<&'static str> {
-    if connector_id == coppice_connectors::CURSOR {
-        Some(PLAN_FINISH_NOTE)
-    } else {
-        None
-    }
-}
-
 #[async_trait]
 impl AgentProvider for CursorProvider {
     fn id(&self) -> &str {
@@ -303,9 +291,9 @@ const APPROVE_MCPS_FLAG: &str = "--approve-mcps";
 
 /// Build `cursor-agent` CLI argv (excluding the binary name).
 ///
-/// Ticket runs use `--force` (write-capable). Plan runs use `--mode plan` and
-/// omit `--force`. Chat uses `--mode ask` and omits `--force`. Ask mode blocks
-/// edit/apply but was not shown to block shell writes.
+/// Ticket runs use `--force` (write-capable). Read-only runs (chat and planning)
+/// use `--mode ask` and omit `--force`. Ask mode blocks edit/apply but was not
+/// shown to block shell writes; Coppice also denies `Shell(*)` and `Write(**)`.
 fn cursor_cli_args(
     worktree: &Path,
     read_only_tools: bool,
@@ -670,18 +658,18 @@ mod tests {
     }
 
     #[test]
-    fn plan_runs_use_plan_mode_without_force() {
+    fn plan_runs_use_ask_mode_without_force() {
         let args = cursor_cli_args(
             Path::new("/tmp/plan"),
-            false,
+            true,
             true,
             None,
             None,
             None,
             coppice_run_prompt(),
         );
-        assert!(args.windows(2).any(|w| w == ["--mode", "plan"]));
-        assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(!args.windows(2).any(|w| w == ["--mode", "plan"]));
         assert!(!args.iter().any(|a| a == "--force"));
     }
 

@@ -364,9 +364,6 @@ async fn drive_plan_run(
         if has_design_skill(&skills) {
             markdown.push_str(&format!("\n{}\n", plan::PLAN_DESIGN_INSTRUCTION));
         }
-        if let Some(note) = plan::connector_plan_finish_note(connector_name) {
-            markdown.push_str(&format!("\n{note}\n"));
-        }
     }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,

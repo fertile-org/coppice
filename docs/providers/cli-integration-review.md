@@ -33,7 +33,7 @@ Coppice's client (`sessions/opencode_client.rs`) calls `/session`, `/session/{id
 
 ### Cursor and Kilo Code use CLI modes for read-only
 
-Claude Code's plan mode changed meaning in a minor release. Cursor chat uses `--mode ask` and planning uses `--mode plan`; Kilo Code uses `--agent ask` and `--agent plan`. Any of these can start refusing MCP calls the same way, and the result is the same lost reply. Kilo Code already hit a version of this, which is why it keeps `--auto` next to `--agent ask`.
+Claude Code's plan mode changed meaning in a minor release. Cursor chat and planning both use `--mode ask` (native `--mode plan` often ends on `createPlan` without `result_submit`); Kilo Code uses `--agent ask` and `--agent plan`. Any of these modes can start refusing MCP calls the same way, and the result is the same lost reply. Kilo Code already hit a version of this, which is why it keeps `--auto` next to `--agent ask`.
 
 **Change:** cover chat and plan modes in Test connection (below) so a CLI update shows up as a failed check, not a user's lost reply.
 
@@ -148,7 +148,7 @@ At the end of every run, log one line: CLI, version, model, exit code, events re
 
 | Area | Now | Change |
 |------|-----|--------|
-| Read-only | `--mode ask` (chat), `--mode plan` (planning) | Cover both in Test connection; a mode change is the main risk |
+| Read-only | `--mode ask` (chat and planning) | Cover chat and planning in Test connection; a mode change is the main risk |
 | Outcome | `is_error` read, stderr tail attached | Already closest to the shared contract; move it there |
 | MCP | Per-run `HOME` for its config | Keep; fail fast if Cursor reports the server failed |
 
