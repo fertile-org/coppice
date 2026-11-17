@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Thuê chuyên gia. Bạn là người quyết định cuối cùng.</strong><br />
-  Ứng dụng desktop cho multi-agent coding. Các agent lên kế hoạch, viết code và review trên một bảng. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.<br />
+  Ứng dụng desktop cho multi-agent coding. Các agent lên kế hoạch, viết code và review trên một bảng. Bạn vẫn theo sát.<br />
   Chạy ngay trên máy bạn, mã nguồn mở, dùng các agent CLI bạn đang trả phí.
 </p>
 
@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <img src="static/marketing.gif" alt="Viết ticket, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Chỉ khi bạn chấp nhận thì việc mới tính là xong." width="960" />
+  <img src="static/marketing.gif" alt="Viết ticket, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Bạn vẫn theo sát." width="960" />
 </p>
 
 Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song, mỗi agent một branch riêng. Nhìn vào bảng là biết việc nào đang chạy, việc nào bị kẹt và việc nào đang chờ bạn.

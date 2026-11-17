@@ -10,11 +10,11 @@ export const pages: Pages = {
       'Coppice 是多代理程式設計的桌面應用程式。你寫工單、批准計劃，並接受 diff。Claude Code、Codex 等代理在你的電腦上執行。',
     worksWith: '支援',
     h1: '僱用專家，你來拍板。',
-    lede: '這是多代理程式設計的桌面應用程式。你的 PM 代理起草計劃，由你批准。專業代理並行實作。你接受 diff 之前，都不算完成。',
+    lede: '這是多代理程式設計的桌面應用程式。你的 PM 代理起草計劃，由你批准。專業代理並行實作。你一直在場。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 倉庫的工單',
       videoAlt:
-        'Coppice：寫一個工單，比較設計方案，批准 PM 代理起草的計劃，讓代理實作並測試，再對 diff 下評論。你接受之前，都不算完成。',
+        'Coppice：寫一個工單，比較設計方案，批准 PM 代理起草的計劃，讓代理實作並測試，再對 diff 下評論。你一直在場。',
     },
     support: '開源（Apache 2.0）。在本機執行，不需要 Coppice 帳號。',
     downloads: {

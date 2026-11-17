@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Hire specialists. Keep the final say.</strong><br />
-  A desktop app for multi-agent coding. Agents plan, build, and review on one board. Nothing is done until you accept the diff.<br />
+  A desktop app for multi-agent coding. Agents plan, build, and review on one board. You stay in the loop.<br />
   It runs on your machine, it is open source, and it uses the agent CLIs you already pay for.
 </p>
 
@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <img src="static/marketing.gif" alt="Write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it." width="960" />
+  <img src="static/marketing.gif" alt="Write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. You stay in the loop." width="960" />
 </p>
 
 Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel, each on its own branch. The board shows what's moving, what's stuck, and what's waiting on you.

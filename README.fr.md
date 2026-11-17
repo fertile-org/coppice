@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Recrutez des spécialistes. Gardez le dernier mot.</strong><br />
-  Une application de bureau pour le codage multi-agent. Les agents planifient, construisent et relisent sur un seul tableau. Rien n’est terminé tant que vous n’avez pas accepté le diff.<br />
+  Une application de bureau pour le codage multi-agent. Les agents planifient, construisent et relisent sur un seul tableau. Vous restez dans la boucle.<br />
   Local, open source, avec les CLI d’agents que vous payez déjà.
 </p>
 
@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <img src="static/marketing.gif" alt="Écrivez un ticket, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté." width="960" />
+  <img src="static/marketing.gif" alt="Écrivez un ticket, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Vous restez dans la boucle." width="960" />
 </p>
 
 Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle, chacun sur sa branche. Le tableau montre ce qui avance, ce qui bloque et ce qui vous attend.
