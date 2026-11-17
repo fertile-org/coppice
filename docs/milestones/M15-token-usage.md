@@ -4,7 +4,7 @@
 
 Show how many tokens agents spend, per LLM request, per run, per ticket and per agent, so a human can answer "what did this ticket cost to deliver, and which agent spent it?" without reading consoles.
 
-Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connectors) and [phase 2](#phase-2-settings--usage) are built for Claude Code (deliverables D1–D6 and D8–D11). Still open: D0's manual check with a real Claude Code run, and the [deferred](#deferred) readers for other connectors (D7, D12+).
+Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connectors) and [phase 2](#phase-2-settings--usage) are built for Claude Code (deliverables D1–D6 and D8–D11). D0's manual check passed with a real Claude Code 2.1.318 ticket run. Cursor has a reader too: run totals only, from a real capture, on the same groundwork. Still open: the [deferred](#deferred) readers for the remaining connectors (D7, D12+).
 
 ## Problem
 
@@ -124,7 +124,7 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 
 | # | Deliverable | Needs | Verified by |
 |---|---|---|---|
-| D0 | **Close phase 1 on `main`.** The two open items in [Acceptance criteria (phase 1)](#acceptance-criteria-phase-1). | — | Manual: a real Claude Code ticket run shows tokens in the Runs tab. `make test`, clippy and `make web-test` pass on `main`. |
+| D0 | **Done.** **Close phase 1 on `main`.** The two open items in [Acceptance criteria (phase 1)](#acceptance-criteria-phase-1). | — | Manual: a real Claude Code ticket run shows tokens in the Runs tab. `make test`, clippy and `make web-test` pass on `main`. |
 | D1 | **Done.** **Process context.** `start_process(&ProcessContext { resumed, cli_version })`; the Claude Code reader reads `resumed` from it. ([§ 2](#2-a-process-context-instead-of-a-flag)) | — | The existing `providers::usage` tests pass unchanged. A unit test shows the CLI version reaches the reader. |
 | D2 | **Done.** **Usage hooks in the shared runners.** `cli_runner.rs` and `acp_connector.rs` call `track_usage` and `observe_usage`; adapters drop their calls. ([§ 1](#1-usage-hooks-live-in-the-shared-runners)) | D1 | No adapter under `server/src/providers/` calls a usage method. A `cli_runner` test replays a Claude Code capture through a stub program and stores the same snapshot as the reader test. A connector with `UsageFormat::None` stores no `run_usage` row. Manual: a Claude Code run shows the same tokens as before. |
 | D3 | **Done.** **Reader test harness.** The table-driven test, a `.usage.json` for every Claude Code capture, and the invariants that do not need coverage. ([§ 5](#5-one-test-harness-for-every-reader)) | — | The harness passes on every capture. A case with a wrong expected file and a case with a negative count both fail. |
@@ -136,11 +136,11 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 | D9 | **Done.** **Slices and summary API.** The `usage_slices` view and `GET /api/usage/summary`. ([Slices](#slices)) | D5, D6 | DB tests with MockProvider fixtures at each level of detail (per request, per turn, run total only, subagent total only): each run's slices add up to its total. One test per `groupBy`. Day grouping is checked in two timezones around midnight. Untracked runs appear only in the coverage counts. Workspace runs are excluded by the board filter. Deleting a ticket leaves the totals unchanged. Tokens per Done ticket matches a hand-computed median over a split ticket tree. |
 | D10 | **Done.** **Settings → Usage page.** Tiles, chart, grouped table, filters and the coverage line. ([Page](#page)) | D4, D9 | Web tests: for every group, the table rows add up to the Total tile. The coverage line names untracked connectors. "—" and "not reported" appear in the right cells. Filters change the query. Manual: a workspace with runs from two connectors. |
 | D11 | **Done.** **Chat-session totals.** `GET /api/chat/sessions/{id}/usage` and the total in the chat header. | — | Integration test with MockProvider chat runs, where untracked runs are not counted. Web test for the header. |
-| D12+ | **Deferred. One deliverable per further connector:** Cursor, OpenCode CLI, Kilo Code, and one ACP reader covering every ACP connector. Each follows the [checklist](#checklist-for-a-new-connector). | D2, D3, D4, that connector's captures ([deferred](#deferred)) | The same checks as D7, for that connector. |
+| D12+ | **Cursor done** (run totals from `result.usage`, real capture `cursor-agent-2026.11.13-eacade1`). **Deferred. One deliverable per further connector:** OpenCode CLI, Kilo Code, and one ACP reader covering every ACP connector. Each follows the [checklist](#checklist-for-a-new-connector). | D2, D3, D4, that connector's captures ([deferred](#deferred)) | The same checks as D7, for that connector. |
 
 D0, D1, D3, D5 and D11 can start now and run in parallel. D2 follows D1, D4 follows D3, and D6 follows D5. D8, D9 and D10 need only Claude Code and MockProvider, so none of them waits on the deferred readers.
 
-D7 and D12+ are deferred until someone with the Codex, OpenCode or other connector CLIs records the [standard capture](#standard-capture). Until then only Claude Code runs are tracked, and the Usage page's coverage line names every other connector as not tracked. MockProvider fixtures shaped like a per-turn CLI and a total-only CLI stand in for a second format in D3 and D9. They test the tracker and slices, but not a real reader's conversion or a second coverage declaration, so the groundwork is only fully proven when D7 lands.
+D7 and D12+ are deferred until someone with the Codex, OpenCode or other connector CLIs records the [standard capture](#standard-capture). Until then only Claude Code and Cursor runs are tracked, and the Usage page's coverage line names every other connector as not tracked. Cursor is the second real format: a run-total-only reader with its own coverage declaration and harness capture. It has no per-turn usage, so a MockProvider fixture shaped like a per-turn CLI still stands in for that shape in D3 and D9 until D7 lands.
 
 ## Adding connectors
 
@@ -283,7 +283,7 @@ Slices are a SQL view, `usage_slices`, that reads its dimensions from `run_usage
 - **Tiles:** total tokens, tracked runs, tokens per Done ticket (median, with the average in the tooltip) and active days.
 - **Chart:** tokens per day, stacked by the selected group.
 - **Table:** "Group by" Model, Agent, Board, Connector or Job type. Columns are In, Cached, Out, No breakdown, Total, % of total and Runs. Cached reads stay apart, as on the Runs tab. Rows with no model show as "Model not reported". Workspace overhead is its own row when grouping by job type, and Workspace is its own row when grouping by board.
-- **Coverage line:** "Counts 42 of 60 runs in this range. Not tracked: Cursor (12 runs), Kilo Code (6 runs)." Tracked runs are usage rows created in the range; untracked runs are runs that started on a connector (`agent_runs.connector` set) and have no `run_usage` row, grouped by connector. Runs that never started are in neither count. A column shows "—" for a row only when no connector in that row can report the count, according to its coverage.
+- **Coverage line:** "Counts 42 of 60 runs in this range. Not tracked: Codex (12 runs), Kilo Code (6 runs)." Tracked runs are usage rows created in the range; untracked runs are runs that started on a connector (`agent_runs.connector` set) and have no `run_usage` row, grouped by connector. Runs that never started are in neither count. A column shows "—" for a row only when no connector in that row can report the count, according to its coverage.
 - **Chat sessions:** a chat session's header shows its total. On this page, chat is a job type.
 
 Numbers use the same compact format as the Runs tab, with exact counts in a tooltip. The page is `/settings/usage`, admins only like the other Settings tabs. The chart shows the seven largest groups and folds the rest into "Other"; its colors are `--chart-series-*` tokens, checked for color-vision deficiency in both themes, and the table below it carries the same numbers.
@@ -341,8 +341,8 @@ These need connector CLIs that are not available yet. They block only D7 and D12
 - [x] A ticket's Detail tab shows its token total.
 - [x] Compaction and connector-check runs are not counted in any ticket total.
 - [x] No dollar amounts in the UI or API.
-- [ ] Manual: a real Claude Code ticket run shows tokens in the Runs tab.
-- [ ] `make test`, clippy, `make web-test` pass on the branch.
+- [x] Manual: a real Claude Code ticket run shows tokens in the Runs tab. Claude Code 2.1.318 on Haiku, with one subagent, in desktop mode: the total moved from partial to reported as the run finished, with 9 requests and the subagent's own total, and the Runs tab, Detail tab and Settings → Usage showed the same 346k.
+- [x] `make test`, clippy, `make web-test` pass on the branch.
 
 ## References
 
