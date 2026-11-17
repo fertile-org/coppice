@@ -37,7 +37,7 @@
   <img src="static/marketing.gif" alt="寫一個工單，批准 PM 代理起草的計劃，讓代理構建和測試，然後評論 diff。你接受之前，甚麼都不算完成。" width="960" />
 </p>
 
-你的 PM 代理起草計劃，由你批准。專業代理並行構建，每個都在自己的分支上。看板顯示哪些在推進、哪些卡住了、哪些在等你。你接受 diff 之前，甚麼都不算完成。
+你的 PM 代理起草計劃，由你批准。專業代理並行構建，每個都在自己的分支上。看板顯示哪些在推進、哪些卡住了、哪些在等你。
 
 下載、開啟、開工。不用另外設定：不用 Docker，也不用 Coppice 帳號。
 
@@ -46,7 +46,7 @@
 - **每個角色都用合適的模型。** 每個代理各自選擇 CLI 和模型。用最強的模型做規劃和審查，用更快的模型寫程式碼，全都在同一塊看板上。
 - **不用再在終端之間來回切換。** 每個代理的工作都是同一塊看板上的一張卡片。受阻的工單和等你審查的工作一目瞭然，你知道哪裏需要你。
 - **在落地之前發現錯誤。** 每個改動都會以 diff 的形式在應用裏等你審查。你接受之前，甚麼都不算完成；你接受的內容，就是最終合併的內容。
-- **不用再多一份訂閱。** Coppice 驅動的是你已經付費的 CLI，登入方式和你平時一樣。
+- **不用再多一份訂閱。** Coppice 驅動的是你已經付費的 CLI，登入方式和你平時一樣。支援的 CLI 見 [供應商](https://getcoppice.app/zh-hk/docs/providers)。
 
 ## 工作方式
 
@@ -73,24 +73,6 @@ PM 代理閱讀工單並起草計劃：做法、步驟，以及如何檢查這�
 在應用裏閱讀 diff，可以評論任意一行。你接受之前，甚麼都不算完成，接受和合併是兩件分開的事。
 
 <img src="website/public/home/review.png" alt="主題開關的程式碼審查：已批准的計劃、改動的檔案，以及 diff 某一行上的評論。" width="720" />
-
-## 用你已經在用的 CLI
-
-按常規方式安裝並登入即可。Coppice 會在你登入 shell 的 `PATH` 中找到它們。
-
-| CLI | 命令 |
-| --- | --- |
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Cursor | `cursor-agent` |
-| OpenCode | `opencode` |
-| Kilo Code | `kilo` |
-| GitHub Copilot | `copilot` |
-| Qwen Code | `qwen` |
-| Kimi Code | `kimi` |
-| Grok | `grok` |
-
-安裝連結和各個 CLI 支援的功能，見 [供應商](https://getcoppice.app/zh-hk/docs/providers)。
 
 ## 還有這些
 

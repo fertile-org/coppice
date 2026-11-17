@@ -37,7 +37,7 @@
   <img src="static/marketing.gif" alt="Write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it." width="960" />
 </p>
 
-Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel, each on its own branch. The board shows what's moving, what's stuck, and what's waiting on you. Nothing is done until you accept the diff.
+Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel, each on its own branch. The board shows what's moving, what's stuck, and what's waiting on you.
 
 Download the app and open it. There's nothing to set up: no Docker and no Coppice account.
 
@@ -46,7 +46,7 @@ Download the app and open it. There's nothing to set up: no Docker and no Coppic
 - **The right model for each role.** Each agent uses its own CLI and model. You can plan and review with your strongest model, and code with a faster one, on the same board.
 - **Stop tab-hopping between terminals.** Each agent's work is a card on one board. Blocked tickets, and work waiting for your review, stand out, so you can see where you're needed.
 - **Catch mistakes before they land.** Every change waits for you as a diff in the app. Nothing counts as done until you accept it, and what you accept is exactly what merges.
-- **No second subscription.** Coppice drives the CLIs you already pay for, using the sign-in you already use for each CLI.
+- **No second subscription.** Coppice drives the CLIs you already pay for, using the sign-in you already use for each CLI. See the [supported CLIs](https://getcoppice.app/docs/providers).
 
 ## How it works
 
@@ -73,26 +73,6 @@ Specialist agents build, review, and test the ticket. Each ticket gets its own g
 Read the diff in the app and comment on any line. Nothing counts as done until you accept it, and Accept and Merge stay separate choices.
 
 <img src="website/public/home/review.png" alt="Code review for a theme toggle: the approved plan, the changed file, and a comment on one line of the diff." width="720" />
-
-## Works with the CLIs you already use
-
-Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
-
-| CLI | Command | Minimum version |
-| --- | --- | --- |
-| Claude Code | `claude` | 2.1.309 |
-| Codex | `codex` | 0.163.0 |
-| Cursor | `cursor-agent` | 2026.10.01 |
-| OpenCode | `opencode` | 1.x, 2.x |
-| Kilo Code | `kilo` | 7.8.3 |
-| GitHub Copilot | `copilot` | 1.0.98 |
-| Qwen Code | `qwen` | 0.25.2 |
-| Kimi Code | `kimi` | 2.2.0 |
-| Grok | `grok` | 1.0.62 |
-
-We will update this list as we test more CLI versions.
-
-See [Providers](https://getcoppice.app/docs/providers) for install links and what each one supports.
 
 ## What else is inside
 

@@ -37,7 +37,7 @@
   <img src="static/marketing.gif" alt="Viết ticket, duyệt kế hoạch do agent PM soạn, để các agent viết code và test, rồi góp ý trên diff. Chỉ khi bạn chấp nhận thì việc mới tính là xong." width="960" />
 </p>
 
-Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song, mỗi agent một branch riêng. Nhìn vào bảng là biết việc nào đang chạy, việc nào bị kẹt và việc nào đang chờ bạn. Chỉ khi bạn chấp nhận diff thì việc mới tính là xong.
+Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song, mỗi agent một branch riêng. Nhìn vào bảng là biết việc nào đang chạy, việc nào bị kẹt và việc nào đang chờ bạn.
 
 Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, không tài khoản Coppice.
 
@@ -46,7 +46,7 @@ Tải về, mở lên là dùng. Không phải cài thêm gì: không Docker, kh
 - **Mỗi vai trò một model phù hợp.** Mỗi agent tự chọn CLI và model riêng. Lên kế hoạch và review bằng model mạnh nhất, viết code bằng model nhanh hơn, tất cả trên cùng một bảng.
 - **Không phải chuyển qua lại giữa các terminal.** Việc của mỗi agent là một thẻ trên cùng một bảng. Ticket bị kẹt và việc đang chờ bạn review hiện rõ, nên bạn biết ngay chỗ nào cần bạn.
 - **Phát hiện lỗi trước khi lỗi đó lọt vào code.** Mọi thay đổi đều nằm chờ bạn dưới dạng diff trong ứng dụng. Bạn chưa chấp nhận thì chưa xong, và thứ bạn chấp nhận chính là thứ được merge.
-- **Không phải mua thêm gói nào.** Coppice dùng luôn các CLI bạn đang trả phí, đăng nhập như bạn vẫn làm.
+- **Không phải mua thêm gói nào.** Coppice dùng luôn các CLI bạn đang trả phí, đăng nhập như bạn vẫn làm. Xem các [CLI được hỗ trợ](https://getcoppice.app/vi/docs/providers).
 
 ## Cách hoạt động
 
@@ -73,24 +73,6 @@ Các agent chuyên môn viết code, review và test ticket. Mỗi ticket có gi
 Đọc diff ngay trong ứng dụng và góp ý ở bất kỳ dòng nào. Chỉ khi bạn chấp nhận thì việc mới tính là xong, và Accept với Merge là hai lựa chọn riêng.
 
 <img src="website/public/home/review.png" alt="Review code của nút theme: kế hoạch đã duyệt, file đã đổi, và một góp ý trên một dòng của diff." width="720" />
-
-## Dùng luôn các CLI bạn đang có
-
-Cài và đăng nhập như bạn vẫn làm. Coppice sẽ tự tìm chúng trong `PATH` của login shell.
-
-| CLI | Lệnh |
-| --- | --- |
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Cursor | `cursor-agent` |
-| OpenCode | `opencode` |
-| Kilo Code | `kilo` |
-| GitHub Copilot | `copilot` |
-| Qwen Code | `qwen` |
-| Kimi Code | `kimi` |
-| Grok | `grok` |
-
-Xem trang [Nhà cung cấp](https://getcoppice.app/vi/docs/providers) để lấy link cài đặt và xem mỗi CLI hỗ trợ những gì.
 
 ## Còn gì nữa
 

@@ -37,7 +37,7 @@
   <img src="static/marketing.gif" alt="Écrivez un ticket, approuvez le plan rédigé par un agent PM, laissez les agents construire et tester, puis commentez le diff. Rien n’est terminé tant que vous ne l’avez pas accepté." width="960" />
 </p>
 
-Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle, chacun sur sa branche. Le tableau montre ce qui avance, ce qui bloque et ce qui vous attend. Rien n’est terminé tant que vous n’avez pas accepté le diff.
+Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle, chacun sur sa branche. Le tableau montre ce qui avance, ce qui bloque et ce qui vous attend.
 
 Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de compte Coppice.
 
@@ -46,7 +46,7 @@ Téléchargez, ouvrez, travaillez. Rien à installer : pas de Docker, pas de c
 - **Le bon modèle pour chaque rôle.** Chaque agent choisit sa CLI et son modèle. Planifiez et relisez avec votre modèle le plus fort, et codez avec un modèle plus rapide, le tout sur un seul tableau.
 - **Arrêtez de jongler entre les terminaux.** Le travail de chaque agent est une carte sur un seul tableau. Les tickets bloqués et le travail qui attend votre revue ressortent. Vous savez donc où intervenir.
 - **Repérez les erreurs avant qu’elles n’arrivent.** Chaque changement vous attend sous forme de diff dans l’application. Rien ne compte comme terminé tant que vous ne l’avez pas accepté. Ce que vous acceptez est exactement ce qui est fusionné.
-- **Pas de deuxième abonnement.** Coppice pilote les CLI que vous payez déjà, connectées comme vous en avez l’habitude.
+- **Pas de deuxième abonnement.** Coppice pilote les CLI que vous payez déjà, connectées comme vous en avez l’habitude. Voir les [CLI prises en charge](https://getcoppice.app/fr/docs/providers).
 
 ## Comment ça marche
 
@@ -73,24 +73,6 @@ Des agents spécialisés construisent, relisent et testent le ticket. Chaque tic
 Lisez le diff dans l’application et commentez n’importe quelle ligne. Rien ne compte comme terminé tant que vous ne l’avez pas accepté, et accepter et Merge restent deux choix distincts.
 
 <img src="website/public/home/review.png" alt="Revue de code d’un interrupteur de thème : le plan approuvé, le fichier modifié, et un commentaire sur une ligne du diff." width="720" />
-
-## Avec les CLI que vous utilisez déjà
-
-Installez-les et connectez-vous comme d’habitude. Coppice les trouve dans le `PATH` de votre shell de connexion.
-
-| CLI | Commande |
-| --- | --- |
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Cursor | `cursor-agent` |
-| OpenCode | `opencode` |
-| Kilo Code | `kilo` |
-| GitHub Copilot | `copilot` |
-| Qwen Code | `qwen` |
-| Kimi Code | `kimi` |
-| Grok | `grok` |
-
-Voir [Fournisseurs](https://getcoppice.app/fr/docs/providers) pour les liens d’installation et ce que chacune prend en charge.
 
 ## Et aussi
 
