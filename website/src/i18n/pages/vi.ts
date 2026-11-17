@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice là ứng dụng desktop cho multi-agent coding. Bạn viết ticket, duyệt kế hoạch và chấp nhận diff. Claude Code, Codex và các CLI khác chạy trên máy bạn.',
     worksWith: 'Dùng được với',
     h1: 'Thuê chuyên gia. Bạn là người quyết định cuối cùng.',
-    lede: 'Ứng dụng desktop cho multi-agent coding. Agent PM soạn kế hoạch, bạn duyệt. Các agent chuyên môn làm song song. Bạn vẫn theo sát.',
+    lede: 'Ứng dụng desktop cho multi-agent coding. Agent PM soạn kế hoạch. Các agent chuyên môn làm song song. Bạn vẫn theo sát.',
     hero: {
       stillAlt: 'Bảng Coppice với các ticket của repository acme-web',
       videoAlt:

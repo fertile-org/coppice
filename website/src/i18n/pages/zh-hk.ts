@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice 是多代理程式設計的桌面軟件。你寫工單、批准計劃，並接受 diff。Claude Code、Codex 等代理在你的電腦上執行。',
     worksWith: '支援',
     h1: '僱用專家，你來拍板。',
-    lede: '這是多代理程式設計的桌面軟件。你的 PM 代理起草計劃，由你批准。專業代理並行構建。你一直在場。',
+    lede: '這是多代理程式設計的桌面軟件。你的 PM 代理起草計劃。專業代理並行構建。你一直在場。',
     hero: {
       stillAlt: 'Coppice 看板，上面是 acme-web 倉庫的工單',
       videoAlt:

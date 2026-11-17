@@ -10,7 +10,7 @@ export const pages: Pages = {
       'Coppice est une application de bureau pour le codage multi-agent. Vous approuvez le plan et le diff. Claude Code, Codex et d’autres tournent sur votre machine.',
     worksWith: 'Fonctionne avec',
     h1: 'Recrutez des spécialistes. Gardez le dernier mot.',
-    lede: 'Une application de bureau pour le codage multi-agent. Votre agent PM rédige le plan, et vous l’approuvez. Des agents spécialisés construisent en parallèle. Vous restez dans la boucle.',
+    lede: 'Une application de bureau pour le codage multi-agent. Votre agent PM rédige le plan. Des agents spécialisés construisent en parallèle. Vous restez dans la boucle.',
     hero: {
       stillAlt: 'Tableau Coppice avec des tickets pour le dépôt acme-web',
       videoAlt:

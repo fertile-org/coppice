@@ -8,7 +8,7 @@ export const pages = {
       'Coppice is a desktop app for multi-agent coding. You write tickets, approve the plan, and accept the diff. Agents run CLIs such as Claude Code and Codex.',
     worksWith: 'Works with',
     h1: 'Hire specialists. Keep the final say.',
-    lede: 'A desktop app for multi-agent coding. Your PM agent drafts the plan, and you approve it. Specialist agents build in parallel. You stay in the loop.',
+    lede: 'A desktop app for multi-agent coding. Your PM agent drafts the plan. Specialist agents build in parallel. You stay in the loop.',
     hero: {
       stillAlt: 'Coppice board with tickets for the acme-web repository',
       videoAlt:
