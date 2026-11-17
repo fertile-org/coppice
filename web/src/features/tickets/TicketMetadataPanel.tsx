@@ -448,23 +448,30 @@ export function TicketMetadataPanel({ ticket, onViewRuns }: TicketMetadataPanelP
             <TicketStatusBadge status={option.value as TicketStatus} />
           )}
         />
-        <label className="flex items-center gap-2 font-body text-xs text-text-muted">
-          <input
-            type="checkbox"
-            checked={Boolean(ticket.skipPlanning)}
-            disabled={formDisabled}
-            onChange={(event) => {
-              void updateTicket
-                .mutateAsync({ skipPlanning: event.target.checked })
-                .catch((err: unknown) => {
-                  toast.error(
-                    parseApiErrorMessage(err, PLAN_COPY.skipFailed),
-                  );
-                });
-            }}
-          />
-          {PLAN_COPY.skipPlanning}
-        </label>
+      </div>
+
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Label htmlFor="ticket-skip-planning">{PLAN_COPY.skipPlanning}</Label>
+          <p className="mt-0.5 font-body text-xs text-text-muted">
+            {PLAN_COPY.skipPlanningHelp}
+          </p>
+        </div>
+        <Switch
+          id="ticket-skip-planning"
+          checked={Boolean(ticket.skipPlanning)}
+          disabled={formDisabled}
+          onCheckedChange={(checked) => {
+            void updateTicket
+              .mutateAsync({ skipPlanning: checked })
+              .catch((err: unknown) => {
+                toast.error(
+                  parseApiErrorMessage(err, PLAN_COPY.skipFailed),
+                );
+              });
+          }}
+          className="mt-0.5"
+        />
       </div>
 
       <div className="flex items-start justify-between gap-3">

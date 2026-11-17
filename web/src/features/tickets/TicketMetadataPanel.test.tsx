@@ -143,6 +143,48 @@ describe('TicketMetadataPanel split confirm', () => {
   });
 });
 
+describe('TicketMetadataPanel skip planning', () => {
+  beforeEach(() => {
+    updateTicket.mockReset();
+    updateTicket.mockResolvedValue(undefined);
+  });
+
+  it('renders as a switch with help text', () => {
+    renderPanel(makeTicket({ pendingSplitRecommendation: null }));
+
+    expect(
+      screen.getByRole('switch', { name: PLAN_COPY.skipPlanning }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(PLAN_COPY.skipPlanningHelp)).toBeInTheDocument();
+  });
+
+  it('turns the flag on with a switch', async () => {
+    renderPanel(makeTicket({ pendingSplitRecommendation: null }));
+
+    const toggle = screen.getByRole('switch', { name: PLAN_COPY.skipPlanning });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateTicket).toHaveBeenCalledWith({ skipPlanning: true }),
+    );
+  });
+
+  it('shows the stored flag and turns it off', async () => {
+    renderPanel(
+      makeTicket({ pendingSplitRecommendation: null, skipPlanning: true }),
+    );
+
+    const toggle = screen.getByRole('switch', { name: PLAN_COPY.skipPlanning });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateTicket).toHaveBeenCalledWith({ skipPlanning: false }),
+    );
+  });
+});
+
 describe('TicketMetadataPanel skip human review', () => {
   beforeEach(() => {
     updateTicket.mockReset();

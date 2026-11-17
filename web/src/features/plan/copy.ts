@@ -11,6 +11,7 @@ export const PLAN_COPY = {
   sending: 'Sending…',
   askPlaceholder: 'What should change?',
   skipPlanning: 'Skip planning',
+  skipPlanningHelp: 'Goes straight from Backlog to Ready without a plan.',
   skipHumanReview: 'Skip human review',
   skipHumanReviewHelp:
     "Coppice accepts the ticket when the agent's code review approves it and nobody asked for changes.",
