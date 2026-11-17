@@ -41,6 +41,9 @@ describe('useConfirm', () => {
       name: 'Remove plugin directory "/tmp"?',
     });
     expect(dialog).toBeVisible();
+    // Idle centering must not use a permanent translate (softens text on macOS).
+    expect(dialog.className).toMatch(/\binset-0\b/);
+    expect(dialog.className).not.toMatch(/-translate-[xy]-1\/2/);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(document.body.dataset.confirmResult).toBe('true'));

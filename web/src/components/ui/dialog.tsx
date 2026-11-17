@@ -8,7 +8,7 @@ import { ignoreToastInteractions } from './overlay-interactions';
 export const overlayAnimationClassName =
   'motion-safe:data-[state=open]:animate-overlay-in motion-safe:data-[state=closed]:animate-overlay-out';
 
-/** Fade + zoom-from-95% + slight rise for centered dialog content. */
+/** Fade + slight rise for centered dialog content (no scale — softens text on macOS). */
 export const dialogContentAnimationClassName =
   'motion-safe:data-[state=open]:animate-dialog-in motion-safe:data-[state=closed]:animate-dialog-out';
 
@@ -67,7 +67,8 @@ function DialogContent({
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-paper-50 p-6 shadow-lg focus:outline-none',
+          // inset-0 + m-auto centers without a permanent transform (macOS Retina softens text on translated layers)
+          'fixed inset-0 z-50 m-auto h-fit w-[calc(100%-2rem)] max-w-lg rounded-xl border border-border bg-paper-50 p-6 shadow-lg focus:outline-none',
           dialogContentAnimationClassName,
           className,
         )}

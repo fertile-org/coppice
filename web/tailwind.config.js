@@ -193,8 +193,6 @@ export default {
           '0%': { width: '100%' },
           '100%': { width: '0%' },
         },
-        // `scale` / `translate` are individual transform properties so they
-        // compose with the centering `transform` on dialog content.
         'overlay-in': {
           from: { opacity: '0' },
           to: { opacity: '1' },
@@ -203,13 +201,14 @@ export default {
           from: { opacity: '1' },
           to: { opacity: '0' },
         },
+        // Opacity + Y translate only — no scale (softens text on macOS Retina).
         'dialog-in': {
-          from: { opacity: '0', scale: '0.95', translate: '0 0.5rem' },
-          to: { opacity: '1', scale: '1', translate: '0 0' },
+          from: { opacity: '0', translate: '0 0.5rem' },
+          to: { opacity: '1', translate: '0 0' },
         },
         'dialog-out': {
-          from: { opacity: '1', scale: '1', translate: '0 0' },
-          to: { opacity: '0', scale: '0.95', translate: '0 0.25rem' },
+          from: { opacity: '1', translate: '0 0' },
+          to: { opacity: '0', translate: '0 0.25rem' },
         },
         'sheet-in': {
           from: { opacity: '0' },
