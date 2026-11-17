@@ -34,7 +34,7 @@ const html = `<!doctype html>
   <div class="card">
     <div class="brand"><img src="${dataUri('public/logo.svg', 'image/svg+xml')}" alt="" />Coppice</div>
     <h1>The desktop app for multi-agent coding</h1>
-    <p>Agents plan, build and review on one board. Nothing is done until you accept the diff.</p>
+    <p>Agents plan, build and review on one board. You stay in the loop.</p>
     <div class="tags">Claude Code · Codex · Cursor · OpenCode · and more</div>
     <img class="shot" src="${dataUri('public/assets/hero-screenshot.png', 'image/png')}" alt="" />
   </div>
