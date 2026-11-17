@@ -236,123 +236,129 @@ function KnowledgeForm({
   const pending = create.isPending || edit.isPending || supersede.isPending;
 
   return (
-    <form onSubmit={(event) => void submit(event)} noValidate>
-      <DialogHeader>
-        <DialogTitle>{copy.title}</DialogTitle>
-        <DialogDescription>{copy.description}</DialogDescription>
-      </DialogHeader>
+    <form
+      onSubmit={(event) => void submit(event)}
+      noValidate
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogDescription>{copy.description}</DialogDescription>
+        </DialogHeader>
 
-      {item && !isCreate && (
-        <p className="mt-4 rounded-md border border-border bg-paper-100 px-3 py-2 font-body text-xs text-text-secondary">
-          <span className="font-medium text-text-primary">
-            {TYPE_LABELS[item.knowledgeType]}
-          </span>{' '}
-          · {scopeLabel(item)} · revision {item.revisionNumber}
-        </p>
-      )}
-
-      <div className="mt-5 space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="knowledge-title">Title</Label>
-          <Input
-            id="knowledge-title"
-            required
-            maxLength={160}
-            value={form.title}
-            onChange={(event) => update({ title: event.target.value })}
-            placeholder="Run unit tests before review"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="knowledge-content">Knowledge</Label>
-          <Textarea
-            id="knowledge-content"
-            required
-            maxLength={12000}
-            rows={6}
-            value={form.content}
-            onChange={(event) => update({ content: event.target.value })}
-            placeholder="State the durable fact or instruction, including when it applies."
-          />
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          {isCreate && (
-            <div className="space-y-1.5">
-              <Label htmlFor="knowledge-type">Type</Label>
-              <Combobox
-                id="knowledge-type"
-                value={form.knowledgeType}
-                onValueChange={(value) =>
-                  update({ knowledgeType: value as KnowledgeType })
-                }
-                options={TYPE_OPTIONS}
-                searchPlaceholder="Search types…"
-              />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="knowledge-confidence">Confidence</Label>
-            <Combobox
-              id="knowledge-confidence"
-              value={form.confidence}
-              onValueChange={(value) =>
-                update({ confidence: value as KnowledgeConfidence })
-              }
-              options={CONFIDENCE_OPTIONS}
-            />
-          </div>
-        </div>
-
-        {isCreate && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="knowledge-scope">Scope</Label>
-              <Combobox
-                id="knowledge-scope"
-                value={form.scope}
-                onValueChange={(value) =>
-                  update({ scope: value as KnowledgeScope, agentId: '' })
-                }
-                options={SCOPE_OPTIONS}
-              />
-            </div>
-            {form.scope !== 'workspace' && (
-              <div className="space-y-1.5">
-                <Label htmlFor="knowledge-board">Board</Label>
-                <Combobox
-                  id="knowledge-board"
-                  value={form.boardId}
-                  onValueChange={(value) => update({ boardId: value })}
-                  options={boardOptions}
-                  placeholder="Choose a board"
-                  searchPlaceholder="Search boards…"
-                  emptyText="No boards found."
-                />
-              </div>
-            )}
-            {form.scope === 'agent' && (
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="knowledge-agent">Agent</Label>
-                <Combobox
-                  id="knowledge-agent"
-                  value={form.agentId}
-                  onValueChange={(value) => update({ agentId: value })}
-                  options={agentOptions}
-                  placeholder="Choose an agent"
-                  searchPlaceholder="Search agents…"
-                  emptyText="No enabled agents."
-                />
-              </div>
-            )}
-          </div>
+        {item && !isCreate && (
+          <p className="mt-4 rounded-md border border-border bg-paper-100 px-3 py-2 font-body text-xs text-text-secondary">
+            <span className="font-medium text-text-primary">
+              {TYPE_LABELS[item.knowledgeType]}
+            </span>{' '}
+            · {scopeLabel(item)} · revision {item.revisionNumber}
+          </p>
         )}
 
-        <FormError message={error} />
+        <div className="mt-5 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="knowledge-title">Title</Label>
+            <Input
+              id="knowledge-title"
+              required
+              maxLength={160}
+              value={form.title}
+              onChange={(event) => update({ title: event.target.value })}
+              placeholder="Run unit tests before review"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="knowledge-content">Knowledge</Label>
+            <Textarea
+              id="knowledge-content"
+              required
+              maxLength={12000}
+              rows={6}
+              value={form.content}
+              onChange={(event) => update({ content: event.target.value })}
+              placeholder="State the durable fact or instruction, including when it applies."
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {isCreate && (
+              <div className="space-y-1.5">
+                <Label htmlFor="knowledge-type">Type</Label>
+                <Combobox
+                  id="knowledge-type"
+                  value={form.knowledgeType}
+                  onValueChange={(value) =>
+                    update({ knowledgeType: value as KnowledgeType })
+                  }
+                  options={TYPE_OPTIONS}
+                  searchPlaceholder="Search types…"
+                />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="knowledge-confidence">Confidence</Label>
+              <Combobox
+                id="knowledge-confidence"
+                value={form.confidence}
+                onValueChange={(value) =>
+                  update({ confidence: value as KnowledgeConfidence })
+                }
+                options={CONFIDENCE_OPTIONS}
+              />
+            </div>
+          </div>
+
+          {isCreate && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="knowledge-scope">Scope</Label>
+                <Combobox
+                  id="knowledge-scope"
+                  value={form.scope}
+                  onValueChange={(value) =>
+                    update({ scope: value as KnowledgeScope, agentId: '' })
+                  }
+                  options={SCOPE_OPTIONS}
+                />
+              </div>
+              {form.scope !== 'workspace' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="knowledge-board">Board</Label>
+                  <Combobox
+                    id="knowledge-board"
+                    value={form.boardId}
+                    onValueChange={(value) => update({ boardId: value })}
+                    options={boardOptions}
+                    placeholder="Choose a board"
+                    searchPlaceholder="Search boards…"
+                    emptyText="No boards found."
+                  />
+                </div>
+              )}
+              {form.scope === 'agent' && (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="knowledge-agent">Agent</Label>
+                  <Combobox
+                    id="knowledge-agent"
+                    value={form.agentId}
+                    onValueChange={(value) => update({ agentId: value })}
+                    options={agentOptions}
+                    placeholder="Choose an agent"
+                    searchPlaceholder="Search agents…"
+                    emptyText="No enabled agents."
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <FormError message={error} />
+        </div>
       </div>
 
-      <DialogFooter className="mt-6">
+      <DialogFooter>
         <DialogClose asChild>
           <Button type="button" variant="ghost">
             Cancel
@@ -379,7 +385,7 @@ export function KnowledgeFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden">
         <KnowledgeForm mode={mode} item={item} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
@@ -415,43 +421,48 @@ function RejectForm({ item, onDone }: { item: KnowledgeItem; onDone: () => void 
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)}>
-      <DialogHeader>
-        <DialogTitle>Reject candidate</DialogTitle>
-        <DialogDescription>
-          “{item.title}” will not be used by agents. The reason is kept in the audit history.
-        </DialogDescription>
-      </DialogHeader>
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Reject candidate</DialogTitle>
+          <DialogDescription>
+            “{item.title}” will not be used by agents. The reason is kept in the audit history.
+          </DialogDescription>
+        </DialogHeader>
 
-      <div className="mt-5 space-y-3">
-        <Label htmlFor={reasonId}>Reason (optional)</Label>
-        <div
-          role="group"
-          aria-label="Reject reason presets"
-          className="flex flex-wrap gap-1.5"
-        >
-          {REJECT_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => setReason(preset.reasonText)}
-              className="rounded-md border border-danger-muted bg-surface-raised px-2 py-1 font-body text-xs font-medium text-danger transition-colors duration-fast hover:bg-danger-muted/40"
-            >
-              {preset.label}
-            </button>
-          ))}
+        <div className="mt-5 space-y-3">
+          <Label htmlFor={reasonId}>Reason (optional)</Label>
+          <div
+            role="group"
+            aria-label="Reject reason presets"
+            className="flex flex-wrap gap-1.5"
+          >
+            {REJECT_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setReason(preset.reasonText)}
+                className="rounded-md border border-danger-muted bg-surface-raised px-2 py-1 font-body text-xs font-medium text-danger transition-colors duration-fast hover:bg-danger-muted/40"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <Textarea
+            id={reasonId}
+            rows={4}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Why should this candidate not be used?"
+          />
+          <FormError message={error} />
         </div>
-        <Textarea
-          id={reasonId}
-          rows={4}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder="Why should this candidate not be used?"
-        />
-        <FormError message={error} />
       </div>
 
-      <DialogFooter className="mt-6">
+      <DialogFooter>
         <DialogClose asChild>
           <Button type="button" variant="ghost">
             Cancel
@@ -476,7 +487,7 @@ export function RejectKnowledgeDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="flex max-h-[90vh] max-w-lg flex-col overflow-hidden">
         {item && <RejectForm item={item} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>

@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
@@ -37,8 +38,8 @@ export function MarketplaceSourcesDialog({
 }: MarketplaceSourcesDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Marketplace sources</DialogTitle>
           <DialogDescription>{PLUGIN_COPY.sourcesIntro}</DialogDescription>
         </DialogHeader>
@@ -135,126 +136,134 @@ function MarketplaceSources({
   }
 
   return (
-    <section className="space-y-3">
-      <ol className="mt-4 overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
-        {sources.map((source) => {
-          const coppice = isCoppiceSource(source);
-          return (
-            <li
-              key={source.id}
-              data-testid={`marketplace-source-${source.id}`}
-              className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+    <div className="mt-4 flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        <ol className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
+          {sources.map((source) => {
+            const coppice = isCoppiceSource(source);
+            return (
+              <li
+                key={source.id}
+                data-testid={`marketplace-source-${source.id}`}
+                className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+              >
+                <span className="font-body text-sm font-medium text-text-primary">
+                  {source.name}
+                </span>
+                <Badge variant="outline">{trustLabel(source)}</Badge>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
+                  {source.gitUrl ?? ''}
+                </span>
+                <span className="font-body text-xs text-text-muted">
+                  {source.lastError
+                    ? `Last refresh failed: ${source.lastError}`
+                    : source.refreshedAt
+                      ? `Refreshed ${new Date(source.refreshedAt).toLocaleString()}`
+                      : 'Not fetched yet'}
+                </span>
+                {!coppice && (
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={
+                        source.lastError
+                          ? `Retry ${source.name}`
+                          : `Refresh ${source.name}`
+                      }
+                      disabled={busy}
+                      onClick={() => void handleRefresh(source)}
+                    >
+                      {source.lastError ? 'Retry' : 'Refresh'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      aria-label={`Remove ${source.name}`}
+                      disabled={busy}
+                      onClick={() => void handleRemove(source)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+        {error && (
+          <p role="alert" className={ERROR_CLASS}>
+            {error}
+          </p>
+        )}
+      </div>
+
+      <DialogFooter className="sm:justify-stretch">
+        <form
+          onSubmit={(e) => void handleAdd(e)}
+          className="grid w-full gap-3 sm:grid-cols-[1fr_2fr_1fr_auto] sm:items-end"
+        >
+          <div>
+            <label
+              htmlFor="marketplace-source-name"
+              className="mb-1 block font-body text-sm font-medium text-bark-800"
             >
-              <span className="font-body text-sm font-medium text-text-primary">{source.name}</span>
-              <Badge variant="outline">{trustLabel(source)}</Badge>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
-                {source.gitUrl ?? ''}
-              </span>
-              <span className="font-body text-xs text-text-muted">
-                {source.lastError
-                  ? `Last refresh failed: ${source.lastError}`
-                  : source.refreshedAt
-                    ? `Refreshed ${new Date(source.refreshedAt).toLocaleString()}`
-                    : 'Not fetched yet'}
-              </span>
-              {!coppice && (
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={
-                      source.lastError ? `Retry ${source.name}` : `Refresh ${source.name}`
-                    }
-                    disabled={busy}
-                    onClick={() => void handleRefresh(source)}
-                  >
-                    {source.lastError ? 'Retry' : 'Refresh'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    aria-label={`Remove ${source.name}`}
-                    disabled={busy}
-                    onClick={() => void handleRemove(source)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-
-      <form
-        onSubmit={(e) => void handleAdd(e)}
-        className="grid gap-3 sm:grid-cols-[1fr_2fr_1fr_auto] sm:items-end"
-      >
-        <div>
-          <label
-            htmlFor="marketplace-source-name"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Name
-          </label>
-          <input
-            id="marketplace-source-name"
-            type="text"
-            autoComplete="off"
-            placeholder="acme-plugins"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="field-control w-full px-3 py-2 font-body text-sm"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="marketplace-source-url"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Git URL
-          </label>
-          <input
-            id="marketplace-source-url"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="https://github.com/org/plugins.git"
-            value={gitUrl}
-            onChange={(e) => setGitUrl(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="marketplace-source-ref"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Ref <span className="font-normal text-text-muted">(optional)</span>
-          </label>
-          <input
-            id="marketplace-source-ref"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="main"
-            value={ref}
-            onChange={(e) => setRef(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-        <Button type="submit" loading={adding}>
-          Add marketplace
-        </Button>
-      </form>
-
-      {error && (
-        <p role="alert" className={ERROR_CLASS}>
-          {error}
-        </p>
-      )}
-    </section>
+              Name
+            </label>
+            <input
+              id="marketplace-source-name"
+              type="text"
+              autoComplete="off"
+              placeholder="acme-plugins"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="field-control w-full px-3 py-2 font-body text-sm"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="marketplace-source-url"
+              className="mb-1 block font-body text-sm font-medium text-bark-800"
+            >
+              Git URL
+            </label>
+            <input
+              id="marketplace-source-url"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://github.com/org/plugins.git"
+              value={gitUrl}
+              onChange={(e) => setGitUrl(e.target.value)}
+              className="field-control w-full px-3 py-2 font-mono text-sm"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="marketplace-source-ref"
+              className="mb-1 block font-body text-sm font-medium text-bark-800"
+            >
+              Ref <span className="font-normal text-text-muted">(optional)</span>
+            </label>
+            <input
+              id="marketplace-source-ref"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="main"
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              className="field-control w-full px-3 py-2 font-mono text-sm"
+            />
+          </div>
+          <Button type="submit" loading={adding}>
+            Add marketplace
+          </Button>
+        </form>
+      </DialogFooter>
+    </div>
   );
 }

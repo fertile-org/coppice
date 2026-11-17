@@ -214,49 +214,49 @@ function CreateAgentDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-        <DialogTitle>New agent</DialogTitle>
-        <DialogDescription className="mt-1">
-          Choose a preset to prefill role and prompt, then name your agent.
-        </DialogDescription>
-
-        <div className="mt-5">
-          <label
-            htmlFor="agent-preset"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Preset
-          </label>
-          <Combobox
-            ref={presetRef}
-            id="agent-preset"
-            value={presetId}
-            onValueChange={handlePresetChange}
-            searchPlaceholder="Search presets…"
-            options={presets.map((preset) => ({
-              value: preset.id,
-              label: `${preset.key} — ${preset.role}`,
-            }))}
-          />
-        </div>
-
-        <div className="mt-4">
-          <AgentForm
-            mode="create"
-            values={
-              values.connector
-                ? values
-                : { ...values, connector: firstReadyConnector(connectorOptions) }
-            }
-            onChange={setValues}
-            onSubmit={handleSubmit}
-            onCancel={onClose}
-            connectorOptions={connectorOptions}
-            isPending={createAgent.isPending || setAgentPlugins.isPending}
-            error={error}
-            submitLabel={createdAgentId ? 'Retry plugin assignment' : undefined}
-          />
-        </div>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
+        <AgentForm
+          mode="create"
+          values={
+            values.connector
+              ? values
+              : { ...values, connector: firstReadyConnector(connectorOptions) }
+          }
+          onChange={setValues}
+          onSubmit={handleSubmit}
+          onCancel={onClose}
+          connectorOptions={connectorOptions}
+          isPending={createAgent.isPending || setAgentPlugins.isPending}
+          error={error}
+          submitLabel={createdAgentId ? 'Retry plugin assignment' : undefined}
+          header={
+            <>
+              <DialogTitle>New agent</DialogTitle>
+              <DialogDescription className="mt-1">
+                Choose a preset to prefill role and prompt, then name your agent.
+              </DialogDescription>
+              <div className="mt-5">
+                <label
+                  htmlFor="agent-preset"
+                  className="mb-1 block font-body text-sm font-medium text-bark-800"
+                >
+                  Preset
+                </label>
+                <Combobox
+                  ref={presetRef}
+                  id="agent-preset"
+                  value={presetId}
+                  onValueChange={handlePresetChange}
+                  searchPlaceholder="Search presets…"
+                  options={presets.map((preset) => ({
+                    value: preset.id,
+                    label: `${preset.key} — ${preset.role}`,
+                  }))}
+                />
+              </div>
+            </>
+          }
+        />
       </DialogContent>
     </Dialog>
   );
@@ -358,26 +358,27 @@ function EditAgentDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-        <DialogTitle>Edit agent</DialogTitle>
-        <DialogDescription className="mt-1">
-          Update {agent.name}&apos;s configuration.
-        </DialogDescription>
-
-        <div className="mt-5">
-          <AgentForm
-            mode="edit"
-            values={values}
-            onChange={setValues}
-            onSubmit={handleSubmit}
-            onCancel={onClose}
-            connectorOptions={connectorOptions}
-            isPending={updateAgent.isPending || setAgentPlugins.isPending}
-            error={error}
-            pluginAssignment={pluginAssignment}
-            focusPlugins={Boolean(preselectPluginId)}
-          />
-        </div>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
+        <AgentForm
+          mode="edit"
+          values={values}
+          onChange={setValues}
+          onSubmit={handleSubmit}
+          onCancel={onClose}
+          connectorOptions={connectorOptions}
+          isPending={updateAgent.isPending || setAgentPlugins.isPending}
+          error={error}
+          pluginAssignment={pluginAssignment}
+          focusPlugins={Boolean(preselectPluginId)}
+          header={
+            <>
+              <DialogTitle>Edit agent</DialogTitle>
+              <DialogDescription className="mt-1">
+                Update {agent.name}&apos;s configuration.
+              </DialogDescription>
+            </>
+          }
+        />
       </DialogContent>
     </Dialog>
   );

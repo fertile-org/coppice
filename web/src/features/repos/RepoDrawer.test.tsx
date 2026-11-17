@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Repo } from '../../lib/schemas/repo';
-import { RepoGitFlowSection } from './RepoDrawer';
+import { RepoDrawer, RepoGitFlowSection } from './RepoDrawer';
 
 const mocks = vi.hoisted(() => ({ update: vi.fn() }));
 
@@ -26,6 +26,25 @@ const repo: Repo = {
   createdAt: '2026-09-04T00:00:00Z',
   updatedAt: '2026-09-04T00:00:00Z',
 };
+
+describe('RepoDrawer', () => {
+  it('pins the footer outside the scroll body', () => {
+    render(
+      <RepoDrawer
+        ariaLabel="Add repository"
+        title="Add repository"
+        onClose={() => {}}
+        footer={<button type="button">Add repository</button>}
+      >
+        <p>Long form content</p>
+      </RepoDrawer>,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Add repository' });
+    const footerButton = screen.getByRole('button', { name: 'Add repository' });
+    expect(dialog).toContainElement(footerButton);
+    expect(footerButton.parentElement).toHaveClass('border-t');
+  });
+});
 
 describe('RepoGitFlowSection', () => {
   beforeEach(() => {

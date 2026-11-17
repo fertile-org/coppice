@@ -6,6 +6,7 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetTitle,
 } from '../../components/ui/sheet';
 
@@ -18,6 +19,8 @@ export interface RepoDrawerProps {
   onClose: () => void;
   /** Same as TicketDrawer: drawers with no SheetTrigger return focus here. */
   onRestoreFocus?: () => void;
+  /** Pinned action bar below the scroll body. */
+  footer?: ReactNode;
   children: ReactNode;
 }
 
@@ -29,6 +32,7 @@ export function RepoDrawer({
   description,
   onClose,
   onRestoreFocus,
+  footer,
   children,
 }: RepoDrawerProps) {
   return (
@@ -61,6 +65,7 @@ export function RepoDrawer({
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        {footer != null && <SheetFooter className="justify-start">{footer}</SheetFooter>}
       </SheetContent>
     </Sheet>
   );

@@ -65,11 +65,24 @@ function SheetContent({
   );
 }
 
+function SheetFooter({ className, ...props }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      className={cn(
+        'flex shrink-0 justify-end gap-2 border-t border-border bg-surface-raised px-6 py-4',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export {
   Dialog as Sheet,
   DialogClose as SheetClose,
   SheetContent,
   DialogDescription as SheetDescription,
+  SheetFooter,
   DialogTitle as SheetTitle,
   DialogTrigger as SheetTrigger,
 };

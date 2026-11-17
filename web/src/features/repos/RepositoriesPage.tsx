@@ -79,11 +79,19 @@ function formatDate(iso: string | null): string {
   });
 }
 
-interface CreateRepoFormProps {
-  onCreated: () => void;
-}
+const CREATE_REPO_FORM_ID = 'create-repo-form';
+const EDIT_REPO_FORM_ID = 'edit-repo-form';
 
-function CreateRepoForm({ onCreated }: CreateRepoFormProps) {
+const primaryActionClassName =
+  'rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60';
+
+function CreateRepoDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const [name, setName] = useState('');
   const [localPath, setLocalPath] = useState('');
   const [remoteUrl, setRemoteUrl] = useState('');
@@ -111,7 +119,7 @@ function CreateRepoForm({ onCreated }: CreateRepoFormProps) {
       setLocalPath('');
       setRemoteUrl('');
       setDefaultBranch('main');
-      onCreated();
+      onClose();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError('A repository with that path already exists.');
@@ -124,43 +132,62 @@ function CreateRepoForm({ onCreated }: CreateRepoFormProps) {
   }
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-      <RepoFields
-        name={name}
-        localPath={localPath}
-        remoteUrl={remoteUrl}
-        defaultBranch={defaultBranch}
-        onNameChange={setName}
-        onLocalPathChange={setLocalPath}
-        onRemoteUrlChange={setRemoteUrl}
-        onDefaultBranchChange={setDefaultBranch}
-        autofillFromPath
-        idPrefix="create"
-      />
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+    <RepoDrawer
+      open={open}
+      ariaLabel="Add repository"
+      title="Add repository"
+      description="Register a local git checkout. Pull/push use host git credentials."
+      onClose={onClose}
+      footer={
+        <button
+          type="submit"
+          form={CREATE_REPO_FORM_ID}
+          disabled={createRepo.isPending}
+          className={primaryActionClassName}
         >
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={createRepo.isPending}
-        className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
+          {createRepo.isPending ? 'Creating…' : 'Add repository'}
+        </button>
+      }
+    >
+      <form
+        id={CREATE_REPO_FORM_ID}
+        onSubmit={(e) => void handleSubmit(e)}
+        className="space-y-4"
       >
-        {createRepo.isPending ? 'Creating…' : 'Add repository'}
-      </button>
-    </form>
+        <RepoFields
+          name={name}
+          localPath={localPath}
+          remoteUrl={remoteUrl}
+          defaultBranch={defaultBranch}
+          onNameChange={setName}
+          onLocalPathChange={setLocalPath}
+          onRemoteUrlChange={setRemoteUrl}
+          onDefaultBranchChange={setDefaultBranch}
+          autofillFromPath
+          idPrefix="create"
+        />
+        {error && (
+          <p
+            role="alert"
+            className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+          >
+            {error}
+          </p>
+        )}
+      </form>
+    </RepoDrawer>
   );
 }
 
-interface EditRepoFormProps {
+function EditRepoDrawer({
+  open,
+  repo,
+  onClose,
+}: {
+  open: boolean;
   repo: Repo;
-}
-
-function EditRepoForm({ repo }: EditRepoFormProps) {
+  onClose: () => void;
+}) {
   const [name, setName] = useState(repo.name);
   const [localPath, setLocalPath] = useState(repo.localPath);
   const [remoteUrl, setRemoteUrl] = useState(repo.remoteUrl ?? '');
@@ -215,76 +242,92 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
   }
 
   return (
-    <div className="space-y-6">
-    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-      <h3 className="font-display text-sm font-semibold text-bark-800">
-        Metadata
-      </h3>
-      <RepoFields
-        name={name}
-        localPath={localPath}
-        remoteUrl={remoteUrl}
-        defaultBranch={defaultBranch}
-        onNameChange={setName}
-        onLocalPathChange={setLocalPath}
-        onRemoteUrlChange={setRemoteUrl}
-        onDefaultBranchChange={setDefaultBranch}
-        autofillFromPath
-        idPrefix="edit"
-      />
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
-        >
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={updateRepo.isPending}
-        className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
-      >
-        {updateRepo.isPending ? 'Saving…' : 'Save changes'}
-      </button>
-    </form>
-    {repo.forgeTokenNeedsReentry && (
-      <form onSubmit={(e) => void handleSaveToken(e)} className="space-y-3">
-        <label
-          htmlFor="repo-forge-token"
-          className="block font-body text-sm font-medium text-bark-800"
-        >
-          Token
-        </label>
-        <input
-          id="repo-forge-token"
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          value={token}
-          placeholder="Paste this token again. Backups don't include saved tokens."
-          onChange={(e) => setToken(e.target.value)}
-          className="field-control w-full px-3 py-2 font-mono text-sm"
-        />
-        {tokenError && (
-          <p
-            role="alert"
-            className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
-          >
-            {tokenError}
-          </p>
-        )}
+    <RepoDrawer
+      open={open}
+      ariaLabel="Edit repository"
+      title="Edit repository"
+      description="Update metadata and sync the default branch with the remote."
+      onClose={onClose}
+      footer={
         <button
           type="submit"
-          disabled={setForgeToken.isPending || token.trim() === ''}
-          className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
+          form={EDIT_REPO_FORM_ID}
+          disabled={updateRepo.isPending}
+          className={primaryActionClassName}
         >
-          {setForgeToken.isPending ? 'Saving…' : 'Save token'}
+          {updateRepo.isPending ? 'Saving…' : 'Save changes'}
         </button>
-      </form>
-    )}
-    <RepoGitFlowSection repo={repo} />
-    </div>
+      }
+    >
+      <div className="space-y-6">
+        <form
+          id={EDIT_REPO_FORM_ID}
+          onSubmit={(e) => void handleSubmit(e)}
+          className="space-y-4"
+        >
+          <h3 className="font-display text-sm font-semibold text-bark-800">
+            Metadata
+          </h3>
+          <RepoFields
+            name={name}
+            localPath={localPath}
+            remoteUrl={remoteUrl}
+            defaultBranch={defaultBranch}
+            onNameChange={setName}
+            onLocalPathChange={setLocalPath}
+            onRemoteUrlChange={setRemoteUrl}
+            onDefaultBranchChange={setDefaultBranch}
+            autofillFromPath
+            idPrefix="edit"
+          />
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+            >
+              {error}
+            </p>
+          )}
+        </form>
+        {repo.forgeTokenNeedsReentry && (
+          <form onSubmit={(e) => void handleSaveToken(e)} className="space-y-3">
+            <label
+              htmlFor="repo-forge-token"
+              className="block font-body text-sm font-medium text-bark-800"
+            >
+              Token
+            </label>
+            <input
+              id="repo-forge-token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={token}
+              placeholder="Paste this token again. Backups don't include saved tokens."
+              onChange={(e) => setToken(e.target.value)}
+              className="field-control w-full px-3 py-2 font-mono text-sm"
+            />
+            {tokenError && (
+              <p
+                role="alert"
+                className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+              >
+                {tokenError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={setForgeToken.isPending || token.trim() === ''}
+              className={primaryActionClassName}
+            >
+              {setForgeToken.isPending ? 'Saving…' : 'Save token'}
+            </button>
+          </form>
+        )}
+        <RepoGitFlowSection repo={repo} />
+        <EditRepoActions repo={repo} onRemoved={onClose} />
+      </div>
+    </RepoDrawer>
   );
 }
 
@@ -871,30 +914,16 @@ export function RepositoriesPage() {
       )}
 
       {isAdmin && (
-        <RepoDrawer
-          open={drawer.type === 'create'}
-          ariaLabel="Add repository"
-          title="Add repository"
-          description="Register a local git checkout. Pull/push use host git credentials."
-          onClose={closeDrawer}
-        >
-          <CreateRepoForm onCreated={closeDrawer} />
-        </RepoDrawer>
+        <CreateRepoDrawer open={drawer.type === 'create'} onClose={closeDrawer} />
       )}
 
       {isAdmin && shownEditRepo && (
-        <RepoDrawer
+        <EditRepoDrawer
+          key={shownEditRepo.id}
           open={drawer.type === 'edit' && Boolean(editingRepo)}
-          ariaLabel="Edit repository"
-          title="Edit repository"
-          description="Update metadata and sync the default branch with the remote."
+          repo={shownEditRepo}
           onClose={closeDrawer}
-        >
-          <div className="space-y-6">
-            <EditRepoForm key={shownEditRepo.id} repo={shownEditRepo} />
-            <EditRepoActions repo={shownEditRepo} onRemoved={closeDrawer} />
-          </div>
-        </RepoDrawer>
+        />
       )}
     </div>
   );

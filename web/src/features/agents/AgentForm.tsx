@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Combobox, type ComboboxOption } from '../../components/ui/combobox';
+import { DialogFooter } from '../../components/ui/dialog';
 import {
   connectorDefaultModelLabel,
   INSTALL_GUIDE_URL,
@@ -235,6 +236,8 @@ interface AgentFormProps {
   pluginAssignment?: PluginAssignmentState;
   /** Scrolls to and highlights the plugin picker (plugin deep link). */
   focusPlugins?: boolean;
+  /** Title / preset controls rendered above the fields in the scroll body. */
+  header?: ReactNode;
 }
 
 export function AgentForm({
@@ -249,6 +252,7 @@ export function AgentForm({
   submitLabel,
   pluginAssignment = { status: 'ready' },
   focusPlugins = false,
+  header,
 }: AgentFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
   const pluginsRef = useRef<HTMLFieldSetElement>(null);
@@ -353,7 +357,12 @@ export function AgentForm({
   const displayError = error ?? localError;
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+    <form
+      onSubmit={(e) => void handleSubmit(e)}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+        {header}
       <div>
         <label
           htmlFor="agent-name"
@@ -628,8 +637,9 @@ export function AgentForm({
           {displayError}
         </p>
       )}
+      </div>
 
-      <div className="flex justify-end gap-2 pt-1">
+      <DialogFooter>
         <button
           type="button"
           onClick={onCancel}
@@ -647,7 +657,7 @@ export function AgentForm({
             ? 'Saving…'
             : submitLabel ?? (mode === 'create' ? 'Create agent' : 'Save changes')}
         </button>
-      </div>
+      </DialogFooter>
     </form>
   );
 }
