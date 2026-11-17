@@ -37,7 +37,7 @@
   <img src="static/marketing.gif" alt="写一个工单，批准 PM 智能体起草的计划，让智能体构建和测试，然后评论 diff。你接受之前，什么都不算完成。" width="960" />
 </p>
 
-你的 PM 智能体起草计划，由你批准。专业智能体并行构建，各自在自己的分支上。看板显示哪些在推进、哪些卡住了、哪些在等你。你接受 diff 之前，什么都不算完成。
+你的 PM 智能体起草计划，由你批准。专业智能体并行构建，各自在自己的分支上。看板显示哪些在推进、哪些卡住了、哪些在等你。
 
 下载、打开、开始工作。无需任何配置：不用 Docker，也不用 Coppice 账号。
 
@@ -46,7 +46,7 @@
 - **每个角色都用合适的模型。** 每个智能体各自选择 CLI 和模型。用最强的模型做规划和审查，用更快的模型写代码，全都在同一块看板上。
 - **不用再在终端之间来回切换。** 每个智能体的工作都是同一块看板上的一张卡片。受阻的工单和等你审核的工作一目了然，你知道哪里需要你。
 - **在落地之前发现错误。** 每个改动都会以 diff 的形式在应用里等你审核。你接受之前，什么都不算完成；你接受的内容，就是最终合并的内容。
-- **不用再多一份订阅。** Coppice 驱动的是你已经付费的 CLI，登录方式和你平时一样。
+- **不用再多一份订阅。** Coppice 驱动的是你已经付费的 CLI，登录方式和你平时一样。支持的 CLI 见 [提供商](https://getcoppice.app/zh-cn/docs/providers)。
 
 ## 工作方式
 
@@ -73,24 +73,6 @@ PM 智能体阅读工单并起草计划：做法、步骤，以及如何检查�
 在应用里阅读 diff，可以评论任意一行。你接受之前，什么都不算完成，接受和合并是两件分开的事。
 
 <img src="website/public/home/review.png" alt="主题开关的代码审查：已批准的计划、改动的文件，以及 diff 某一行上的评论。" width="720" />
-
-## 用你已经在用的 CLI
-
-按常规方式安装并登录即可。Coppice 会在你登录 shell 的 `PATH` 中找到它们。
-
-| CLI | 命令 |
-| --- | --- |
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Cursor | `cursor-agent` |
-| OpenCode | `opencode` |
-| Kilo Code | `kilo` |
-| GitHub Copilot | `copilot` |
-| Qwen Code | `qwen` |
-| Kimi Code | `kimi` |
-| Grok | `grok` |
-
-安装链接和各个 CLI 支持的功能，见 [提供商](https://getcoppice.app/zh-cn/docs/providers)。
 
 ## 还有这些
 
