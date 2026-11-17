@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/worktree","session_id":"7212d38c-ca5e-496f-a177-8f1e7e4c6693","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: ok"}]},"session_id":"7212d38c-ca5e-496f-a177-8f1e7e4c6693"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"session_id":"7212d38c-ca5e-496f-a177-8f1e7e4c6693"}
+{"type":"result","subtype":"success","duration_ms":8810,"duration_api_ms":8810,"is_error":false,"result":"ok","session_id":"7212d38c-ca5e-496f-a177-8f1e7e4c6693","request_id":"a8a82d26-af63-4ff4-8e22-45b6552d45ce","usage":{"inputTokens":8686,"outputTokens":85,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":84}}

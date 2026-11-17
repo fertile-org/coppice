@@ -52,9 +52,9 @@ impl AgentProvider for CursorProvider {
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let command = self.config.command.as_str();
-        let contract = coppice_connectors::get(coppice_connectors::CURSOR)
-            .expect("cursor descriptor")
-            .run_contract;
+        let descriptor = coppice_connectors::get(coppice_connectors::CURSOR)
+            .expect("cursor descriptor");
+        let contract = descriptor.run_contract;
         let version = cli_version::detect(command).await.map_err(|err| {
             ProviderError::InvalidFixture(cli_version::version_unavailable(command, &err))
         })?;
@@ -110,6 +110,13 @@ impl AgentProvider for CursorProvider {
             &args,
             run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
+        if let Some(stream) = &input.stream {
+            let resumed = input
+                .resume_session_id
+                .as_deref()
+                .is_some_and(|sid| !sid.is_empty());
+            stream.track_usage(descriptor.usage, resumed);
+        }
 
         let invocation = CliInvocation {
             program: command.to_string(),
@@ -248,6 +255,7 @@ impl LineHandler for CursorLines {
             if let Some(model) = crate::providers::reported_model::reported_model("cursor", value) {
                 stream.note_reported_model(&model);
             }
+            stream.observe_usage(value);
             self.console.handle_stream_json(stream, value);
         }
 

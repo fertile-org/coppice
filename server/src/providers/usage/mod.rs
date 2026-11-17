@@ -6,12 +6,14 @@
 //! descriptor; storage, API and UI need no change.
 
 mod claude_stream_json;
+mod cursor_stream_json;
 
 use crate::domain::usage::UsageEvent;
 use coppice_connectors::UsageFormat;
 use serde_json::Value;
 
 pub use claude_stream_json::ClaudeStreamJsonReader;
+pub use cursor_stream_json::CursorStreamJsonReader;
 
 /// Reads one output event at a time. Readers may keep state across events
 /// (pending requests, cumulative totals).
@@ -30,6 +32,7 @@ pub trait UsageReader: Send {
 pub fn reader_for(format: UsageFormat) -> Option<Box<dyn UsageReader>> {
     match format {
         UsageFormat::ClaudeStreamJson => Some(Box::new(ClaudeStreamJsonReader::default())),
+        UsageFormat::CursorStreamJson => Some(Box::new(CursorStreamJsonReader::default())),
         UsageFormat::Normalized => Some(Box::new(NormalizedReader)),
         UsageFormat::None => None,
     }

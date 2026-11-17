@@ -120,6 +120,7 @@ Coppice records the tokens a run used: one row per LLM request, one row per suba
 | Connector | Usage format | What is recorded |
 |-----------|--------------|------------------|
 | Claude Code | `claudeStreamJson` | Each request's final usage (`stream_event` `message_delta`, from `--include-partial-messages`), each subagent's totals (Agent tool result), and the run total from `result.model_usage_since_last_result` (2.1.309+) or `result.modelUsage` (subagents included). On 2.1.277–2.1.308 a resumed process's `modelUsage` covers the whole session, so it is not used and the run total is the sum of its rows (`partial`). Captures: `fixtures/claude-code/claude-code-2.1.3*-usage-*.jsonl`. |
+| Cursor | `cursorStreamJson` | Run total from the terminal `result.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`). No per-request rows, no cost; `reasoningTokens` is ignored. Captures: `fixtures/cursor/cursor-agent-2026.11.13-eacade1-usage.jsonl`. |
 | Mock | `normalized` | The fixture's `usage` array, replayed through the same path. Without the key the run is untracked; `"usage": []` is tracked with nothing reported. |
 | Others | `none` | Nothing yet; their runs show no usage. |
 

@@ -233,6 +233,8 @@ pub enum ConsoleKind {
 pub enum UsageFormat {
     /// Claude Code `--output-format stream-json` with `--include-partial-messages`.
     ClaudeStreamJson,
+    /// Cursor `cursor-agent --output-format stream-json` terminal `result.usage`.
+    CursorStreamJson,
     /// Events already in Coppice's own usage shape (MockProvider fixtures).
     Normalized,
     /// No reader yet. Runs record no usage.
@@ -299,7 +301,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::CursorHome,
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
-        usage: UsageFormat::None,
+        usage: UsageFormat::CursorStreamJson,
         caps: Capabilities {
             // `--mode ask` blocks edit/apply, not shell writes. Read-only runs
             // write a per-run deny for Shell(*) and Write(**) and overlay
@@ -644,10 +646,11 @@ mod tests {
             id == CLAUDE_CODE,
             "{id} thinking level"
         );
-        // Only Claude Code has a usage reader so far; the mock replays
+        // Claude Code and Cursor have usage readers; the mock replays
         // normalized events.
         let usage = match id {
             CLAUDE_CODE => UsageFormat::ClaudeStreamJson,
+            CURSOR => UsageFormat::CursorStreamJson,
             MOCK => UsageFormat::Normalized,
             _ => UsageFormat::None,
         };

@@ -35,7 +35,7 @@ Verified against Claude Code 2.1.318 on 2026-11-05: `fixtures/claude-code/claude
 |---|---|---|---|---|
 | Claude Code | `stream_event` → `message_delta.usage` (needs `--include-partial-messages`); `assistant.message.usage` without it | `result.usage` (main thread), `result.modelUsage` (main + subagents, per model) | Agent `tool_result` → `tool_use_result.usage`, `system/task_notification.usage` | **yes** |
 | Codex | — (per turn: `turn.completed.usage`: input, cached input, output) | sum of turns | unknown | no |
-| Cursor | unknown | `result` event, fields unknown | unknown | no |
+| Cursor | — | `result.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`; `reasoningTokens` ignored). Capture: `fixtures/cursor/cursor-agent-2026.11.13-eacade1-usage.jsonl` (2026.11.13-eacade1) | — | **yes** |
 | OpenCode (CLI) | `step_finish` part, likely `tokens` (input, output, reasoning, cache read/write) | sum of steps | unknown | no |
 | ACP connectors (OpenCode, Copilot, Qwen Code, Kimi, Grok) and Kilo | ACP `usage_update` (`used` / `size`, context window); session messages likely carry `tokens` | prompt response or sum | unknown | no |
 
