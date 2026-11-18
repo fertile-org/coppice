@@ -235,6 +235,8 @@ pub enum UsageFormat {
     ClaudeStreamJson,
     /// Cursor `cursor-agent --output-format stream-json` terminal `result.usage`.
     CursorStreamJson,
+    /// Codex `codex exec --json` `turn.completed.usage`.
+    CodexJson,
     /// Events already in Coppice's own usage shape (MockProvider fixtures).
     Normalized,
     /// No reader yet. Runs record no usage.
@@ -270,6 +272,16 @@ impl UsageFormat {
                     output: true,
                     reasoning: false,
                 },
+                subagents: SubagentSource::None,
+                context_window: ContextWindowSource::None,
+            }),
+            // One `turn.completed.usage` per turn. `input_tokens` includes
+            // cached reads (checked on 0.163.0); the stream names no model
+            // and no subagent usage.
+            UsageFormat::CodexJson => Some(UsageCoverage {
+                granularity: CoverageGranularity::Turn,
+                model: ModelSource::None,
+                fields: TokenFields::ALL,
                 subagents: SubagentSource::None,
                 context_window: ContextWindowSource::None,
             }),
@@ -490,7 +502,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::CodexFlags,
         mcp_tool_names: ToolNameStyle::ServerToolFields,
         console: ConsoleKind::Structured,
-        usage: UsageFormat::None,
+        usage: UsageFormat::CodexJson,
         caps: Capabilities {
             read_only_tools: true,
             chat_resume: true,
@@ -771,11 +783,12 @@ mod tests {
             id == CLAUDE_CODE,
             "{id} thinking level"
         );
-        // Claude Code and Cursor have usage readers; the mock replays
-        // normalized events.
+        // Claude Code, Cursor and Codex have usage readers; the mock
+        // replays normalized events.
         let usage = match id {
             CLAUDE_CODE => UsageFormat::ClaudeStreamJson,
             CURSOR => UsageFormat::CursorStreamJson,
+            CODEX => UsageFormat::CodexJson,
             MOCK => UsageFormat::Normalized,
             _ => UsageFormat::None,
         };

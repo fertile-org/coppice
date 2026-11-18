@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 const CAPTURE_DIRS: &[(&str, UsageFormat)] = &[
     ("claude-code", UsageFormat::ClaudeStreamJson),
     ("cursor", UsageFormat::CursorStreamJson),
+    ("codex", UsageFormat::CodexJson),
 ];
 
 fn fixtures_root() -> PathBuf {
