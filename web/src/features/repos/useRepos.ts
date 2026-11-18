@@ -38,6 +38,15 @@ export type PullDefaultBranchResult = {
   status: DefaultBranchSyncStatus;
 };
 
+export type SyncDefaultBranchAction = 'pulled' | 'pushed' | 'upToDate';
+
+export type SyncDefaultBranchResult = {
+  action: SyncDefaultBranchAction;
+  defaultBranch: string;
+  message: string;
+  status: DefaultBranchSyncStatus;
+};
+
 export function defaultBranchSyncQueryKey(repoId: string) {
   return ['repos', repoId, 'default-branch-sync'] as const;
 }
@@ -129,6 +138,15 @@ async function pullDefaultBranch(
   return res.json() as Promise<PullDefaultBranchResult>;
 }
 
+async function syncDefaultBranch(
+  repoId: string,
+): Promise<SyncDefaultBranchResult> {
+  const res = await apiFetch(`/api/repos/${repoId}/sync`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<SyncDefaultBranchResult>;
+}
+
 async function inspectRepoPath(localPath: string): Promise<{
   suggestedName: string | null;
   remoteUrl: string | null;
@@ -196,6 +214,20 @@ export function usePullDefaultBranch(repoId: string) {
 
   return useMutation({
     mutationFn: () => pullDefaultBranch(repoId),
+    onSuccess: (result) => {
+      queryClient.setQueryData(
+        defaultBranchSyncQueryKey(repoId),
+        result.status,
+      );
+    },
+  });
+}
+
+export function useSyncDefaultBranch(repoId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => syncDefaultBranch(repoId),
     onSuccess: (result) => {
       queryClient.setQueryData(
         defaultBranchSyncQueryKey(repoId),

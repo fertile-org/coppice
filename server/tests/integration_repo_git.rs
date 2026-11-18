@@ -2,7 +2,9 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::middleware::session::parse_session_cookie;
-use coppice_server::services::repo_git_service::RepoGitService;
+use coppice_server::services::repo_git_service::{
+    RepoGitError, RepoGitService, SyncDefaultBranchAction,
+};
 use http_body_util::BodyExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -106,6 +108,54 @@ fn checkout_ahead_of_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
     commit_file(&local, "extra.txt", "ahead\n", "local ahead");
     // Keep origin/main at the pushed base (local is ahead).
     git(&local, &["update-ref", "refs/remotes/origin/main", &base]);
+
+    (root, local, bare)
+}
+
+/// Local checkout matching a bare sibling (origin/main at HEAD).
+fn checkout_equal_to_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let root = tempfile::tempdir().expect("tempdir");
+    let bare = root.path().join("remote.git");
+    let local = root.path().join("local");
+    std::fs::create_dir_all(&bare).expect("mkdir bare");
+    std::fs::create_dir_all(&local).expect("mkdir local");
+
+    git(&bare, &["init", "--bare", "-b", "main"]);
+    git(&local, &["init", "-b", "main"]);
+    commit_file(&local, "README.md", "# test\n", "initial");
+    git(
+        &local,
+        &["remote", "add", "origin", bare.to_str().expect("utf8")],
+    );
+    git(&local, &["push", "-u", "origin", "main"]);
+
+    (root, local, bare)
+}
+
+/// Local and remote each have one unique commit after a shared base.
+fn checkout_diverged_from_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let root = tempfile::tempdir().expect("tempdir");
+    let bare = root.path().join("remote.git");
+    let local = root.path().join("local");
+    std::fs::create_dir_all(&bare).expect("mkdir bare");
+    std::fs::create_dir_all(&local).expect("mkdir local");
+
+    git(&bare, &["init", "--bare", "-b", "main"]);
+    git(&local, &["init", "-b", "main"]);
+    commit_file(&local, "README.md", "# test\n", "initial");
+    git(
+        &local,
+        &["remote", "add", "origin", bare.to_str().expect("utf8")],
+    );
+    git(&local, &["push", "-u", "origin", "main"]);
+    let base = rev_parse(&local, "HEAD");
+
+    commit_file(&local, "remote.txt", "remote ahead\n", "remote ahead");
+    git(&local, &["push", "origin", "main"]);
+    let tip = rev_parse(&local, "HEAD");
+    git(&local, &["reset", "--hard", &base]);
+    commit_file(&local, "local.txt", "local\n", "local diverge");
+    git(&local, &["update-ref", "refs/remotes/origin/main", &tip]);
 
     (root, local, bare)
 }
@@ -246,6 +296,7 @@ async fn default_branch_sync_requires_admin_and_csrf() {
         format!("/api/repos/{repo_id}/fetch"),
         format!("/api/repos/{repo_id}/push-default-branch"),
         format!("/api/repos/{repo_id}/pull-default-branch"),
+        format!("/api/repos/{repo_id}/sync"),
     ] {
         let method = if uri.ends_with("default-branch-sync") {
             "GET"
@@ -720,4 +771,240 @@ async fn pull_blocked_when_dirty_or_diverged() {
         msg.contains("diverged") || msg.contains("ahead") || msg.contains("fast-forward"),
         "{msg}"
     );
+}
+
+#[tokio::test]
+async fn sync_pushes_when_ahead() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_ahead_of_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let result = svc
+        .sync_default_branch_with_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect("sync push");
+
+    assert_eq!(result.action, SyncDefaultBranchAction::Pushed);
+    assert_eq!(result.status.ahead_count, Some(0));
+    assert_eq!(result.status.behind_count, Some(0));
+    assert_eq!(
+        rev_parse(&bare, "refs/heads/main"),
+        rev_parse(&local, "HEAD")
+    );
+
+    // HTTP sync uses origin when no forge token is set.
+    let (_root2, local2, _bare2) = checkout_ahead_of_bare();
+    let repo_id2 = register_repo_with_remote(
+        &app,
+        &local2.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let http = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/repos/{repo_id2}/sync"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(http.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(http).await;
+    assert_eq!(body["action"], "pushed");
+    assert_eq!(body["status"]["aheadCount"], 0);
+    assert_eq!(body["status"]["behindCount"], 0);
+}
+
+#[tokio::test]
+async fn sync_pulls_when_behind() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_behind_of_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let result = svc
+        .sync_default_branch_with_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect("sync pull");
+
+    assert_eq!(result.action, SyncDefaultBranchAction::Pulled);
+    assert_eq!(result.status.ahead_count, Some(0));
+    assert_eq!(result.status.behind_count, Some(0));
+    assert_eq!(
+        rev_parse(&local, "HEAD"),
+        rev_parse(&bare, "refs/heads/main")
+    );
+}
+
+#[tokio::test]
+async fn sync_up_to_date_when_equal() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_equal_to_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let result = svc
+        .sync_default_branch_with_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect("sync equal");
+
+    assert_eq!(result.action, SyncDefaultBranchAction::UpToDate);
+    assert_eq!(result.status.ahead_count, Some(0));
+    assert_eq!(result.status.behind_count, Some(0));
+}
+
+#[tokio::test]
+async fn sync_errors_when_diverged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_diverged_from_bare();
+    let before = rev_parse(&local, "HEAD");
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let err = svc
+        .sync_default_branch_with_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect_err("diverged sync must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("diverged") || msg.contains("behind") || msg.contains("resolve"),
+        "{msg}"
+    );
+    assert_eq!(rev_parse(&local, "HEAD"), before);
+}
+
+#[tokio::test]
+async fn sync_errors_when_push_disabled_and_ahead() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_ahead_of_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = false;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, false, &state.secret_store);
+    let err = svc
+        .sync_default_branch_with_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect_err("push disabled");
+    assert!(
+        matches!(err, RepoGitError::PushDisabled) || err.to_string().contains("push_enabled"),
+        "{err}"
+    );
+
+    let http = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/repos/{repo_id}/sync"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(http.status(), StatusCode::FORBIDDEN);
 }
