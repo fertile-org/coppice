@@ -1145,12 +1145,13 @@ async fn usage_summary_groups_tracked_runs_for_admins() {
         assert!(body["message"].is_string(), "{bad}: {body}");
     }
 
-    // Legacy aliases and unknown zones must not break the page.
-    for tz in ["Asia/Saigon", "Nowhere/Special"] {
-        let uri = format!("/api/usage/summary?tz={tz}");
-        let (status, body) = get_json(&app, &uri, &cookie, &csrf).await;
-        assert_eq!(status, StatusCode::OK, "{tz}: {body}");
-    }
+    // Legacy Chromium aliases resolve; unknown zones stay 400.
+    let (status, body) = get_json(&app, "/api/usage/summary?tz=Asia/Saigon", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "Asia/Saigon: {body}");
+    let (status, body) =
+        get_json(&app, "/api/usage/summary?tz=Nowhere/Special", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Nowhere/Special: {body}");
+    assert_eq!(body["message"], "unknown time zone");
 
     sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
         .execute(state.db.as_ref().unwrap())

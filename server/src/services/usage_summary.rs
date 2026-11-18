@@ -171,6 +171,32 @@ pub async fn timezone_exists(pool: &PgPool, tz: &str) -> Result<bool, sqlx::Erro
         .await
 }
 
+/// Legacy IANA names Chromium may send that host tzdata without `tzdata-legacy` omits.
+fn canonical_timezone(tz: &str) -> &str {
+    match tz {
+        "Asia/Saigon" => "Asia/Ho_Chi_Minh",
+        "Asia/Calcutta" => "Asia/Kolkata",
+        "Asia/Katmandu" => "Asia/Kathmandu",
+        "Asia/Rangoon" => "Asia/Yangon",
+        "Europe/Kiev" => "Europe/Kyiv",
+        "America/Buenos_Aires" => "America/Argentina/Buenos_Aires",
+        other => other,
+    }
+}
+
+/// Resolve a client `tz` to a name Postgres knows, or `None` if neither the
+/// original nor its IANA backward alias exists on this host.
+pub async fn resolve_timezone(pool: &PgPool, tz: &str) -> Result<Option<String>, sqlx::Error> {
+    if timezone_exists(pool, tz).await? {
+        return Ok(Some(tz.to_string()));
+    }
+    let mapped = canonical_timezone(tz);
+    if mapped != tz && timezone_exists(pool, mapped).await? {
+        return Ok(Some(mapped.to_string()));
+    }
+    Ok(None)
+}
+
 /// Slice filters, with `$1` from, `$2` to, `$3` tz, `$4` board, `$5` connector.
 const SLICE_FILTER: &str = "
     ($1::date IS NULL OR s.at >= ($1::date::timestamp AT TIME ZONE $3))
@@ -722,6 +748,19 @@ mod tests {
             .unwrap()
             .daily;
         assert_eq!(hanoi[0].day, "2026-03-02");
+
+        // Legacy Chromium alias: map table points at the canonical zone; day
+        // buckets match whether Postgres still knows the alias or we remap.
+        assert_eq!(canonical_timezone("Asia/Saigon"), "Asia/Ho_Chi_Minh");
+        assert_eq!(canonical_timezone("UTC"), "UTC");
+        let resolved = resolve_timezone(&w.pool, "Asia/Saigon").await.unwrap().unwrap();
+        assert!(
+            resolved == "Asia/Saigon" || resolved == "Asia/Ho_Chi_Minh",
+            "unexpected resolve: {resolved}"
+        );
+        let saigon = usage_summary(&w.pool, &around_midnight(&resolved)).await.unwrap().daily;
+        assert_eq!(saigon, hanoi);
+        assert_eq!(resolve_timezone(&w.pool, "Mars/Base").await.unwrap(), None);
 
         // The range is in the viewer's days too: 23:30 UTC on Mar 1 is Mar 2 in Hanoi.
         let mut q = w.query(GroupBy::Model);
