@@ -1139,11 +1139,17 @@ async fn usage_summary_groups_tracked_runs_for_admins() {
         "/api/usage/summary?groupBy=nope",
         "/api/usage/summary?from=2026-13-01",
         "/api/usage/summary?from=2026-03-02&to=2026-03-01",
-        "/api/usage/summary?tz=Nowhere/Special",
     ] {
         let (status, body) = get_json(&app, bad, &cookie, &csrf).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {body}");
         assert!(body["message"].is_string(), "{bad}: {body}");
+    }
+
+    // Legacy aliases and unknown zones must not break the page.
+    for tz in ["Asia/Saigon", "Nowhere/Special"] {
+        let uri = format!("/api/usage/summary?tz={tz}");
+        let (status, body) = get_json(&app, &uri, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::OK, "{tz}: {body}");
     }
 
     sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")

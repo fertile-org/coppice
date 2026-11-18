@@ -116,9 +116,11 @@ async fn summary(
         ))?,
     };
     let tz = params.tz.filter(|tz| !tz.is_empty()).unwrap_or_else(|| "UTC".into());
-    if !usage_summary::timezone_exists(pool, &tz).await? {
-        return Err(UsageApiError(StatusCode::BAD_REQUEST, "unknown time zone"));
-    }
+    // Hosts without legacy tzdata links report names like `Asia/Saigon` that
+    // Postgres can't resolve. Map known aliases, and never fail the page over
+    // an unknown zone: day buckets fall back to UTC.
+    let tz = canonical_timezone(&tz).to_string();
+    let tz = if usage_summary::timezone_exists(pool, &tz).await? { tz } else { "UTC".into() };
     let query = SummaryQuery {
         from,
         to,
@@ -128,6 +130,19 @@ async fn summary(
         connector: params.connector.filter(|c| !c.is_empty()),
     };
     Ok(Json(usage_summary::usage_summary(pool, &query).await?))
+}
+
+/// Legacy IANA names that Postgres's bundled or host tzdata may lack.
+fn canonical_timezone(tz: &str) -> &str {
+    match tz {
+        "Asia/Saigon" => "Asia/Ho_Chi_Minh",
+        "Asia/Calcutta" => "Asia/Kolkata",
+        "Asia/Katmandu" => "Asia/Kathmandu",
+        "Asia/Rangoon" => "Asia/Yangon",
+        "Europe/Kiev" => "Europe/Kyiv",
+        "America/Buenos_Aires" => "America/Argentina/Buenos_Aires",
+        other => other,
+    }
 }
 
 /// A chat session's total, for its owner (anyone else gets 404, as for the
