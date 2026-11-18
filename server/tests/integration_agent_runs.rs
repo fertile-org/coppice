@@ -1139,12 +1139,19 @@ async fn usage_summary_groups_tracked_runs_for_admins() {
         "/api/usage/summary?groupBy=nope",
         "/api/usage/summary?from=2026-13-01",
         "/api/usage/summary?from=2026-03-02&to=2026-03-01",
-        "/api/usage/summary?tz=Nowhere/Special",
     ] {
         let (status, body) = get_json(&app, bad, &cookie, &csrf).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {body}");
         assert!(body["message"].is_string(), "{bad}: {body}");
     }
+
+    // Legacy Chromium aliases resolve; unknown zones stay 400.
+    let (status, body) = get_json(&app, "/api/usage/summary?tz=Asia/Saigon", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "Asia/Saigon: {body}");
+    let (status, body) =
+        get_json(&app, "/api/usage/summary?tz=Nowhere/Special", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Nowhere/Special: {body}");
+    assert_eq!(body["message"], "unknown time zone");
 
     sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
         .execute(state.db.as_ref().unwrap())

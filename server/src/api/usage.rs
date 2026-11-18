@@ -116,9 +116,9 @@ async fn summary(
         ))?,
     };
     let tz = params.tz.filter(|tz| !tz.is_empty()).unwrap_or_else(|| "UTC".into());
-    if !usage_summary::timezone_exists(pool, &tz).await? {
-        return Err(UsageApiError(StatusCode::BAD_REQUEST, "unknown time zone"));
-    }
+    let tz = usage_summary::resolve_timezone(pool, &tz)
+        .await?
+        .ok_or(UsageApiError(StatusCode::BAD_REQUEST, "unknown time zone"))?;
     let query = SummaryQuery {
         from,
         to,

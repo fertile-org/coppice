@@ -77,6 +77,8 @@ deb:
     - libgbm1
     # Bundled Postgres is built --with-system-tzdata=/usr/share/zoneinfo.
     # TimeZone=UTC is rejected when that directory is missing.
+    # Legacy IANA aliases (e.g. Asia/Saigon) are resolved in the server, so
+    # tzdata-legacy is not required (and is missing on older distros).
     - tzdata
     - git
   afterInstall: build/linux/after-install.sh
