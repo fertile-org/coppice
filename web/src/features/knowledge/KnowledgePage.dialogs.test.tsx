@@ -6,6 +6,7 @@ import { REJECT_PRESETS } from './curationGuide';
 import {
   item,
   mutation,
+  neighbor,
   resetKnowledgePageMocks,
 } from './KnowledgePage.test.shared';
 import { KnowledgePage } from './KnowledgePage';
@@ -13,7 +14,7 @@ import { KnowledgePage } from './KnowledgePage';
 const mocks = vi.hoisted(() => ({
   items: [] as typeof item[],
   filter: null as unknown,
-  similarItems: [] as unknown[],
+  similarItems: [] as typeof neighbor[],
   similarEnabled: null as boolean | null,
   create: vi.fn(),
   approve: vi.fn(),
