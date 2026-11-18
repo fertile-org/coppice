@@ -363,7 +363,10 @@ async fn list_connectors_returns_mock() {
     assert_eq!(coverage("claude-code")["subagents"], "totalOnly");
     assert_eq!(coverage("cursor")["granularity"], "runTotalOnly");
     assert_eq!(coverage("cursor")["fields"]["reasoning"], false);
-    assert!(coverage("codex").is_null());
+    assert_eq!(coverage("codex")["granularity"], "turn");
+    assert_eq!(coverage("codex")["model"], "none");
+    assert_eq!(coverage("codex")["subagents"], "none");
+    assert_eq!(coverage("codex")["fields"]["reasoning"], true);
 }
 
 #[tokio::test]

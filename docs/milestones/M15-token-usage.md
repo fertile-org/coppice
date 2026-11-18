@@ -4,7 +4,7 @@
 
 Show how many tokens agents spend, per LLM request, per run, per ticket and per agent, so a human can answer "what did this ticket cost to deliver, and which agent spent it?" without reading consoles.
 
-Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connectors) and [phase 2](#phase-2-settings--usage) are built for Claude Code (deliverables D1–D6 and D8–D11). D0's manual check passed with a real Claude Code 2.1.318 ticket run. Cursor has a reader too: run totals only, from a real capture, on the same groundwork. Still open: the [deferred](#deferred) readers for the remaining connectors (D7, D12+).
+Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connectors) and [phase 2](#phase-2-settings--usage) are built for Claude Code (deliverables D1–D6 and D8–D11). D0's manual check passed with a real Claude Code 2.1.318 ticket run. Cursor has a reader too: run totals only, from a real capture, on the same groundwork. Codex (D7) is done: per-turn rows from a real 0.163.0 capture. Still open: the [deferred](#deferred) readers for the remaining connectors (D12+).
 
 ## Problem
 
@@ -25,7 +25,7 @@ Status: **phase 1 merged** (PR #215). The [connector groundwork](#adding-connect
 | Honesty | Same rule as `reported_model`: only what the CLI reported. Missing is `NULL` and shows "not reported", never 0. A total that is only the sum of what was streamed (`partial`) says so. |
 | Tracked runs | A run is tracked when a reader was attached to it, and that is **recorded at run time**: the stream handle stores a `run_usage` row (status `none`) as soon as tracking starts. Runs without a row (connectors without a reader, runs from before M15) are left out of every count. No connector, current or past, is looked up afterwards. |
 | Coupling | Usage is keyed by **wire format**, not connector. Storage, API and UI only see normalized events; a connector joins by declaring its format and, if the format is new, adding one reader. |
-| Scope | **Claude Code only, for now.** Other connectors declare `UsageFormat::None` until a capture and reader exist; their runs show nothing. Their readers are [deferred](#deferred) until their CLIs are available for a capture. |
+| Scope | **Claude Code, Cursor and Codex.** Other connectors declare `UsageFormat::None` until a capture and reader exist; their runs show nothing. Their readers are [deferred](#deferred) until their CLIs are available for a capture. |
 
 ## What the CLIs report
 
@@ -34,10 +34,19 @@ Verified against Claude Code 2.1.318 on 2026-11-05: `fixtures/claude-code/claude
 | Connector | Per request | Run total | Subagents | Verified |
 |---|---|---|---|---|
 | Claude Code | `stream_event` → `message_delta.usage` (needs `--include-partial-messages`); `assistant.message.usage` without it | `result.usage` (main thread), `result.modelUsage` (main + subagents, per model) | Agent `tool_result` → `tool_use_result.usage`, `system/task_notification.usage` | **yes** |
-| Codex | — (per turn: `turn.completed.usage`: input, cached input, output) | sum of turns | unknown | no |
+| Codex | `turn.completed.usage` (per turn: `input_tokens` includes `cached_input_tokens`; also `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`). Captures: `fixtures/codex/codex-0.163.0-usage.jsonl`, `...-usage-resume.jsonl` (0.163.0, 2026-11-19) | sum of turns | — (none in capture) | **yes** |
 | Cursor | — | `result.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`; `reasoningTokens` ignored). Capture: `fixtures/cursor/cursor-agent-2026.11.13-eacade1-usage.jsonl` (2026.11.13-eacade1) | — | **yes** |
 | OpenCode (CLI) | `step_finish` part, likely `tokens` (input, output, reasoning, cache read/write) | sum of steps | unknown | no |
 | ACP connectors (OpenCode, Copilot, Qwen Code, Kimi, Grok) and Kilo | ACP `usage_update` (`used` / `size`, context window); session messages likely carry `tokens` | prompt response or sum | unknown | no |
+
+### Codex findings
+
+Checked on Codex CLI 0.163.0 on 2026-11-19 (`codex-0.163.0-usage.jsonl`, shell command; `codex-0.163.0-usage-resume.jsonl`, resumed second turn):
+
+1. **`input_tokens` includes `cached_input_tokens`.** Uncached input is `input_tokens - cached_input_tokens` (25711 − 23552 = 2159 on the fresh capture).
+2. **`turn.completed.usage` is per turn, including on resume.** The resumed process reported output 48 only; it did not include the earlier turn's 41. The reader sums the turns it sees and needs no resume subtraction.
+3. **No model** appears on `turn.completed` or elsewhere in the `--json` stream.
+4. **No subagent usage** appeared in the standard capture. `cache_write_input_tokens` and `reasoning_output_tokens` are present (both 0 on these runs); `output_tokens` includes reasoning (session `total_tokens` is input + output).
 
 ### Claude Code findings
 
@@ -131,7 +140,7 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 | D4 | **Done.** **Coverage per format.** `UsageFormat::coverage()`, `usageCoverage` on connector responses, and the harness check that events stay within coverage. ([§ 4](#4-coverage-declared-per-format)) | D3 | Every format has coverage (an exhaustive `match`, so a missing one does not compile). An API integration test reads `usageCoverage`. A harness case that emits a count outside coverage fails. |
 | D5 | **Done.** **Run dimensions and usage that outlives runs.** `agent_runs.connector` written when every run starts; `run_usage` gets its own `id`, copies its [dimensions](#schema) when tracking starts, and keeps its rows when the run, ticket, agent or board is deleted; request and subagent rows hang off `run_usage.id`. | — | DB tests: every run type (ticket, plan, chat, compaction, connector check) stores its connector. Deleting a ticket, an agent and a board keeps their usage rows, with links set to NULL and names kept. Phase 1 endpoints return the same results as before for runs that still exist. |
 | D6 | **Done.** **Per-model run totals.** `runTotal.byModel`, the `run_usage_models` migration written in the versioned snapshot, and the Claude Code reader emitting it. ([§ 3](#3-a-complete-event-vocabulary)) | D5 | Reader tests on the captures: `byModel` adds up to `tokens`, including a resumed process. DB test: a stale snapshot does not replace newer per-model rows. Integration: a MockProvider fixture with `byModel` stores its rows. |
-| D7 | **Deferred. Codex reader.** The standard capture, a `UsageFormat` variant, its coverage, the reader and the descriptor's `usage`. Proves the groundwork against a second real format. | D2, D3, D4, a real Codex capture ([deferred](#deferred)) | The harness passes on the Codex captures. The diff touches only the reader, coverage, fixtures, descriptor and [What the CLIs report](#what-the-clis-report). Manual: a real Codex ticket run shows tokens in the Runs tab. |
+| D7 | **Done. Codex reader.** Real captures (`codex-0.163.0-usage.jsonl`, resume), `UsageFormat::CodexJson`, coverage, reader and descriptor `usage`. `input_tokens` includes cached reads; usage is per turn (resume does not re-count earlier turns); no model or subagent usage in the stream. | D2, D3, D4 | The harness passes on the Codex captures. The diff touches only the reader, coverage, fixtures, descriptor and [What the CLIs report](#what-the-clis-report). Manual: a real Codex ticket run shows tokens in the Runs tab. |
 | D8 | **Done.** **Context-window meter.** The `contextWindow` event, Claude Code's derived value, delivery on the run's WebSocket stream, and the console meter. ([Meter](#live-context-window-meter)) | D2, D4 | A reader test emits `contextWindow`. A stream test delivers it and stores nothing. Web tests: the meter with and without a window size, and hidden when coverage declares none. Manual: the meter grows during a real Claude Code run. |
 | D9 | **Done.** **Slices and summary API.** The `usage_slices` view and `GET /api/usage/summary`. ([Slices](#slices)) | D5, D6 | DB tests with MockProvider fixtures at each level of detail (per request, per turn, run total only, subagent total only): each run's slices add up to its total. One test per `groupBy`. Day grouping is checked in two timezones around midnight. Untracked runs appear only in the coverage counts. Workspace runs are excluded by the board filter. Deleting a ticket leaves the totals unchanged. Tokens per Done ticket matches a hand-computed median over a split ticket tree. |
 | D10 | **Done.** **Settings → Usage page.** Tiles, chart, grouped table, filters and the coverage line. ([Page](#page)) | D4, D9 | Web tests: for every group, the table rows add up to the Total tile. The coverage line names untracked connectors. "—" and "not reported" appear in the right cells. Filters change the query. Manual: a workspace with runs from two connectors. |
@@ -140,13 +149,13 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 
 D0, D1, D3, D5 and D11 can start now and run in parallel. D2 follows D1, D4 follows D3, and D6 follows D5. D8, D9 and D10 need only Claude Code and MockProvider, so none of them waits on the deferred readers.
 
-D7 and D12+ are deferred until someone with the Codex, OpenCode or other connector CLIs records the [standard capture](#standard-capture). Until then only Claude Code and Cursor runs are tracked, and the Usage page's coverage line names every other connector as not tracked. Cursor is the second real format: a run-total-only reader with its own coverage declaration and harness capture. It has no per-turn usage, so a MockProvider fixture shaped like a per-turn CLI still stands in for that shape in D3 and D9 until D7 lands.
+D12+ is deferred until someone with the OpenCode or other connector CLIs records the [standard capture](#standard-capture). Claude Code, Cursor and Codex runs are tracked; the Usage page's coverage line names every other connector as not tracked. Codex is the per-turn format on the groundwork (D7); Cursor remains run-total-only.
 
 ## Adding connectors
 
 Goal: adding a connector to usage tracking touches a captured fixture, a reader (only when its wire format is new) and the descriptor's `usage` field. It needs no adapter, schema, API or UI change.
 
-Phase 1 already keys usage by wire format, but five parts of it were built around one connector. The plan was to fix them together with the first follow-up connector, Codex, so the shared design is tested against a second real format instead of guessed. Codex differs from Claude Code where it matters: it reports per turn, probably has no cache-write count, and its input count likely includes cached tokens. Both need a real capture to confirm. The Codex reader is [deferred](#deferred), so the five changes land first, checked with MockProvider fixtures, and Codex proves them later.
+Phase 1 already keys usage by wire format, but five parts of it were built around one connector. They landed with MockProvider fixtures first; Codex (D7) then proved the groundwork against a real per-turn format: `input_tokens` includes cached reads, `cache_write_input_tokens` is present, and a resumed process does not re-count earlier turns.
 
 ### 1. Usage hooks live in the shared runners
 
@@ -222,7 +231,7 @@ Every connector records the same scenario: one prompt that runs a shell command 
 - [x] `runTotal.byModel` is stored in `run_usage_models`, and the Claude Code reader emits it.
 - [x] Every `UsageFormat` declares coverage, and the connector API serves it.
 - [x] The harness runs every capture, including the existing Claude Code ones.
-- [ ] Deferred (D7): Codex usage is tracked with changes only to its reader, coverage, fixtures and descriptor.
+- [x] D7: Codex usage is tracked with changes only to its reader, coverage, fixtures and descriptor.
 
 ## Phase 2: Settings → Usage
 
@@ -316,9 +325,8 @@ Settled questions are in [Decisions (phase 2)](#decisions-phase-2). Two were set
 
 ### Deferred
 
-These need connector CLIs that are not available yet. They block only D7 and D12+.
+These need connector CLIs that are not available yet. They block only D12+.
 
-- **A real Codex capture (blocks D7).** `fixtures/codex/*.jsonl` looks hand-written: the counts are round, and it has a `cache_write_input_tokens` field that the Codex row above does not expect. A real capture must show whether `input_tokens` includes `cached_input_tokens`, whether `turn.completed.usage` is per turn or cumulative, whether a model is reported, and how subagents appear. This needs the Codex CLI installed and signed in.
 - **ACP captures beyond OpenCode (blocks the ACP reader).** In the real `fixtures/opencode-acp` capture, the prompt response's `totalTokens` (7897) is `inputTokens` 58 + `outputTokens` 14 + `cachedReadTokens` 7808 + `thoughtTokens` 17. Thought tokens are therefore outside `outputTokens`, and the reader must add them to `output`. `usage_update` reports `used` 7897 and `size` 200000. That capture has no subagent or resumed turn, so it is not the full standard capture. Copilot, Qwen Code, Kimi and Grok need their own captures before one ACP reader can claim to cover them.
 - **OpenCode speaks two wire formats.** OpenCode 2.0+ runs over ACP and older versions print `--format json` events, but one descriptor serves both, and `ConnectorDescriptor::usage` names one format. Its reader must pick the format per launch (the version is in the `ProcessContext`), or the descriptor must name one format per transport.
 

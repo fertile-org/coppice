@@ -6,6 +6,7 @@
 //! descriptor; storage, API and UI need no change.
 
 mod claude_stream_json;
+mod codex_json;
 mod cursor_stream_json;
 #[cfg(test)]
 mod harness;
@@ -18,6 +19,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub use claude_stream_json::ClaudeStreamJsonReader;
+pub use codex_json::CodexJsonReader;
 pub use cursor_stream_json::CursorStreamJsonReader;
 
 /// Sends one CLI process's output to its run's usage tracking. The shared
@@ -104,6 +106,7 @@ pub fn reader_for(format: UsageFormat) -> Option<Box<dyn UsageReader>> {
     match format {
         UsageFormat::ClaudeStreamJson => Some(Box::new(ClaudeStreamJsonReader::default())),
         UsageFormat::CursorStreamJson => Some(Box::new(CursorStreamJsonReader::default())),
+        UsageFormat::CodexJson => Some(Box::new(CodexJsonReader::default())),
         UsageFormat::Normalized => Some(Box::new(NormalizedReader)),
         UsageFormat::None => None,
     }
@@ -137,6 +140,8 @@ mod tests {
         // Listed by hand: a new variant must be added here and to the matches.
         for format in [
             UsageFormat::ClaudeStreamJson,
+            UsageFormat::CursorStreamJson,
+            UsageFormat::CodexJson,
             UsageFormat::Normalized,
             UsageFormat::None,
         ] {
