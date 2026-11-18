@@ -701,6 +701,80 @@ async fn sync_push_clears_not_pushed() {
 }
 
 #[tokio::test]
+async fn repo_sync_push_clears_not_pushed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let bare = tempfile::tempdir().expect("bare");
+    git(bare.path(), &["init", "--bare", "-b", "main"]);
+    git(
+        &local_path,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
+    git(&local_path, &["push", "-u", "origin", "main"]);
+    let worktrees = tempfile::tempdir().expect("worktrees");
+    let path = worktrees.path().to_string_lossy().into_owned();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(move |config| {
+        config.agent.worktrees_path = path;
+        config.git.push_enabled = true;
+    })
+    .await;
+    let worktrees_root = std::path::PathBuf::from(&state.config.agent.worktrees_path);
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let patched = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/repos/{repo_id}"),
+            r#"{"remoteUrl":"https://github.com/example/repo.git"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patched.status(), StatusCode::OK);
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let worktree_path =
+        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    let fx = MergeFixture {
+        _git_keep: git_dir,
+        _worktrees: worktrees,
+        state,
+        app,
+        cookie,
+        csrf,
+        board_id,
+        ticket_id,
+        local_path,
+        worktree_path,
+    };
+    accept(&fx).await;
+    let mut rx = fx.state.event_bus.subscribe();
+    assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
+    wait_for_ticket_updates(&mut rx, &fx, 2).await;
+
+    let pool = fx.state.db.clone().expect("pool");
+    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    HumanReviewService::new(&pool)
+        .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
+        .await
+        .unwrap();
+    assert_eq!(info_git_state(&fx).await, "not_pushed");
+
+    let res = post(&fx, "POST", &format!("/api/repos/{repo_id}/sync"), "").await;
+    assert_eq!(res.status(), StatusCode::OK, "sync");
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["action"], "pushed");
+    assert_eq!(detail_git_state(&fx).await.as_deref(), Some("merged"));
+    assert_eq!(review_of(&fx).await.git_outcome, None);
+}
+
+#[tokio::test]
 async fn not_pushed_is_kept_without_a_remote_tracking_ref() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

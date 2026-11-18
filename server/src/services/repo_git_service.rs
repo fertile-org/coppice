@@ -49,6 +49,23 @@ pub struct PullDefaultBranchResult {
     pub status: DefaultBranchSyncStatus,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncDefaultBranchAction {
+    Pulled,
+    Pushed,
+    UpToDate,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDefaultBranchResult {
+    pub action: SyncDefaultBranchAction,
+    pub default_branch: String,
+    pub message: String,
+    pub status: DefaultBranchSyncStatus,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RepoGitError {
     #[error("repository not found")]
@@ -352,6 +369,107 @@ impl<'a> RepoGitService<'a> {
     ) -> Result<PullDefaultBranchResult, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
         self.fetch_then_ff_pull(&ctx, remote, None).await
+    }
+
+    /// Fetch once, then fast-forward when strictly behind, push when strictly ahead, or
+    /// report up to date. Diverged history and blocked pushes return errors (never force).
+    pub async fn sync_default_branch(
+        &self,
+        repo_id: Uuid,
+    ) -> Result<SyncDefaultBranchResult, RepoGitError> {
+        let ctx = self.resolve(repo_id).await?;
+        let remote_url = ctx
+            .remote_url
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or(RepoGitError::NoRemoteUrl)?;
+        let (token, _secret_mask) = self.decrypt_forge_token_optional(&ctx).await;
+        let fetch_remote = network_remote(remote_url, token.as_deref())?;
+        self.fetch_then_sync(&ctx, repo_id, &fetch_remote, token.as_deref(), None)
+            .await
+    }
+
+    /// Fetch from an explicit remote then sync (tests with a bare sibling).
+    pub async fn sync_default_branch_with_remote(
+        &self,
+        repo_id: Uuid,
+        remote: &str,
+    ) -> Result<SyncDefaultBranchResult, RepoGitError> {
+        let ctx = self.resolve(repo_id).await?;
+        self.fetch_then_sync(&ctx, repo_id, remote, None, Some(remote))
+            .await
+    }
+
+    async fn fetch_then_sync(
+        &self,
+        ctx: &RepoGitContext,
+        repo_id: Uuid,
+        fetch_remote: &str,
+        token: Option<&str>,
+        // When set (tests), push to this URL instead of the production network remote.
+        push_remote: Option<&str>,
+    ) -> Result<SyncDefaultBranchResult, RepoGitError> {
+        let refspec = fetch_default_refspec(&ctx.default_branch);
+        match run_git(ctx.git_dir.as_path(), &["fetch", fetch_remote, &refspec]).await {
+            Ok(()) => {}
+            Err(GitOpsError::Git(msg)) => {
+                let sanitized = match token {
+                    Some(t) => sanitize_token(&msg, t),
+                    None => msg,
+                };
+                return Err(RepoGitError::Git(sanitized));
+            }
+            Err(other) => return Err(other.into()),
+        }
+
+        let status = self.build_status(ctx).await?;
+        if status.can_pull {
+            self.fast_forward_default_branch(ctx).await?;
+            let status = self.build_status(ctx).await?;
+            return Ok(SyncDefaultBranchResult {
+                action: SyncDefaultBranchAction::Pulled,
+                default_branch: ctx.default_branch.clone(),
+                message: "Default branch pulled".into(),
+                status,
+            });
+        }
+        if status.can_push {
+            let pushed = match push_remote {
+                Some(remote) => self.push_default_branch_to_remote(repo_id, remote).await?,
+                None => self.push_default_branch(repo_id).await?,
+            };
+            return Ok(SyncDefaultBranchResult {
+                action: SyncDefaultBranchAction::Pushed,
+                default_branch: pushed.default_branch,
+                message: pushed.message,
+                status: pushed.status,
+            });
+        }
+
+        let ahead = status.ahead_count.unwrap_or(0);
+        let behind = status.behind_count.unwrap_or(0);
+        if ahead == 0 && behind == 0 {
+            return Ok(SyncDefaultBranchResult {
+                action: SyncDefaultBranchAction::UpToDate,
+                default_branch: ctx.default_branch.clone(),
+                message: "Already up to date with remote".into(),
+                status,
+            });
+        }
+
+        if ahead > 0 && !self.push_enabled {
+            return Err(RepoGitError::PushDisabled);
+        }
+        let reason = if ahead > 0 {
+            status
+                .push_disabled_reason
+                .unwrap_or_else(|| "Push is not allowed".into())
+        } else {
+            status
+                .pull_disabled_reason
+                .unwrap_or_else(|| "Pull is not allowed".into())
+        };
+        Err(RepoGitError::Git(reason))
     }
 
     async fn fetch_then_ff_pull(

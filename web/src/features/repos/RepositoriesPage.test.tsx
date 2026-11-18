@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   pull: vi.fn(),
   push: vi.fn(),
+  sync: vi.fn(),
 }));
 
 const sampleRepo: Repo = {
@@ -92,6 +93,7 @@ vi.mock('./useRepos', () => ({
   useFetchDefaultBranch: () => mutation(mocks.fetch),
   usePushDefaultBranch: () => mutation(mocks.push),
   usePullDefaultBranch: () => mutation(mocks.pull),
+  useSyncDefaultBranch: () => mutation(mocks.sync),
 }));
 
 vi.mock('./useWorktrees', () => ({
@@ -138,6 +140,12 @@ describe('RepositoriesPage', () => {
       status: baseSyncStatus({ aheadCount: 0, behindCount: 0, canPull: false }),
     });
     mocks.push.mockResolvedValue(undefined);
+    mocks.sync.mockResolvedValue({
+      action: 'pulled',
+      defaultBranch: 'main',
+      message: 'Default branch pulled',
+      status: baseSyncStatus({ aheadCount: 0, behindCount: 0, canPull: false }),
+    });
   });
 
   it('shows a list-only page for admins without a side form or token selector', () => {
@@ -277,26 +285,13 @@ describe('RepositoriesPage', () => {
     expect(screen.getByRole('button', { name: 'Sync' })).toBeDisabled();
   });
 
-  it('Sync fetches then pulls when post-fetch canPull', async () => {
-    const afterFetch = baseSyncStatus({ canPull: true, behindCount: 2 });
-    mocks.fetch.mockResolvedValue(afterFetch);
+  it('Sync calls the sync endpoint', async () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
 
-    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
-    await waitFor(() => expect(mocks.pull).toHaveBeenCalled());
-  });
-
-  it('Sync fetches only when post-fetch cannot pull', async () => {
-    mocks.fetch.mockResolvedValue(
-      baseSyncStatus({ canPull: false, aheadCount: 0, behindCount: 0 }),
-    );
-    renderPage();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
-
-    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.sync).toHaveBeenCalled());
+    expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.pull).not.toHaveBeenCalled();
   });
 

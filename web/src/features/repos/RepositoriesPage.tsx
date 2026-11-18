@@ -28,11 +28,10 @@ import {
   useCreateRepo,
   useDefaultBranchSync,
   useDeleteRepo,
-  useFetchDefaultBranch,
   useInspectRepoPath,
-  usePullDefaultBranch,
   useRepos,
   useSetForgeToken,
+  useSyncDefaultBranch,
   useUpdateRepo,
   useVerifyRepo,
 } from './useRepos';
@@ -552,9 +551,8 @@ function RepoTableRow({ repo, isAdmin, onEdit }: RepoTableRowProps) {
   const ready = repo.verificationStatus === 'ready';
   const syncEnabled = ready && isAdmin;
   const { data: status, isLoading } = useDefaultBranchSync(repo.id, syncEnabled);
-  const fetchMutation = useFetchDefaultBranch(repo.id);
-  const pullMutation = usePullDefaultBranch(repo.id);
-  const busy = fetchMutation.isPending || pullMutation.isPending;
+  const syncMutation = useSyncDefaultBranch(repo.id);
+  const busy = syncMutation.isPending;
   const canSync =
     syncEnabled &&
     status != null &&
@@ -564,13 +562,8 @@ function RepoTableRow({ repo, isAdmin, onEdit }: RepoTableRowProps) {
 
   async function handleSync() {
     try {
-      const afterFetch = await fetchMutation.mutateAsync();
-      if (afterFetch.canPull) {
-        const result = await pullMutation.mutateAsync();
-        toast.success(result.message);
-      } else {
-        toast.success('Remote refs updated');
-      }
+      const result = await syncMutation.mutateAsync();
+      toast.success(result.message);
     } catch (err) {
       const message = parseApiErrorMessage(err, 'Sync failed.');
       toast.error(apiErrorToastMessage(message));
@@ -632,7 +625,7 @@ function RepoTableRow({ repo, isAdmin, onEdit }: RepoTableRowProps) {
                     ? 'Working tree is dirty'
                     : status && !status.canFetch
                       ? (status.fetchDisabledReason ?? 'Fetch unavailable')
-                      : 'Fetch remote, then fast-forward pull when behind'
+                      : 'Fetch remote, then pull when behind or push when ahead'
               }
               onClick={() => void handleSync()}
             >
