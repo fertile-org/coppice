@@ -1,0 +1,11 @@
+{
+  "status": "done",
+  "summary": "Mock chat reply that reports token usage.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "usage": [
+    { "kind": "request", "id": "chat-req-1", "model": "mock-model", "tokens": { "input": 4, "cacheRead": 100, "output": 6 } },
+    { "kind": "runTotal", "tokens": { "input": 4, "cacheRead": 100, "output": 6 } }
+  ]
+}

@@ -2,6 +2,8 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import '../../opencode-session/theme/opencode-theme.css';
 import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import { ClaudeConsoleView } from './ClaudeConsoleView';
+import { contextWindowFromEvent, type ContextWindowReading } from './contextWindow';
+import { ContextWindowMeter } from './ContextWindowMeter';
 import {
   appendLegacyFrameText,
   applyClaudeConsoleEvent,
@@ -71,6 +73,7 @@ export function ClaudeLiveConsole({
   const [reconnectToken, setReconnectToken] = useState(0);
   const [interrupted, setInterrupted] = useState<string | null>(null);
   const [lastActivityAt, setLastActivityAt] = useState<number | null>(null);
+  const [contextWindow, setContextWindow] = useState<ContextWindowReading | null>(null);
   const hasContentRef = useRef(false);
   const recoverableRef = useRef(true);
 
@@ -84,6 +87,7 @@ export function ClaudeLiveConsole({
     setInterrupted(null);
     hasContentRef.current = false;
     setLastActivityAt(null);
+    setContextWindow(null);
     dispatch({ type: 'reset' });
   }, [runId]);
 
@@ -123,7 +127,10 @@ export function ClaudeLiveConsole({
         return;
       }
 
-      if (msg.type === 'event' && msg.event && isStructuredConsoleEvent(msg.event)) {
+      const reading = msg.type === 'event' && msg.event ? contextWindowFromEvent(msg.event) : null;
+      if (reading) {
+        setContextWindow(reading);
+      } else if (msg.type === 'event' && msg.event && isStructuredConsoleEvent(msg.event)) {
         dispatch({ type: 'event', event: msg.event });
         hasContentRef.current = true;
       } else if (msg.type === 'frame' && typeof msg.data === 'string') {
@@ -210,7 +217,10 @@ export function ClaudeLiveConsole({
         lastActivityAt={lastActivityAt}
         heartbeatElapsedSecs={null}
       />
-      <p className="font-body text-xs text-text-secondary">{statusLabel}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-body text-xs text-text-secondary">{statusLabel}</p>
+        {contextWindow ? <ContextWindowMeter {...contextWindow} /> : null}
+      </div>
       {interrupted ? (
         <p className="font-body text-xs text-warning">{interrupted}</p>
       ) : null}

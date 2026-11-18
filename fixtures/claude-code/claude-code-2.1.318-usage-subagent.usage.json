@@ -1,0 +1,81 @@
+{
+  "contextWindow": {
+    "size": null,
+    "used": 21590
+  },
+  "process": {
+    "cliVersion": "2.1.318",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011Cgjad5FqFZ15YxeJN2mBg",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 11873,
+        "cacheWrite": 6445,
+        "input": 2,
+        "output": 16,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgjadGgv5Vbfbzp1DBk5u",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 18318,
+        "cacheWrite": 3270,
+        "input": 2,
+        "output": 6,
+        "reasoning": null
+      }
+    }
+  ],
+  "subagents": [
+    {
+      "agentType": "general-purpose",
+      "description": "Reply with number 4",
+      "durationMs": 1374,
+      "id": "toolu_01NTxmpEGSyCizLGv3JgMNA5",
+      "model": "claude-haiku-5-5",
+      "status": "completed",
+      "tokens": {
+        "cacheRead": null,
+        "cacheWrite": null,
+        "input": null,
+        "output": null,
+        "reasoning": null
+      },
+      "toolUses": 0,
+      "totalTokens": 12847
+    }
+  ],
+  "totals": {
+    "byModel": [
+      {
+        "model": "claude-haiku-5-5",
+        "tokens": {
+          "cacheRead": 30191,
+          "cacheWrite": 22493,
+          "input": 6,
+          "output": 353,
+          "reasoning": 137
+        }
+      }
+    ],
+    "costUsd": 0.00401926,
+    "requestCount": 2,
+    "status": "reported",
+    "subagentCount": 1,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 30191,
+      "cacheWrite": 22493,
+      "input": 6,
+      "output": 353,
+      "reasoning": 137
+    }
+  }
+}

@@ -618,7 +618,8 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
         return;
     }
 
-    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage").await;
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage", |_| {}).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -636,6 +637,39 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
         Duration::from_secs(10),
     )
     .await;
+
+    // The connector is recorded on the run and copied onto its usage.
+    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+    let (run_connector, usage_connector, agent_name): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT ar.connector, u.connector, u.agent_name
+         FROM agent_runs ar JOIN run_usage u ON u.run_id = ar.id WHERE ar.id = $1",
+    )
+    .bind(run_uuid)
+    .fetch_one(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(run_connector.as_deref(), Some("mock"));
+    assert_eq!(usage_connector.as_deref(), Some("mock"));
+    assert!(agent_name.is_some());
+    // The fixture's run total is split by model; the split is stored with it.
+    let models: Vec<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT model, output_tokens FROM run_usage_models WHERE usage_id = $1 ORDER BY model",
+    )
+    .bind(run_uuid)
+    .fetch_all(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(
+        models,
+        [
+            ("mock-model".to_string(), Some(80)),
+            ("mock-small".to_string(), Some(40))
+        ]
+    );
 
     let (status, run) = get_json(
         &app,
@@ -1006,7 +1040,8 @@ async fn usage_counts_follow_stored_rows_not_connectors() {
         if let Some(status) = usage {
             let output = (status == "reported").then_some(5_i64);
             sqlx::query(
-                "INSERT INTO run_usage (run_id, status, version, output_tokens) VALUES ($1, $2, 1, $3)",
+                "INSERT INTO run_usage (id, run_id, status, version, output_tokens)
+                 VALUES ($1, $1, $2, 1, $3)",
             )
             .bind(run_id)
             .bind(status)
@@ -1053,4 +1088,68 @@ async fn usage_counts_follow_stored_rows_not_connectors() {
             .unwrap();
         assert!(old["usage"].is_null(), "{connector}");
     }
+}
+
+/// Settings → Usage reads the workspace summary: admins only, inputs checked,
+/// and a tracked run shows up grouped by model with its coverage.
+#[tokio::test]
+async fn usage_summary_groups_tracked_runs_for_admins() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("usage", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    poll_run_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "succeeded",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let (status, summary) = get_json(
+        &app,
+        "/api/usage/summary?groupBy=model&connector=mock&tz=Asia/Ho_Chi_Minh",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let rows = summary["rows"].as_array().unwrap();
+    let models: Vec<_> = rows.iter().map(|r| r["label"].as_str().unwrap_or("")).collect();
+    assert!(models.contains(&"mock-model"), "{summary}");
+    assert!(models.contains(&"mock-small"), "{summary}");
+    assert!(rows.iter().all(|r| r["connector"] == "mock"), "{summary}");
+    let row_total: i64 = rows.iter().map(|r| r["total"].as_i64().unwrap()).sum();
+    assert_eq!(row_total, summary["totals"]["total"].as_i64().unwrap());
+    assert!(summary["coverage"]["trackedRuns"].as_i64().unwrap() >= 1, "{summary}");
+    assert!(summary["daily"].as_array().is_some_and(|d| !d.is_empty()));
+
+    for bad in [
+        "/api/usage/summary?groupBy=nope",
+        "/api/usage/summary?from=2026-13-01",
+        "/api/usage/summary?from=2026-03-02&to=2026-03-01",
+        "/api/usage/summary?tz=Nowhere/Special",
+    ] {
+        let (status, body) = get_json(&app, bad, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {body}");
+        assert!(body["message"].is_string(), "{bad}: {body}");
+    }
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+    let (status, _) = get_json(&app, "/api/usage/summary", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

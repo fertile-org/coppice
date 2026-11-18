@@ -21,6 +21,7 @@
 //! into ACP updates so the live console matches ACP runs.
 
 use super::acp::AcpObserver;
+use super::usage::UsageHook;
 use super::acp_connector::AcpConsole;
 use super::cli_runner::{
     log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
@@ -95,6 +96,7 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
         result_before_exit: false,
         result_exit_grace: None,
         stall_limits: None,
+        usage: UsageHook::for_connector(&input, coppice_connectors::OPENCODE, Some(spec.version)),
     };
     let mut lines = RunLines::new(
         AcpConsole::new(CONSOLE_PREFIX, input.stream.clone()),

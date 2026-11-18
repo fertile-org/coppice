@@ -1,5 +1,5 @@
-use crate::domain::usage::{UsageSnapshot, UsageTracker};
-use crate::providers::usage::{reader_for, UsageReader};
+use crate::domain::usage::{UsageEvent, UsageSnapshot, UsageTracker};
+use crate::providers::usage::{reader_for, ProcessContext, UsageReader};
 use crate::sessions::run_artifact_log::RunArtifactLog;
 use crate::sessions::LiveMessage;
 use coppice_connectors::UsageFormat;
@@ -171,12 +171,11 @@ impl RunStreamHandle {
 
     /// A CLI process starts writing to this run; read its usage in `format`.
     /// Call once per process, before its output. The first format with a
-    /// reader wins; a format without one leaves usage off. `resumed` says the
-    /// process continues an earlier session.
+    /// reader wins; a format without one leaves usage off.
     ///
     /// Publishes a snapshot right away, so a tracked run that reports nothing
     /// is still stored as tracked.
-    pub fn track_usage(&self, format: UsageFormat, resumed: bool) {
+    pub fn track_usage(&self, format: UsageFormat, process: &ProcessContext) {
         let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
         if state.reader.is_none() {
             state.reader = reader_for(format);
@@ -185,7 +184,7 @@ impl RunStreamHandle {
         let Some(reader) = reader.as_mut() else {
             return;
         };
-        for usage in reader.start_process(resumed) {
+        for usage in reader.start_process(process) {
             tracker.apply(usage);
         }
         self.usage_tx
@@ -193,18 +192,28 @@ impl RunStreamHandle {
     }
 
     /// One output event from the connector. Ignored until [`Self::track_usage`].
+    /// Context-window readings go out live on the run's stream; the rest is
+    /// counted.
     pub fn observe_usage(&self, event: &Value) {
         let mut state = self.usage.lock().unwrap_or_else(|err| err.into_inner());
         let UsageState { reader, tracker } = &mut *state;
         let Some(reader) = reader.as_mut() else {
             return;
         };
-        let events = reader.read(event);
-        if events.is_empty() {
-            return;
+        let mut counted = false;
+        for usage in reader.read(event) {
+            match usage {
+                UsageEvent::ContextWindow(context) => self.publish(LiveMessage::Event {
+                    event: UsageEvent::context_window_event(&context),
+                }),
+                usage => {
+                    tracker.apply(usage);
+                    counted = true;
+                }
+            }
         }
-        for usage in events {
-            tracker.apply(usage);
+        if !counted {
+            return;
         }
         // Sent under the lock so snapshots go out in version order.
         self.usage_tx
@@ -299,17 +308,18 @@ mod tests {
 
         let mut rx = handle.subscribe_usage();
         // A format without a reader leaves usage off.
-        handle.track_usage(UsageFormat::None, false);
+        let fresh = ProcessContext::default();
+        handle.track_usage(UsageFormat::None, &fresh);
         assert!(handle.usage_snapshot().is_none());
 
-        handle.track_usage(UsageFormat::Normalized, false);
+        handle.track_usage(UsageFormat::Normalized, &fresh);
         // Tracked before anything is reported: a version-0 snapshot.
         let snapshot = handle.usage_snapshot().expect("tracked");
         assert_eq!(snapshot.version, 0);
         assert_eq!(snapshot.totals.status, UsageStatus::None);
 
         // A later format does not replace the first reader.
-        handle.track_usage(UsageFormat::None, true);
+        handle.track_usage(UsageFormat::None, &ProcessContext::new(Some("sid"), None));
         handle.observe_usage(&event);
         handle.observe_usage(&serde_json::json!({ "type": "unrelated" }));
         let snapshot = handle.usage_snapshot().expect("snapshot");
@@ -320,6 +330,27 @@ mod tests {
         registry.remove(run_id);
         drop(handle);
         assert!(rx.changed().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn context_window_goes_out_live_and_is_not_counted() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(Uuid::new_v4());
+        let mut live = handle.subscribe();
+        handle.track_usage(UsageFormat::Normalized, &ProcessContext::default());
+        handle.observe_usage(&serde_json::json!({
+            "kind": "contextWindow", "used": 84000, "size": 200000
+        }));
+        match live.recv().await.unwrap() {
+            LiveMessage::Event { event } => {
+                assert_eq!(event["type"], "usage.contextWindow");
+                assert_eq!(event["used"], 84000);
+                assert_eq!(event["size"], 200000);
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+        // Still the version-0 snapshot: nothing to store.
+        assert_eq!(handle.usage_snapshot().expect("tracked").version, 0);
     }
 
     #[tokio::test]

@@ -24,6 +24,7 @@ import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { LogsPage } from './features/logs/LogsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { UsagePage } from './features/usage/UsagePage';
 import {
   BackupPage,
   ConnectorsPage,
@@ -99,6 +100,7 @@ function App() {
                 />
                 <Route path="/settings/plugins" element={<PluginsPage />} />
                 <Route path="/settings/users" element={<UsersPage />} />
+                <Route path="/settings/usage" element={<UsagePage />} />
                 <Route path="/system" element={<Navigate to="/system/backup" replace />} />
                 <Route path="/system/backup" element={<BackupPage />} />
                 <Route path="/system/connectors" element={<ConnectorsPage />} />

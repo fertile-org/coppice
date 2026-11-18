@@ -146,6 +146,7 @@ impl AgentProvider for OpenCodeProvider {
                 input,
                 super::opencode_acp::RunSpec {
                     program: &self.config.command,
+                    version: &version,
                     config_path: &config_path,
                     worktree: &worktree,
                     prompt: &prompt,

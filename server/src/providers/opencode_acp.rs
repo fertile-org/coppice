@@ -73,6 +73,7 @@ pub async fn offered_models(program: &str) -> anyhow::Result<Vec<String>> {
 
 pub struct RunSpec<'a> {
     pub program: &'a str,
+    pub version: &'a str,
     pub config_path: &'a Path,
     pub worktree: &'a Path,
     pub prompt: &'a str,
@@ -103,6 +104,8 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
             model,
             sign_in_hint: Some(SIGN_IN_HINT.into()),
             session_mode: None,
+            connector: coppice_connectors::OPENCODE,
+            cli_version: Some(spec.version),
         },
     )
     .await

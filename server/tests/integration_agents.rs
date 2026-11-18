@@ -350,6 +350,20 @@ async fn list_connectors_returns_mock() {
         .unwrap()
         .iter()
         .all(|item| item["enabled"].is_boolean()));
+    // A connector Coppice cannot read has no coverage; Claude Code has one.
+    let coverage = |id: &str| {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .map(|i| i["usageCoverage"].clone())
+            .unwrap()
+    };
+    assert_eq!(coverage("claude-code")["subagents"], "totalOnly");
+    assert_eq!(coverage("cursor")["granularity"], "runTotalOnly");
+    assert_eq!(coverage("cursor")["fields"]["reasoning"], false);
+    assert!(coverage("codex").is_null());
 }
 
 #[tokio::test]
@@ -388,6 +402,16 @@ async fn list_connectors_returns_console_and_caps() {
             "displayName": descriptor.display_name,
             "console": "plain",
             "caps": { "readOnlyTools": true, "chatResume": true, "thinkingLevel": false },
+            "usageCoverage": {
+                "granularity": "request",
+                "model": "perRequest",
+                "fields": {
+                    "input": true, "cacheRead": true, "cacheWrite": true,
+                    "output": true, "reasoning": true
+                },
+                "subagents": "breakdown",
+                "contextWindow": "withSize"
+            },
             "enabled": true,
             "readiness": "ready",
             "docsUrl": descriptor.install.docs_url

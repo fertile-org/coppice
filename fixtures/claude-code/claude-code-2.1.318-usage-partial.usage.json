@@ -1,0 +1,63 @@
+{
+  "contextWindow": {
+    "size": null,
+    "used": 21027
+  },
+  "process": {
+    "cliVersion": "2.1.318",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011Cgjag8e592nxXuJaxfQBf",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 14296,
+        "cacheWrite": 6621,
+        "input": 2,
+        "output": 77,
+        "reasoning": 0
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgjagKY9xvY5W7H6BRG5U",
+      "model": "claude-haiku-5-5",
+      "tokens": {
+        "cacheRead": 20917,
+        "cacheWrite": 108,
+        "input": 2,
+        "output": 25,
+        "reasoning": 0
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "byModel": [
+      {
+        "model": "claude-haiku-5-5",
+        "tokens": {
+          "cacheRead": 35213,
+          "cacheWrite": 6729,
+          "input": 4,
+          "output": 102,
+          "reasoning": 0
+        }
+      }
+    ],
+    "costUsd": 0.00174933,
+    "requestCount": 2,
+    "status": "reported",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 35213,
+      "cacheWrite": 6729,
+      "input": 4,
+      "output": 102,
+      "reasoning": 0
+    }
+  }
+}

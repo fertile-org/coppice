@@ -104,3 +104,45 @@ export const ticketUsageSchema = z.object({
 
 export type TicketUsage = z.infer<typeof ticketUsageSchema>;
 export type TicketRunUsage = TicketUsage['runs'][number];
+
+export const usageGroupBySchema = z.enum(['model', 'agent', 'board', 'connector', 'jobType']);
+
+export type UsageGroupBy = z.infer<typeof usageGroupBySchema>;
+
+/** One group in Settings → Usage. `label` is null when the page names the key. */
+export const usageSummaryRowSchema = z.object({
+  key: z.string(),
+  label: z.string().nullable(),
+  connector: z.string().nullable(),
+  tokens: tokenCountsSchema,
+  /** Subagent totals without a breakdown, on top of `tokens`. */
+  unsplit: z.number().int(),
+  total: z.number().int(),
+  runs: z.number().int(),
+});
+
+export type UsageSummaryRow = z.infer<typeof usageSummaryRowSchema>;
+
+export const usageSummarySchema = z.object({
+  totals: z.object({
+    tokens: tokenCountsSchema,
+    unsplit: z.number().int(),
+    total: z.number().int(),
+    runs: z.number().int(),
+    activeDays: z.number().int(),
+  }),
+  rows: z.array(usageSummaryRowSchema),
+  /** Days with tokens, oldest first, as `YYYY-MM-DD` in the viewer's time zone. */
+  daily: z.array(z.object({ day: z.string(), byKey: z.record(z.number().int()) })),
+  coverage: z.object({
+    trackedRuns: z.number().int(),
+    untrackedRuns: z.number().int(),
+    untrackedByConnector: z.array(z.object({ connector: z.string(), runs: z.number().int() })),
+  }),
+  /** Top-level tickets that reached Done in the range, each with its whole tree. */
+  perDoneTicket: z
+    .object({ tickets: z.number().int(), median: z.number(), average: z.number() })
+    .nullable(),
+});
+
+export type UsageSummary = z.infer<typeof usageSummarySchema>;

@@ -60,6 +60,18 @@
   --color-background: var(--color-paper-50);
   --color-surface: var(--color-paper-100);
   --color-surface-raised: #fffdf9;
+  /* Chart series, in fixed order (Settings → Usage). Validated for color-vision
+     deficiency against --color-surface-raised; three sit below 3:1, so charts
+     ship a legend and a table of the same numbers. "Other" is a neutral. */
+  --chart-series-1: #2a78d6;
+  --chart-series-2: #eb6834;
+  --chart-series-3: #1baf7a;
+  --chart-series-4: #eda100;
+  --chart-series-5: #e87ba4;
+  --chart-series-6: #008300;
+  --chart-series-7: #6250d6;
+  --chart-series-other: #a8a69d;
+  --chart-grid: #ebe6dc;
   /* Form fields: bright when editable, recessed when disabled */
   --color-field-bg: #fffef8;
   --color-field-border: var(--color-bark-300);
@@ -217,6 +229,17 @@
  * Overlay scrims stay dark via --color-overlay*.
  */
 [data-theme='dark'] {
+  /* Chart series, stepped for the dark surface (validated against #1c1c1f). */
+  --chart-series-1: #3987e5;
+  --chart-series-2: #d95926;
+  --chart-series-3: #199e70;
+  --chart-series-4: #c98500;
+  --chart-series-5: #d55181;
+  --chart-series-6: #008300;
+  --chart-series-7: #9085e9;
+  --chart-series-other: #6b6a64;
+  --chart-grid: #2c2c30;
+
   /* Foreground / bark role — zinc snow on black */
   --color-bark-950: #fafafa;
   --color-bark-900: #f4f4f5; /* zinc-100 */

@@ -379,7 +379,7 @@ async fn drive_plan_run(
 
     let stream = state.run_streams.register(run.id);
     crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, &stream);
-    crate::services::usage_service::spawn_usage_writer(pool.clone(), run.id, &stream);
+    crate::services::usage_service::track_run(pool, run.id, &agent.connector, &stream).await;
     let cancel_rx = stream.cancelled_rx();
     run_svc
         .mark_running(run.id)

@@ -2295,3 +2295,65 @@ async fn agent_chat_turn_proposes_knowledge_until_human_accepts() {
     assert_eq!(body["knowledge"]["status"], "pending");
     assert_eq!(body["knowledge"]["sourceType"], "chat_session");
 }
+
+/// A chat session's turns add up to one total, read by the session's owner.
+#[cfg(feature = "embedded-test-db")]
+#[tokio::test]
+async fn chat_session_usage_adds_up_its_turns() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("usage_chat").await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    for body in ["first", "second"] {
+        let run_id = post_chat_message(&app, &cookie, &csrf, &session_id, body).await;
+        wait_run(&app, &cookie, &csrf, &run_id).await;
+    }
+
+    let usage = |path: String| {
+        let app = app.clone();
+        let (cookie, csrf) = (cookie.clone(), csrf.clone());
+        async move {
+            let res = app
+                .oneshot(common::json_request("GET", &path, "", &cookie, &csrf))
+                .await
+                .unwrap();
+            let status = res.status();
+            let body: serde_json::Value = common::json_body(res).await;
+            (status, body)
+        }
+    };
+    let (status, total) = usage(format!("/api/chat/sessions/{session_id}/usage")).await;
+    assert_eq!(status, StatusCode::OK, "{total}");
+    assert_eq!(total["runs"], 2, "{total}");
+    assert_eq!(total["runsWithUsage"], 2, "{total}");
+    assert_eq!(total["tokens"]["output"], 12, "{total}");
+    assert_eq!(total["tokens"]["cacheRead"], 200, "{total}");
+
+    let missing = uuid::Uuid::new_v4();
+    let (status, _) = usage(format!("/api/chat/sessions/{missing}/usage")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

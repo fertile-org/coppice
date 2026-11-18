@@ -502,6 +502,13 @@ async fn check_run_passes_with_gateway_calls() {
         .await
         .expect("start check");
     assert_eq!(wait_for_check_end(&pool, check_id).await, "passed");
+    let connector: Option<String> =
+        sqlx::query_scalar("SELECT connector FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(connector.as_deref(), Some(coppice_connectors::MOCK));
 
     let (status, body) = send(
         &app,

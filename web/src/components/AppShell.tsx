@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
   Bot,
+  ChartColumn,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -58,6 +59,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
+  { to: '/settings/usage', label: 'Usage', icon: ChartColumn, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true, end: true },
 ];
 

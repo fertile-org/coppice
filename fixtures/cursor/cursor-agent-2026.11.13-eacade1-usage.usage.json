@@ -1,0 +1,23 @@
+{
+  "contextWindow": null,
+  "process": {
+    "cliVersion": null,
+    "resumed": false
+  },
+  "requests": [],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 0,
+    "status": "reported",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 3968,
+      "cacheWrite": 0,
+      "input": 8686,
+      "output": 85,
+      "reasoning": null
+    }
+  }
+}

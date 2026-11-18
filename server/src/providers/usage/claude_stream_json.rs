@@ -31,10 +31,13 @@
 //! - One run can start several processes (connector-check phases). Their
 //!   totals are added up; while a later process has not reported its total,
 //!   the run falls back to the sum of its rows.
+//! - The context window in use is a main-thread request's prompt: its input
+//!   plus cache reads and writes. The stream never states the window's size.
 
-use super::UsageReader;
+use super::{ProcessContext, UsageReader};
 use crate::domain::usage::{
-    Granularity, RequestUsage, RunTotalUsage, SubagentUsage, TokenCounts, UsageEvent,
+    add_model_tokens, ContextWindowUsage, Granularity, RequestUsage, RunTotalUsage,
+    SubagentUsage, TokenCounts, UsageEvent,
 };
 use serde_json::Value;
 use std::collections::HashSet;
@@ -69,7 +72,7 @@ struct Process {
 }
 
 impl UsageReader for ClaudeStreamJsonReader {
-    fn start_process(&mut self, resumed: bool) -> Vec<UsageEvent> {
+    fn start_process(&mut self, process: &ProcessContext) -> Vec<UsageEvent> {
         if self.process.started {
             match self.process.total.take() {
                 Some(total) => add_total(&mut self.finished, &total),
@@ -80,7 +83,7 @@ impl UsageReader for ClaudeStreamJsonReader {
         self.open = None;
         self.process = Process {
             started: true,
-            resumed,
+            resumed: process.resumed,
             ..Process::default()
         };
         Vec::new()
@@ -123,11 +126,11 @@ impl ClaudeStreamJsonReader {
                 };
                 self.streamed.insert(id.clone());
                 self.open = Some(id.clone());
-                vec![request(
-                    id,
-                    str_field(message, "model"),
-                    message.get("usage").map(api_usage).unwrap_or_default(),
-                )]
+                let tokens = message.get("usage").map(api_usage).unwrap_or_default();
+                let context = context_window(&tokens);
+                std::iter::once(request(id, str_field(message, "model"), tokens))
+                    .chain(context)
+                    .collect()
             }
             Some("message_delta") => {
                 let (Some(id), Some(usage)) = (self.open.take(), inner.get("usage")) else {
@@ -152,7 +155,11 @@ impl ClaudeStreamJsonReader {
         let Some(usage) = message.get("usage") else {
             return Vec::new();
         };
-        vec![request(id, str_field(message, "model"), api_usage(usage))]
+        let tokens = api_usage(usage);
+        let context = context_window(&tokens);
+        std::iter::once(request(id, str_field(message, "model"), tokens))
+            .chain(context)
+            .collect()
     }
 
     /// `task_started` opens a subagent row for `local_agent` tasks only;
@@ -232,10 +239,14 @@ impl ClaudeStreamJsonReader {
     }
 }
 
-/// Adds tokens and cost; the cost stays `None` only when neither side has one.
+/// Adds tokens, the per-model split and cost; the cost stays `None` only when
+/// neither side has one.
 fn add_total(sum: &mut Option<RunTotalUsage>, other: &RunTotalUsage) {
     let sum = sum.get_or_insert_with(RunTotalUsage::default);
     sum.tokens.add(&other.tokens);
+    for entry in &other.by_model {
+        add_model_tokens(&mut sum.by_model, &entry.model, &entry.tokens);
+    }
     sum.cost_usd = match (sum.cost_usd, other.cost_usd) {
         (None, None) => None,
         (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
@@ -248,6 +259,17 @@ fn request(id: String, model: Option<String>, tokens: TokenCounts) -> UsageEvent
         granularity: Granularity::Request,
         model,
         tokens,
+    })
+}
+
+/// The prompt a request sent: what is in the context window now.
+fn context_window(tokens: &TokenCounts) -> Option<UsageEvent> {
+    let parts = [tokens.input, tokens.cache_read, tokens.cache_write];
+    parts.iter().any(Option::is_some).then(|| {
+        UsageEvent::ContextWindow(ContextWindowUsage {
+            used: parts.iter().map(|p| p.unwrap_or(0)).sum(),
+            size: None,
+        })
     })
 }
 
@@ -286,20 +308,25 @@ fn api_usage(usage: &Value) -> TokenCounts {
     }
 }
 
-/// Claude Code `modelUsage`: per-model camelCase totals, summed over models.
+/// Claude Code `modelUsage`: per-model camelCase totals, summed over models
+/// and kept per model.
 fn model_usage(by_model: &Value) -> RunTotalUsage {
     let mut total = RunTotalUsage::default();
     let Some(models) = by_model.as_object() else {
         return total;
     };
-    for usage in models.values() {
-        total.tokens.add(&TokenCounts {
+    for (model, usage) in models {
+        let tokens = TokenCounts {
             input: int(usage, "inputTokens"),
             cache_read: int(usage, "cacheReadInputTokens"),
             cache_write: int(usage, "cacheCreationInputTokens"),
             output: int(usage, "outputTokens"),
             reasoning: int(usage, "thinkingTokens"),
-        });
+        };
+        total.tokens.add(&tokens);
+        if !tokens.is_empty() {
+            add_model_tokens(&mut total.by_model, model, &tokens);
+        }
         if let Some(cost) = usage.get("costUSD").and_then(Value::as_f64) {
             total.cost_usd = Some(total.cost_usd.unwrap_or(0.0) + cost);
         }
@@ -354,7 +381,11 @@ mod tests {
         resumed: bool,
         events: &[Value],
     ) {
-        for usage in reader.start_process(resumed) {
+        let process = ProcessContext {
+            resumed,
+            ..ProcessContext::default()
+        };
+        for usage in reader.start_process(&process) {
             tracker.apply(usage);
         }
         for event in events {
@@ -413,6 +444,13 @@ mod tests {
         assert_eq!(totals.tokens.reasoning, Some(137));
         assert_eq!(totals.cost_usd, Some(0.00401926));
         assert_eq!(totals.subagent_count, 1);
+        // The same total, split by the models that spent it.
+        let mut by_model = TokenCounts::default();
+        for entry in &totals.by_model {
+            by_model.add(&entry.tokens);
+        }
+        assert!(!totals.by_model.is_empty());
+        assert_eq!(by_model, totals.tokens);
     }
 
     #[test]
@@ -463,12 +501,30 @@ mod tests {
     }
 
     #[test]
+    fn each_main_thread_request_reports_the_context_in_use() {
+        let mut reader = ClaudeStreamJsonReader::default();
+        let start = json!({ "type": "stream_event", "parent_tool_use_id": null,
+            "event": { "type": "message_start", "message": { "id": "m1",
+                "usage": { "input_tokens": 2, "cache_read_input_tokens": 14296,
+                    "cache_creation_input_tokens": 6621, "output_tokens": 16 } } } });
+        let events = reader.read(&start);
+        assert_eq!(
+            events.last(),
+            Some(&UsageEvent::ContextWindow(ContextWindowUsage {
+                used: 20919,
+                size: None
+            }))
+        );
+    }
+
+    #[test]
     fn assistant_usage_is_kept_when_nothing_was_streamed() {
         let mut reader = ClaudeStreamJsonReader::default();
         let event = json!({ "type": "assistant", "parent_tool_use_id": null,
             "message": { "id": "m1", "model": "x", "usage": { "input_tokens": 3, "output_tokens": 4 } } });
         let first = reader.read(&event);
-        assert_eq!(first.len(), 1);
+        // The request and the context it used.
+        assert_eq!(first.len(), 2);
         // A repeat for another content block updates the same id.
         let UsageEvent::Request(req) = &reader.read(&event)[0] else {
             panic!("request");
@@ -498,6 +554,9 @@ mod tests {
         };
         assert_eq!(total.tokens.output, Some(15));
         assert_eq!(total.cost_usd, Some(0.5));
+        assert_eq!(total.by_model.len(), 1);
+        assert_eq!(total.by_model[0].model, "m");
+        assert_eq!(total.by_model[0].tokens.output, Some(15));
     }
 
     #[test]
@@ -529,7 +588,10 @@ mod tests {
     #[test]
     fn resumed_process_with_since_last_uses_it() {
         let mut reader = ClaudeStreamJsonReader::default();
-        reader.start_process(true);
+        reader.start_process(&ProcessContext {
+            resumed: true,
+            ..ProcessContext::default()
+        });
         let result = json!({ "type": "result",
             "modelUsage": { "m": { "outputTokens": 6 } },
             "model_usage_since_last_result": { "m": { "outputTokens": 3 } } });

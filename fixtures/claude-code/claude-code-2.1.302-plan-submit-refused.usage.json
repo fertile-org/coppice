@@ -1,0 +1,63 @@
+{
+  "contextWindow": {
+    "size": null,
+    "used": 17743
+  },
+  "process": {
+    "cliVersion": "2.1.302",
+    "resumed": false
+  },
+  "requests": [
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbxrqGohyH97sBaEzhb",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 9150,
+        "cacheWrite": 7899,
+        "input": 2,
+        "output": 8,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbyLHGCMCLBHMEiGkrv",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 17049,
+        "cacheWrite": 554,
+        "input": 2,
+        "output": 24,
+        "reasoning": null
+      }
+    },
+    {
+      "granularity": "request",
+      "id": "msg_011CgAbyXYgcU1vZ1PGk9Z9w",
+      "model": "claude-opus-5-5",
+      "tokens": {
+        "cacheRead": 17603,
+        "cacheWrite": 138,
+        "input": 2,
+        "output": 68,
+        "reasoning": null
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 3,
+    "status": "partial",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 43802,
+      "cacheWrite": 8591,
+      "input": 6,
+      "output": 100,
+      "reasoning": null
+    }
+  }
+}

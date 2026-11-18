@@ -190,6 +190,8 @@ impl AgentProvider for AcpCliProvider {
                 model,
                 sign_in_hint: Some(self.spec.sign_in_hint.to_string()),
                 session_mode: self.spec.session_mode,
+                connector: self.spec.id,
+                cli_version: version.as_deref(),
             },
         )
         .await

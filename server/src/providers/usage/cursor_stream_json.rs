@@ -10,7 +10,7 @@
 //!   `usage` (or has an empty object) emits nothing and does not invalidate
 //!   an earlier process's total.
 
-use super::UsageReader;
+use super::{ProcessContext, UsageReader};
 use crate::domain::usage::{RunTotalUsage, TokenCounts, UsageEvent};
 use serde_json::Value;
 
@@ -28,7 +28,7 @@ struct Process {
 }
 
 impl UsageReader for CursorStreamJsonReader {
-    fn start_process(&mut self, _resumed: bool) -> Vec<UsageEvent> {
+    fn start_process(&mut self, _process: &ProcessContext) -> Vec<UsageEvent> {
         if self.process.started {
             if let Some(total) = self.process.total.take() {
                 add_total(&mut self.finished, &total);
@@ -69,6 +69,8 @@ impl CursorStreamJsonReader {
         let process_total = RunTotalUsage {
             tokens,
             cost_usd: None,
+            // Cursor names no model in its totals.
+            by_model: Vec::new(),
         };
         self.process.total = Some(process_total.clone());
         let mut run_total = self.finished.clone();
@@ -118,7 +120,7 @@ mod tests {
         reader: &mut CursorStreamJsonReader,
         events: &[Value],
     ) {
-        for usage in reader.start_process(false) {
+        for usage in reader.start_process(&ProcessContext::default()) {
             tracker.apply(usage);
         }
         for event in events {

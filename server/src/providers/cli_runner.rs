@@ -37,6 +37,9 @@ pub struct CliInvocation {
     pub result_exit_grace: Option<Duration>,
     /// `(first output, idle)`; `None` uses [`FIRST_OUTPUT_TIMEOUT`] and [`IDLE_TIMEOUT`].
     pub stall_limits: Option<(Duration, Duration)>,
+    /// Where the process's token usage goes. The runner starts it before the
+    /// process and gives it every JSON line, so adapters never call it.
+    pub usage: Option<super::usage::UsageHook>,
 }
 
 impl CliInvocation {
@@ -263,6 +266,10 @@ async fn run_cli_inner(
     handler: &mut dyn LineHandler,
     io: RunIo,
 ) -> Result<CliExit, CliError> {
+    // Before the spawn, so a run whose CLI fails to start is still tracked.
+    if let Some(usage) = &inv.usage {
+        usage.start();
+    }
     let host = crate::host_env::current();
     let program = resolve_cli_program(&host, &inv.program)?;
     let secrets =
@@ -442,6 +449,9 @@ async fn run_cli_inner(
                         let Ok(value) = parsed else {
                             continue;
                         };
+                        if let Some(usage) = &inv.usage {
+                            usage.observe(&value);
+                        }
                         let step = handler.on_json(&value);
                         if let Some(tx) = &replies {
                             for reply in handler.take_replies() {
@@ -666,6 +676,7 @@ async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::run_registry::RunStreamHandle;
 
     #[test]
     fn log_launch_writes_version_and_flags_only() {
@@ -708,6 +719,7 @@ mod tests {
                     result_before_exit: false,
                     result_exit_grace: None,
                     stall_limits: None,
+                    usage: None,
                 };
                 run_cli(
                     invocation,
@@ -786,5 +798,66 @@ mod tests {
             .iter()
             .find(|line| line["fields"]["message"] == message)
             .unwrap_or_else(|| panic!("missing {message} in {lines:?}"))
+    }
+
+    /// Prints `fixture` from `fixtures/claude-code/` as a CLI would, with usage
+    /// read in `format`.
+    async fn replay(fixture: &str, format: coppice_connectors::UsageFormat) -> Arc<RunStreamHandle> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/claude-code")
+            .join(fixture);
+        let stream = crate::sessions::run_registry::RunStreamRegistry::new()
+            .register(uuid::Uuid::new_v4());
+        let usage = super::super::usage::UsageHook::new(
+            stream.clone(),
+            format,
+            super::super::usage::ProcessContext::default(),
+        );
+        let invocation = CliInvocation {
+            program: "sh".into(),
+            args: vec!["-c".into(), format!("cat '{}'", path.display())],
+            env: Vec::new(),
+            cwd: std::env::temp_dir(),
+            timeout: Duration::from_secs(10),
+            run_id: None,
+            artifacts_dir: None,
+            ticket_id: None,
+            result_before_exit: false,
+            result_exit_grace: None,
+            stall_limits: None,
+            usage: Some(usage),
+        };
+        let io = RunIo {
+            cancel_rx: None,
+            session_created_tx: None,
+        };
+        run_cli(invocation, &mut NopHandler, io).await.expect("sh");
+        stream
+    }
+
+    #[tokio::test]
+    async fn usage_is_read_from_every_json_line() {
+        use crate::domain::usage::UsageStatus;
+        let stream = replay(
+            "claude-code-2.1.318-usage-partial.jsonl",
+            coppice_connectors::UsageFormat::ClaudeStreamJson,
+        )
+        .await;
+        // The same snapshot the reader test gets from the capture.
+        let snapshot = stream.usage_snapshot().expect("tracked");
+        let outputs: Vec<_> = snapshot.requests.iter().map(|r| r.tokens.output).collect();
+        assert_eq!(outputs, [Some(77), Some(25)]);
+        assert_eq!(snapshot.totals.status, UsageStatus::Reported);
+        assert_eq!(snapshot.totals.tokens.output, Some(102));
+    }
+
+    #[tokio::test]
+    async fn a_format_without_a_reader_records_no_usage() {
+        let stream = replay(
+            "claude-code-2.1.318-usage-partial.jsonl",
+            coppice_connectors::UsageFormat::None,
+        )
+        .await;
+        assert!(stream.usage_snapshot().is_none());
     }
 }

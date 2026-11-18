@@ -2,6 +2,7 @@ use super::cli_runner::{
     log_launch, run_cli_with_stdin, run_log_dir, CliError, CliInvocation, LineHandler, LineStep,
     RunIo,
 };
+use super::usage::UsageHook;
 use super::cli_version;
 use super::codex_console::CodexConsolePublisher;
 use super::terminal;
@@ -161,6 +162,7 @@ impl AgentProvider for CodexProvider {
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
             stall_limits: None,
+            usage: UsageHook::for_connector(&input, coppice_connectors::CODEX, Some(&version)),
         };
         let mut handler = CodexLines {
             stream: input.stream.clone(),

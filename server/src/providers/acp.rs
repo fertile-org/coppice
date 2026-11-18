@@ -102,6 +102,9 @@ pub trait AcpObserver: Send {
     fn on_update(&mut self, update: &Value);
     /// The turn is over; flush anything buffered.
     fn on_end(&mut self);
+    /// The `session/prompt` result, after [`Self::on_end`]. Some agents put
+    /// the turn's token usage here.
+    fn on_prompt_result(&mut self, _result: &Value) {}
 }
 
 #[derive(Debug)]
@@ -427,6 +430,7 @@ impl Connection<'_> {
             .await;
         self.observer.on_end();
         let prompt = prompt?.map_err(|err| self.rpc_failure("session/prompt", err))?;
+        self.observer.on_prompt_result(&prompt);
         if self.cancel_sent {
             return Err(ProviderError::Cancelled);
         }
