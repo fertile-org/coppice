@@ -27,8 +27,15 @@ export type ChatRunLiveConnection =
   | 'closed'
   | 'reconnecting';
 
+export interface LiveStreamChannels {
+  thinkingText: string;
+  replyText: string;
+}
+
 export interface ChatRunLiveState {
   text: string;
+  thinkingText: string;
+  replyText: string;
   connection: ChatRunLiveConnection;
   error: string | null;
   finished: boolean;
@@ -133,59 +140,90 @@ function consoleHasVisibleBody(entries: ClaudeConsoleEntry[]): boolean {
   return entries.some((entry) => entry.kind !== 'session');
 }
 
-export function consoleStreamText(entries: ClaudeConsoleEntry[]): string {
+export function splitConsoleStream(
+  entries: ClaudeConsoleEntry[],
+): LiveStreamChannels {
   const visible = entries.filter((entry) => entry.kind !== 'session');
-  if (visible.length === 0) return '';
+  const thinkingParts: string[] = [];
+  const postResultText: string[] = [];
+  let seenResult = false;
+  let resultSummary = '';
 
-  const textBlocks = visible
-    .filter((entry): entry is Extract<ClaudeConsoleEntry, { kind: 'text' }> =>
-      entry.kind === 'text',
-    )
-    .map((entry) => entry.markdown)
-    .join('\n\n')
-    .trim();
+  for (const entry of visible) {
+    if (entry.kind === 'thinking') {
+      thinkingParts.push(entry.text);
+      continue;
+    }
+    if (entry.kind === 'text') {
+      if (seenResult) postResultText.push(entry.markdown);
+      else thinkingParts.push(entry.markdown);
+      continue;
+    }
+    if (entry.kind === 'result') {
+      seenResult = true;
+      const summary = entry.contract.summary?.trim() ?? '';
+      if (summary) resultSummary = summary;
+      continue;
+    }
+    if (entry.kind === 'continued') {
+      seenResult = true;
+      if (!resultSummary) {
+        const summary = entry.summary.trim();
+        if (summary) resultSummary = summary;
+      }
+    }
+  }
 
-  const result = visible.find(
-    (entry): entry is Extract<ClaudeConsoleEntry, { kind: 'result' }> =>
-      entry.kind === 'result',
-  );
-
-  const continued = visible.find(
-    (entry): entry is Extract<ClaudeConsoleEntry, { kind: 'continued' }> =>
-      entry.kind === 'continued',
-  );
-
-  return (
-    textBlocks ||
-    result?.contract.summary ||
-    continued?.summary ||
-    ''
-  );
+  return {
+    thinkingText: thinkingParts.join('\n\n').trim(),
+    // Prefer result/continued summary when both summary and post-result text exist.
+    replyText: (resultSummary || postResultText.join('\n\n')).trim(),
+  };
 }
 
-export function openCodeStreamText(store: SessionStore | null): string {
-  if (!store) return '';
+export function splitOpenCodeStream(
+  store: SessionStore | null,
+): LiveStreamChannels {
+  if (!store) return { thinkingText: '', replyText: '' };
   const messages = [...store.messages].sort((a, b) => a.id.localeCompare(b.id));
-  const chunks = messages
-    .filter((message) => message.role === 'assistant')
-    .map((message) => {
-      const parts = store.parts[message.id] ?? [];
-      return parts
-        .filter((part): part is Extract<Part, { type: 'text' }> => part.type === 'text')
-        .map((part) => part.text)
-        .join('');
-    })
-    .filter((text) => text.trim().length > 0);
-  return chunks.join('\n\n').trim();
+  const thinkingParts: string[] = [];
+  const replyParts: string[] = [];
+
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const parts = store.parts[message.id] ?? [];
+    for (const part of parts) {
+      if (part.type === 'reasoning') {
+        const text = part.text.trim();
+        if (text) thinkingParts.push(text);
+      } else if (part.type === 'text') {
+        const text = part.text.trim();
+        if (text) replyParts.push(text);
+      }
+    }
+  }
+
+  return {
+    thinkingText: thinkingParts.join('\n\n').trim(),
+    replyText: replyParts.join('\n\n').trim(),
+  };
 }
 
-export function mergeLiveStreamText(
+export function splitLiveStreamChannels(
   store: SessionStore | null,
   consoleEntries: ClaudeConsoleEntry[],
-): string {
-  const consoleText = consoleStreamText(consoleEntries);
-  if (consoleText) return consoleText;
-  return openCodeStreamText(store);
+): LiveStreamChannels {
+  const consoleSplit = splitConsoleStream(consoleEntries);
+  const openCodeSplit = splitOpenCodeStream(store);
+  if (consoleSplit.thinkingText || consoleSplit.replyText) {
+    return {
+      thinkingText: [consoleSplit.thinkingText, openCodeSplit.thinkingText]
+        .filter(Boolean)
+        .join('\n\n'),
+      replyText: consoleSplit.replyText || openCodeSplit.replyText,
+    };
+  }
+  return openCodeSplit;
 }
 
 export function useChatRunLiveStream(
@@ -358,13 +396,16 @@ export function useChatRunLiveStream(
         ? 'Waiting for reply…'
         : 'Thinking…';
 
-  const text = useMemo(
-    () => mergeLiveStreamText(store, consoleState.entries),
+  const channels = useMemo(
+    () => splitLiveStreamChannels(store, consoleState.entries),
     [store, consoleState.entries],
   );
+  const text = channels.replyText || channels.thinkingText;
 
   return {
     text,
+    thinkingText: channels.thinkingText,
+    replyText: channels.replyText,
     connection,
     error: null,
     finished,
