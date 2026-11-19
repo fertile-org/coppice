@@ -1,0 +1,5 @@
+{
+  "name": "pass-minimal",
+  "version": "0.1.0",
+  "description": "Minimal valid skill-only plugin for the builder checker"
+}

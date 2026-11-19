@@ -1,0 +1,9 @@
+{
+  "name": "fail-npm-market",
+  "plugins": [
+    {
+      "name": "pkg",
+      "source": { "source": "npm", "package": "@acme/pkg" }
+    }
+  ]
+}

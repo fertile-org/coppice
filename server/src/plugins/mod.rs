@@ -3,6 +3,7 @@ pub mod capability;
 pub mod catalog;
 pub mod coppice_git_skill;
 pub mod discover;
+pub mod format_check;
 pub mod git_install;
 pub mod manifest;
 pub mod marketplace;

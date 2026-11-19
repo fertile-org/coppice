@@ -1,0 +1,5 @@
+{
+  "name": "fail-secrets",
+  "version": "0.1.0",
+  "description": "Contains literal secrets"
+}

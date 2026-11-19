@@ -21,6 +21,7 @@ use crate::services::context_builder::{
     build_tool_first_context, write_context_document, ContextInput,
 };
 use crate::services::plugin_build_service::PluginBuildService;
+use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
 use crate::services::run_service::RunService;
 use crate::AppState;
@@ -153,6 +154,19 @@ async fn drive(
     } else {
         markdown.push('\n');
         markdown.push_str(BUILD_FORMAT_RULES);
+        if let Some(errors) = build.check_errors.as_ref().and_then(|v| v.as_array()) {
+            if !errors.is_empty() {
+                markdown.push_str(
+                    "\n## Format check errors (fix these before finishing)\n\n",
+                );
+                for err in errors {
+                    if let Some(line) = err.as_str() {
+                        markdown.push_str(&format!("- {line}\n"));
+                    }
+                }
+                markdown.push('\n');
+            }
+        }
         markdown.push_str(
             "\nWrite the plugin files only under this workspace. Finish with `result_submit` \
              (`done` + non-empty summary). No other Coppice tools are available.\n",
@@ -304,6 +318,44 @@ async fn drive(
         finished.error_message,
     )
     .await;
+
+    // Format check / install / auto-test after the active-run index is free.
+    if !planning {
+        let plugins = PluginService::new(pool);
+        let ready = |connector: &str| {
+            if connector == coppice_connectors::MOCK {
+                return true;
+            }
+            matches!(
+                state
+                    .connector_probes
+                    .get(connector)
+                    .map(|cached| cached.readiness),
+                Some(coppice_connectors::sign_in::Readiness::Ready)
+            )
+        };
+        if let Err(err) = builds
+            .finalize_after_build(
+                build_id,
+                &plugins,
+                &state.config.plugins.dir,
+                Path::new(&state.config.plugins.marketplaces_dir),
+                &state.secret_store,
+                &state.plugin_mcp,
+                &state.skills,
+                ready,
+            )
+            .await
+        {
+            tracing::warn!(
+                run_id = %run.id,
+                %build_id,
+                error = %err,
+                "plugin build finalize (check/install/test) failed"
+            );
+        }
+    }
+
     tracing::info!(
         run_id = %run.id,
         %build_id,

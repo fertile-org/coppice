@@ -1,11 +1,19 @@
+use crate::crypto::SecretStore;
 use crate::domain::agent::Agent;
 use crate::domain::plugin_build::{
     JOB_TYPE_BUILD_PLUGIN, JOB_TYPE_PLAN_PLUGIN_BUILD, NO_AGENT_READY_TO_BUILD,
 };
 use crate::domain::run::AgentRun;
+use crate::mcp::proxy::McpServerPool;
+use crate::plugins::format_check::check_plugin;
+use crate::plugins::manifest::parse_plugin;
+use crate::plugins::skills::SkillCatalog;
 use crate::providers::{AgentRunResult, PlanQuestion};
 use crate::services::agent_service::AgentService;
 use crate::services::planning_service::planner_for_ticket;
+use crate::services::plugin_service::{
+    PluginError, PluginService, ServerTestOutcome, ServerTestResult,
+};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::workflow_service::is_implementer;
 use crate::services::worktree_service::{
@@ -13,11 +21,14 @@ use crate::services::worktree_service::{
 };
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
-const COLUMNS: &str = "id, answers, plans, status, plugin_name, workspace_path, publish_target, plan_questions, created_at, updated_at";
+const COLUMNS: &str = "id, answers, plans, status, plugin_name, workspace_path, publish_target, plan_questions, check_errors, format_retries, plugin_id, test_result, created_at, updated_at";
+
+const MAX_FORMAT_RETRIES: i32 = 2;
 
 const TERMINAL: &[&str] = &["accepted", "discarded", "cancelled"];
 
@@ -37,6 +48,8 @@ pub enum PluginBuildError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Worktree(#[from] WorktreeError),
+    #[error(transparent)]
+    Plugin(#[from] PluginError),
 }
 
 impl From<RunError> for PluginBuildError {
@@ -62,6 +75,12 @@ pub struct PluginBuild {
     pub workspace_path: String,
     pub publish_target: Option<String>,
     pub plan_questions: Option<Value>,
+    /// Plain-language format-check errors (JSON string array), when the last check failed.
+    pub check_errors: Option<Value>,
+    pub format_retries: i32,
+    pub plugin_id: Option<Uuid>,
+    /// Auto-test payload (`{ "servers": […] }`), set when install+test finishes.
+    pub test_result: Option<Value>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -264,7 +283,10 @@ impl<'a> PluginBuildService<'a> {
                 "save the five answers before starting a plan run".into(),
             ));
         }
-        if matches!(build.status.as_str(), "building" | "ready_to_try" | "accepted") {
+        let check_failed = has_check_errors(&build);
+        if matches!(build.status.as_str(), "ready_to_try" | "accepted")
+            || (build.status == "building" && !check_failed)
+        {
             return Err(PluginBuildError::Conflict(format!(
                 "cannot plan while status is {}",
                 build.status
@@ -290,8 +312,12 @@ impl<'a> PluginBuildService<'a> {
         }
 
         let mut tx = self.pool.begin().await?;
+        // Ask-for-changes from a failed check: clear check state and re-enter planning.
         sqlx::query(
-            "UPDATE plugin_builds SET answers = $2, status = 'planning', plan_questions = NULL, updated_at = now() WHERE id = $1",
+            "UPDATE plugin_builds
+             SET answers = $2, status = 'planning', plan_questions = NULL,
+                 check_errors = NULL, format_retries = 0, updated_at = now()
+             WHERE id = $1",
         )
         .bind(id)
         .bind(&build.answers)
@@ -318,7 +344,8 @@ impl<'a> PluginBuildService<'a> {
         Ok((self.get(id).await?, run))
     }
 
-    /// Queue a `build_plugin` run from `plan_ready` with at least one plan revision.
+    /// Queue a `build_plugin` run from `plan_ready`, or Try again from `building`
+    /// after format-check failure (`check_errors` set).
     ///
     /// Stopping the agent run must not call build `cancel`/`discard`. On run
     /// cancel/fail the worker reverts status to `plan_ready` so Try again works.
@@ -328,7 +355,8 @@ impl<'a> PluginBuildService<'a> {
         connector_ready: impl Fn(&str) -> bool,
     ) -> Result<(PluginBuild, AgentRun), PluginBuildError> {
         let build = self.get(id).await?;
-        if build.status != "plan_ready" {
+        let retry_after_check = build.status == "building" && has_check_errors(&build);
+        if build.status != "plan_ready" && !retry_after_check {
             return Err(PluginBuildError::Conflict(format!(
                 "build runs require status plan_ready (got {})",
                 build.status
@@ -353,7 +381,9 @@ impl<'a> PluginBuildService<'a> {
 
         let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "UPDATE plugin_builds SET status = 'building', updated_at = now() WHERE id = $1",
+            "UPDATE plugin_builds
+             SET status = 'building', check_errors = NULL, format_retries = 0, updated_at = now()
+             WHERE id = $1",
         )
         .bind(id)
         .execute(&mut *tx)
@@ -466,7 +496,8 @@ impl<'a> PluginBuildService<'a> {
         Ok(row_to_build(row))
     }
 
-    /// Build success: keep status `building` for later PB-7/8 steps.
+    /// Build agent success: validate the result. Status stays `building` until
+    /// [`Self::finalize_after_build`] runs the checker / install / auto-test.
     pub async fn apply_build_result(
         &self,
         build_id: Uuid,
@@ -482,8 +513,254 @@ impl<'a> PluginBuildService<'a> {
                 "plugin build runs need a non-empty summary".into(),
             ));
         }
-        // Status stays `building` until format check / install (later tickets).
         self.get(build_id).await
+    }
+
+    /// After a successful build run finishes (active-run index free): format-check
+    /// the workspace, optionally queue a retry, or install disabled + auto-test.
+    pub async fn finalize_after_build(
+        &self,
+        build_id: Uuid,
+        plugins: &PluginService<'_>,
+        plugins_dir: &str,
+        marketplaces_dir: &Path,
+        secret_store: &SecretStore,
+        plugin_mcp: &McpServerPool,
+        skills: &SkillCatalog,
+        connector_ready: impl Fn(&str) -> bool,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let build = self.get(build_id).await?;
+        if build.status != "building" {
+            return Ok(build);
+        }
+
+        let installed: HashSet<String> = plugins
+            .list_plugins()
+            .await?
+            .into_iter()
+            .filter(|p| build.plugin_id != Some(p.id))
+            .map(|p| p.name)
+            .collect();
+
+        let errors = check_plugin(Path::new(&build.workspace_path), &installed);
+        if !errors.is_empty() {
+            return self
+                .on_format_check_failed(build_id, &errors, connector_ready)
+                .await;
+        }
+
+        self.install_disabled_and_test(
+            build_id,
+            plugins,
+            plugins_dir,
+            marketplaces_dir,
+            secret_store,
+            plugin_mcp,
+            skills,
+        )
+        .await
+    }
+
+    async fn on_format_check_failed(
+        &self,
+        build_id: Uuid,
+        errors: &[String],
+        connector_ready: impl Fn(&str) -> bool,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let build = self.get(build_id).await?;
+        let check_errors = Value::Array(errors.iter().cloned().map(Value::String).collect());
+        let should_retry = build.format_retries < MAX_FORMAT_RETRIES;
+        let next_retries = if should_retry {
+            build.format_retries + 1
+        } else {
+            build.format_retries
+        };
+        sqlx::query(
+            "UPDATE plugin_builds
+             SET check_errors = $2, format_retries = $3, updated_at = now()
+             WHERE id = $1",
+        )
+        .bind(build_id)
+        .bind(&check_errors)
+        .bind(next_retries)
+        .execute(self.pool)
+        .await?;
+
+        if should_retry {
+            // Automatic retry after current run finished (unique active-run index free).
+            self.queue_format_retry(build_id, connector_ready).await?;
+        }
+        self.get(build_id).await
+    }
+
+    /// Queue a follow-up build run while keeping `check_errors` / `format_retries`.
+    async fn queue_format_retry(
+        &self,
+        id: Uuid,
+        connector_ready: impl Fn(&str) -> bool,
+    ) -> Result<AgentRun, PluginBuildError> {
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PluginBuildError::Validation(err.to_string()))?;
+        let Some(builder) = builder_for_plugin(&agents) else {
+            return Err(PluginBuildError::Conflict(NO_AGENT_READY_TO_BUILD.into()));
+        };
+        if !connector_ready(&builder.connector) {
+            return Err(PluginBuildError::Conflict(NO_AGENT_READY_TO_BUILD.into()));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let run = match RunService::create_plugin_build_run(
+            &mut tx,
+            id,
+            builder.id,
+            JOB_TYPE_BUILD_PLUGIN,
+        )
+        .await
+        {
+            Ok(run) => run,
+            Err(RunError::Database(err)) if is_unique_violation(&err, ONE_ACTIVE_RUN_INDEX) => {
+                return Err(PluginBuildError::Conflict(
+                    "a plan or build run is already active for this build".into(),
+                ));
+            }
+            Err(err) => return Err(err.into()),
+        };
+        tx.commit().await?;
+        Ok(run)
+    }
+
+    async fn install_disabled_and_test(
+        &self,
+        build_id: Uuid,
+        plugins: &PluginService<'_>,
+        plugins_dir: &str,
+        marketplaces_dir: &Path,
+        secret_store: &SecretStore,
+        plugin_mcp: &McpServerPool,
+        skills: &SkillCatalog,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let build = self.get(build_id).await?;
+        let workspace = Path::new(&build.workspace_path);
+        let manifest = parse_plugin(workspace).map_err(PluginBuildError::Validation)?;
+        let plugin_name = manifest.name.clone();
+
+        plugins
+            .ensure_default_dir(plugins_dir, marketplaces_dir)
+            .await?;
+        let dest = Path::new(plugins_dir).join(&plugin_name);
+
+        if dest.exists() {
+            let ok_to_replace = match build.plugin_id {
+                Some(id) => plugins
+                    .get_plugin(id)
+                    .await
+                    .ok()
+                    .is_some_and(|row| row.name == plugin_name),
+                None => false,
+            };
+            if !ok_to_replace {
+                // Orphan folder from a prior attempt for this name, or clash.
+                if plugins
+                    .list_plugins()
+                    .await?
+                    .iter()
+                    .any(|p| p.name == plugin_name && build.plugin_id != Some(p.id))
+                {
+                    return self
+                        .store_install_failure(
+                            build_id,
+                            &format!(
+                                "Coppice couldn't load it: a plugin called {plugin_name} already exists."
+                            ),
+                        )
+                        .await;
+                }
+            }
+            if dest.is_dir() {
+                tokio::fs::remove_dir_all(&dest).await?;
+            } else {
+                tokio::fs::remove_file(&dest).await?;
+            }
+        }
+
+        copy_plugin_tree(workspace, &dest)?;
+
+        let rows = plugins.rescan().await?;
+        if let Err(err) = plugins.refresh_catalog(skills).await {
+            tracing::warn!(error = %err, %build_id, "plugin skill catalog refresh after builder install");
+        }
+
+        let Some(row) = rows.into_iter().find(|p| p.name == plugin_name) else {
+            return self
+                .store_install_failure(
+                    build_id,
+                    "Coppice couldn't load it: rescan did not find the installed plugin.",
+                )
+                .await;
+        };
+        if row.status != "ok" {
+            return self
+                .store_install_failure(
+                    build_id,
+                    &format!(
+                        "Coppice couldn't load it: {}.",
+                        row.error.as_deref().unwrap_or(&row.status)
+                    ),
+                )
+                .await;
+        }
+        if row.enabled {
+            return self
+                .store_install_failure(
+                    build_id,
+                    "Coppice couldn't load it: plugin was enabled unexpectedly.",
+                )
+                .await;
+        }
+
+        let test_results = plugins
+            .test_servers(row.id, secret_store, plugin_mcp)
+            .await?;
+        if !row.enabled {
+            plugin_mcp.stop_plugin(row.id).await;
+        }
+        let test_result = json!({ "servers": test_results_json(&test_results) });
+
+        let updated = sqlx::query(&format!(
+            "UPDATE plugin_builds
+             SET check_errors = NULL, plugin_name = $2, plugin_id = $3, test_result = $4,
+                 status = 'ready_to_try', updated_at = now()
+             WHERE id = $1
+             RETURNING {COLUMNS}"
+        ))
+        .bind(build_id)
+        .bind(&plugin_name)
+        .bind(row.id)
+        .bind(&test_result)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(row_to_build(updated))
+    }
+
+    async fn store_install_failure(
+        &self,
+        build_id: Uuid,
+        reason: &str,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let check_errors = json!([reason]);
+        let row = sqlx::query(&format!(
+            "UPDATE plugin_builds
+             SET check_errors = $2, updated_at = now()
+             WHERE id = $1
+             RETURNING {COLUMNS}"
+        ))
+        .bind(build_id)
+        .bind(&check_errors)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(row_to_build(row))
     }
 
     /// On plan/build run cancel or failure: revert build runs to `plan_ready`
@@ -635,9 +912,94 @@ fn row_to_build(row: sqlx::postgres::PgRow) -> PluginBuild {
         workspace_path: row.get("workspace_path"),
         publish_target: row.get("publish_target"),
         plan_questions: row.get("plan_questions"),
+        check_errors: row.get("check_errors"),
+        format_retries: row.get("format_retries"),
+        plugin_id: row.get("plugin_id"),
+        test_result: row.get("test_result"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
+}
+
+fn has_check_errors(build: &PluginBuild) -> bool {
+    match &build.check_errors {
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(other) => !other.is_null(),
+        None => false,
+    }
+}
+
+fn test_results_json(results: &[ServerTestResult]) -> Vec<Value> {
+    results
+        .iter()
+        .map(|r| {
+            let (status, error, tools) = match &r.outcome {
+                ServerTestOutcome::Ok(tools) => (
+                    "ok",
+                    None,
+                    tools
+                        .iter()
+                        .map(|t| {
+                            json!({
+                                "name": t.name,
+                                "exposedName": t.exposed_name,
+                                "description": t.description,
+                                "readOnly": t.read_only,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                ServerTestOutcome::Error(error) => ("error", Some(error.clone()), Vec::new()),
+                ServerTestOutcome::Unsupported { error } => {
+                    ("unsupported", error.clone(), Vec::new())
+                }
+            };
+            json!({
+                "name": r.name,
+                "kind": r.kind,
+                "status": status,
+                "error": error,
+                "tools": tools,
+            })
+        })
+        .collect()
+}
+
+/// Recursive copy that skips `.git` / `.agent` and does not follow symlinks.
+fn copy_plugin_tree(src: &Path, dest: &Path) -> Result<(), PluginBuildError> {
+    std::fs::create_dir_all(dest)?;
+    for entry in walkdir::WalkDir::new(src)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            name != ".git" && name != ".agent"
+        })
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let Ok(rel) = path.strip_prefix(src) else {
+            continue;
+        };
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let target = dest.join(rel);
+        if entry.file_type().is_symlink() {
+            // Skip outbound / any symlinks — checker already rejects escapes.
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&target)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(path, &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// Context helpers used by the worker when writing `.agent/context.md`.

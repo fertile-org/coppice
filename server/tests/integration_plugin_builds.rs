@@ -6,13 +6,34 @@ use axum::Router;
 use coppice_server::domain::plugin_build::NO_AGENT_READY_TO_BUILD;
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::services::plugin_build_service::PluginBuildService;
+use coppice_server::services::plugin_service::PluginService;
 use coppice_server::services::run_service::RunService;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+fn builder_check_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/plugins/builder-check")
+        .join(name)
+}
+
+fn copy_tree(src: &Path, dest: &Path) {
+    std::fs::create_dir_all(dest).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        let target = dest.join(entry.file_name());
+        if path.is_dir() {
+            copy_tree(&path, &target);
+        } else {
+            std::fs::copy(&path, &target).unwrap();
+        }
+    }
+}
 
 macro_rules! require_db {
     () => {
@@ -730,4 +751,226 @@ async fn stopping_build_run_reverts_to_plan_ready_without_discard() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+#[tokio::test]
+async fn finalize_installs_disabled_and_auto_tests() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+
+    // Agent writes only in the workspace; plant a valid fixture there.
+    copy_tree(&builder_check_fixture("pass-minimal"), workspace);
+    // Workspace may also have .git / .agent from create — install must skip them.
+    std::fs::create_dir_all(workspace.join(".agent")).unwrap();
+    std::fs::write(workspace.join(".agent/context.md"), "scratch").unwrap();
+
+    sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
+        .bind(build_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let builds = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = PluginService::new(pool);
+    let build = builds
+        .finalize_after_build(
+            build_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("finalize");
+
+    assert_eq!(build.status, "ready_to_try");
+    assert!(build.check_errors.is_none());
+    assert!(build.plugin_id.is_some());
+    assert!(build.test_result.is_some());
+    let servers = build.test_result.as_ref().unwrap()["servers"]
+        .as_array()
+        .unwrap();
+    assert!(servers.is_empty(), "skills-only → empty servers is a pass");
+
+    let installed = Path::new(&state.config.plugins.dir).join("pass-minimal");
+    assert!(installed.join(".claude-plugin/plugin.json").is_file());
+    assert!(installed.join("skills/hello/SKILL.md").is_file());
+    assert!(
+        !installed.join(".agent").exists(),
+        ".agent must not be copied into Installed"
+    );
+    assert!(
+        !installed.join(".git").exists(),
+        ".git must not be copied into Installed"
+    );
+
+    let row = plugins.get_plugin(build.plugin_id.unwrap()).await.unwrap();
+    assert_eq!(row.status, "ok");
+    assert!(!row.enabled);
+
+    let (status, got) = send(
+        &app,
+        "GET",
+        &format!("/api/plugin-builds/{build_id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["status"], "ready_to_try");
+    assert_eq!(got["pluginName"], "pass-minimal");
+    assert!(got["pluginId"].is_string());
+    assert!(got["testResult"]["servers"].is_array());
+}
+
+#[tokio::test]
+async fn finalize_check_failure_never_installs() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+    copy_tree(&builder_check_fixture("fail-gateway"), workspace);
+
+    // Exhaust automatic retries so finalize only records errors.
+    sqlx::query(
+        "UPDATE plugin_builds SET status = 'building', format_retries = 2 WHERE id = $1",
+    )
+    .bind(build_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let builds = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = PluginService::new(pool);
+    let build = builds
+        .finalize_after_build(
+            build_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("finalize");
+
+    assert_eq!(build.status, "building");
+    assert!(build.plugin_id.is_none());
+    assert!(build.test_result.is_none());
+    let errors = build.check_errors.as_ref().unwrap().as_array().unwrap();
+    assert!(!errors.is_empty());
+    assert!(
+        errors.iter().any(|e| e.as_str().unwrap().contains("gateway")),
+        "{errors:?}"
+    );
+    assert!(
+        !Path::new(&state.config.plugins.dir)
+            .join("fail-gateway")
+            .exists(),
+        "half-written / failed check must not appear under Installed"
+    );
+}
+
+#[tokio::test]
+async fn try_again_and_ask_for_changes_from_check_failure() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+
+    sqlx::query(
+        "UPDATE plugin_builds
+         SET status = 'building',
+             answers = $2::jsonb,
+             plans = $3::jsonb,
+             check_errors = $4::jsonb,
+             format_retries = 2
+         WHERE id = $1",
+    )
+    .bind(build_id)
+    .bind(json!({ "purpose": "changelog" }))
+    .bind(json!([{"revision": 1, "body": "plan"}]))
+    .bind(json!(["Do not reference Coppice gateway tools (found `ticket_`)."]))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // Try again from building + check_errors.
+    let (status, started) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/build-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["build"]["status"], "building");
+    assert!(started["build"]["checkErrors"].is_null());
+    assert_eq!(started["build"]["formatRetries"], 0);
+
+    // Stop the queued run so we can exercise Ask for changes next.
+    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    RunService::new(pool).stop(run_id).await.unwrap();
+    wait_for_run_status(pool, run_id, "cancelled").await;
+
+    // Re-seed check failure (stop reverted to plan_ready).
+    sqlx::query(
+        "UPDATE plugin_builds
+         SET status = 'building', check_errors = $2::jsonb, format_retries = 2
+         WHERE id = $1",
+    )
+    .bind(build_id)
+    .bind(json!(["A skill is missing its description."]))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, planned) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/plan-runs"),
+        json!({ "changeRequest": "Drop the gateway tool." }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{planned}");
+    assert_eq!(planned["build"]["status"], "planning");
+    assert!(planned["build"]["checkErrors"].is_null());
 }
