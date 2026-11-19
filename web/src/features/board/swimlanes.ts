@@ -59,7 +59,7 @@ export function ticketsInLaneColumn(lane: SplitLane, status: TicketStatus): Tick
     );
 }
 
-/** Lane cards sit above the column stack, so they come first for J/K. */
+/** Lane cards precede ungrouped cards in the same status for J/K. */
 export function columnTicketIds(
   lanes: readonly SplitLane[],
   collapsed: ReadonlySet<string>,

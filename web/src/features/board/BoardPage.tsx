@@ -44,7 +44,7 @@ import {
   type BoardColumnSnapshot,
   type BoardFocus,
 } from './boardFocus';
-import { BoardColumn } from './BoardColumn';
+import { BoardColumn, BoardColumnHeader } from './BoardColumn';
 import { SplitLaneRow } from './SplitLaneRow';
 import { useBoardKeyboard } from './useBoardKeyboard';
 import { useTicketShortcuts } from './useTicketShortcuts';
@@ -535,7 +535,44 @@ export function BoardPage() {
             {moveAnnouncement}
           </div>
           <div id="board" className="relative -mx-8 overflow-x-auto px-8 pb-4">
-            <div className="flex min-w-max flex-col gap-3">
+            <div
+              className="grid min-w-max gap-x-4 gap-y-3"
+              style={{
+                gridTemplateColumns: `repeat(${BOARD_COLUMNS.length}, 18rem)`,
+              }}
+            >
+              {BOARD_COLUMNS.map((column, columnIndex) => {
+                const ungroupedCount =
+                  column.status === 'done'
+                    ? doneList.length
+                    : (ticketsByStatus.get(column.status) ?? []).length;
+                // Badge = ungrouped only; focusable when lanes + ungrouped are empty.
+                return (
+                  <BoardColumnHeader
+                    key={`head-${column.status}`}
+                    column={column}
+                    columnIndex={columnIndex}
+                    matchingCount={ungroupedCount}
+                    headingFocusable={
+                      (columnSnapshots[columnIndex]?.ticketIds.length ?? 0) === 0
+                    }
+                    headingFocused={
+                      boardFocus.type === 'heading' &&
+                      boardFocus.column === columnIndex
+                    }
+                    onHeadingFocus={focusHeading}
+                    needsActionCount={
+                      column.status === 'done' ? needsActionCount : 0
+                    }
+                    needsActionOnly={
+                      column.status === 'done' && doneNeedsActionOnly
+                    }
+                    onToggleNeedsAction={
+                      column.status === 'done' ? toggleNeedsAction : undefined
+                    }
+                  />
+                );
+              })}
               {lanes.map((lane) => (
                 <SplitLaneRow
                   key={lane.parentId}
@@ -565,12 +602,17 @@ export function BoardPage() {
                   onCardFocus={focusCard}
                 />
               ))}
-              <div className="flex gap-4">
+              {lanes.length > 0 && (
+                <div className="col-span-full mt-1 font-body text-xs uppercase tracking-wide text-text-muted">
+                  Other tickets
+                </div>
+              )}
               {BOARD_COLUMNS.map((column, columnIndex) => (
                 <BoardColumn
                   key={column.status}
                   column={column}
                   columnIndex={columnIndex}
+                  hideHeader
                   tickets={visibleTicketsByStatus.get(column.status) ?? []}
                   totalCount={
                     column.status === 'done'
@@ -608,14 +650,9 @@ export function BoardPage() {
                       ? boardFocus.ticketId
                       : null
                   }
-                  headingFocused={
-                    boardFocus.type === 'heading' && boardFocus.column === columnIndex
-                  }
                   onCardFocus={focusCard}
-                  onHeadingFocus={focusHeading}
                 />
               ))}
-              </div>
             </div>
           </div>
 

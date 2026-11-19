@@ -821,8 +821,9 @@ describe('board keyboard navigation with a limited Done column', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
-    const done = screen.getByRole('region', { name: 'Done' });
-    expect(within(done).getByText('11')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
+    ).toHaveTextContent('11');
     expect(screen.getByText('Done new')).toBeVisible();
     expect(screen.getByText('Done 09')).toBeVisible();
     expect(card('Done 09')).toHaveAttribute('data-board-tabstop', 'true');
