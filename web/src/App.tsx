@@ -16,6 +16,7 @@ import { useSession } from './features/auth/useSession';
 import { LoginPage } from './features/auth/LoginPage';
 import { BoardPage } from './features/board/BoardPage';
 import { BoardPickerPage } from './features/boards/BoardPickerPage';
+import { PluginBuilderPage } from './features/plugins/PluginBuilderPage';
 import { PluginsPage } from './features/plugins/PluginsPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
@@ -99,6 +100,7 @@ function App() {
                   element={<RepositoriesPage />}
                 />
                 <Route path="/settings/plugins" element={<PluginsPage />} />
+                <Route path="/settings/plugins/build" element={<PluginBuilderPage />} />
                 <Route path="/settings/users" element={<UsersPage />} />
                 <Route path="/settings/usage" element={<UsagePage />} />
                 <Route path="/system" element={<Navigate to="/system/backup" replace />} />

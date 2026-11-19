@@ -10,11 +10,17 @@ import { PluginsPage } from './PluginsPage';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
+  isDesktopShell: vi.fn(() => false),
 }));
 
 vi.mock('../../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/api')>()),
   apiFetch: mocks.apiFetch,
+}));
+
+vi.mock('../../lib/desktop', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/desktop')>()),
+  isDesktopShell: () => mocks.isDesktopShell(),
 }));
 
 vi.mock('../auth/useSession', () => ({
@@ -118,6 +124,7 @@ async function openCustom() {
 describe('PluginsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isDesktopShell.mockReturnValue(false);
     localStorage.clear();
     dirs = [defaultDir, extraDir];
     plugins = [samplePlugin, shadowedPlugin];
@@ -140,6 +147,9 @@ describe('PluginsPage', () => {
       if (path === '/api/plugins' && method === 'GET') {
         return Promise.resolve(json(plugins));
       }
+      if (path === '/api/marketplace/sources' && method === 'GET') {
+        return Promise.resolve(json([]));
+      }
       if (path === '/api/agents' && method === 'GET') {
         return Promise.resolve(json({ items: [] }));
       }
@@ -156,6 +166,22 @@ describe('PluginsPage', () => {
       }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
+  });
+
+  it('hides Build a plugin outside the desktop shell', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Plugins' });
+    expect(screen.queryByRole('button', { name: 'Build a plugin' })).not.toBeInTheDocument();
+  });
+
+  it('shows Build a plugin on every tab in the desktop shell', async () => {
+    mocks.isDesktopShell.mockReturnValue(true);
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
+    expect(screen.getByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Custom' }));
+    expect(screen.getByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
   });
 
   it('renders plugin cards with status and unsupported parts', async () => {

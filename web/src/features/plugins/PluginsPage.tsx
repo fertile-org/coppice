@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { Button } from '../../components/ui/button';
+import { parseApiErrorMessage } from '../../lib/api';
+import { isDesktopShell } from '../../lib/desktop';
 import { cn } from '../../lib/utils';
 import { useSession } from '../auth/useSession';
+import { BUILDER_COPY } from './builderCopy';
 import { missingSettingsNotice, PLUGIN_COPY, PLUGIN_DOCS_URL } from './copy';
 import { CustomPluginsSection } from './CustomPluginsSection';
 import { InstalledPluginsList } from './InstalledPluginsList';
 import { MarketplaceSection } from './MarketplaceSection';
 import { useMarketplaceSources } from './useMarketplace';
+import { useCreatePluginBuild } from './usePluginBuilds';
 import { usePluginDirs, usePlugins } from './usePlugins';
 
 type PluginsTab = 'installed' | 'marketplace' | 'custom';
@@ -25,15 +30,29 @@ function SectionHeading({ children }: { children: string }) {
 
 export function PluginsPage() {
   const { user, loading } = useSession();
+  const navigate = useNavigate();
   const dirsQuery = usePluginDirs();
   const pluginsQuery = usePlugins();
   const sourcesQuery = useMarketplaceSources();
+  const createBuild = useCreatePluginBuild();
+  const [desktop] = useState(isDesktopShell);
   const [gitUrl, setGitUrl] = useState('');
   const [tab, setTab] = useState<PluginsTab>('installed');
   const [notice, setNotice] = useState<string | null>(null);
+  const [builderError, setBuilderError] = useState<string | null>(null);
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const installRef = useRef<HTMLElement>(null);
   const focusGitForm = useRef(false);
+
+  async function startBuilder() {
+    setBuilderError(null);
+    try {
+      const build = await createBuild.mutateAsync();
+      navigate(`/settings/plugins/build?id=${build.id}`);
+    } catch (err) {
+      setBuilderError(parseApiErrorMessage(err));
+    }
+  }
 
   useEffect(() => {
     if (tab !== 'custom' || !focusGitForm.current || !installRef.current) return;
@@ -81,20 +100,33 @@ export function PluginsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-bark-900">Plugins</h1>
-        <p className="mt-2 max-w-xl font-body text-text-secondary">
-          {PLUGIN_COPY.pageIntro}{' '}
-          <a
-            href={PLUGIN_DOCS_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-moss-700 underline-offset-2 hover:underline"
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-bark-900">Plugins</h1>
+          <p className="mt-2 max-w-xl font-body text-text-secondary">
+            {PLUGIN_COPY.pageIntro}{' '}
+            <a
+              href={PLUGIN_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-moss-700 underline-offset-2 hover:underline"
+            >
+              Plugin guide <span aria-hidden="true">↗</span>
+            </a>
+          </p>
+        </div>
+        {desktop && (
+          <Button
+            type="button"
+            onClick={() => void startBuilder()}
+            disabled={createBuild.isPending}
+            loading={createBuild.isPending}
           >
-            Plugin guide <span aria-hidden="true">↗</span>
-          </a>
-        </p>
+            {BUILDER_COPY.buildButton}
+          </Button>
+        )}
       </div>
+      {builderError && <p className="font-body text-sm text-danger">{builderError}</p>}
 
       {isLoading && (
         <p className="font-body text-sm text-text-muted">Loading plugins…</p>
@@ -171,6 +203,21 @@ export function PluginsPage() {
                       <code className="font-mono">examples/plugins</code>
                     </a>{' '}
                     folder from GitHub.
+                    {desktop && (
+                      <>
+                        {' '}
+                        {BUILDER_COPY.emptyBuildLine}{' '}
+                        <button
+                          type="button"
+                          onClick={() => void startBuilder()}
+                          disabled={createBuild.isPending}
+                          className="font-medium text-moss-700 underline-offset-2 hover:underline"
+                        >
+                          {BUILDER_COPY.emptyBuildLink}
+                        </button>
+                        .
+                      </>
+                    )}
                   </p>
                 ) : (
                   <InstalledPluginsList
