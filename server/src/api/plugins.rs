@@ -5,6 +5,7 @@ use crate::plugins::capability::{McpServerEntry, McpServerTransport};
 use crate::plugins::git_install;
 use crate::plugins::manifest::{ExternalSource, MarketplaceRef};
 use crate::plugins::placeholders::{placeholder_keys, setting_sources, SettingSource};
+use crate::services::plugin_publish_service::{PluginPublishError, PluginPublishService};
 use crate::services::plugin_service::{
     PluginAgentAssignment, PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
     ServerTestOutcome, ServerTestResult,
@@ -52,6 +53,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/plugins/{plugin_id}/agents",
             get(get_plugin_agents).put(set_plugin_agents),
         )
+        .route("/api/plugins/{plugin_id}/publish", post(publish_plugin))
         .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
@@ -93,6 +95,10 @@ pub(crate) struct PluginResponse {
     settings: Vec<PluginSettingResponse>,
     agent_access: String,
     agent_ids: Vec<Uuid>,
+    /// True when an accepted `plugin_builds` row links to this plugin.
+    builder_made: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publish_target: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -256,6 +262,36 @@ impl From<StatusCode> for ApiError {
     }
 }
 
+impl From<PluginPublishError> for ApiError {
+    fn from(err: PluginPublishError) -> Self {
+        match err {
+            PluginPublishError::Validation(msg) => ApiError(StatusCode::BAD_REQUEST, msg),
+            PluginPublishError::Conflict(msg) => ApiError(StatusCode::CONFLICT, msg),
+            PluginPublishError::Unreachable(msg) => ApiError(StatusCode::BAD_GATEWAY, msg),
+            PluginPublishError::NotFound => ApiError(StatusCode::NOT_FOUND, err.to_string()),
+            PluginPublishError::NotBuilderMade => {
+                ApiError(StatusCode::FORBIDDEN, err.to_string())
+            }
+            PluginPublishError::Plugin(e) => e.into(),
+            PluginPublishError::Db(_) | PluginPublishError::Io(_) => {
+                tracing::error!(error = %err, "plugin publish failed");
+                ApiError(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.".into(),
+                )
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishBody {
+    url: String,
+    #[serde(default)]
+    confirm_suffix: bool,
+}
+
 /// Refreshes the skill catalog and stops the MCP servers of plugins that are no
 /// longer `ok` (missing, invalid, shadowed, or removed). The mutation has already
 /// committed, so failures are logged rather than reported.
@@ -308,6 +344,8 @@ fn plugin_response(
     reentry: &BTreeSet<String>,
     mcp: &McpServerPool,
     agent_ids: &[Uuid],
+    builder_made: bool,
+    publish_target: Option<String>,
 ) -> PluginResponse {
     let entries = plugin
         .manifest
@@ -378,6 +416,8 @@ fn plugin_response(
             agent_ids.to_vec()
         },
         agent_access: plugin.agent_access,
+        builder_made,
+        publish_target,
     }
 }
 
@@ -393,13 +433,31 @@ pub(crate) async fn single_response(
         .explicit_members(&[plugin.id])
         .await?;
     let agent_ids = members.get(&plugin.id).cloned().unwrap_or_default();
+    let publisher = publish_service(state, pool);
+    let build = publisher.accepted_build_for_plugin(plugin.id).await?;
+    let (builder_made, publish_target) = match build {
+        Some((_, _, target)) => (true, target),
+        None => (false, None),
+    };
     Ok(Json(plugin_response(
         plugin,
         &configured,
         &reentry,
         &state.plugin_mcp,
         &agent_ids,
+        builder_made,
+        publish_target,
     )))
+}
+
+fn publish_service<'a>(state: &AppState, pool: &'a PgPool) -> PluginPublishService<'a> {
+    PluginPublishService::new(
+        pool,
+        std::path::PathBuf::from(&state.config.agent.worktrees_path),
+        state.config.plugins.allow_file_git_urls,
+        Duration::from_secs(state.config.plugins.git_timeout_secs),
+        state.config.git.push_enabled,
+    )
 }
 
 async fn plugins_response(
@@ -412,6 +470,9 @@ async fn plugins_response(
     let reentry = settings.reentry_keys_by_plugin().await?;
     let ids: Vec<Uuid> = plugins.iter().map(|plugin| plugin.id).collect();
     let members = PluginService::new(pool).explicit_members(&ids).await?;
+    let builder_targets = publish_service(state, pool)
+        .builder_made_targets(&ids)
+        .await?;
     let none = BTreeSet::new();
     let no_agents = Vec::new();
     Ok(Json(
@@ -421,7 +482,11 @@ async fn plugins_response(
                 let keys = configured.get(&p.id).unwrap_or(&none);
                 let again = reentry.get(&p.id).unwrap_or(&none);
                 let agent_ids = members.get(&p.id).unwrap_or(&no_agents);
-                plugin_response(p, keys, again, &state.plugin_mcp, agent_ids)
+                let (made, target) = match builder_targets.get(&p.id) {
+                    Some(t) => (true, t.clone()),
+                    None => (false, None),
+                };
+                plugin_response(p, keys, again, &state.plugin_mcp, agent_ids, made, target)
             })
             .collect(),
     ))
@@ -675,6 +740,37 @@ fn server_test_response(result: ServerTestResult) -> ServerTestResponse {
                 read_only: t.read_only,
             })
             .collect(),
+    }
+}
+
+async fn publish_plugin(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<PublishBody>,
+) -> Result<Response, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let plugins = PluginService::new(pool);
+    let publisher = publish_service(&state, pool);
+    let name = plugins.get_plugin(plugin_id).await?.name;
+    match publisher
+        .publish_for_plugin(plugin_id, &body.url, body.confirm_suffix, &plugins)
+        .await
+    {
+        Ok(result) => Ok(Json(result).into_response()),
+        Err(PluginPublishError::Conflict(msg)) => {
+            let suggested = crate::services::plugin_publish_service::publish_branch_suffix(&name);
+            Ok((
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": msg,
+                    "suggestedBranch": suggested,
+                    "status": "failed",
+                })),
+            )
+                .into_response())
+        }
+        Err(err) => Err(err.into()),
     }
 }
 

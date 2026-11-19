@@ -86,11 +86,30 @@ export const BUILDER_COPY = {
   acceptCancel: 'Cancel',
   acceptedNotice: (name: string) => `Accepted ${name}.`,
 
+  // §8 publish
+  publishPushed: (repo: string, branch: string) =>
+    `Pushed to ${repo} on branch ${branch}. Open a pull request there to share it.`,
+  openRepository: 'Open repository ↗',
+  publishLater: 'Publish…',
+  publishDialogTitle: 'Publish this plugin?',
+  publishDialogBody: 'Coppice adds it to the repository on a new branch.',
+  publishUrlLabel: 'Repository URL',
+  publishUrlPlaceholder: 'https://github.com/your-team/plugins.git',
+  publishConfirm: 'Publish',
+  publishCancel: 'Cancel',
+  publishBranchExists: (branch: string) =>
+    `A branch for this plugin is already there. Coppice will push to ${branch}.`,
+  publishPushSuffix: 'Push',
+  keepItLocal: 'Keep it local',
+
   // §10 errors
   buildDidNotFinish: "The build didn't finish.",
   checkFailed: "The plugin didn't pass Coppice's checks.",
   tryAgain: 'Try again',
   askForChanges: 'Ask for changes',
+  publishUnreachable: (repo: string) =>
+    `Couldn't push to ${repo}. Check that this computer can push there, then try again.`,
+  publishInvalidUrl: "That doesn't look like a repository URL.",
 } as const;
 
 export const TOOL_CHIP_VALUES = {

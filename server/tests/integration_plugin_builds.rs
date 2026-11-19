@@ -1135,3 +1135,297 @@ async fn accept_enable_discard_uninstall_ask_from_ready_and_active_run_id() {
     assert!(!workspace2.exists());
     assert!(!dest.exists(), "installed copy must be removed");
 }
+
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@localhost",
+            "-c",
+            "init.defaultBranch=main",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Bare marketplace repo with one commit on `main` (empty tree + marketplace.json).
+fn marketplace_bare() -> (tempfile::TempDir, String) {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    let bare = tmp.path().join("market.git");
+    std::fs::create_dir_all(&work).unwrap();
+    git_in(&work, &["init", "-q"]);
+    std::fs::create_dir_all(work.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        work.join(".claude-plugin/marketplace.json"),
+        r#"{"name":"team","plugins":[]}"#,
+    )
+    .unwrap();
+    git_in(&work, &["add", "-A"]);
+    git_in(&work, &["commit", "-q", "-m", "init"]);
+    git_in(tmp.path(), &["clone", "-q", "--bare", "work", "market.git"]);
+    let url = format!("file://{}", bare.display());
+    (tmp, url)
+}
+
+fn ensure_git_identity() {
+    std::env::set_var("GIT_AUTHOR_NAME", "Test");
+    std::env::set_var("GIT_AUTHOR_EMAIL", "test@localhost");
+    std::env::set_var("GIT_COMMITTER_NAME", "Test");
+    std::env::set_var("GIT_COMMITTER_EMAIL", "test@localhost");
+}
+
+async fn ready_builder_plugin(
+    state: &std::sync::Arc<coppice_server::AppState>,
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+    name: &str,
+) -> (Uuid, Uuid) {
+    let pool = state.db.as_ref().unwrap();
+    let (status, created) = send(app, "POST", "/api/plugin-builds", Value::Null, cookie, csrf).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+    copy_tree(&builder_check_fixture("pass-minimal"), workspace);
+    let manifest = workspace.join(".claude-plugin/plugin.json");
+    let mut body: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+    body["name"] = json!(name);
+    std::fs::write(&manifest, serde_json::to_string_pretty(&body).unwrap()).unwrap();
+    sqlx::query("UPDATE plugin_builds SET status = 'building', plugin_name = $2 WHERE id = $1")
+        .bind(build_id)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    let builds = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = PluginService::new(pool);
+    let build = builds
+        .finalize_after_build(
+            build_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("finalize");
+    assert_eq!(build.status, "ready_to_try");
+    sqlx::query(
+        "UPDATE plugin_builds SET test_result = $2::jsonb WHERE id = $1",
+    )
+    .bind(build_id)
+    .bind(json!({ "servers": [] }))
+    .execute(pool)
+    .await
+    .unwrap();
+    (build_id, build.plugin_id.unwrap())
+}
+
+#[tokio::test]
+async fn publish_accept_and_publish_api() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    ensure_git_identity();
+    let (_market, url) = marketplace_bare();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|cfg| {
+        cfg.plugins.allow_file_git_urls = true;
+        cfg.git.push_enabled = true;
+    })
+    .await;
+
+    let (build_id, plugin_id) =
+        ready_builder_plugin(&state, &app, &cookie, &csrf, "pub-happy").await;
+
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{build_id}"),
+        json!({ "publishTarget": url }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+
+    let (status, accepted) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/accept"),
+        json!({ "enable": false, "publish": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(accepted["publish"]["status"], "pushed", "{accepted}");
+    assert_eq!(
+        accepted["publish"]["branch"],
+        "coppice/plugin-pub-happy",
+        "{accepted}"
+    );
+    assert!(
+        Path::new(&state.config.plugins.dir).join("pub-happy").exists(),
+        "local install remains"
+    );
+
+    // Remote branch holds marketplace entry + plugin files.
+    let check = tempfile::tempdir().unwrap();
+    let work = check.path().join("check");
+    git_in(
+        check.path(),
+        &[
+            "clone",
+            "-q",
+            "--branch",
+            "coppice/plugin-pub-happy",
+            &url,
+            "check",
+        ],
+    );
+    let market = std::fs::read_to_string(work.join(".claude-plugin/marketplace.json")).unwrap();
+    assert!(market.contains("pub-happy"), "{market}");
+    assert!(market.contains("./plugins/pub-happy"), "{market}");
+    assert!(work.join("plugins/pub-happy/.claude-plugin/plugin.json").is_file());
+
+    // Branch already exists → conflict + suggested -2; confirmSuffix pushes it.
+    let (status, conflict) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/publish"),
+        json!({ "url": url }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    assert_eq!(
+        conflict["suggestedBranch"],
+        "coppice/plugin-pub-happy-2",
+        "{conflict}"
+    );
+
+    let (status, pushed) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/publish"),
+        json!({ "url": url, "confirmSuffix": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pushed}");
+    assert_eq!(pushed["status"], "pushed", "{pushed}");
+    assert_eq!(pushed["branch"], "coppice/plugin-pub-happy-2", "{pushed}");
+
+    // builderMade flag on list/get
+    let (status, plugins) = send(&app, "GET", "/api/plugins", Value::Null, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    let row = plugins
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == plugin_id.to_string())
+        .unwrap();
+    assert_eq!(row["builderMade"], true, "{row}");
+}
+
+#[tokio::test]
+async fn publish_bad_url_and_accept_survives_unreachable() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    ensure_git_identity();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|cfg| {
+        cfg.plugins.allow_file_git_urls = true;
+        cfg.git.push_enabled = true;
+    })
+    .await;
+
+    let (build_id, plugin_id) =
+        ready_builder_plugin(&state, &app, &cookie, &csrf, "pub-fail").await;
+
+    let (status, patched) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{build_id}"),
+        json!({ "publishTarget": "not-a-url" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+
+    let (status, accepted) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/accept"),
+        json!({ "enable": false, "publish": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(accepted["publish"]["status"], "failed", "{accepted}");
+    assert_eq!(
+        accepted["publish"]["error"],
+        "That doesn't look like a repository URL.",
+        "{accepted}"
+    );
+    assert!(
+        Path::new(&state.config.plugins.dir).join("pub-fail").exists(),
+        "local install remains after publish failure"
+    );
+
+    let (status, bad) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/publish"),
+        json!({ "url": "http://example.test/nope.git" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    assert_eq!(
+        bad["error"],
+        "That doesn't look like a repository URL.",
+        "{bad}"
+    );
+
+    let (status, unreachable) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/publish"),
+        json!({ "url": "file:///nonexistent/market.git" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{unreachable}");
+    assert!(
+        unreachable["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Couldn't push to"),
+        "{unreachable}"
+    );
+}

@@ -56,6 +56,16 @@ export const pluginBuildPlanSchema = z.object({
 
 export type PluginBuildPlan = z.infer<typeof pluginBuildPlanSchema>;
 
+export const pluginPublishResultSchema = z.object({
+  status: z.enum(['pushed', 'failed', 'skipped']),
+  branch: z.string().optional().nullable(),
+  error: z.string().optional().nullable(),
+  suggestedBranch: z.string().optional().nullable(),
+  url: z.string().optional().nullable(),
+});
+
+export type PluginPublishResult = z.infer<typeof pluginPublishResultSchema>;
+
 export const pluginBuildSchema = z.object({
   id: z.string().uuid(),
   answers: z.record(z.string(), z.unknown()).default({}),
@@ -74,6 +84,7 @@ export const pluginBuildSchema = z.object({
   lastRunStatus: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  publish: pluginPublishResultSchema.optional().nullable(),
 });
 
 export type PluginBuild = z.infer<typeof pluginBuildSchema>;
@@ -112,6 +123,13 @@ export function parsePluginBuild(data: unknown): PluginBuild {
     const wrapped = planQuestions as { questions?: unknown };
     planQuestions = Array.isArray(wrapped.questions) ? wrapped.questions : null;
   }
+  const publishRaw = raw.publish;
+  const publish =
+    publishRaw && typeof publishRaw === 'object'
+      ? pluginPublishResultSchema.safeParse(publishRaw).success
+        ? pluginPublishResultSchema.parse(publishRaw)
+        : null
+      : null;
   return pluginBuildSchema.parse({
     ...raw,
     answers,
@@ -123,6 +141,7 @@ export function parsePluginBuild(data: unknown): PluginBuild {
     lastRunId: raw.lastRunId ?? null,
     lastRunStatus: raw.lastRunStatus ?? null,
     pluginId: raw.pluginId ?? null,
+    publish,
   });
 }
 

@@ -13,7 +13,7 @@ import { InstalledPluginsList } from './InstalledPluginsList';
 import { MarketplaceSection } from './MarketplaceSection';
 import { useMarketplaceSources } from './useMarketplace';
 import { useCreatePluginBuild } from './usePluginBuilds';
-import { usePluginDirs, usePlugins } from './usePlugins';
+import { usePluginDirs, usePlugins, usePublishPlugin } from './usePlugins';
 
 type PluginsTab = 'installed' | 'marketplace' | 'custom';
 
@@ -29,9 +29,20 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
+type PublishNotice = {
+  status: 'pushed' | 'failed' | 'skipped';
+  branch?: string | null;
+  error?: string | null;
+  suggestedBranch?: string | null;
+  url?: string | null;
+  pluginId?: string | null;
+  publishTarget?: string | null;
+};
+
 type PluginsLocationState = {
   notice?: string;
   highlightIds?: string[];
+  publish?: PublishNotice;
 };
 
 export function PluginsPage() {
@@ -42,10 +53,12 @@ export function PluginsPage() {
   const pluginsQuery = usePlugins();
   const sourcesQuery = useMarketplaceSources();
   const createBuild = useCreatePluginBuild();
+  const publishPlugin = usePublishPlugin();
   const [desktop] = useState(isDesktopShell);
   const [gitUrl, setGitUrl] = useState('');
   const [tab, setTab] = useState<PluginsTab>('installed');
   const [notice, setNotice] = useState<string | null>(null);
+  const [publishNotice, setPublishNotice] = useState<PublishNotice | null>(null);
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const installRef = useRef<HTMLElement>(null);
@@ -53,9 +66,10 @@ export function PluginsPage() {
 
   useEffect(() => {
     const state = location.state as PluginsLocationState | null;
-    if (!state?.notice && !state?.highlightIds?.length) return;
+    if (!state?.notice && !state?.highlightIds?.length && !state?.publish) return;
     if (state.notice) setNotice(state.notice);
     if (state.highlightIds?.length) setHighlightIds(state.highlightIds);
+    if (state.publish) setPublishNotice(state.publish);
     setTab('installed');
     navigate(location.pathname, { replace: true, state: null });
   }, [location, navigate]);
@@ -203,6 +217,90 @@ export function PluginsPage() {
                 <p role="status" className="font-body text-sm text-success">
                   {noticeText}
                 </p>
+              )}
+              {publishNotice?.status === 'pushed' && publishNotice.branch && (
+                <div role="status" className="space-y-2 font-body text-sm text-text-primary">
+                  <p>
+                    {BUILDER_COPY.publishPushed(
+                      publishNotice.publishTarget ?? publishNotice.url ?? 'the repository',
+                      publishNotice.branch,
+                    )}
+                  </p>
+                  {publishNotice.url && (
+                    <a
+                      href={publishNotice.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block font-medium text-moss-700 underline-offset-2 hover:underline"
+                    >
+                      {BUILDER_COPY.openRepository}
+                    </a>
+                  )}
+                </div>
+              )}
+              {publishNotice?.status === 'failed' && (
+                <div role="alert" className="space-y-2 font-body text-sm text-text-primary">
+                  <p className="text-danger">
+                    {publishNotice.error ??
+                      BUILDER_COPY.publishUnreachable(
+                        publishNotice.publishTarget ?? 'the repository',
+                      )}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {publishNotice.pluginId && publishNotice.publishTarget && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        loading={publishPlugin.isPending}
+                        onClick={() => {
+                          void publishPlugin
+                            .mutateAsync({
+                              id: publishNotice.pluginId!,
+                              url: publishNotice.publishTarget!,
+                              confirmSuffix: Boolean(publishNotice.suggestedBranch),
+                            })
+                            .then((outcome) => {
+                              if (outcome.kind === 'ok') {
+                                setPublishNotice({
+                                  ...outcome.result,
+                                  pluginId: publishNotice.pluginId,
+                                  publishTarget: publishNotice.publishTarget,
+                                });
+                              } else if (outcome.kind === 'conflict') {
+                                setPublishNotice({
+                                  status: 'failed',
+                                  error: outcome.error,
+                                  suggestedBranch: outcome.suggestedBranch,
+                                  pluginId: publishNotice.pluginId,
+                                  publishTarget: publishNotice.publishTarget,
+                                });
+                              } else {
+                                setPublishNotice({
+                                  status: 'failed',
+                                  error: outcome.error,
+                                  pluginId: publishNotice.pluginId,
+                                  publishTarget: publishNotice.publishTarget,
+                                });
+                              }
+                            });
+                        }}
+                      >
+                        {publishNotice.suggestedBranch
+                          ? BUILDER_COPY.publishPushSuffix
+                          : BUILDER_COPY.tryAgain}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setPublishNotice(null)}
+                    >
+                      {BUILDER_COPY.keepItLocal}
+                    </Button>
+                  </div>
+                </div>
               )}
               <section className="space-y-3">
                 <SectionHeading>Installed plugins</SectionHeading>

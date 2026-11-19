@@ -343,7 +343,7 @@ impl<'a> PluginBuildService<'a> {
     }
 
     /// Accept: delete workspace, optionally enable the installed plugin.
-    /// `publish` is ignored until PB-12 (still succeeds when true).
+    /// Publish (if requested) runs in the API layer after this returns.
     pub async fn accept(
         &self,
         id: Uuid,

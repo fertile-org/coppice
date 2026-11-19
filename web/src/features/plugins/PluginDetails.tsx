@@ -11,12 +11,19 @@ import type {
 import { parseApiErrorMessage } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
+import { BUILDER_COPY } from './builderCopy';
 import { PLUGIN_COPY } from './copy';
 import { confirmStart } from './pluginConsent';
 import { STATUS_HINTS, statusPillClass } from './installedPlugins';
 import { PluginSettingsForm } from './PluginSettingsForm';
 import { PluginTestResults } from './PluginTestResults';
-import { useSetPluginAgents, useSetSkillEnabled, useTestPlugin } from './usePlugins';
+import { PublishPluginDialog } from './PublishPluginDialog';
+import {
+  usePublishPlugin,
+  useSetPluginAgents,
+  useSetSkillEnabled,
+  useTestPlugin,
+} from './usePlugins';
 
 const HEALTH_HINTS: Record<PluginMcpServerHealth, string> = {
   stopped: 'Not running. Starts when an agent run or Test needs it.',
@@ -327,6 +334,13 @@ export function PluginDetails({
   onUpdate,
 }: PluginDetailsProps) {
   const [error, setError] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [branchExists, setBranchExists] = useState(false);
+  const [suggestedBranch, setSuggestedBranch] = useState<string | null>(null);
+  const [publishUrl, setPublishUrl] = useState('');
+  const [publishSuccess, setPublishSuccess] = useState<string | null>(null);
+  const publish = usePublishPlugin();
   const isExternal = plugin.status === 'external';
 
   async function handleUpdate() {
@@ -336,6 +350,34 @@ export function PluginDetails({
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Unable to start update.'));
     }
+  }
+
+  async function runPublish(url: string, confirmSuffix: boolean) {
+    setPublishError(null);
+    setPublishSuccess(null);
+    const outcome = await publish.mutateAsync({
+      id: plugin.id,
+      url,
+      confirmSuffix,
+    });
+    if (outcome.kind === 'ok') {
+      setBranchExists(false);
+      setSuggestedBranch(null);
+      setPublishOpen(false);
+      setPublishSuccess(
+        BUILDER_COPY.publishPushed(url, outcome.result.branch ?? 'branch'),
+      );
+      return;
+    }
+    if (outcome.kind === 'conflict') {
+      setBranchExists(true);
+      setSuggestedBranch(outcome.suggestedBranch);
+      setPublishError(outcome.error);
+      setPublishUrl(url);
+      return;
+    }
+    setPublishError(outcome.error);
+    setPublishUrl(url);
   }
 
   return (
@@ -390,6 +432,28 @@ export function PluginDetails({
           </Button>
         </div>
       )}
+      {!isExternal && plugin.builderMade && (
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setPublishError(null);
+              setBranchExists(false);
+              setSuggestedBranch(null);
+              setPublishUrl(plugin.publishTarget ?? '');
+              setPublishOpen(true);
+            }}
+          >
+            {BUILDER_COPY.publishLater}
+          </Button>
+        </div>
+      )}
+      {publishSuccess && (
+        <p role="status" className="mt-2 font-body text-xs text-success">
+          {publishSuccess}
+        </p>
+      )}
       {update?.status === 'failed' && (
         <p role="alert" className="mt-2 font-body text-xs text-danger">
           Update failed: {update.error ?? 'unknown error'}
@@ -408,6 +472,19 @@ export function PluginDetails({
         <PluginSettingsForm pluginId={plugin.id} settings={plugin.settings} />
       )}
       {!isExternal && plugin.skills.length > 0 && <SkillsSection plugin={plugin} />}
+      <PublishPluginDialog
+        open={publishOpen}
+        initialUrl={publishUrl}
+        busy={publish.isPending}
+        error={publishError}
+        branchExists={branchExists}
+        suggestedBranch={suggestedBranch}
+        onClose={() => {
+          if (!publish.isPending) setPublishOpen(false);
+        }}
+        onPublish={(url) => void runPublish(url, false)}
+        onConfirmSuffix={() => void runPublish(publishUrl, true)}
+      />
     </div>
   );
 }

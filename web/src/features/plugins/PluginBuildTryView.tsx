@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useConfirm } from '../../components/ui/confirm-dialog';
 import { parseApiErrorMessage } from '../../lib/api';
-import type { PluginBuild } from '../../lib/schemas/pluginBuild';
+import type { PluginBuild, PluginPublishResult } from '../../lib/schemas/pluginBuild';
 import { pluginBuildTestPassed } from '../../lib/schemas/pluginBuild';
 import type { PluginTestResult } from '../../lib/schemas/plugin';
 import { PLAN_COPY } from '../plan/copy';
@@ -31,7 +31,12 @@ export function PluginBuildTryView({
   onDiscarded,
 }: {
   build: PluginBuild;
-  onAccepted: (pluginId: string | null, name: string) => void;
+  onAccepted: (
+    pluginId: string | null,
+    name: string,
+    publish: PluginPublishResult | null | undefined,
+    publishTarget: string | null,
+  ) => void;
   onDiscarded: () => void;
 }) {
   const confirm = useConfirm();
@@ -100,9 +105,17 @@ export function PluginBuildTryView({
       if (opts.enable && plugin) {
         if (!(await confirmStart(plugin, confirm))) return;
       }
-      await accept.mutateAsync({ enable: opts.enable, publish: opts.publish });
+      const accepted = await accept.mutateAsync({
+        enable: opts.enable,
+        publish: opts.publish,
+      });
       setAcceptOpen(false);
-      onAccepted(build.pluginId ?? null, name);
+      onAccepted(
+        build.pluginId ?? null,
+        name,
+        accepted.publish,
+        build.publishTarget,
+      );
     } catch (err) {
       setError(parseApiErrorMessage(err));
     }
