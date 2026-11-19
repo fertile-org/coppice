@@ -16,6 +16,17 @@ use uuid::Uuid;
 pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let result: AgentRunResult = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidArgs(format!("invalid result: {e}")))?;
+    if let AgentRunResult::Done {
+        advanced: Some(_),
+        ..
+    } = &result
+    {
+        if ctx.scope.job_type != crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD {
+            return Err(ToolError::InvalidArgs(
+                "advanced is only allowed on plan_plugin_build results".into(),
+            ));
+        }
+    }
     validate_for_profile(&result, ctx.scope.profile, &ctx.scope.job_type)
         .map_err(ToolError::InvalidArgs)?;
     if let AgentRunResult::Done {
@@ -27,7 +38,9 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         if !plan_questions.is_empty() {
             questions_allowed(ctx).await?;
         }
-        if *no_visible_change && ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+        if *no_visible_change
+            && ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+            && ctx.scope.job_type != crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD
         {
             return Err(ToolError::InvalidArgs(
                 crate::copy::plan::NO_VISIBLE_CHANGE_PLAN_ONLY.into(),
@@ -63,7 +76,9 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         .map_err(|e| ToolError::Internal(e.into()))?;
     let keys = resolve_agent_keys(&agents);
     let mut warnings = target_warnings(&result, &keys, ctx.scope.agent_id);
-    if ctx.scope.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+    if ctx.scope.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+        || ctx.scope.job_type == crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD
+    {
         warnings.extend(plan_warnings(&result));
     }
 
@@ -84,9 +99,12 @@ fn plan_warnings(result: &AgentRunResult) -> Vec<String> {
     }
 }
 
-/// Questions belong to a planning run on a ticket with no plan and no
-/// earlier question round. Refusing here lets the agent plan instead.
+/// Questions belong to a planning run. Ticket plans also require no prior
+/// question round; plugin-build plans allow one round per run.
 async fn questions_allowed(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
+    if ctx.scope.job_type == crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD {
+        return Ok(());
+    }
     if ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
         return Err(ToolError::InvalidArgs(
             "planQuestions is only for planning runs.".into(),

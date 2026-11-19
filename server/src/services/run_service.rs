@@ -4,6 +4,7 @@ use crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE;
+use crate::domain::plugin_build::{JOB_TYPE_BUILD_PLUGIN, JOB_TYPE_PLAN_PLUGIN_BUILD};
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
@@ -454,16 +455,27 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn stop(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
+        // Capture prior status: cancel_for_run drops the pending job, so a
+        // still-queued plugin-build stop never reaches the worker revert path.
         let row = sqlx::query(
             r#"
-            UPDATE agent_runs
+            WITH prev AS (
+                SELECT id, status AS was_status, job_type AS was_job_type,
+                       plugin_build_id
+                FROM agent_runs
+                WHERE id = $1 AND status IN ('queued', 'running')
+                FOR UPDATE
+            )
+            UPDATE agent_runs AS r
             SET status = $2, ended_at = now(), submitted_result = NULL
-            WHERE id = $1 AND status IN ('queued', 'running')
+            FROM prev
+            WHERE r.id = prev.id
             RETURNING
-                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message, session_id,
-                context_profile, trigger_comment_id,
-                started_at, ended_at, created_at
+                r.id, r.ticket_id, r.agent_id, r.job_type, r.status, r.sandbox_profile_id,
+                r.worktree_path, r.branch_name, r.error_message, r.session_id,
+                r.context_profile, r.trigger_comment_id,
+                r.started_at, r.ended_at, r.created_at,
+                prev.was_status, prev.was_job_type, prev.plugin_build_id
             "#,
         )
         .bind(run_id)
@@ -472,10 +484,36 @@ impl<'a> RunService<'a> {
         .await?
         .ok_or_else(|| RunError::Validation("run is not active".into()))?;
 
+        let was_queued: String = row.get("was_status");
+        let was_job_type: String = row.get("was_job_type");
+        let plugin_build_id: Option<Uuid> = row.get("plugin_build_id");
+
         // Cut off gateway access right away rather than waiting for the worker
         // to notice the cancel; a stopped run's submission is already cleared.
         self.revoke_run_tokens(run_id).await;
         JobService::new(self.pool).cancel_for_run(run_id).await?;
+
+        if was_queued == "queued"
+            && crate::domain::plugin_build::is_plugin_build_job(&was_job_type)
+        {
+            if let Some(build_id) = plugin_build_id {
+                // worktrees_root unused by on_run_terminal.
+                if let Err(err) = crate::services::plugin_build_service::PluginBuildService::new(
+                    self.pool,
+                    std::path::PathBuf::new(),
+                )
+                .on_run_terminal(build_id, &was_job_type, false)
+                .await
+                {
+                    tracing::warn!(
+                        %run_id,
+                        %build_id,
+                        error = %err,
+                        "failed to revert plugin build after queued stop"
+                    );
+                }
+            }
+        }
 
         Ok(row_to_run(&row))
     }
@@ -1025,6 +1063,60 @@ impl<'a> RunService<'a> {
         .bind(Uuid::new_v4())
         .bind(run_id)
         .bind(JOB_TYPE_CONNECTOR_CHECK)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(row_to_run(&row))
+    }
+
+    /// Queue a plugin-build plan or build run. Owner is `plugin_build_id` only.
+    pub async fn create_plugin_build_run(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        plugin_build_id: Uuid,
+        agent_id: Uuid,
+        job_type: &str,
+    ) -> Result<AgentRun, RunError> {
+        if job_type != JOB_TYPE_PLAN_PLUGIN_BUILD && job_type != JOB_TYPE_BUILD_PLUGIN {
+            return Err(RunError::Validation(format!(
+                "unsupported plugin build job type: {job_type}"
+            )));
+        }
+        let run_id = Uuid::new_v4();
+        let row = sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, chat_session_id, plugin_build_id,
+                agent_id, job_type, status, sandbox_profile_id, context_profile
+            )
+            VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $7)
+            RETURNING
+                id, ticket_id, chat_session_id, chat_message_id,
+                agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
+                started_at, ended_at, created_at
+            "#,
+        )
+        .bind(run_id)
+        .bind(plugin_build_id)
+        .bind(agent_id)
+        .bind(job_type)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(PROFILE_ID)
+        .bind(ContextProfile::Full.as_str())
+        .fetch_one(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_jobs (id, run_id, job_type, status)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(run_id)
+        .bind(job_type)
         .bind(job_status_to_str(JobStatus::Pending))
         .execute(&mut **tx)
         .await?;

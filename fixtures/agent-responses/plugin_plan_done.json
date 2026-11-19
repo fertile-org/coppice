@@ -1,0 +1,19 @@
+{
+  "status": "done",
+  "summary": "# changelog-helper\n\nKeeps CHANGELOG.md up to date from recent commits.\n\n## What it will do\n- Read commits since the last release\n- Write a short summary of each change\n- Add the summary to CHANGELOG.md\n\n## What it needs\n- git on this computer\n- No keys, no internet\n\n## How you'll know it works\n- Coppice runs a test after it's built\n\n## Where it goes\njust this computer",
+  "advanced": {
+    "pluginName": "changelog-helper",
+    "version": "0.1.0",
+    "description": "Keeps CHANGELOG.md up to date from recent commits.",
+    "files": [".claude-plugin/plugin.json", "skills/summarize/SKILL.md", "README.md"],
+    "skills": [{ "name": "summarize", "description": "Summarize commits" }],
+    "servers": [],
+    "settings": [],
+    "permissions": ["Runs on your computer with your computer's privileges"],
+    "manifestPreview": "{\n  \"name\": \"changelog-helper\",\n  \"version\": \"0.1.0\"\n}"
+  },
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

@@ -223,6 +223,12 @@ pub fn validate_for_profile(
     if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
         return validate_plan_result(result);
     }
+    if job_type == crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD {
+        return validate_plugin_plan_result(result);
+    }
+    if job_type == crate::domain::plugin_build::JOB_TYPE_BUILD_PLUGIN {
+        return validate_plugin_build_result(result);
+    }
     if job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT {
         return validate_verify_result(result);
     }
@@ -323,6 +329,61 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             Ok(())
         }
         _ => Err(PLAN_MUST_FINISH.into()),
+    }
+}
+
+fn validate_plugin_plan_result(result: &AgentRunResult) -> Result<(), String> {
+    use crate::copy::plan::{
+        PLAN_ASSIGN_REJECTED, PLAN_CHANGED_FILES_REJECTED, PLAN_DESCRIPTION_REJECTED,
+        PLAN_MUST_FINISH,
+    };
+    match result {
+        AgentRunResult::Done {
+            summary,
+            changed_files,
+            updated_description,
+            assign_to,
+            plan_questions,
+            suggest_skip_human_review,
+            ..
+        } => {
+            if !changed_files.is_empty() {
+                return Err(PLAN_CHANGED_FILES_REJECTED.into());
+            }
+            if plan_questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
+                return Err(crate::copy::plan::PLAN_QUESTIONS_TOO_MANY.into());
+            }
+            if updated_description
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Err(PLAN_DESCRIPTION_REJECTED.into());
+            }
+            if assign_to
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Err(PLAN_ASSIGN_REJECTED.into());
+            }
+            if *suggest_skip_human_review {
+                return Err("suggestSkipHumanReview is not used for plugin builds".into());
+            }
+            if summary.trim().is_empty() && plan_questions.is_empty() {
+                return Err(PLAN_MUST_FINISH.into());
+            }
+            Ok(())
+        }
+        _ => Err(PLAN_MUST_FINISH.into()),
+    }
+}
+
+fn validate_plugin_build_result(result: &AgentRunResult) -> Result<(), String> {
+    match result {
+        AgentRunResult::Done { summary, .. } if !summary.trim().is_empty() => Ok(()),
+        AgentRunResult::Done { .. } => {
+            Err("plugin build runs need a non-empty summary".into())
+        }
+        _ => Err("plugin build runs must finish with status done".into()),
     }
 }
 
@@ -789,6 +850,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -823,6 +885,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
 
@@ -864,6 +927,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
 
@@ -903,6 +967,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
 
@@ -981,6 +1046,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1012,6 +1078,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1043,6 +1110,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1085,6 +1153,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
@@ -1135,6 +1204,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         }
     }
@@ -1305,6 +1375,7 @@ mod tests {
             AgentRunResult::Done {
                 no_visible_change: false,
                 suggest_skip_human_review: false,
+                advanced: None,
                 ..
             }
         ));

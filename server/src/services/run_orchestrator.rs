@@ -1343,6 +1343,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         }
     }
@@ -1382,6 +1383,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         }
     }
@@ -1414,6 +1416,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         }
     }
@@ -1548,6 +1551,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
 
@@ -2122,6 +2126,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let apply = ApplyResult {
@@ -3658,6 +3663,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let workflow = WorkflowConfig {
@@ -3908,6 +3914,7 @@ mod tests {
             plan_questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
+            advanced: None,
             actions: None,
         };
         let mut malicious_apply =
@@ -4555,6 +4562,7 @@ mod tests {
                     plan_questions: Vec::new(),
                     no_visible_change: false,
                     suggest_skip_human_review: false,
+                    advanced: None,
                     actions: None,
                 },
                 ApplyResult {

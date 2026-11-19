@@ -322,6 +322,11 @@ fn result_submit_properties() -> Value {
                 "required": ["question"],
             },
         },
+        "advanced": {
+            "type": "object",
+            "description": "plan_plugin_build only. Structured Advanced data (pluginName, version, description, files, skills, servers, settings, permissions, manifestPreview).",
+            "additionalProperties": true,
+        },
         "actions": {
             "type": "array",
             "description": "Agent chat only (chat turns). Ticket or knowledge drafts for the human to confirm with Create or Reject. Nothing is created until they click. Max 5.",

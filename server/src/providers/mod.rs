@@ -356,6 +356,13 @@ pub enum AgentRunResult {
             skip_serializing_if = "std::ops::Not::not"
         )]
         suggest_skip_human_review: bool,
+        /// `plan_plugin_build` only: structured Advanced data for the plan UI.
+        #[serde(
+            default,
+            rename = "advanced",
+            skip_serializing_if = "Option::is_none"
+        )]
+        advanced: Option<serde_json::Value>,
         /// Agent-chat turns only: proposed ticket/knowledge items for the human to confirm.
         /// Kept raw so validation can report the specific `parse_chat_actions` error.
         #[serde(default, rename = "actions", skip_serializing_if = "Option::is_none")]
