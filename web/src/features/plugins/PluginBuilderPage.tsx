@@ -14,12 +14,16 @@ import { useSession } from '../auth/useSession';
 import { PLAN_COPY } from '../plan/copy';
 import { BUILDER_COPY, TOOL_CHIP_VALUES, type ToolChipValue } from './builderCopy';
 import { PluginBuildPlanReview } from './PluginBuildPlanReview';
+import { PluginBuildProgress } from './PluginBuildProgress';
+import { PluginBuildTryView } from './PluginBuildTryView';
 import {
   useCreatePluginBuild,
   usePatchPluginBuild,
   usePluginBuild,
   useStartPluginPlanRun,
 } from './usePluginBuilds';
+import { missingSettingsNotice } from './copy';
+import { usePlugins } from './usePlugins';
 
 const TOTAL_STEPS = 5;
 
@@ -175,9 +179,10 @@ export function PluginBuilderPage() {
   const [step, setStep] = useState(1);
   const [answers, setAnswers] = useState<WizardAnswers>(EMPTY_ANSWERS);
   const [hydrated, setHydrated] = useState(false);
-  const [phase, setPhase] = useState<'wizard' | 'plan'>('wizard');
+  const [phase, setPhase] = useState<'wizard' | 'plan' | 'progress' | 'try'>('wizard');
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const pluginsQuery = usePlugins();
 
   useEffect(() => {
     if (!desktop || loading || user?.role !== 'admin') return;
@@ -206,22 +211,37 @@ export function PluginBuilderPage() {
   useEffect(() => {
     if (!buildQuery.data || hydrated) return;
     setAnswers(fromApiAnswers(buildQuery.data.answers, buildQuery.data.publishTarget));
-    if (
-      buildQuery.data.status === 'planning' ||
-      buildQuery.data.status === 'plan_ready' ||
-      buildQuery.data.plans.length > 0
-    ) {
-      setPhase('plan');
-    }
     setHydrated(true);
   }, [buildQuery.data, hydrated]);
 
+  useEffect(() => {
+    const status = buildQuery.data?.status;
+    if (!status) return;
+    if (status === 'building') {
+      setPhase('progress');
+      return;
+    }
+    if (status === 'ready_to_try') {
+      setPhase('try');
+      return;
+    }
+    if (
+      status === 'planning' ||
+      status === 'plan_ready' ||
+      (buildQuery.data?.plans.length ?? 0) > 0
+    ) {
+      setPhase('plan');
+    }
+  }, [buildQuery.data?.status, buildQuery.data?.plans.length]);
+
   const dirty = useMemo(() => hasAnyAnswer(answers), [answers]);
   const canLeaveWithoutPrompt =
-    phase === 'plan' &&
-    (buildQuery.data?.status === 'building' ||
-      buildQuery.data?.status === 'ready' ||
-      buildQuery.data?.status === 'plan_ready');
+    phase === 'plan' ||
+    phase === 'progress' ||
+    phase === 'try' ||
+    buildQuery.data?.status === 'building' ||
+    buildQuery.data?.status === 'ready_to_try' ||
+    buildQuery.data?.status === 'plan_ready';
 
   const requestLeave = useCallback(async () => {
     if (!dirty || canLeaveWithoutPrompt) {
@@ -304,6 +324,34 @@ export function PluginBuilderPage() {
         <p className="font-body text-sm text-text-muted motion-safe:animate-pulse">
           {phase === 'plan' ? BUILDER_COPY.writingPlan : 'Loading…'}
         </p>
+      ) : phase === 'progress' && build ? (
+        <PluginBuildProgress
+          build={build}
+          onDiscarded={() => navigate('/settings/plugins', { replace: true })}
+        />
+      ) : phase === 'try' && build ? (
+        <PluginBuildTryView
+          build={build}
+          onDiscarded={() => navigate('/settings/plugins', { replace: true })}
+          onAccepted={(pluginId, name) => {
+            const missing =
+              pluginsQuery.data
+                ?.find((p) => p.id === pluginId)
+                ?.settings.filter((s) => s.source === 'missing')
+                .map((s) => s.key) ?? [];
+            const notice =
+              missing.length > 0
+                ? `${BUILDER_COPY.acceptedNotice(name)} ${missingSettingsNotice(missing)}`
+                : BUILDER_COPY.acceptedNotice(name);
+            navigate('/settings/plugins', {
+              replace: true,
+              state: {
+                notice,
+                highlightIds: pluginId ? [pluginId] : [],
+              },
+            });
+          }}
+        />
       ) : phase === 'plan' && build ? (
         <PluginBuildPlanReview build={build} />
       ) : (

@@ -83,6 +83,11 @@ pub struct PluginBuild {
     pub test_result: Option<Value>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    /// Active plan/build run for this build (`queued` / `running`), if any.
+    pub active_run_id: Option<Uuid>,
+    /// Most recent run for this build (any status).
+    pub last_run_id: Option<Uuid>,
+    pub last_run_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -155,6 +160,37 @@ impl<'a> PluginBuildService<'a> {
         };
         let rows = sqlx::query(&sql).fetch_all(self.pool).await?;
         Ok(rows.into_iter().map(row_to_build).collect())
+    }
+
+    /// Attach active/latest agent-run ids for Stop + Installed-row reopen.
+    pub async fn with_run_meta(
+        &self,
+        mut build: PluginBuild,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let active: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM agent_runs
+             WHERE plugin_build_id = $1 AND status IN ('queued', 'running')
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .bind(build.id)
+        .fetch_optional(self.pool)
+        .await?;
+        let last_row = sqlx::query(
+            "SELECT id, status FROM agent_runs
+             WHERE plugin_build_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .bind(build.id)
+        .fetch_optional(self.pool)
+        .await?;
+        build.active_run_id = active;
+        if let Some(row) = last_row {
+            build.last_run_id = Some(row.get("id"));
+            build.last_run_status = Some(row.get("status"));
+        }
+        Ok(build)
     }
 
     pub async fn update(
@@ -238,13 +274,59 @@ impl<'a> PluginBuildService<'a> {
         self.set_terminal(id, "discarded", true).await
     }
 
+    /// Discard and, when an installed copy exists, remove it and rescan.
+    pub async fn discard_and_uninstall(
+        &self,
+        id: Uuid,
+        plugins: &PluginService<'_>,
+        plugins_dir: &str,
+        plugin_mcp: &McpServerPool,
+        skills: &SkillCatalog,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let build = self.get(id).await?;
+        if is_terminal(&build.status) {
+            return Err(PluginBuildError::Conflict(format!(
+                "build is already {}",
+                build.status
+            )));
+        }
+        if let Some(plugin_id) = build.plugin_id {
+            plugin_mcp.stop_plugin(plugin_id).await;
+            skills.remove_plugin(plugin_id).await;
+            if let Ok(path) = plugins.plugin_path(plugin_id).await {
+                remove_workspace(&path).await?;
+            } else if let Some(name) = build.plugin_name.as_deref() {
+                remove_workspace(&Path::new(plugins_dir).join(name)).await?;
+            }
+        } else if let Some(name) = build.plugin_name.as_deref() {
+            remove_workspace(&Path::new(plugins_dir).join(name)).await?;
+        }
+        remove_workspace(Path::new(&build.workspace_path)).await?;
+        let row = sqlx::query(&format!(
+            "UPDATE plugin_builds
+             SET status = 'discarded', plugin_id = NULL, test_result = NULL, updated_at = now()
+             WHERE id = $1
+             RETURNING {COLUMNS}"
+        ))
+        .bind(id)
+        .fetch_one(self.pool)
+        .await?;
+        if let Err(err) = plugins.rescan().await {
+            tracing::warn!(error = %err, %id, "plugin rescan after builder discard");
+        }
+        if let Err(err) = plugins.refresh_catalog(skills).await {
+            tracing::warn!(error = %err, %id, "skill catalog refresh after builder discard");
+        }
+        Ok(row_to_build(row))
+    }
+
     /// Delete the workspace after Accept (PB-11). Keeps the row; status → accepted.
     pub async fn delete_workspace_on_accept(
         &self,
         id: Uuid,
     ) -> Result<PluginBuild, PluginBuildError> {
         let build = self.get(id).await?;
-        if build.status == "discarded" || build.status == "cancelled" {
+        if build.status != "ready_to_try" {
             return Err(PluginBuildError::Conflict(format!(
                 "cannot accept a {} build",
                 build.status
@@ -258,6 +340,33 @@ impl<'a> PluginBuildService<'a> {
         .fetch_one(self.pool)
         .await?;
         Ok(row_to_build(row))
+    }
+
+    /// Accept: delete workspace, optionally enable the installed plugin.
+    /// `publish` is ignored until PB-12 (still succeeds when true).
+    pub async fn accept(
+        &self,
+        id: Uuid,
+        enable: bool,
+        plugins: &PluginService<'_>,
+        plugin_mcp: &McpServerPool,
+        skills: &SkillCatalog,
+    ) -> Result<PluginBuild, PluginBuildError> {
+        let build = self.delete_workspace_on_accept(id).await?;
+        if enable {
+            let Some(plugin_id) = build.plugin_id else {
+                return Err(PluginBuildError::Validation(
+                    "build has no installed plugin to enable".into(),
+                ));
+            };
+            plugins.set_enabled(plugin_id, true).await?;
+            if let Err(err) = plugins.refresh_catalog(skills).await {
+                tracing::warn!(error = %err, %id, "skill catalog refresh after builder accept");
+            }
+            // Enabling starts MCP on demand elsewhere; keep pool consistent.
+            let _ = plugin_mcp;
+        }
+        self.get(id).await
     }
 
     /// Queue a `plan_plugin_build` run. Requires saved answers. `connector_ready`
@@ -284,7 +393,8 @@ impl<'a> PluginBuildService<'a> {
             ));
         }
         let check_failed = has_check_errors(&build);
-        if matches!(build.status.as_str(), "ready_to_try" | "accepted")
+        // Ask-for-changes allowed from ready_to_try and check-failed building.
+        if matches!(build.status.as_str(), "accepted")
             || (build.status == "building" && !check_failed)
         {
             return Err(PluginBuildError::Conflict(format!(
@@ -292,6 +402,7 @@ impl<'a> PluginBuildService<'a> {
                 build.status
             )));
         }
+        let from_try = build.status == "ready_to_try";
 
         let agents = AgentService::new(self.pool)
             .list_agents()
@@ -312,15 +423,18 @@ impl<'a> PluginBuildService<'a> {
         }
 
         let mut tx = self.pool.begin().await?;
-        // Ask-for-changes from a failed check: clear check state and re-enter planning.
+        // Re-enter planning; keep plugin_id so the next finalize can replace the install.
         sqlx::query(
             "UPDATE plugin_builds
              SET answers = $2, status = 'planning', plan_questions = NULL,
-                 check_errors = NULL, format_retries = 0, updated_at = now()
+                 check_errors = NULL, format_retries = 0,
+                 test_result = CASE WHEN $3 THEN NULL ELSE test_result END,
+                 updated_at = now()
              WHERE id = $1",
         )
         .bind(id)
         .bind(&build.answers)
+        .bind(from_try)
         .execute(&mut *tx)
         .await?;
 
@@ -918,6 +1032,9 @@ fn row_to_build(row: sqlx::postgres::PgRow) -> PluginBuild {
         test_result: row.get("test_result"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        active_run_id: None,
+        last_run_id: None,
+        last_run_status: None,
     }
 }
 

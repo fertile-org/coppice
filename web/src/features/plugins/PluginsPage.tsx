@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell } from '../../lib/desktop';
 import { cn } from '../../lib/utils';
 import { useSession } from '../auth/useSession';
+import { BuilderInstalledRows } from './BuilderInstalledRows';
 import { BUILDER_COPY } from './builderCopy';
 import { missingSettingsNotice, PLUGIN_COPY, PLUGIN_DOCS_URL } from './copy';
 import { CustomPluginsSection } from './CustomPluginsSection';
@@ -28,9 +29,15 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
+type PluginsLocationState = {
+  notice?: string;
+  highlightIds?: string[];
+};
+
 export function PluginsPage() {
   const { user, loading } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const dirsQuery = usePluginDirs();
   const pluginsQuery = usePlugins();
   const sourcesQuery = useMarketplaceSources();
@@ -43,6 +50,15 @@ export function PluginsPage() {
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const installRef = useRef<HTMLElement>(null);
   const focusGitForm = useRef(false);
+
+  useEffect(() => {
+    const state = location.state as PluginsLocationState | null;
+    if (!state?.notice && !state?.highlightIds?.length) return;
+    if (state.notice) setNotice(state.notice);
+    if (state.highlightIds?.length) setHighlightIds(state.highlightIds);
+    setTab('installed');
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location, navigate]);
 
   async function startBuilder() {
     setBuilderError(null);
@@ -190,6 +206,7 @@ export function PluginsPage() {
               )}
               <section className="space-y-3">
                 <SectionHeading>Installed plugins</SectionHeading>
+                {desktop && <BuilderInstalledRows />}
                 {plugins.length === 0 ? (
                   <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
                     No plugins yet. Find one in Marketplace or add your own in Custom. To try

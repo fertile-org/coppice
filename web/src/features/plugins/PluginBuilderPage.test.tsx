@@ -40,6 +40,13 @@ function draftBuild(overrides: Partial<PluginBuild> = {}): PluginBuild {
     workspacePath: '/tmp/plugin-builds/' + BUILD_ID,
     publishTarget: null,
     planQuestions: null,
+    checkErrors: null,
+    formatRetries: 0,
+    pluginId: null,
+    testResult: null,
+    activeRunId: null,
+    lastRunId: null,
+    lastRunStatus: null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -90,25 +97,34 @@ describe('PluginBuilderPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isDesktopShell.mockReturnValue(true);
+    let current = draftBuild();
     mocks.apiFetch.mockImplementation((path: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET';
       if (path === `/api/plugin-builds/${BUILD_ID}` && method === 'GET') {
-        return Promise.resolve(json(draftBuild()));
+        return Promise.resolve(json(current));
       }
       if (path === `/api/plugin-builds/${BUILD_ID}` && method === 'PATCH') {
         const body = JSON.parse(init.body as string);
-        return Promise.resolve(json(draftBuild({ answers: body.answers ?? {} })));
+        current = draftBuild({
+          ...current,
+          answers: body.answers ?? current.answers,
+          publishTarget:
+            body.publishTarget === undefined ? current.publishTarget : body.publishTarget,
+        });
+        return Promise.resolve(json(current));
       }
       if (path === `/api/plugin-builds/${BUILD_ID}/plan-runs` && method === 'POST') {
+        current = draftBuild({ ...current, status: 'planning' });
         return Promise.resolve(
           json({
-            build: draftBuild({ status: 'planning' }),
+            build: current,
             runId: '00000000-0000-4000-8000-0000000000bb',
           }),
         );
       }
       if (path === '/api/plugin-builds' && method === 'POST') {
-        return Promise.resolve(json(draftBuild()));
+        current = draftBuild();
+        return Promise.resolve(json(current));
       }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });

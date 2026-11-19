@@ -26,6 +26,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/plugin-builds/{id}/cancel", post(cancel_build))
         .route("/api/plugin-builds/{id}/discard", post(discard_build))
+        .route("/api/plugin-builds/{id}/accept", post(accept_build))
         .route("/api/plugin-builds/{id}/plan-runs", post(start_plan_run))
         .route("/api/plugin-builds/{id}/build-runs", post(start_build_run))
 }
@@ -80,6 +81,9 @@ struct BuildResponse {
     format_retries: i32,
     plugin_id: Option<Uuid>,
     test_result: Option<Value>,
+    active_run_id: Option<Uuid>,
+    last_run_id: Option<Uuid>,
+    last_run_status: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -121,6 +125,14 @@ struct PlanRunBody {
     change_request: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AcceptBody {
+    enable: Option<bool>,
+    /// Ignored until PB-12; Accept still succeeds when true.
+    publish: Option<bool>,
+}
+
 fn build_response(build: PluginBuild) -> BuildResponse {
     BuildResponse {
         id: build.id,
@@ -135,6 +147,9 @@ fn build_response(build: PluginBuild) -> BuildResponse {
         format_retries: build.format_retries,
         plugin_id: build.plugin_id,
         test_result: build.test_result,
+        active_run_id: build.active_run_id,
+        last_run_id: build.last_run_id,
+        last_run_status: build.last_run_status,
         created_at: build
             .created_at
             .format(&Rfc3339)
@@ -144,6 +159,13 @@ fn build_response(build: PluginBuild) -> BuildResponse {
             .format(&Rfc3339)
             .unwrap_or_default(),
     }
+}
+
+async fn enrich_response(
+    svc: &PluginBuildService<'_>,
+    build: PluginBuild,
+) -> Result<BuildResponse, ApiError> {
+    Ok(build_response(svc.with_run_meta(build).await?))
 }
 
 fn service(state: &AppState) -> Result<PluginBuildService<'_>, ApiError> {
@@ -171,8 +193,9 @@ async fn create_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
 ) -> Result<(StatusCode, Json<BuildResponse>), ApiError> {
-    let build = service(&state)?.create().await?;
-    Ok((StatusCode::CREATED, Json(build_response(build))))
+    let svc = service(&state)?;
+    let build = svc.create().await?;
+    Ok((StatusCode::CREATED, Json(enrich_response(&svc, build).await?)))
 }
 
 async fn list_builds(
@@ -180,10 +203,13 @@ async fn list_builds(
     AdminUser(_): AdminUser,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<BuildResponse>>, ApiError> {
-    let builds = service(&state)?
-        .list(query.include_discarded)
-        .await?;
-    Ok(Json(builds.into_iter().map(build_response).collect()))
+    let svc = service(&state)?;
+    let builds = svc.list(query.include_discarded).await?;
+    let mut out = Vec::with_capacity(builds.len());
+    for build in builds {
+        out.push(enrich_response(&svc, build).await?);
+    }
+    Ok(Json(out))
 }
 
 async fn get_build(
@@ -191,8 +217,9 @@ async fn get_build(
     AdminUser(_): AdminUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<BuildResponse>, ApiError> {
-    let build = service(&state)?.get(id).await?;
-    Ok(Json(build_response(build)))
+    let svc = service(&state)?;
+    let build = svc.get(id).await?;
+    Ok(Json(enrich_response(&svc, build).await?))
 }
 
 async fn update_build(
@@ -208,8 +235,9 @@ async fn update_build(
         plugin_name: body.plugin_name.map(Some),
         publish_target: body.publish_target.map(Some),
     };
-    let build = service(&state)?.update(id, update).await?;
-    Ok(Json(build_response(build)))
+    let svc = service(&state)?;
+    let build = svc.update(id, update).await?;
+    Ok(Json(enrich_response(&svc, build).await?))
 }
 
 async fn cancel_build(
@@ -217,8 +245,9 @@ async fn cancel_build(
     AdminUser(_): AdminUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<BuildResponse>, ApiError> {
-    let build = service(&state)?.cancel(id).await?;
-    Ok(Json(build_response(build)))
+    let svc = service(&state)?;
+    let build = svc.cancel(id).await?;
+    Ok(Json(enrich_response(&svc, build).await?))
 }
 
 async fn discard_build(
@@ -226,8 +255,41 @@ async fn discard_build(
     AdminUser(_): AdminUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<BuildResponse>, ApiError> {
-    let build = service(&state)?.discard(id).await?;
-    Ok(Json(build_response(build)))
+    let pool = pool_from_state(&state)?;
+    let svc = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = crate::services::plugin_service::PluginService::new(pool);
+    let build = svc
+        .discard_and_uninstall(
+            id,
+            &plugins,
+            &state.config.plugins.dir,
+            &state.plugin_mcp,
+            &state.skills,
+        )
+        .await?;
+    Ok(Json(enrich_response(&svc, build).await?))
+}
+
+async fn accept_build(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AcceptBody>,
+) -> Result<Json<BuildResponse>, ApiError> {
+    let _publish = body.publish; // PB-12
+    let pool = pool_from_state(&state)?;
+    let svc = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = crate::services::plugin_service::PluginService::new(pool);
+    let build = svc
+        .accept(
+            id,
+            body.enable.unwrap_or(false),
+            &plugins,
+            &state.plugin_mcp,
+            &state.skills,
+        )
+        .await?;
+    Ok(Json(enrich_response(&svc, build).await?))
 }
 
 async fn start_plan_run(
@@ -237,13 +299,14 @@ async fn start_plan_run(
     Json(body): Json<PlanRunBody>,
 ) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
     let ready = |connector: &str| connector_is_ready(&state, connector);
-    let (build, run) = service(&state)?
+    let svc = service(&state)?;
+    let (build, run) = svc
         .queue_plan_run(id, body.change_request, ready)
         .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(RunStartResponse {
-            build: build_response(build),
+            build: enrich_response(&svc, build).await?,
             run_id: run.id,
         }),
     ))
@@ -255,11 +318,12 @@ async fn start_build_run(
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
     let ready = |connector: &str| connector_is_ready(&state, connector);
-    let (build, run) = service(&state)?.queue_build_run(id, ready).await?;
+    let svc = service(&state)?;
+    let (build, run) = svc.queue_build_run(id, ready).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(RunStartResponse {
-            build: build_response(build),
+            build: enrich_response(&svc, build).await?,
             run_id: run.id,
         }),
     ))

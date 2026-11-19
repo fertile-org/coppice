@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { parseApiErrorMessage } from '../../lib/api';
 import type {
@@ -20,7 +19,7 @@ const primaryButton =
 const secondaryButton =
   'rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50';
 
-function AdvancedDetails({ advanced }: { advanced: PluginBuildAdvanced }) {
+export function AdvancedDetails({ advanced }: { advanced: PluginBuildAdvanced }) {
   return (
     <details className="rounded-md border border-border bg-surface px-3 py-2">
       <summary className="cursor-pointer font-body text-sm text-text-primary">
@@ -202,7 +201,6 @@ function ClarifyingQuestions({
 }
 
 export function PluginBuildPlanReview({ build }: { build: PluginBuild }) {
-  const navigate = useNavigate();
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const ask = useStartPluginPlanRun(build.id);
@@ -315,7 +313,6 @@ export function PluginBuildPlanReview({ build }: { build: PluginBuild }) {
               onClick={() => {
                 setError(null);
                 approve.mutate(undefined, {
-                  onSuccess: () => navigate('/settings/plugins', { replace: true }),
                   onError: (err: unknown) => setError(parseApiErrorMessage(err)),
                 });
               }}

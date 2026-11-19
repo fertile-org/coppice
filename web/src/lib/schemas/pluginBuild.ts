@@ -1,11 +1,13 @@
 import { z } from 'zod';
+import { pluginTestResultSchema } from './plugin';
 
 export const pluginBuildStatusSchema = z.enum([
   'drafting',
   'planning',
   'plan_ready',
   'building',
-  'ready',
+  'ready_to_try',
+  'accepted',
   'failed',
   'cancelled',
   'discarded',
@@ -63,6 +65,13 @@ export const pluginBuildSchema = z.object({
   workspacePath: z.string(),
   publishTarget: z.string().nullable(),
   planQuestions: z.array(pluginBuildPlanQuestionSchema).nullable().optional(),
+  checkErrors: z.array(z.string()).nullable().optional(),
+  formatRetries: z.number().int().optional().default(0),
+  pluginId: z.string().uuid().nullable().optional(),
+  testResult: pluginTestResultSchema.nullable().optional(),
+  activeRunId: z.string().uuid().nullable().optional(),
+  lastRunId: z.string().uuid().nullable().optional(),
+  lastRunStatus: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -76,6 +85,20 @@ export const pluginBuildRunStartSchema = z.object({
 
 export type PluginBuildRunStart = z.infer<typeof pluginBuildRunStartSchema>;
 
+function normalizeCheckErrors(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === 'string');
+  }
+  return null;
+}
+
+function normalizeTestResult(raw: unknown) {
+  if (raw == null) return null;
+  const parsed = pluginTestResultSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
 /** Lenient parse: plans may arrive as a raw JSON array from the API. */
 export function parsePluginBuild(data: unknown): PluginBuild {
   const raw = data as Record<string, unknown>;
@@ -86,7 +109,6 @@ export function parsePluginBuild(data: unknown): PluginBuild {
       : {};
   let planQuestions = raw.planQuestions;
   if (planQuestions && !Array.isArray(planQuestions)) {
-    // Ticket shape sometimes wraps questions; accept either.
     const wrapped = planQuestions as { questions?: unknown };
     planQuestions = Array.isArray(wrapped.questions) ? wrapped.questions : null;
   }
@@ -95,5 +117,19 @@ export function parsePluginBuild(data: unknown): PluginBuild {
     answers,
     plans,
     planQuestions: planQuestions ?? null,
+    checkErrors: normalizeCheckErrors(raw.checkErrors),
+    testResult: normalizeTestResult(raw.testResult),
+    activeRunId: raw.activeRunId ?? null,
+    lastRunId: raw.lastRunId ?? null,
+    lastRunStatus: raw.lastRunStatus ?? null,
+    pluginId: raw.pluginId ?? null,
   });
+}
+
+/** Empty servers (skills-only) counts as a pass; any `error` fails. */
+export function pluginBuildTestPassed(
+  result: PluginBuild['testResult'] | null | undefined,
+): boolean {
+  if (!result) return false;
+  return result.servers.every((server) => server.status !== 'error');
 }
