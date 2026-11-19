@@ -17,6 +17,7 @@ mod logs;
 mod marketplace;
 mod mentions;
 mod notifications;
+mod plugin_builds;
 mod plugins;
 mod repos;
 mod settings;
@@ -66,6 +67,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tools::routes())
         .merge(tool_connectors::routes())
         .merge(plugins::routes())
+        .merge(plugin_builds::routes())
         .merge(marketplace::routes())
         .merge(worktrees::routes())
         .merge(init_wizard::routes())

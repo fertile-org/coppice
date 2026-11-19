@@ -236,6 +236,11 @@ pub fn plan_scratch_dir(worktrees_root: &Path, run_id: Uuid) -> PathBuf {
     worktrees_root.join("plan-scratch").join(run_id.to_string())
 }
 
+/// Where a plugin builder run works. Never the ticket worktree or plugins install dir.
+pub fn plugin_build_dir(worktrees_root: &Path, build_id: Uuid) -> PathBuf {
+    worktrees_root.join("plugin-builds").join(build_id.to_string())
+}
+
 /// The repo a plan scratch is detached from, when the ticket has one.
 pub struct PlanScratchSource {
     pub git_dir: PathBuf,
@@ -335,7 +340,7 @@ impl PlanScratch {
             add_detached_worktree(&source.git_dir, &path, &rev).await?;
             Some(source.git_dir)
         } else {
-            init_detached_scratch(&path).await?;
+            init_empty_git_workspace(&path).await?;
             None
         };
         Ok(Self {
@@ -424,7 +429,9 @@ async fn remove_linked_worktree(git_dir: &Path, worktree: &Path) -> Result<(), W
     removed
 }
 
-async fn init_detached_scratch(path: &Path) -> Result<(), WorktreeError> {
+/// Init a private empty git repo (not a linked worktree). Shared by plan-scratch
+/// (no source repo) and plugin-builds.
+pub(crate) async fn init_empty_git_workspace(path: &Path) -> Result<(), WorktreeError> {
     if path.exists() {
         tokio::fs::remove_dir_all(path).await?;
     }
@@ -440,7 +447,7 @@ async fn init_detached_scratch(path: &Path) -> Result<(), WorktreeError> {
             "commit",
             "--allow-empty",
             "-m",
-            "plan scratch",
+            "empty workspace",
         ],
     )
     .await?;

@@ -38,6 +38,7 @@ pub mod marketplace_service;
 pub mod mention_service;
 pub mod notification_service;
 pub mod planning_service;
+pub mod plugin_build_service;
 pub mod plugin_service;
 pub mod plugin_settings_service;
 pub mod pr_create_url;

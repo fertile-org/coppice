@@ -137,7 +137,7 @@ fn dir_size_bytes(path: &Path) -> u64 {
     total
 }
 
-/// `TICKET-<8 hex>-<slug>` — skips `chat/`, `plan-scratch/`, `knowledge-compaction/`.
+/// `TICKET-<8 hex>-<slug>` — skips `chat/`, `plan-scratch/`, `plugin-builds/`, `knowledge-compaction/`.
 fn is_ticket_worktree_folder(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("TICKET-") else {
         return false;
@@ -723,6 +723,7 @@ mod tests {
         assert!(is_ticket_worktree_folder("TICKET-550e8400-my-repo"));
         assert!(!is_ticket_worktree_folder("chat"));
         assert!(!is_ticket_worktree_folder("plan-scratch"));
+        assert!(!is_ticket_worktree_folder("plugin-builds"));
         assert!(!is_ticket_worktree_folder("knowledge-compaction"));
         assert!(!is_ticket_worktree_folder("TICKET-short-coppice"));
         assert!(!is_ticket_worktree_folder("../TICKET-fd82310c-coppice"));

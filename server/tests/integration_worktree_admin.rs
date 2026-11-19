@@ -68,7 +68,7 @@ async fn list_skips_system_dirs_and_returns_without_waiting_for_sizes() {
         return;
     }
     let (_git, env, _state, app, cookie, csrf, ticket_id, _repo, worktree) = setup().await;
-    for name in ["chat", "plan-scratch", "knowledge-compaction"] {
+    for name in ["chat", "plan-scratch", "plugin-builds", "knowledge-compaction"] {
         let dir = env.worktrees.path().join(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("keep.txt"), "x").unwrap();
@@ -92,7 +92,7 @@ async fn list_skips_system_dirs_and_returns_without_waiting_for_sizes() {
     assert_eq!(list[0]["folderName"], folder_name(&worktree));
     assert_eq!(list[0]["ticketId"], ticket_id.to_string());
     assert!(list[0]["sizeBytes"].is_null());
-    for name in ["chat", "plan-scratch", "knowledge-compaction"] {
+    for name in ["chat", "plan-scratch", "plugin-builds", "knowledge-compaction"] {
         assert!(
             list.iter().all(|w| w["folderName"] != name),
             "listed system dir {name}"
