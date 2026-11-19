@@ -48,6 +48,49 @@ export const BUILDER_COPY = {
   q5RepoLabel: 'Repository URL',
   q5RepoPlaceholder: 'https://github.com/your-team/plugins.git',
   q5RepoHelp: 'Coppice adds the plugin there after you accept it.',
+
+  // §6 progress
+  buildingTitle: (name: string) => `Building ${name}`,
+  stepPlanApproved: 'Plan approved',
+  stepWriting: 'Writing the plugin',
+  stepChecking: 'Checking it',
+  stepInstalling: 'Installing it, turned off',
+  stepTesting: 'Testing it',
+  showDetails: 'Show details',
+  stopBuild: 'Stop build',
+  stopBuildTitle: 'Stop building? You can start again from the plan.',
+  stopBuildConfirm: 'Stop',
+  stopBuildKeep: 'Keep building',
+  installedBuilding: (name: string) => `${name} · Building…`,
+  installedReady: (name: string) => `${name} · Ready to try`,
+  open: 'Open',
+  review: 'Review',
+  buildStoppedClosed: 'Build stopped when Coppice closed.',
+
+  // §7 try / accept
+  readyTitle: (name: string) => `${name} is ready to try`,
+  readySub: "It's installed and turned off.",
+  testPassed: 'Passed',
+  testFailed: "Didn't pass",
+  testAgain: 'Test again',
+  acceptDisabledTitle: 'Run a test that passes first.',
+  accept: 'Accept',
+  discard: 'Discard',
+  discardTitle: 'Discard this plugin? It will be removed from this computer.',
+  discardConfirm: 'Discard',
+  discardKeep: 'Keep',
+  acceptDialogTitle: 'Accept this plugin?',
+  acceptDialogBody: 'It stays off until you turn it on.',
+  acceptEnable: 'Turn it on for all agents now',
+  acceptPublish: (repo: string) => `Publish to ${repo}`,
+  acceptCancel: 'Cancel',
+  acceptedNotice: (name: string) => `Accepted ${name}.`,
+
+  // §10 errors
+  buildDidNotFinish: "The build didn't finish.",
+  checkFailed: "The plugin didn't pass Coppice's checks.",
+  tryAgain: 'Try again',
+  askForChanges: 'Ask for changes',
 } as const;
 
 export const TOOL_CHIP_VALUES = {

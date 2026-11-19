@@ -230,6 +230,11 @@ async fn create_get_list_cancel_discard_and_accept_cleanup() {
     let id3: uuid::Uuid = created3["id"].as_str().unwrap().parse().unwrap();
     let workspace3 = Path::new(created3["workspacePath"].as_str().unwrap()).to_path_buf();
     let pool = state.db.as_ref().unwrap();
+    sqlx::query("UPDATE plugin_builds SET status = 'ready_to_try' WHERE id = $1")
+        .bind(id3)
+        .execute(pool)
+        .await
+        .unwrap();
     let accepted = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone())
         .delete_workspace_on_accept(id3)
         .await
@@ -973,4 +978,160 @@ async fn try_again_and_ask_for_changes_from_check_failure() {
     assert_eq!(status, StatusCode::ACCEPTED, "{planned}");
     assert_eq!(planned["build"]["status"], "planning");
     assert!(planned["build"]["checkErrors"].is_null());
+}
+
+#[tokio::test]
+async fn accept_enable_discard_uninstall_ask_from_ready_and_active_run_id() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    // Finalize a build so we have ready_to_try + installed copy.
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+    copy_tree(&builder_check_fixture("pass-minimal"), workspace);
+    sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
+        .bind(build_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let builds = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+    let plugins = PluginService::new(pool);
+    let build = builds
+        .finalize_after_build(
+            build_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("finalize");
+    assert_eq!(build.status, "ready_to_try");
+    let plugin_id = build.plugin_id.unwrap();
+    let installed = Path::new(&state.config.plugins.dir).join("pass-minimal");
+    assert!(installed.exists());
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{build_id}"),
+        json!({ "answers": { "purpose": "changelog" } }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Ask for changes from ready_to_try keeps plugin_id for replace path.
+    let (status, planned) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/plan-runs"),
+        json!({ "changeRequest": "Add a skill." }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{planned}");
+    assert_eq!(planned["build"]["status"], "planning");
+    assert_eq!(planned["build"]["pluginId"], plugin_id.to_string());
+    assert!(planned["build"]["testResult"].is_null());
+    assert!(planned["build"]["activeRunId"].is_string());
+
+    // Cancel that plan run and restore ready_to_try for Accept.
+    let plan_run: Uuid = planned["runId"].as_str().unwrap().parse().unwrap();
+    RunService::new(pool).stop(plan_run).await.unwrap();
+    wait_for_run_status(pool, plan_run, "cancelled").await;
+    sqlx::query(
+        "UPDATE plugin_builds
+         SET status = 'ready_to_try', plugin_id = $2, test_result = $3::jsonb
+         WHERE id = $1",
+    )
+    .bind(build_id)
+    .bind(plugin_id)
+    .bind(json!({ "servers": [] }))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, accepted) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id}/accept"),
+        json!({ "enable": true, "publish": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["status"], "accepted");
+    assert!(!workspace.exists());
+    let row = plugins.get_plugin(plugin_id).await.unwrap();
+    assert!(row.enabled);
+
+    // Fresh build + plant an install to exercise discard uninstall.
+    let (status, created2) =
+        send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let build_id2: Uuid = created2["id"].as_str().unwrap().parse().unwrap();
+    let workspace2 = Path::new(created2["workspacePath"].as_str().unwrap()).to_path_buf();
+    let dest = Path::new(&state.config.plugins.dir).join("discard-me");
+    copy_tree(&builder_check_fixture("pass-minimal"), &dest);
+    let manifest = dest.join(".claude-plugin/plugin.json");
+    let mut body: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+    body["name"] = json!("discard-me");
+    std::fs::write(&manifest, serde_json::to_string_pretty(&body).unwrap()).unwrap();
+    plugins.rescan().await.unwrap();
+    let row = plugins
+        .list_plugins()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.name == "discard-me")
+        .expect("discard-me installed");
+    sqlx::query(
+        "UPDATE plugin_builds
+         SET status = 'ready_to_try', plugin_id = $2, plugin_name = 'discard-me',
+             test_result = $3::jsonb
+         WHERE id = $1",
+    )
+    .bind(build_id2)
+    .bind(row.id)
+    .bind(json!({ "servers": [] }))
+    .execute(pool)
+    .await
+    .unwrap();
+    assert!(dest.exists());
+
+    let (status, discarded) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{build_id2}/discard"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{discarded}");
+    assert_eq!(discarded["status"], "discarded");
+    assert!(!workspace2.exists());
+    assert!(!dest.exists(), "installed copy must be removed");
 }
