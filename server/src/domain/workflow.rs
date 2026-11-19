@@ -14,7 +14,9 @@ pub const JOB_TYPE_VERIFY_PARENT: &str = "verify_parent";
 /// Runs that only read: planning and verifying a split parent. They get
 /// read-only tools and the CLI's plan mode where it has one.
 pub fn is_read_only_job(job_type: &str) -> bool {
-    job_type == JOB_TYPE_PLAN_TICKET || job_type == JOB_TYPE_VERIFY_PARENT
+    job_type == JOB_TYPE_PLAN_TICKET
+        || job_type == JOB_TYPE_VERIFY_PARENT
+        || job_type == crate::domain::plugin_build::JOB_TYPE_PLAN_PLUGIN_BUILD
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -56,6 +56,7 @@ use time::format_description::well_known::Rfc3339;
 mod compaction;
 mod connector_check;
 mod plan;
+mod plugin_build;
 pub use plan::VERIFIED_RESULTS_SHA;
 
 #[derive(Debug)]
@@ -124,6 +125,10 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
             {
                 tracing::warn!(run_id = %run.id, error = %err, "failed to fail connector check for stale job");
             }
+            // Stop while still queued never enters execute_plugin_build; revert here.
+            if crate::domain::plugin_build::is_plugin_build_job(&run.job_type) {
+                revert_plugin_build_on_fail(pool, state, run.id, &run.job_type).await;
+            }
             return Ok(());
         }
 
@@ -169,6 +174,10 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
+            // Early is_cancelled in execute_job never reaches execute_plugin_build.
+            if crate::domain::plugin_build::is_plugin_build_job(&run.job_type) {
+                revert_plugin_build_on_fail(pool, state, run.id, &run.job_type).await;
+            }
             job_svc.mark_cancelled(job.id).await?;
             if let Ok(cancelled_run) = run_svc.get(run.id).await {
                 RunOrchestrator::new(pool, &state.config.workflow)
@@ -180,6 +189,8 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
         Err(err) => {
             state.run_streams.remove(run.id);
             let is_check = run.job_type == crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
+            let is_plugin_build =
+                crate::domain::plugin_build::is_plugin_build_job(&run.job_type);
             let message = if is_check {
                 connector_check::sanitize_run_error(&err)
             } else {
@@ -194,6 +205,9 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
                 if is_check {
                     fail_check_for_run(pool, run.id, "run cancelled").await;
                 }
+                if is_plugin_build {
+                    revert_plugin_build_on_fail(pool, state, run.id, &run.job_type).await;
+                }
                 job_svc.mark_cancelled(job.id).await?;
                 if let Ok(cancelled_run) = run_svc.get(run.id).await {
                     RunOrchestrator::new(pool, &state.config.workflow)
@@ -204,6 +218,9 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
             } else {
                 if is_check {
                     fail_check_for_run(pool, run.id, &message).await;
+                }
+                if is_plugin_build {
+                    revert_plugin_build_on_fail(pool, state, run.id, &run.job_type).await;
                 }
                 match fail_job(pool, run.id, job.id, &message).await {
                     Ok(failed_run) => {
@@ -279,6 +296,26 @@ async fn fail_check_for_run(pool: &PgPool, run_id: uuid::Uuid, failure: &str) {
     }
 }
 
+/// Revert plugin-build status after a failed/cancelled run without discard.
+async fn revert_plugin_build_on_fail(
+    pool: &PgPool,
+    state: &AppState,
+    run_id: uuid::Uuid,
+    job_type: &str,
+) {
+    let builds =
+        crate::services::plugin_build_service::PluginBuildService::new(
+            pool,
+            state.config.agent.worktrees_path.clone(),
+        );
+    let Ok(build_id) = builds.build_id_for_run(run_id).await else {
+        return;
+    };
+    if let Err(err) = builds.on_run_terminal(build_id, job_type, false).await {
+        tracing::warn!(%run_id, %build_id, error = %err, "failed to revert plugin build status");
+    }
+}
+
 async fn execute_job(
     state: &Arc<AppState>,
     pool: &PgPool,
@@ -296,6 +333,11 @@ async fn execute_job(
 
     if run.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
         return compaction::execute_compaction(state, pool, run_svc, run).await;
+    }
+
+    // Plugin builder jobs must not fall through to the ticket path.
+    if crate::domain::plugin_build::is_plugin_build_job(&run.job_type) {
+        return plugin_build::execute_plugin_build(state, pool, run_svc, run).await;
     }
 
     if crate::domain::workflow::is_read_only_job(&run.job_type) {

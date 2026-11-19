@@ -1,0 +1,9 @@
+{
+  "status": "done",
+  "summary": "Should be cancelled before finishing.",
+  "delayMsAfterToolCalls": 15000,
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

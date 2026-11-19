@@ -274,6 +274,10 @@ fn is_design_tool(name: &str) -> bool {
 }
 
 fn allowed_for(profile: ContextProfile, job_type: &str, def: &ToolDefinition) -> bool {
+    // Plugin builder plan/build: result_submit only (no ticket/knowledge/design/skills/proxy).
+    if crate::domain::plugin_build::is_plugin_build_job(job_type) {
+        return def.name == REPLY_TOOL;
+    }
     if crate::domain::workflow::is_read_only_job(job_type) {
         return def.read_only || def.name == REPLY_TOOL || is_design_tool(&def.name);
     }
@@ -650,6 +654,36 @@ mod tests {
                 read_only: false,
             }
         ));
+    }
+
+    #[test]
+    fn plugin_build_jobs_allow_only_result_submit() {
+        let reply = ToolDefinition {
+            name: "result_submit".into(),
+            description: String::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            read_only: false,
+        };
+        let ticket = ToolDefinition {
+            name: "ticket_get".into(),
+            description: String::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            read_only: true,
+        };
+        for job in ["plan_plugin_build", "build_plugin"] {
+            assert!(allowed_for(ContextProfile::Full, job, &reply));
+            assert!(!allowed_for(ContextProfile::Full, job, &ticket));
+            assert!(!allowed_for(
+                ContextProfile::Full,
+                job,
+                &ToolDefinition {
+                    name: "design__create".into(),
+                    description: String::new(),
+                    input_schema: serde_json::json!({"type":"object"}),
+                    read_only: false,
+                }
+            ));
+        }
     }
 
     struct HungSource;

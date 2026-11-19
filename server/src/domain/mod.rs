@@ -14,6 +14,7 @@ pub mod knowledge;
 pub mod knowledge_compaction;
 pub mod mention;
 pub mod notification;
+pub mod plugin_build;
 pub mod repo;
 pub mod run;
 pub mod session;

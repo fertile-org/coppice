@@ -3,11 +3,16 @@ mod common;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
+use coppice_server::domain::plugin_build::NO_AGENT_READY_TO_BUILD;
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::services::plugin_build_service::PluginBuildService;
+use coppice_server::services::run_service::RunService;
 use serde_json::{json, Value};
+use sqlx::PgPool;
 use std::path::Path;
+use std::time::Duration;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 macro_rules! require_db {
     () => {
@@ -284,4 +289,445 @@ async fn non_admin_gets_403_and_unknown_id_gets_404() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+async fn wait_for_run_status(pool: &PgPool, run_id: Uuid, wanted: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        if status == wanted {
+            return;
+        }
+        assert!(
+            !matches!(status.as_str(), "failed" | "cancelled" | "blocked") || status == wanted,
+            "run ended as {status}, wanted {wanted}"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for run {run_id} to be {wanted}; last={status}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
+async fn plan_run_persists_revision_with_advanced_and_ask_for_changes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("plugin_plan_done", |_| {}).await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({
+            "answers": {
+                "purpose": "changelog",
+                "jobs": ["summarize commits"],
+                "tools": ["git"],
+                "secrets": "none",
+                "where": "local"
+            }
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, started) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/plan-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["build"]["status"], "planning");
+    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(pool, run_id, "succeeded").await;
+
+    let (status, got) = send(
+        &app,
+        "GET",
+        &format!("/api/plugin-builds/{id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["status"], "plan_ready");
+    assert_eq!(got["plans"][0]["revision"], 1);
+    assert!(got["plans"][0]["body"].as_str().unwrap().contains("changelog-helper"));
+    assert_eq!(got["plans"][0]["advanced"]["pluginName"], "changelog-helper");
+    assert_eq!(got["pluginName"], "changelog-helper");
+
+    let (status, revision2) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/plan-runs"),
+        json!({ "changeRequest": "Make the description shorter." }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{revision2}");
+    let run2: Uuid = revision2["runId"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(pool, run2, "succeeded").await;
+
+    let (status, got2) = send(
+        &app,
+        "GET",
+        &format!("/api/plugin-builds/{id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got2}");
+    assert_eq!(got2["status"], "plan_ready");
+    assert_eq!(got2["plans"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        got2["plans"][1]["changeRequest"],
+        "Make the description shorter."
+    );
+}
+
+#[tokio::test]
+async fn build_run_writes_workspace_files_and_keeps_building() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("plugin_build_done", |_| {}).await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({
+            "answers": { "purpose": "changelog" },
+            "planRevision": { "body": "approved plan" },
+            "pluginName": "changelog-helper"
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Move to plan_ready (PATCH alone leaves drafting).
+    let build_id: Uuid = id.parse().unwrap();
+    sqlx::query("UPDATE plugin_builds SET status = 'plan_ready' WHERE id = $1")
+        .bind(build_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, started) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/build-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["build"]["status"], "building");
+    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(pool, run_id, "succeeded").await;
+
+    assert!(workspace.join("README.md").is_file());
+    assert!(workspace.join(".claude-plugin/plugin.json").is_file());
+
+    let (status, got) = send(
+        &app,
+        "GET",
+        &format!("/api/plugin-builds/{id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["status"], "building");
+    // finish_run clears submitted_result after apply; success is the files + status.
+    let _ = run_id;
+}
+
+#[tokio::test]
+async fn plan_run_errors_when_no_ready_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({ "answers": { "purpose": "x" } }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // No PM agent on the board.
+    let (status, err) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/plan-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{err}");
+    assert_eq!(err["error"], NO_AGENT_READY_TO_BUILD);
+}
+
+#[tokio::test]
+async fn plan_run_errors_when_connector_not_ready() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({ "answers": { "purpose": "x" } }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let err = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone())
+        .queue_plan_run(id, None, |_| false)
+        .await
+        .expect_err("connector not ready");
+    assert!(
+        matches!(
+            err,
+            coppice_server::services::plugin_build_service::PluginBuildError::Conflict(ref msg)
+                if msg == NO_AGENT_READY_TO_BUILD
+        ),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_queued_build_run_reverts_to_plan_ready() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("plugin_build_done", |_| {}).await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap()).to_path_buf();
+    let build_id: Uuid = id.parse().unwrap();
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({
+            "answers": { "purpose": "changelog" },
+            "planRevision": { "body": "plan" }
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE plugin_builds SET status = 'plan_ready' WHERE id = $1")
+        .bind(build_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Hold mock slots so the worker cannot claim the job while it stays queued.
+    let mock_cap = state.config.agent.connectors.max_concurrent_runs("mock") as usize;
+    let _held: Vec<_> = (0..mock_cap)
+        .map(|_| state.connector_slots.acquire("mock"))
+        .collect();
+
+    let (status, started) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/build-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["build"]["status"], "building");
+    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+
+    let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "queued", "run must still be queued under saturated slots");
+
+    // stop() cancels the pending job (worker never claims) and must revert status.
+    RunService::new(pool).stop(run_id).await.unwrap();
+    wait_for_run_status(pool, run_id, "cancelled").await;
+
+    let build = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone())
+        .get(build_id)
+        .await
+        .unwrap();
+    assert_eq!(build.status, "plan_ready");
+    assert!(workspace.exists(), "workspace must remain after queued cancel");
+    drop(_held);
+}
+
+#[tokio::test]
+async fn stopping_build_run_reverts_to_plan_ready_without_discard() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    // Slow fixture so we can stop mid-run.
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("plugin_build_slow", |_| {}).await;
+    let pool = state.db.as_ref().unwrap();
+    let _pm = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let _be = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap()).to_path_buf();
+    let build_id: Uuid = id.parse().unwrap();
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugin-builds/{id}"),
+        json!({
+            "answers": { "purpose": "changelog" },
+            "planRevision": { "body": "plan" }
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE plugin_builds SET status = 'plan_ready' WHERE id = $1")
+        .bind(build_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, started) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{id}/build-runs"),
+        json!({}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(pool, run_id, "running").await;
+
+    // Cancel the agent run (Stop build), not the build record.
+    RunService::new(pool).stop(run_id).await.unwrap();
+    if let Some(handle) = state.run_streams.get(run_id) {
+        handle.cancel();
+    }
+    wait_for_run_status(pool, run_id, "cancelled").await;
+
+    // Worker reconciles build status after JobCancelled.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let build = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone())
+            .get(build_id)
+            .await
+            .unwrap();
+        if build.status == "plan_ready" {
+            assert!(workspace.exists(), "workspace must remain after stop");
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for plan_ready; status={}",
+            build.status
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }

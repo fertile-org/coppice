@@ -1,0 +1,9 @@
+{
+  "status": "done",
+  "summary": "Wrote the changelog-helper plugin into the build workspace.",
+  "writeScratchFiles": ["README.md", ".claude-plugin/plugin.json"],
+  "changedFiles": ["README.md", ".claude-plugin/plugin.json"],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

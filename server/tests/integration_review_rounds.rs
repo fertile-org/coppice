@@ -54,6 +54,7 @@ fn done(summary: &str, blockers: Vec<String>) -> AgentRunResult {
         plan_questions: Vec::new(),
         no_visible_change: false,
         suggest_skip_human_review: false,
+        advanced: None,
         actions: None,
     }
 }

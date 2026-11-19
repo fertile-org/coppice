@@ -26,6 +26,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/plugin-builds/{id}/cancel", post(cancel_build))
         .route("/api/plugin-builds/{id}/discard", post(discard_build))
+        .route("/api/plugin-builds/{id}/plan-runs", post(start_plan_run))
+        .route("/api/plugin-builds/{id}/build-runs", post(start_build_run))
 }
 
 struct ApiError(StatusCode, String);
@@ -70,8 +72,16 @@ struct BuildResponse {
     plugin_name: Option<String>,
     workspace_path: String,
     publish_target: Option<String>,
+    plan_questions: Option<Value>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunStartResponse {
+    build: BuildResponse,
+    run_id: Uuid,
 }
 
 #[derive(Deserialize, Default)]
@@ -98,6 +108,12 @@ struct PlanRevisionBody {
     change_request: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PlanRunBody {
+    change_request: Option<String>,
+}
+
 fn build_response(build: PluginBuild) -> BuildResponse {
     BuildResponse {
         id: build.id,
@@ -107,6 +123,7 @@ fn build_response(build: PluginBuild) -> BuildResponse {
         plugin_name: build.plugin_name,
         workspace_path: build.workspace_path,
         publish_target: build.publish_target,
+        plan_questions: build.plan_questions,
         created_at: build
             .created_at
             .format(&Rfc3339)
@@ -124,6 +141,19 @@ fn service(state: &AppState) -> Result<PluginBuildService<'_>, ApiError> {
         pool,
         state.config.agent.worktrees_path.clone(),
     ))
+}
+
+fn connector_is_ready(state: &AppState, connector: &str) -> bool {
+    if connector == coppice_connectors::MOCK {
+        return true;
+    }
+    matches!(
+        state
+            .connector_probes
+            .get(connector)
+            .map(|cached| cached.readiness),
+        Some(coppice_connectors::sign_in::Readiness::Ready)
+    )
 }
 
 async fn create_build(
@@ -163,9 +193,7 @@ async fn update_build(
     let update = PluginBuildUpdate {
         answers: body.answers,
         plan_body: body.plan_revision.as_ref().map(|p| p.body.clone()),
-        plan_change_request: body
-            .plan_revision
-            .and_then(|p| p.change_request),
+        plan_change_request: body.plan_revision.and_then(|p| p.change_request),
         plugin_name: body.plugin_name.map(Some),
         publish_target: body.publish_target.map(Some),
     };
@@ -189,4 +217,39 @@ async fn discard_build(
 ) -> Result<Json<BuildResponse>, ApiError> {
     let build = service(&state)?.discard(id).await?;
     Ok(Json(build_response(build)))
+}
+
+async fn start_plan_run(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PlanRunBody>,
+) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
+    let ready = |connector: &str| connector_is_ready(&state, connector);
+    let (build, run) = service(&state)?
+        .queue_plan_run(id, body.change_request, ready)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(RunStartResponse {
+            build: build_response(build),
+            run_id: run.id,
+        }),
+    ))
+}
+
+async fn start_build_run(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
+    let ready = |connector: &str| connector_is_ready(&state, connector);
+    let (build, run) = service(&state)?.queue_build_run(id, ready).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(RunStartResponse {
+            build: build_response(build),
+            run_id: run.id,
+        }),
+    ))
 }
