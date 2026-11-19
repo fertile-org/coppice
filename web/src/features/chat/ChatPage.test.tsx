@@ -158,6 +158,8 @@ vi.mock('./useChat', () => ({
 vi.mock('./useChatRunLiveStream', () => ({
   useChatRunLiveStream: (runId: string | null) => ({
     text: runId ? 'Partial…' : '',
+    thinkingText: '',
+    replyText: runId ? 'Partial…' : '',
     connection: 'open' as const,
     error: null,
     finished: false,

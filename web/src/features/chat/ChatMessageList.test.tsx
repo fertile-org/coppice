@@ -273,12 +273,12 @@ describe('ChatMessageList', () => {
     renderList(
       <ChatMessageList
         messages={[]}
-        streamingAgent={{ runId: 'run-1', text: 'Partial…' }}
+        streamingAgent={{ runId: 'run-1', replyText: 'Partial…' }}
       />,
     );
     expect(screen.getByText(/Partial/)).toBeInTheDocument();
     expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
-    expect(screen.getByTestId('chat-streaming-bubble').className).not.toMatch(
+    expect(screen.getByTestId('chat-streaming-reply').className).not.toMatch(
       /bg-moss-50/,
     );
   });
@@ -289,7 +289,7 @@ describe('ChatMessageList', () => {
         messages={[]}
         streamingAgent={{
           runId: 'run-1',
-          text: '```mermaid\nflowchart LR\n  A --> B\n```',
+          replyText: '```mermaid\nflowchart LR\n  A --> B\n```',
         }}
       />,
     );
@@ -303,11 +303,82 @@ describe('ChatMessageList', () => {
 
   it('shows one thinking bubble, not one inside another, before text arrives', () => {
     renderList(
-      <ChatMessageList messages={[]} streamingAgent={{ runId: 'run-1', text: '' }} />,
+      <ChatMessageList messages={[]} streamingAgent={{ runId: 'run-1', replyText: '' }} />,
     );
     const indicator = screen.getByTestId('thinking-indicator');
     expect(indicator.closest('article')).toBeNull();
     expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('keeps pre-result thinking under CollapsibleDetail, not reply prose', () => {
+    renderList(
+      <ChatMessageList
+        messages={[]}
+        streamingAgent={{
+          runId: 'run-1',
+          thinkingText: 'Checking updater paths…',
+          replyText: '',
+        }}
+      />,
+    );
+    expect(screen.getByTestId('chat-streaming-thinking')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Thinking/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByText(/Checking updater paths/)).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-streaming-reply')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent')).not.toBeInTheDocument();
+  });
+
+  it('renders reply prose beside thinking and collapses when streaming ends', () => {
+    const client = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ChatMessageList
+            messages={[]}
+            streamingAgent={{
+              runId: 'run-1',
+              thinkingText: 'Checking updater paths…',
+              replyText: 'Signed builds auto-update.',
+              streaming: true,
+            }}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId('chat-streaming-thinking')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-streaming-reply')).toHaveTextContent(
+      'Signed builds auto-update.',
+    );
+    expect(screen.getByRole('button', { name: /Thinking/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ChatMessageList
+            messages={[]}
+            streamingAgent={{
+              runId: 'run-1',
+              thinkingText: 'Checking updater paths…',
+              replyText: 'Signed builds auto-update.',
+              streaming: false,
+            }}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('button', { name: /Thinking/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.getByTestId('chat-streaming-reply')).toHaveTextContent(
+      'Signed builds auto-update.',
+    );
   });
 
   it('virtualizes a long transcript in a scrollable log', () => {

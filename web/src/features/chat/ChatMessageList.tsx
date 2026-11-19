@@ -15,6 +15,13 @@ import {
   type ChatProposal,
 } from '../../lib/schemas/chat';
 import type { DesignSet } from '../../lib/schemas/design';
+import {
+  CollapsibleDetail,
+  excerptPreview,
+} from '../../opencode-session/components/CollapsibleDetail';
+import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
+import { sessionTheme } from '../../opencode-session/theme/session-theme';
+import '../../opencode-session/theme/opencode-theme.css';
 import { DesignCard } from '../designs/DesignCard';
 import { useDesigns, type DesignScope } from '../designs/useDesigns';
 import { cn } from '../../lib/utils';
@@ -22,6 +29,15 @@ import { useBoards } from '../boards/useBoards';
 import { CommentAttachments } from '../tickets/CommentAttachments';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import { useAcceptChatProposal, useRejectChatProposal } from './useChat';
+
+export type StreamingAgentState = {
+  runId: string;
+  thinkingText?: string;
+  replyText?: string;
+  text?: string;
+  error?: string | null;
+  streaming?: boolean;
+};
 
 const ESTIMATED_ROW_HEIGHT = 72;
 const AGENT_PROSE_CLASS =
@@ -313,10 +329,37 @@ function designsForRun(
   return matched.length > 0 ? matched : undefined;
 }
 
+function StreamingThinking({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
+  const content = text.replaceAll('[REDACTED]', '').trim();
+  if (!content) return null;
+  return (
+    <div className="oc-session" data-testid="chat-streaming-thinking">
+      <CollapsibleDetail
+        label="Thinking"
+        preview={excerptPreview(content)}
+        streaming={streaming}
+      >
+        <div className={sessionTheme.fontMonoSm}>
+          <MarkdownContent tone="thinking">{content}</MarkdownContent>
+        </div>
+      </CollapsibleDetail>
+    </div>
+  );
+}
+
 export function ChatMessageBubble({
   message,
   streaming,
   streamingText,
+  streamingThinking,
+  streamingReply,
+  streamingLive = true,
   proposalContext,
   designs,
   designScope,
@@ -324,14 +367,17 @@ export function ChatMessageBubble({
   message?: ChatMessage;
   streaming?: boolean;
   streamingText?: string;
+  streamingThinking?: string;
+  streamingReply?: string;
+  streamingLive?: boolean;
   proposalContext?: ChatProposalContext;
   designs?: DesignSet[];
   designScope?: DesignScope;
 }) {
   if (streaming) {
-    const text = streamingText?.trim() ?? '';
-    // The indicator is not wrapped in an article.
-    if (!text) {
+    const thinking = (streamingThinking ?? '').trim();
+    const reply = (streamingReply ?? streamingText ?? '').trim();
+    if (!thinking && !reply) {
       return (
         <div className="flex w-full justify-start" data-testid="chat-streaming-bubble">
           <ThinkingIndicator />
@@ -339,19 +385,27 @@ export function ChatMessageBubble({
       );
     }
     return (
-      <div className="flex w-full justify-start">
-        <article
-          data-role="agent"
-          aria-label="Agent"
-          aria-live="polite"
-          aria-busy="true"
-          className="w-full min-w-0 font-body text-text-primary"
-          data-testid="chat-streaming-bubble"
-        >
-          <div className={AGENT_PROSE_CLASS}>
-            <TicketMarkdown mermaidAsCode>{text}</TicketMarkdown>
-          </div>
-        </article>
+      <div
+        className="flex w-full flex-col gap-3"
+        data-testid="chat-streaming-bubble"
+      >
+        {thinking ? (
+          <StreamingThinking text={thinking} streaming={streamingLive} />
+        ) : null}
+        {reply ? (
+          <article
+            data-role="agent"
+            aria-label="Agent"
+            aria-live="polite"
+            aria-busy={streamingLive}
+            className="w-full min-w-0 font-body text-text-primary"
+            data-testid="chat-streaming-reply"
+          >
+            <div className={AGENT_PROSE_CLASS}>
+              <TicketMarkdown mermaidAsCode>{reply}</TicketMarkdown>
+            </div>
+          </article>
+        ) : null}
       </div>
     );
   }
@@ -437,7 +491,7 @@ export function ChatMessageList({
 }: {
   messages: ChatMessage[];
   thinking?: boolean;
-  streamingAgent?: { runId: string; text: string; error?: string | null };
+  streamingAgent?: StreamingAgentState;
   proposalContext?: ChatProposalContext;
   chatSessionId?: string;
 }) {
@@ -447,6 +501,12 @@ export function ChatMessageList({
   const parentRef = useRef<HTMLDivElement>(null);
   const streamingRow = streamingAgent ? 1 : 0;
   const rowCount = messages.length + streamingRow;
+  const streamScrollKey = [
+    streamingAgent?.thinkingText,
+    streamingAgent?.replyText,
+    streamingAgent?.text,
+    streamingAgent?.error,
+  ].join('\0');
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -464,7 +524,7 @@ export function ChatMessageList({
   useEffect(() => {
     if (rowCount === 0) return;
     virtualizer.scrollToIndex(rowCount - 1, { align: 'end' });
-  }, [rowCount, virtualizer, streamingAgent?.text]);
+  }, [rowCount, virtualizer, streamScrollKey]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5">
@@ -500,11 +560,17 @@ export function ChatMessageList({
                 ) : (
                   <ChatMessageBubble
                     streaming
-                    streamingText={
+                    streamingThinking={
+                      streamingAgent?.error
+                        ? undefined
+                        : streamingAgent?.thinkingText
+                    }
+                    streamingReply={
                       streamingAgent?.error
                         ? streamingAgent.error
-                        : streamingAgent?.text
+                        : (streamingAgent?.replyText ?? streamingAgent?.text)
                     }
+                    streamingLive={streamingAgent?.streaming !== false}
                   />
                 )}
               </div>

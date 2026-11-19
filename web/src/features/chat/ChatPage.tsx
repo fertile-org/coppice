@@ -379,7 +379,13 @@ function ChatTranscript({
   const live = useChatRunLiveStream(activeRunId, { onFinished: onLiveFinished });
   pollRef.current.liveOpen = live.connection === 'open';
   const streamingAgent = activeRunId
-    ? { runId: activeRunId, text: live.text, error: live.error }
+    ? {
+        runId: activeRunId,
+        thinkingText: live.thinkingText,
+        replyText: live.replyText,
+        streaming: !live.finished,
+        error: live.error,
+      }
     : undefined;
 
   const readOnly = session?.status === 'archived' || session?.status === 'cutoff';
