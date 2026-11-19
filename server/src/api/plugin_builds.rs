@@ -44,7 +44,10 @@ impl From<PluginBuildError> for ApiError {
             PluginBuildError::NotFound => StatusCode::NOT_FOUND,
             PluginBuildError::Validation(_) => StatusCode::BAD_REQUEST,
             PluginBuildError::Conflict(_) => StatusCode::CONFLICT,
-            PluginBuildError::Db(_) | PluginBuildError::Io(_) | PluginBuildError::Worktree(_) => {
+            PluginBuildError::Db(_)
+            | PluginBuildError::Io(_)
+            | PluginBuildError::Worktree(_)
+            | PluginBuildError::Plugin(_) => {
                 tracing::error!(error = %err, "plugin build request failed");
                 return ApiError(
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -73,6 +76,10 @@ struct BuildResponse {
     workspace_path: String,
     publish_target: Option<String>,
     plan_questions: Option<Value>,
+    check_errors: Option<Value>,
+    format_retries: i32,
+    plugin_id: Option<Uuid>,
+    test_result: Option<Value>,
     created_at: String,
     updated_at: String,
 }
@@ -124,6 +131,10 @@ fn build_response(build: PluginBuild) -> BuildResponse {
         workspace_path: build.workspace_path,
         publish_target: build.publish_target,
         plan_questions: build.plan_questions,
+        check_errors: build.check_errors,
+        format_retries: build.format_retries,
+        plugin_id: build.plugin_id,
+        test_result: build.test_result,
         created_at: build
             .created_at
             .format(&Rfc3339)
