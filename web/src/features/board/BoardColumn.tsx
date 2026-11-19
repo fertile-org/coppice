@@ -23,6 +23,84 @@ import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
+interface BoardColumnHeaderProps {
+  column: BoardColumnDef;
+  columnIndex?: number;
+  matchingCount: number;
+  /** Empty column: heading is in the board focus order. */
+  headingFocusable?: boolean;
+  headingFocused?: boolean;
+  onHeadingFocus?: (columnIndex: number) => void;
+  needsActionCount?: number;
+  needsActionOnly?: boolean;
+  onToggleNeedsAction?: () => void;
+  /** Standalone chip above the board grid (default). Inside a column: bare bar. */
+  framed?: boolean;
+}
+
+/** Shared status header — one row above lanes and ungrouped cells. */
+export function BoardColumnHeader({
+  column,
+  columnIndex = 0,
+  matchingCount,
+  headingFocusable = false,
+  headingFocused = false,
+  onHeadingFocus,
+  needsActionCount = 0,
+  needsActionOnly = false,
+  onToggleNeedsAction,
+  framed = true,
+}: BoardColumnHeaderProps) {
+  const headingSelected = headingFocusable && headingFocused;
+  const headingFocusId = `heading:${columnIndex}`;
+
+  return (
+    <header
+      className={[
+        'flex items-center justify-between gap-2 px-3 py-2.5',
+        framed
+          ? `rounded-lg border ${columnBgClass(column.colorKey)} ${columnBorderClass(column.colorKey)}`
+          : '',
+      ].join(' ')}
+    >
+      <h2
+        tabIndex={headingFocusable ? (headingSelected ? 0 : -1) : undefined}
+        data-board-focus-id={headingFocusable ? headingFocusId : undefined}
+        data-board-tabstop={headingSelected ? 'true' : undefined}
+        onFocus={() => onHeadingFocus?.(columnIndex)}
+        className={[
+          'keyboard-focus rounded-sm font-display text-sm font-semibold',
+          columnAccentClass(column.colorKey),
+        ].join(' ')}
+      >
+        {column.label}
+      </h2>
+      {onToggleNeedsAction && needsActionCount > 0 && (
+        <button
+          type="button"
+          aria-pressed={needsActionOnly}
+          onClick={onToggleNeedsAction}
+          className={[
+            'keyboard-focus ml-auto rounded-full border border-warning px-2 py-0.5 font-body text-xs text-warning',
+            needsActionOnly ? 'bg-warning-muted' : 'bg-transparent',
+          ].join(' ')}
+        >
+          {needsActionCount} need action
+        </button>
+      )}
+      <span
+        className={[
+          'rounded-full px-2 py-0.5 font-mono text-xs',
+          columnBgClass(column.colorKey),
+          columnAccentClass(column.colorKey),
+        ].join(' ')}
+      >
+        {matchingCount}
+      </span>
+    </header>
+  );
+}
+
 interface BoardColumnProps {
   column: BoardColumnDef;
   tickets: Ticket[];
@@ -52,6 +130,8 @@ interface BoardColumnProps {
   needsActionCount?: number;
   needsActionOnly?: boolean;
   onToggleNeedsAction?: () => void;
+  /** Status label lives in the shared board header row. */
+  hideHeader?: boolean;
 }
 
 /**
@@ -82,6 +162,7 @@ export const BoardColumn = memo(function BoardColumn({
   needsActionCount = 0,
   needsActionOnly = false,
   onToggleNeedsAction,
+  hideHeader = false,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const addingRef = useRef(false);
@@ -112,9 +193,6 @@ export const BoardColumn = memo(function BoardColumn({
     }
   }
 
-  const headingFocusable = tickets.length === 0;
-  const headingSelected = headingFocusable && headingFocused;
-  const headingFocusId = `heading:${columnIndex}`;
   const matchingCount = totalCount ?? tickets.length;
   const remaining = matchingCount - tickets.length;
   const showMore = Boolean(onShowMore) && remaining > 0;
@@ -123,54 +201,29 @@ export const BoardColumn = memo(function BoardColumn({
     <section
       ref={setNodeRef}
       className={[
-        'flex min-h-[calc(100svh-14rem)] w-72 shrink-0 flex-col rounded-lg border',
+        'flex min-h-[calc(100svh-14rem)] min-w-0 flex-col rounded-lg border',
         columnBgClass(column.colorKey),
         columnBorderClass(column.colorKey),
         isOver ? 'ring-2 ring-accent ring-offset-2 ring-offset-background' : '',
       ].join(' ')}
       aria-label={column.label}
     >
-      <header
-        className={[
-          'flex items-center justify-between gap-2 border-b px-3 py-2.5',
-          columnBorderClass(column.colorKey),
-        ].join(' ')}
-      >
-        <h2
-          tabIndex={headingFocusable ? (headingSelected ? 0 : -1) : undefined}
-          data-board-focus-id={headingFocusable ? headingFocusId : undefined}
-          data-board-tabstop={headingSelected ? 'true' : undefined}
-          onFocus={() => onHeadingFocus?.(columnIndex)}
-          className={[
-            'keyboard-focus rounded-sm font-display text-sm font-semibold',
-            columnAccentClass(column.colorKey),
-          ].join(' ')}
-        >
-          {column.label}
-        </h2>
-        {onToggleNeedsAction && needsActionCount > 0 && (
-          <button
-            type="button"
-            aria-pressed={needsActionOnly}
-            onClick={onToggleNeedsAction}
-            className={[
-              'keyboard-focus ml-auto rounded-full border border-warning px-2 py-0.5 font-body text-xs text-warning',
-              needsActionOnly ? 'bg-warning-muted' : 'bg-transparent',
-            ].join(' ')}
-          >
-            {needsActionCount} need action
-          </button>
-        )}
-        <span
-          className={[
-            'rounded-full px-2 py-0.5 font-mono text-xs',
-            columnBgClass(column.colorKey),
-            columnAccentClass(column.colorKey),
-          ].join(' ')}
-        >
-          {matchingCount}
-        </span>
-      </header>
+      {!hideHeader && (
+        <div className={['border-b', columnBorderClass(column.colorKey)].join(' ')}>
+          <BoardColumnHeader
+            column={column}
+            columnIndex={columnIndex}
+            matchingCount={matchingCount}
+            headingFocusable={tickets.length === 0}
+            headingFocused={headingFocused}
+            onHeadingFocus={onHeadingFocus}
+            needsActionCount={needsActionCount}
+            needsActionOnly={needsActionOnly}
+            onToggleNeedsAction={onToggleNeedsAction}
+            framed={false}
+          />
+        </div>
+      )}
 
       <div className="flex flex-1 flex-col gap-2 p-2">
         {showQuickAdd && onQuickAdd && (

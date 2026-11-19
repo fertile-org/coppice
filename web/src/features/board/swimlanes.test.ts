@@ -88,7 +88,7 @@ describe('splitLanes', () => {
     expect(grouped.lanes[0]?.progress.position ?? null).toBeNull();
   });
 
-  it('lists lane cards above the column for keyboard order, and skips a collapsed lane', () => {
+  it('lists lane cards before ungrouped cards for keyboard order, and skips a collapsed lane', () => {
     const ids = (status: TicketStatus, collapsed = new Set<string>()) =>
       columnTicketIds(
         grouped.lanes,

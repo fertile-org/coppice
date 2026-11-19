@@ -478,7 +478,9 @@ describe('BoardPage Done column limit', () => {
     renderBoard();
 
     const done = screen.getByRole('region', { name: 'Done' });
-    expect(within(done).getByText('32')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
+    ).toHaveTextContent('32');
     expect(within(done).getByText('Showing 10 of 32')).toBeVisible();
     expect(within(done).getByRole('button', { name: 'Show 10 more' })).toBeVisible();
     expect(within(done).getByText('Done 00')).toBeVisible();
@@ -515,7 +517,9 @@ describe('BoardPage Done column limit', () => {
     renderBoard();
 
     const done = screen.getByRole('region', { name: 'Done' });
-    expect(within(done).getByText('8')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
+    ).toHaveTextContent('8');
     expect(within(done).getAllByText(/^Done \d+$/)).toHaveLength(8);
     expect(within(done).queryByText(/Showing \d+ of \d+/)).toBeNull();
     expect(within(done).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
@@ -536,7 +540,9 @@ describe('BoardPage Done column limit', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
     const done = screen.getByRole('region', { name: 'Done' });
-    expect(within(done).getByText('12')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
+    ).toHaveTextContent('12');
     expect(within(done).getByText('Showing 10 of 12')).toBeVisible();
     expect(within(done).getByRole('button', { name: 'Show 2 more' })).toBeVisible();
     expect(within(done).getByText('Keep 00')).toBeVisible();
@@ -623,10 +629,32 @@ describe('BoardPage split swimlanes', () => {
     const backlog = screen.getByRole('region', { name: 'Backlog' });
     expect(within(backlog).getByText('Plain ticket')).toBeVisible();
     expect(within(backlog).queryByText('Write the notice')).toBeNull();
-    expect(within(backlog).getByText('1')).toBeVisible();
+    const backlogHead = screen
+      .getByRole('heading', { name: 'Backlog', level: 2 })
+      .closest('header');
+    expect(backlogHead).toHaveTextContent('1');
     expect(
       within(screen.getByRole('region', { name: 'Done' })).queryByText('Survey the site'),
     ).toBeNull();
+  });
+
+  it('keeps status headers above the swimlane inside the same board grid', () => {
+    renderBoard();
+
+    const board = document.getElementById('board');
+    expect(board).not.toBeNull();
+    const grid = board!.querySelector(':scope > div');
+    expect(grid).toHaveClass('grid');
+
+    const backlogHead = screen.getByRole('heading', { name: 'Backlog', level: 2 });
+    const lane = screen.getByRole('region', { name: 'Ship the gate' });
+    const backlog = screen.getByRole('region', { name: 'Backlog' });
+    expect(
+      backlogHead.compareDocumentPosition(lane) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      lane.compareDocumentPosition(backlog) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('keeps the board scroller positioned so swimlane sr-only labels stay inside it', () => {

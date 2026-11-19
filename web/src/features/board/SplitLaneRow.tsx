@@ -46,8 +46,11 @@ export function SplitLaneRow({
   const needsReview = splitNeedsReview(lane.progress);
 
   return (
-    <section aria-label={lane.title} className="flex flex-col gap-2">
-      <header className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-surface-raised px-3 py-2">
+    <section
+      aria-label={lane.title}
+      className="col-span-full grid grid-cols-subgrid gap-y-2"
+    >
+      <header className="col-span-full flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-surface-raised px-3 py-2">
         <button
           type="button"
           aria-expanded={!collapsed}
@@ -72,7 +75,7 @@ export function SplitLaneRow({
         )}
       </header>
       {!collapsed && (
-        <div data-testid="swimlane-row" className="flex items-stretch gap-4">
+        <div data-testid="swimlane-row" className="contents">
           {BOARD_COLUMNS.map((column) => (
             <LaneCell
               key={column.status}
@@ -139,7 +142,7 @@ function LaneCell({
       ref={setNodeRef}
       data-testid={`swimlane-cell-${status}`}
       className={[
-        'flex w-72 shrink-0 flex-col gap-2',
+        'flex min-w-0 flex-col gap-2',
         tickets.length === 0 ? 'min-h-12' : '',
         isOver ? 'rounded-md ring-2 ring-accent ring-offset-2 ring-offset-background' : '',
       ].join(' ')}
