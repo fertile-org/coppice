@@ -146,9 +146,23 @@ To see what was used:
 2. Expand a run.
 3. Open **Tools & Skills**. Plugin calls are marked **Plugin**.
 
+<a id="build-a-plugin"></a>
+
+## 5. Build a plugin
+
+On the **desktop app**, open **Plugins** and choose **Build a plugin**. (The web UI does not offer this button.)
+
+1. Answer a few short questions about what the plugin should do.
+2. A planner agent writes a plan. Review it, ask for changes, or approve it.
+3. Approving starts the build. An implementer agent writes the plugin folder and Coppice checks it.
+4. When the build is ready, Coppice installs it **turned off** and runs a test. Skills-only plugins pass with no MCP servers.
+5. **Accept** keeps the install. You can turn it on for agents then, or leave it off. Nothing is enabled until you accept.
+
+If the check fails, you can try again or ask for plan changes. Discard removes the draft and any install that came from that build.
+
 <a id="create-a-plugin"></a>
 
-## 5. Create a plugin
+## 6. Create a plugin
 The simplest plugin is a folder with a `SKILL.md`. For a name, version and MCP tools, add a manifest.
 
 ```

@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "summary": "Wrote the m10-builder-smoke skills-only plugin into the build workspace.",
+  "copyFixtureDir": "plugins/builder-check/pass-minimal",
+  "writeScratchFiles": {
+    ".claude-plugin/plugin.json": "{\n  \"name\": \"m10-builder-smoke\",\n  \"version\": \"0.1.0\",\n  \"description\": \"Skills-only plugin for the M10 builder smoke path.\"\n}\n",
+    "README.md": "# m10-builder-smoke\n\nSkills-only plugin used by the M10 builder e2e smoke.\n"
+  },
+  "changedFiles": [
+    ".claude-plugin/plugin.json",
+    "skills/hello/SKILL.md",
+    "README.md"
+  ],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

@@ -632,6 +632,7 @@ impl<'a> PluginBuildService<'a> {
 
     /// After a successful build run finishes (active-run index free): format-check
     /// the workspace, optionally queue a retry, or install disabled + auto-test.
+    #[allow(clippy::too_many_arguments)] // install path needs plugins + secret + MCP + skills + readiness
     pub async fn finalize_after_build(
         &self,
         build_id: Uuid,
@@ -745,6 +746,7 @@ impl<'a> PluginBuildService<'a> {
         Ok(run)
     }
 
+    #[allow(clippy::too_many_arguments)] // same install/test deps as finalize_after_build
     async fn install_disabled_and_test(
         &self,
         build_id: Uuid,

@@ -8,5 +8,6 @@ pub mod git_install;
 pub mod manifest;
 pub mod marketplace;
 pub mod placeholders;
+pub mod portable_format;
 pub mod skill_walk;
 pub mod skills;

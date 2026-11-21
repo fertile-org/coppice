@@ -7,6 +7,7 @@ use crate::plugins::capability::{
     McpServerTransport, MARKETPLACE_JSON,
 };
 use crate::plugins::manifest::{is_valid_plugin_name, parse_plugin, PluginLayout};
+use crate::plugins::portable_format::check_portable_format;
 use std::collections::HashSet;
 use std::path::{Component, Path};
 use walkdir::WalkDir;
@@ -45,6 +46,9 @@ pub fn check_plugin(plugin_root: &Path, installed_names: &HashSet<String>) -> Ve
     if !plugin_root.join("README.md").is_file() {
         errors.push("Add a short README.md that explains what the plugin does.".into());
     }
+
+    // Structural portability first (Claude Code / Cursor layout); Coppice rules follow.
+    errors.extend(check_portable_format(plugin_root));
 
     check_escapes(plugin_root, &mut errors);
 

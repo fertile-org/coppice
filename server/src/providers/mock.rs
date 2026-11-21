@@ -211,6 +211,8 @@ impl AgentProvider for MockProvider {
             };
         let mut value: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
+        let copy_dir = take_copy_fixture_dir(&mut value)?;
+        copy_fixture_dir(&input, copy_dir.as_deref())?;
         let scratch_files = take_scratch_writes(&mut value)?;
         write_scratch_files(&input, &scratch_files)?;
         let (tool_calls, delay_ms) = take_tool_directives(&mut value)?;
@@ -239,38 +241,134 @@ fn empty_args() -> serde_json::Value {
     serde_json::json!({})
 }
 
-fn take_scratch_writes(value: &mut serde_json::Value) -> Result<Vec<String>, ProviderError> {
+/// Path list (placeholder body) or path→content map for real bytes.
+enum ScratchWrites {
+    Paths(Vec<String>),
+    Contents(Vec<(String, String)>),
+}
+
+fn take_scratch_writes(value: &mut serde_json::Value) -> Result<ScratchWrites, ProviderError> {
     let Some(object) = value.as_object_mut() else {
-        return Ok(Vec::new());
+        return Ok(ScratchWrites::Paths(Vec::new()));
     };
-    match object.remove("writeScratchFiles") {
-        Some(raw) => serde_json::from_value(raw)
-            .map_err(|err| ProviderError::InvalidFixture(format!("writeScratchFiles: {err}"))),
-        None => Ok(Vec::new()),
+    let Some(raw) = object.remove("writeScratchFiles") else {
+        return Ok(ScratchWrites::Paths(Vec::new()));
+    };
+    if raw.is_array() {
+        let paths: Vec<String> = serde_json::from_value(raw).map_err(|err| {
+            ProviderError::InvalidFixture(format!("writeScratchFiles: {err}"))
+        })?;
+        return Ok(ScratchWrites::Paths(paths));
+    }
+    if let Some(map) = raw.as_object() {
+        let mut contents = Vec::with_capacity(map.len());
+        for (path, body) in map {
+            let text = body.as_str().ok_or_else(|| {
+                ProviderError::InvalidFixture(format!(
+                    "writeScratchFiles[{path}] must be a string"
+                ))
+            })?;
+            contents.push((path.clone(), text.to_string()));
+        }
+        return Ok(ScratchWrites::Contents(contents));
+    }
+    Err(ProviderError::InvalidFixture(
+        "writeScratchFiles must be a string array or path→content object".into(),
+    ))
+}
+
+fn take_copy_fixture_dir(value: &mut serde_json::Value) -> Result<Option<String>, ProviderError> {
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    match object.remove("copyFixtureDir") {
+        Some(raw) => {
+            let path = raw.as_str().ok_or_else(|| {
+                ProviderError::InvalidFixture("copyFixtureDir must be a string".into())
+            })?;
+            Ok(Some(path.to_string()))
+        }
+        None => Ok(None),
     }
 }
 
-fn write_scratch_files(input: &AgentRunInput, files: &[String]) -> Result<(), ProviderError> {
-    if files.is_empty() {
+fn assert_rel_path<'a>(rel: &'a str, label: &str) -> Result<&'a std::path::Path, ProviderError> {
+    let rel_path = std::path::Path::new(rel);
+    if rel_path.is_absolute()
+        || rel_path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ProviderError::InvalidFixture(format!("{label} path `{rel}`")));
+    }
+    Ok(rel_path)
+}
+
+fn copy_fixture_dir(input: &AgentRunInput, rel: Option<&str>) -> Result<(), ProviderError> {
+    let Some(rel) = rel.filter(|s| !s.is_empty()) else {
         return Ok(());
+    };
+    let rel_path = assert_rel_path(rel, "copyFixtureDir")?;
+    // fixtures_root → agent-responses; plugin trees live under fixtures/.
+    let src = fixtures_root()
+        .parent()
+        .ok_or_else(|| ProviderError::InvalidFixture("fixtures root has no parent".into()))?
+        .join(rel_path);
+    if !src.is_dir() {
+        return Err(ProviderError::InvalidFixture(format!(
+            "copyFixtureDir `{rel}` not found at {}",
+            src.display()
+        )));
     }
     let worktree = worktree_dir_from_context(&input.context_path)?;
-    for rel in files {
-        let rel_path = std::path::Path::new(rel);
-        if rel_path.is_absolute()
-            || rel_path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            return Err(ProviderError::InvalidFixture(format!(
-                "writeScratchFiles path `{rel}`"
-            )));
+    copy_tree(&src, &worktree)?;
+    Ok(())
+}
+
+fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), ProviderError> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(entry.path(), &target)?;
         }
-        let dest = worktree.join(rel_path);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn write_scratch_files(input: &AgentRunInput, files: &ScratchWrites) -> Result<(), ProviderError> {
+    let worktree = match files {
+        ScratchWrites::Paths(paths) if paths.is_empty() => return Ok(()),
+        ScratchWrites::Contents(map) if map.is_empty() => return Ok(()),
+        _ => worktree_dir_from_context(&input.context_path)?,
+    };
+    match files {
+        ScratchWrites::Paths(paths) => {
+            for rel in paths {
+                let rel_path = assert_rel_path(rel, "writeScratchFiles")?;
+                let dest = worktree.join(rel_path);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(dest, "plan-scratch-write\n")?;
+            }
         }
-        std::fs::write(dest, "plan-scratch-write\n")?;
+        ScratchWrites::Contents(map) => {
+            for (rel, body) in map {
+                let rel_path = assert_rel_path(rel, "writeScratchFiles")?;
+                let dest = worktree.join(rel_path);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(dest, body)?;
+            }
+        }
     }
     Ok(())
 }
@@ -917,5 +1015,43 @@ mod tests {
             &context.to_string_lossy(),
         );
         assert_eq!(filled, "t-1 b-1 t-2 b-2 {{ticket:9}}");
+    }
+
+    #[tokio::test]
+    async fn copy_fixture_dir_and_content_map_write_real_plugin_bytes() {
+        let _lock = env_lock();
+        let real_fx = fixtures_root().join("fx-copy-test.json");
+        std::fs::write(
+            &real_fx,
+            r#"{
+              "status":"done",
+              "summary":"ok",
+              "copyFixtureDir":"plugins/builder-check/pass-minimal",
+              "writeScratchFiles":{
+                ".claude-plugin/plugin.json":"{\"name\":\"scratch-map\",\"version\":\"0.1.0\",\"description\":\"from map\"}"
+              }
+            }"#,
+        )
+        .expect("write fixture");
+        let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "fx-copy-test");
+
+        let work = TempDir::new().expect("worktree");
+        let agent_dir = work.path().join(".agent");
+        std::fs::create_dir_all(&agent_dir).expect("agent dir");
+        let context = agent_dir.join("context.md");
+        std::fs::write(&context, "scratch").expect("context");
+
+        let mut input = base_input("backend_engineer", "build_plugin");
+        input.context_path = context.to_string_lossy().into_owned();
+        MockProvider::new(fixtures_root())
+            .run(input)
+            .await
+            .expect("run");
+
+        let body = std::fs::read_to_string(work.path().join(".claude-plugin/plugin.json"))
+            .expect("manifest");
+        assert!(body.contains("scratch-map"), "{body}");
+        assert!(work.path().join("skills/hello/SKILL.md").is_file());
+        let _ = std::fs::remove_file(&real_fx);
     }
 }
