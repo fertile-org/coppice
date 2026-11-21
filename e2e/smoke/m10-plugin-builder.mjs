@@ -197,6 +197,8 @@ async function main() {
   await createMockAgent('pm', `M10 Builder PM ${suffix}`, auth);
   await createMockAgent('backend_engineer', `M10 Builder BE ${suffix}`, auth);
 
+  // Drop leftover install folder so rescan marks any prior row `missing`.
+  // Server finalize ignores missing names for clash checks (QA re-run fix).
   removeInstalledPluginDir(PLUGIN_NAME);
   await expectJson(await api('POST', '/api/plugins/rescan', auth), 200, 'rescan');
 

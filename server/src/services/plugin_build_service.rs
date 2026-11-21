@@ -649,11 +649,13 @@ impl<'a> PluginBuildService<'a> {
             return Ok(build);
         }
 
+        // Missing rows are gone from disk; reusing their name must not fail the check
+        // (Compose smoke re-runs leave Accept'ed plugins as status=missing after rm+rescan).
         let installed: HashSet<String> = plugins
             .list_plugins()
             .await?
             .into_iter()
-            .filter(|p| build.plugin_id != Some(p.id))
+            .filter(|p| p.status != "missing" && build.plugin_id != Some(p.id))
             .map(|p| p.name)
             .collect();
 
@@ -778,12 +780,11 @@ impl<'a> PluginBuildService<'a> {
             };
             if !ok_to_replace {
                 // Orphan folder from a prior attempt for this name, or clash.
-                if plugins
-                    .list_plugins()
-                    .await?
-                    .iter()
-                    .any(|p| p.name == plugin_name && build.plugin_id != Some(p.id))
-                {
+                if plugins.list_plugins().await?.iter().any(|p| {
+                    p.name == plugin_name
+                        && p.status != "missing"
+                        && build.plugin_id != Some(p.id)
+                }) {
                     return self
                         .store_install_failure(
                             build_id,
