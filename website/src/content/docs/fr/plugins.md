@@ -146,9 +146,23 @@ Pour voir ce qui a servi :
 2. Dépliez un lancement.
 3. Ouvrez **Tools & Skills**. Les appels de plugin sont marqués **Plugin**.
 
+<a id="build-a-plugin"></a>
+
+## 5. Construire un plugin
+
+Sur l’**application de bureau**, ouvrez **Plugins** et choisissez **Build a plugin**. (L’interface web n’affiche pas ce bouton.)
+
+1. Répondez à quelques questions courtes sur ce que le plugin doit faire.
+2. Un agent planificateur rédige un plan. Relisez-le, demandez des changements ou approuvez-le.
+3. L’approbation lance la construction. Un agent d’implémentation écrit le dossier du plugin et Coppice le vérifie.
+4. Quand la construction est prête, Coppice l’installe **désactivée** et lance un test. Les plugins qui n’ont que des skills réussissent sans serveur MCP.
+5. **Accept** conserve l’installation. Vous pouvez alors l’activer pour les agents, ou la laisser désactivée. Rien n’est activé avant l’acceptation.
+
+Si la vérification échoue, vous pouvez réessayer ou demander des changements au plan. **Discard** supprime le brouillon et toute installation issue de cette construction.
+
 <a id="create-a-plugin"></a>
 
-## 5. Créer un plugin
+## 6. Créer un plugin
 Le plugin le plus simple est un dossier avec un `SKILL.md`. Pour un nom, une version et des outils MCP, ajoutez un manifeste.
 
 ```

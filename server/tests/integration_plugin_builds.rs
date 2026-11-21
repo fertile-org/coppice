@@ -841,6 +841,100 @@ async fn finalize_installs_disabled_and_auto_tests() {
 }
 
 #[tokio::test]
+async fn finalize_reuses_name_when_prior_install_is_missing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let plugins = PluginService::new(pool);
+    let builds = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
+
+    let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let first_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let workspace = Path::new(created["workspacePath"].as_str().unwrap());
+    copy_tree(&builder_check_fixture("pass-minimal"), workspace);
+    sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
+        .bind(first_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let first = builds
+        .finalize_after_build(
+            first_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("first finalize");
+    assert_eq!(first.status, "ready_to_try");
+    let plugin_id = first.plugin_id.expect("installed");
+
+    // Match Compose smoke: Accept with enable, then rm+rescan → missing+enabled.
+    let (status, accepted) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{first_id}/accept"),
+        json!({ "enable": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    let enabled = plugins.get_plugin(plugin_id).await.unwrap();
+    assert!(enabled.enabled);
+    assert_eq!(enabled.status, "ok");
+
+    let installed = Path::new(&state.config.plugins.dir).join("pass-minimal");
+    std::fs::remove_dir_all(&installed).unwrap();
+    plugins.rescan().await.unwrap();
+    let prior = plugins.get_plugin(plugin_id).await.unwrap();
+    assert_eq!(prior.status, "missing");
+    assert!(prior.enabled, "Accept enable flag must survive missing");
+    assert_eq!(prior.name, "pass-minimal");
+
+    let (status, created2) =
+        send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CREATED, "{created2}");
+    let second_id: Uuid = created2["id"].as_str().unwrap().parse().unwrap();
+    let workspace2 = Path::new(created2["workspacePath"].as_str().unwrap());
+    copy_tree(&builder_check_fixture("pass-minimal"), workspace2);
+    sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
+        .bind(second_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let second = builds
+        .finalize_after_build(
+            second_id,
+            &plugins,
+            &state.config.plugins.dir,
+            Path::new(&state.config.plugins.marketplaces_dir),
+            &state.secret_store,
+            &state.plugin_mcp,
+            &state.skills,
+            |_| true,
+        )
+        .await
+        .expect("second finalize after Accept+enable+missing");
+    assert_eq!(second.status, "ready_to_try", "{second:?}");
+    assert!(second.check_errors.is_none(), "{:?}", second.check_errors);
+    let revived = plugins
+        .get_plugin(second.plugin_id.expect("reinstalled"))
+        .await
+        .unwrap();
+    assert_eq!(revived.status, "ok");
+    assert!(!revived.enabled, "builder reinstall must force disabled");
+    assert!(installed.join(".claude-plugin/plugin.json").is_file());
+}
+
+#[tokio::test]
 async fn finalize_check_failure_never_installs() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();

@@ -1,0 +1,19 @@
+{
+  "status": "done",
+  "summary": "# m10-builder-smoke\n\nSkills-only helper for the M10 builder smoke path.\n\n## What it will do\n- Offer one hello skill agents can load\n\n## What it needs\n- Nothing beyond the skill file\n\n## How you'll know it works\n- Coppice runs a test after it's built (skills-only passes with no servers)\n\n## Where it goes\njust this computer",
+  "advanced": {
+    "pluginName": "m10-builder-smoke",
+    "version": "0.1.0",
+    "description": "Skills-only plugin for the M10 builder smoke path.",
+    "files": [".claude-plugin/plugin.json", "skills/hello/SKILL.md", "README.md"],
+    "skills": [{ "name": "hello", "description": "Says hello" }],
+    "servers": [],
+    "settings": [],
+    "permissions": ["Runs on your computer with your computer's privileges"],
+    "manifestPreview": "{\n  \"name\": \"m10-builder-smoke\",\n  \"version\": \"0.1.0\"\n}"
+  },
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

@@ -73,6 +73,8 @@ function plugin(overrides: Partial<Plugin>): Plugin {
     marketplace: null,
     external: null,
     gitRoot: null,
+    builderMade: false,
+    publishTarget: null,
     ...overrides,
   };
 }

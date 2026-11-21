@@ -139,6 +139,8 @@ const installedPlugin: Plugin = {
   marketplace: { name: 'acme-plugins' },
   external: null,
   gitRoot: null,
+  builderMade: false,
+  publishTarget: null,
   agentAccess: 'explicit',
   agentIds: [],
 };

@@ -1,0 +1,5 @@
+{
+  "name": "fail-portable-no-frontmatter",
+  "version": "0.1.0",
+  "description": "Broken golden: skill without YAML frontmatter"
+}

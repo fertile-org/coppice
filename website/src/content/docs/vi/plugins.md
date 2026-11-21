@@ -147,9 +147,23 @@ Plugin mới có thiết lập ban đầu như sau:
 2. Mở rộng một lần chạy.
 3. Mở **Tools & Skills**. Các lệnh gọi plugin có nhãn **Plugin**.
 
+<a id="build-a-plugin"></a>
+
+## 5. Build plugin
+
+Trên **ứng dụng desktop**, mở **Plugins** và chọn **Build a plugin**. (Giao diện web không có nút này.)
+
+1. Trả lời vài câu hỏi ngắn về việc plugin cần làm gì.
+2. Agent lập kế hoạch viết bản plan. Bạn xem lại, yêu cầu chỉnh, hoặc phê duyệt.
+3. Phê duyệt sẽ bắt đầu build. Agent triển khai ghi thư mục plugin và Coppice kiểm tra.
+4. Khi build xong, Coppice cài plugin ở trạng thái **tắt** và chạy kiểm thử. Plugin chỉ có skill vẫn đạt khi không có MCP server.
+5. **Accept** giữ bản cài. Bạn có thể bật cho agent ngay, hoặc để tắt. Chưa gì được bật trước khi bạn Accept.
+
+Nếu kiểm tra thất bại, bạn có thể thử lại hoặc yêu cầu đổi plan. **Discard** xóa bản nháp và mọi bản cài từ build đó.
+
 <a id="create-a-plugin"></a>
 
-## 5. Tạo plugin
+## 6. Tạo plugin
 Plugin đơn giản nhất là một thư mục có `SKILL.md`. Muốn có tên, phiên bản và công cụ MCP thì thêm manifest.
 
 ```

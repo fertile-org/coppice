@@ -273,3 +273,12 @@ printf '%s\n' \
 ### Share it
 
 Push the plugin folder as the root of a git repository. Others install it with **Install from git** and pick up new commits with **Update**. Plugins also work unchanged in Claude Code and Cursor if they only use skills and MCP servers.
+
+### Try a sample outside Coppice (manual checklist)
+
+Use this once when you change the portable layout or the format-only validator. Coppice does not claim “use outside Coppice” in the builder UI until this checklist exists.
+
+1. Take `fixtures/plugins/builder-check/pass-minimal` (skills only) or `examples/plugins/hello-coppice` (skill + MCP).
+2. Install that folder in **Claude Code** or **Cursor** the same way you install any local plugin (plugin directory / marketplace path for that tool).
+3. Confirm the skill appears (`hello` for pass-minimal, or `greeting-style` for hello-coppice). For hello-coppice, confirm the MCP tool starts when the host supports local stdio servers.
+4. Optional: from the repo root, run `cargo test -p coppice-server portable_format` — it must pass `pass-minimal` and fail the broken goldens under `fixtures/plugins/builder-check/fail-portable-*`.

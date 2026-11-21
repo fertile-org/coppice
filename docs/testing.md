@@ -158,7 +158,7 @@ M10 plugin MCP smoke:
 make e2e-smoke-m10   # plugin dir → setting → Test → enable → assign → mock run → tool-call log
 ```
 
-It recreates the server with `MOCK_AGENT_RESPONSE=mcp/m10_smoke`, adds `/app/fixtures/plugins/m10-smoke` (baked into the server image) as a plugin dir, and runs a ticket whose mock run calls `ticket_get`, `skill_load` (`m10-smoke:greet`), `m10-smoke__echo` (a `node` stdio MCP server), and `result_submit`; it then checks all four are `ok` in `GET /api/agent-runs/{id}/tool-calls`, with `source = plugin` for the echo call. It is rerunnable on an existing database (timestamped board and agent names).
+It recreates the server with `MOCK_AGENT_RESPONSE=mcp/m10_smoke`, adds `/app/fixtures/plugins/m10-smoke` (baked into the server image) as a plugin dir, and runs a ticket whose mock run calls `ticket_get`, `skill_load` (`m10-smoke:greet`), `m10-smoke__echo` (a `node` stdio MCP server), and `result_submit`; it then checks all four are `ok` in `GET /api/agent-runs/{id}/tool-calls`, with `source = plugin` for the echo call. It is rerunnable on an existing database (timestamped board and agent names). After that flow, the target recreates the server with `MOCK_AGENT_RESPONSE` cleared and runs `e2e/smoke/m10-plugin-builder.mjs`: mock PM `plan_plugin_build` → approve/build via `backend_engineer/build_plugin.json` (`copyFixtureDir` + content map) → disabled install + Test → Accept with enable.
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs

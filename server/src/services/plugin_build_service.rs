@@ -632,6 +632,7 @@ impl<'a> PluginBuildService<'a> {
 
     /// After a successful build run finishes (active-run index free): format-check
     /// the workspace, optionally queue a retry, or install disabled + auto-test.
+    #[allow(clippy::too_many_arguments)] // install path needs plugins + secret + MCP + skills + readiness
     pub async fn finalize_after_build(
         &self,
         build_id: Uuid,
@@ -648,11 +649,13 @@ impl<'a> PluginBuildService<'a> {
             return Ok(build);
         }
 
+        // Missing rows are gone from disk; reusing their name must not fail the check
+        // (Compose smoke re-runs leave Accept'ed plugins as status=missing after rm+rescan).
         let installed: HashSet<String> = plugins
             .list_plugins()
             .await?
             .into_iter()
-            .filter(|p| build.plugin_id != Some(p.id))
+            .filter(|p| p.status != "missing" && build.plugin_id != Some(p.id))
             .map(|p| p.name)
             .collect();
 
@@ -745,6 +748,7 @@ impl<'a> PluginBuildService<'a> {
         Ok(run)
     }
 
+    #[allow(clippy::too_many_arguments)] // same install/test deps as finalize_after_build
     async fn install_disabled_and_test(
         &self,
         build_id: Uuid,
@@ -776,12 +780,11 @@ impl<'a> PluginBuildService<'a> {
             };
             if !ok_to_replace {
                 // Orphan folder from a prior attempt for this name, or clash.
-                if plugins
-                    .list_plugins()
-                    .await?
-                    .iter()
-                    .any(|p| p.name == plugin_name && build.plugin_id != Some(p.id))
-                {
+                if plugins.list_plugins().await?.iter().any(|p| {
+                    p.name == plugin_name
+                        && p.status != "missing"
+                        && build.plugin_id != Some(p.id)
+                }) {
                     return self
                         .store_install_failure(
                             build_id,
@@ -825,21 +828,18 @@ impl<'a> PluginBuildService<'a> {
                 )
                 .await;
         }
-        if row.enabled {
-            return self
-                .store_install_failure(
-                    build_id,
-                    "Coppice couldn't load it: plugin was enabled unexpectedly.",
-                )
-                .await;
-        }
+        // Rescan reuses a missing same-path row and keeps prior `enabled` (e.g. after
+        // Accept). Builder installs must stay off until the human Accepts again.
+        let row = if row.enabled {
+            plugins.set_enabled(row.id, false).await?
+        } else {
+            row
+        };
 
         let test_results = plugins
             .test_servers(row.id, secret_store, plugin_mcp)
             .await?;
-        if !row.enabled {
-            plugin_mcp.stop_plugin(row.id).await;
-        }
+        plugin_mcp.stop_plugin(row.id).await;
         let test_result = json!({ "servers": test_results_json(&test_results) });
 
         let updated = sqlx::query(&format!(

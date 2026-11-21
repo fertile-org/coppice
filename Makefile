@@ -187,6 +187,9 @@ e2e-smoke-m10:
 	MOCK_AGENT_RESPONSE=mcp/m10_smoke WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m10-plugins.mjs
+	# Builder happy path needs agent-keyed fixtures (plan vs build job types).
+	MOCK_AGENT_RESPONSE= WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
+	node e2e/smoke/m10-plugin-builder.mjs
 
 # Marketing stills, GIF, and the docs guide stills. Not part of CI.
 # Own Compose project (coppice-screenshot) so the seed does not touch a dev
