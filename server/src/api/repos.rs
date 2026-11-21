@@ -11,7 +11,7 @@ use crate::services::git_state_service::GitStateService;
 use crate::services::planning_service::PlanningService;
 use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
-    RepoGitService,
+    RepoGitService, SyncDefaultBranchAction, SyncDefaultBranchResult,
 };
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::repo_verifier::inspect_local_path;
@@ -57,6 +57,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/repos/{repo_id}/pull-default-branch",
             post(pull_default_branch),
         )
+        .route("/api/repos/{repo_id}/sync", post(sync_default_branch))
         .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
         .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
         .route("/api/repos/{repo_id}/diff", get(get_repo_diff))
@@ -485,6 +486,28 @@ async fn pull_default_branch(
         .pull_default_branch(repo_id)
         .await
         .map_err(map_repo_git_error)?;
+    Ok(Json(result))
+}
+
+async fn sync_default_branch(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<SyncDefaultBranchResult>, RepoGitApiError> {
+    let pool = pool_from_state(&state)
+        .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
+    let result = repo_git_service(&state, pool)
+        .sync_default_branch(repo_id)
+        .await
+        .map_err(map_repo_git_error)?;
+    if result.action == SyncDefaultBranchAction::Pushed {
+        if let Err(err) = GitStateService::new(&state, pool)
+            .recheck_repo_not_pushed(repo_id)
+            .await
+        {
+            tracing::warn!(%repo_id, error = %err, "git state recheck failed");
+        }
+    }
     Ok(Json(result))
 }
 
