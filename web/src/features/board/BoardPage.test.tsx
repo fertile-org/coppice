@@ -695,4 +695,31 @@ describe('BoardPage split swimlanes', () => {
     expect(screen.getByText('1/3 merged')).toBeVisible();
     expect(screen.queryByText('Needs review')).toBeNull();
   });
+
+  it('drops the swimlane when the split parent is archived and shows children in columns', () => {
+    const parent = ticketsState.active.find((ticket) => ticket.id === 'parent');
+    expect(parent).toBeDefined();
+    ticketsState.active = ticketsState.active.filter((ticket) => ticket.id !== 'parent');
+    ticketsState.archived = [
+      {
+        ...parent!,
+        archivedAt: '2026-11-22T00:00:00.000Z',
+      },
+    ];
+
+    renderBoard();
+
+    expect(screen.queryByRole('region', { name: 'Ship the gate' })).toBeNull();
+    expect(screen.queryByTestId('swimlane-row')).toBeNull();
+    expect(
+      within(screen.getByRole('region', { name: 'Ready' })).getByText('Open the gate'),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Backlog' })).getByText('Write the notice'),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Done' })).getByText('Survey the site'),
+    ).toBeVisible();
+    expect(screen.getByText('Plain ticket')).toBeVisible();
+  });
 });

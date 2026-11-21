@@ -150,6 +150,54 @@ describe('splitLanes', () => {
     ]);
     expect(visible.rest).toEqual([]);
   });
+
+  it('returns the family to the columns when the parent is archived but still listed', () => {
+    const archivedParent = makeTicket({
+      id: 'parent',
+      title: 'Ship the gate',
+      status: 'in_progress',
+      archivedAt: '2026-11-22T00:00:00.000Z',
+      splitProgress: progress(),
+    });
+
+    const listed = splitLanes(
+      [archivedParent, ready, backlog, done],
+      [archivedParent, ready, backlog, done],
+    );
+
+    expect(listed.lanes).toEqual([]);
+    expect(listed.rest.map((ticket) => ticket.id)).toEqual([
+      'parent',
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+  });
+
+  it('returns the family to the columns when the parent is absent from the board list', () => {
+    const absent = splitLanes([ready, backlog, done], [ready, backlog, done]);
+
+    expect(absent.lanes).toEqual([]);
+    expect(absent.rest.map((ticket) => ticket.id)).toEqual([
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+  });
+
+  it('keeps the lane for a live parent that is not Done', () => {
+    const live = splitLanes([parent, ready, backlog, done]);
+
+    expect(live.lanes).toHaveLength(1);
+    expect(live.lanes[0]?.parentId).toBe('parent');
+    expect(live.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
+      'parent',
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+    expect(live.rest).toEqual([]);
+  });
 });
 
 describe('split copy and lane drop ids', () => {
