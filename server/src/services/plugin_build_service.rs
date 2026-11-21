@@ -828,21 +828,18 @@ impl<'a> PluginBuildService<'a> {
                 )
                 .await;
         }
-        if row.enabled {
-            return self
-                .store_install_failure(
-                    build_id,
-                    "Coppice couldn't load it: plugin was enabled unexpectedly.",
-                )
-                .await;
-        }
+        // Rescan reuses a missing same-path row and keeps prior `enabled` (e.g. after
+        // Accept). Builder installs must stay off until the human Accepts again.
+        let row = if row.enabled {
+            plugins.set_enabled(row.id, false).await?
+        } else {
+            row
+        };
 
         let test_results = plugins
             .test_servers(row.id, secret_store, plugin_mcp)
             .await?;
-        if !row.enabled {
-            plugin_mcp.stop_plugin(row.id).await;
-        }
+        plugin_mcp.stop_plugin(row.id).await;
         let test_result = json!({ "servers": test_results_json(&test_results) });
 
         let updated = sqlx::query(&format!(

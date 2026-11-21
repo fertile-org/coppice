@@ -874,13 +874,29 @@ async fn finalize_reuses_name_when_prior_install_is_missing() {
         .await
         .expect("first finalize");
     assert_eq!(first.status, "ready_to_try");
+    let plugin_id = first.plugin_id.expect("installed");
 
-    // Simulate Compose re-run cleanup: folder gone → rescan marks row missing.
+    // Match Compose smoke: Accept with enable, then rm+rescan → missing+enabled.
+    let (status, accepted) = send(
+        &app,
+        "POST",
+        &format!("/api/plugin-builds/{first_id}/accept"),
+        json!({ "enable": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    let enabled = plugins.get_plugin(plugin_id).await.unwrap();
+    assert!(enabled.enabled);
+    assert_eq!(enabled.status, "ok");
+
     let installed = Path::new(&state.config.plugins.dir).join("pass-minimal");
     std::fs::remove_dir_all(&installed).unwrap();
     plugins.rescan().await.unwrap();
-    let prior = plugins.get_plugin(first.plugin_id.unwrap()).await.unwrap();
+    let prior = plugins.get_plugin(plugin_id).await.unwrap();
     assert_eq!(prior.status, "missing");
+    assert!(prior.enabled, "Accept enable flag must survive missing");
     assert_eq!(prior.name, "pass-minimal");
 
     let (status, created2) =
@@ -906,9 +922,15 @@ async fn finalize_reuses_name_when_prior_install_is_missing() {
             |_| true,
         )
         .await
-        .expect("second finalize must ignore missing name");
+        .expect("second finalize after Accept+enable+missing");
     assert_eq!(second.status, "ready_to_try", "{second:?}");
     assert!(second.check_errors.is_none(), "{:?}", second.check_errors);
+    let revived = plugins
+        .get_plugin(second.plugin_id.expect("reinstalled"))
+        .await
+        .unwrap();
+    assert_eq!(revived.status, "ok");
+    assert!(!revived.enabled, "builder reinstall must force disabled");
     assert!(installed.join(".claude-plugin/plugin.json").is_file());
 }
 
