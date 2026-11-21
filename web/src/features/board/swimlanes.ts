@@ -5,6 +5,9 @@ export interface SplitLane {
   parentId: string;
   title: string;
   progress: SplitProgress;
+  /** Parent ticket from the unfiltered board list; never a lane card. */
+  parent: Ticket;
+  /** Sub-tickets only. */
   tickets: Ticket[];
 }
 
@@ -20,6 +23,8 @@ function familyFinished(progress: SplitProgress): boolean {
  * board, not archived, and not Done. A missing, archived, or finished parent
  * sends the family back to the columns, and so does a family whose children are all
  * Done or archived (an archived child is hidden, so the lane would stay empty).
+ * The parent lives in `lane.parent` (header), never in `lane.tickets`. A parent
+ * with no visible children stays in `rest` as a normal card.
  * Other parent links stay in the columns.
  */
 export function splitLanes(
@@ -29,14 +34,15 @@ export function splitLanes(
   lanes: SplitLane[];
   rest: Ticket[];
 } {
-  const parents = new Map(boardTickets.map((ticket) => [ticket.id, ticket]));
+  const boardById = new Map(boardTickets.map((ticket) => [ticket.id, ticket]));
   const lanes: SplitLane[] = [];
   const byParent = new Map<string, SplitLane>();
+  const deferredParents: Ticket[] = [];
   const rest: Ticket[] = [];
 
   for (const ticket of tickets) {
     const progress = ticket.splitProgress;
-    const parent = progress ? parents.get(progress.parentTicketId) : undefined;
+    const parent = progress ? boardById.get(progress.parentTicketId) : undefined;
     if (
       !progress ||
       !parent ||
@@ -47,12 +53,20 @@ export function splitLanes(
       rest.push(ticket);
       continue;
     }
+
+    if (progress.position == null) {
+      deferredParents.push(ticket);
+      continue;
+    }
+
     let lane = byParent.get(progress.parentTicketId);
     if (!lane) {
+      const parentProgress = parent.splitProgress;
       lane = {
         parentId: progress.parentTicketId,
-        title: progress.parentTitle,
-        progress,
+        title: parentProgress?.parentTitle ?? progress.parentTitle,
+        progress: parentProgress ?? progress,
+        parent,
         tickets: [],
       };
       byParent.set(progress.parentTicketId, lane);
@@ -60,7 +74,16 @@ export function splitLanes(
     }
     lane.tickets.push(ticket);
     lane.title = progress.parentTitle;
-    if (progress.position == null) lane.progress = progress;
+  }
+
+  for (const ticket of deferredParents) {
+    const lane = byParent.get(ticket.id);
+    if (lane && ticket.splitProgress) {
+      lane.progress = ticket.splitProgress;
+      lane.title = ticket.splitProgress.parentTitle;
+      continue;
+    }
+    rest.push(ticket);
   }
 
   return { lanes, rest };
@@ -95,7 +118,7 @@ export function splitChildLabel(
   progress: SplitProgress | null | undefined,
 ): string | null {
   if (progress?.position == null) return null;
-  return `↳ ${progress.position}/${progress.count} · ${progress.parentTitle}`;
+  return `↳ ${progress.position} of ${progress.count}`;
 }
 
 export function splitNeedsReview(progress: SplitProgress): boolean {

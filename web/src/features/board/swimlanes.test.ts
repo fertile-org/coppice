@@ -78,9 +78,9 @@ describe('splitLanes', () => {
   it('puts a split family in one lane and leaves other tickets in the columns', () => {
     expect(grouped.lanes).toHaveLength(1);
     expect(grouped.lanes[0]?.parentId).toBe('parent');
+    expect(grouped.lanes[0]?.parent.id).toBe('parent');
     expect(grouped.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
       'child-done',
-      'parent',
       'child-backlog',
       'child-ready',
     ]);
@@ -99,7 +99,7 @@ describe('splitLanes', () => {
 
     expect(ids('backlog')).toEqual(['child-backlog', 'plain']);
     expect(ids('ready')).toEqual(['child-ready']);
-    expect(ids('in_progress')).toEqual(['parent']);
+    expect(ids('in_progress')).toEqual([]);
     expect(ids('done')).toEqual(['child-done']);
     expect(ids('backlog', new Set(['parent']))).toEqual(['plain']);
   });
@@ -137,6 +137,7 @@ describe('splitLanes', () => {
       family([child('c1', 'done', false), child('c2', 'ready', false)]),
     );
     expect(open.lanes).toHaveLength(1);
+    expect(open.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual(['c1']);
   });
 
   it('returns a finished split to the columns', () => {
@@ -179,11 +180,19 @@ describe('splitLanes', () => {
     const visible = splitLanes([ready, backlog], [parent, ready, backlog]);
 
     expect(visible.lanes).toHaveLength(1);
+    expect(visible.lanes[0]?.parent.id).toBe('parent');
     expect(visible.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
       'child-ready',
       'child-backlog',
     ]);
     expect(visible.rest).toEqual([]);
+  });
+
+  it('keeps a parent with no visible children in the columns', () => {
+    const alone = splitLanes([parent], [parent, ready, backlog]);
+
+    expect(alone.lanes).toEqual([]);
+    expect(alone.rest.map((ticket) => ticket.id)).toEqual(['parent']);
   });
 
   it('returns the family to the columns when the parent is archived but still listed', () => {
@@ -225,8 +234,8 @@ describe('splitLanes', () => {
 
     expect(live.lanes).toHaveLength(1);
     expect(live.lanes[0]?.parentId).toBe('parent');
+    expect(live.lanes[0]?.parent.id).toBe('parent');
     expect(live.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
-      'parent',
       'child-ready',
       'child-backlog',
       'child-done',
@@ -237,9 +246,7 @@ describe('splitLanes', () => {
 
 describe('split copy and lane drop ids', () => {
   it('labels a child and not the parent', () => {
-    expect(splitChildLabel(progress({ position: 2 }))).toBe(
-      '↳ 2/3 · Ship the gate',
-    );
+    expect(splitChildLabel(progress({ position: 2 }))).toBe('↳ 2 of 3');
     expect(splitChildLabel(progress())).toBeNull();
   });
 
