@@ -104,6 +104,41 @@ describe('splitLanes', () => {
     expect(ids('backlog', new Set(['parent']))).toEqual(['plain']);
   });
 
+  it('returns the family to the columns once every child is Done or archived', () => {
+    const child = (id: string, status: TicketStatus, archived: boolean) => ({
+      id,
+      title: id,
+      status,
+      position: 1,
+      archived,
+      merged: status === 'done',
+    });
+    const family = (children: ReturnType<typeof child>[]) => {
+      const split = progress({ children });
+      return [
+        makeTicket({ id: 'parent', title: 'P', status: 'in_progress', splitProgress: split }),
+        makeTicket({
+          id: 'c1',
+          title: 'c1',
+          status: 'done',
+          parentTicketId: 'parent',
+          splitProgress: { ...split, position: 1 },
+        }),
+      ];
+    };
+
+    const finished = splitLanes(
+      family([child('c1', 'done', false), child('c2', 'ready', true)]),
+    );
+    expect(finished.lanes).toHaveLength(0);
+    expect(finished.rest).toHaveLength(2);
+
+    const open = splitLanes(
+      family([child('c1', 'done', false), child('c2', 'ready', false)]),
+    );
+    expect(open.lanes).toHaveLength(1);
+  });
+
   it('returns a finished split to the columns', () => {
     const finishedParent = makeTicket({
       id: 'parent',
@@ -149,6 +184,54 @@ describe('splitLanes', () => {
       'child-backlog',
     ]);
     expect(visible.rest).toEqual([]);
+  });
+
+  it('returns the family to the columns when the parent is archived but still listed', () => {
+    const archivedParent = makeTicket({
+      id: 'parent',
+      title: 'Ship the gate',
+      status: 'in_progress',
+      archivedAt: '2026-11-22T00:00:00.000Z',
+      splitProgress: progress(),
+    });
+
+    const listed = splitLanes(
+      [archivedParent, ready, backlog, done],
+      [archivedParent, ready, backlog, done],
+    );
+
+    expect(listed.lanes).toEqual([]);
+    expect(listed.rest.map((ticket) => ticket.id)).toEqual([
+      'parent',
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+  });
+
+  it('returns the family to the columns when the parent is absent from the board list', () => {
+    const absent = splitLanes([ready, backlog, done], [ready, backlog, done]);
+
+    expect(absent.lanes).toEqual([]);
+    expect(absent.rest.map((ticket) => ticket.id)).toEqual([
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+  });
+
+  it('keeps the lane for a live parent that is not Done', () => {
+    const live = splitLanes([parent, ready, backlog, done]);
+
+    expect(live.lanes).toHaveLength(1);
+    expect(live.lanes[0]?.parentId).toBe('parent');
+    expect(live.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
+      'parent',
+      'child-ready',
+      'child-backlog',
+      'child-done',
+    ]);
+    expect(live.rest).toEqual([]);
   });
 });
 
