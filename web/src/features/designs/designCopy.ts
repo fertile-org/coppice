@@ -5,6 +5,7 @@ export const DESIGN_COPY = {
   dialogTitle: 'Design options',
   recommended: 'Recommended',
   chosen: 'Chosen',
+  yourPick: 'Your pick',
   noPreview: 'This preview has no file.',
   loadingPreview: 'Loading preview…',
   options: (n: number) => `${n} ${n === 1 ? 'option' : 'options'}`,
@@ -15,6 +16,10 @@ export const DESIGN_COPY = {
     `Using ${option.label}: ${option.displayTitle} (${yourChoice ? 'your choice' : 'recommended'})`,
   workFollows: 'Work follows this option.',
   planNotUpdated: "The plan wasn't updated to this option.",
+  notPicked: 'not picked',
+  decisionsInPlan: (n: number) =>
+    `${n} ${n === 1 ? 'decision' : 'decisions'} in this plan`,
+  sectionPick: (section: string, pick: string) => `${section}: ${pick}`,
   tryAgain: 'Try again',
   planRunning: 'The plan is being updated.',
   planFinal:

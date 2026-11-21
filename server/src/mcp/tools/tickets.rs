@@ -184,7 +184,8 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
     }
     let ticket = resolve_ticket(ctx, &args).await?;
     let agents = list_agents(ctx).await?;
-    let (description, acceptance_criteria) = split_ticket_description(&ticket.ticket.description);
+    let stripped = crate::services::design_markers::strip_design_markers(&ticket.ticket.description);
+    let (description, acceptance_criteria) = split_ticket_description(&stripped);
 
     let repo = match ticket.ticket.repo_id {
         None => Value::Null,

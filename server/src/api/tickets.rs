@@ -298,6 +298,8 @@ struct UpdateTicketBody {
 #[serde(rename_all = "camelCase")]
 struct ApprovePlanBody {
     skip_human_review: Option<bool>,
+    /// Accept each live plan-run set's recommended option when nothing was picked.
+    accept_recommended: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -1127,16 +1129,24 @@ async fn approve_plan(
     body: axum::body::Bytes,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
-    // The body is optional: an empty one leaves the flag unchanged.
-    let skip_human_review = if body.iter().all(u8::is_ascii_whitespace) {
-        None
+    // The body is optional: an empty one leaves skip_human_review unchanged.
+    let (skip_human_review, accept_recommended) = if body.iter().all(u8::is_ascii_whitespace) {
+        (None, false)
     } else {
-        serde_json::from_slice::<ApprovePlanBody>(&body)
-            .map_err(|_| UpdateStatusError::Status(StatusCode::BAD_REQUEST))?
-            .skip_human_review
+        let parsed = serde_json::from_slice::<ApprovePlanBody>(&body)
+            .map_err(|_| UpdateStatusError::Status(StatusCode::BAD_REQUEST))?;
+        (
+            parsed.skip_human_review,
+            parsed.accept_recommended.unwrap_or(false),
+        )
     };
     PlanningService::new(pool)
-        .approve(ticket_id, &state.config.workflow, skip_human_review)
+        .approve(
+            ticket_id,
+            &state.config.workflow,
+            skip_human_review,
+            accept_recommended,
+        )
         .await
         .map_err(map_plan_error)?;
     let ticket = TicketService::new(pool)

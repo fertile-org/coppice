@@ -5,6 +5,7 @@ import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { Ticket } from '../board/useTickets';
 import { MarkdownEditor } from '../../components/MarkdownEditor';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
+import { stripDesignMarkers } from '../plan/designMarkers';
 import { useToast } from '../../components/ToastProvider';
 import {
   attachmentFailedMessage,
@@ -15,8 +16,6 @@ import {
 import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { DesignPlanCard } from '../designs/DesignPlanCard';
-import { planCardDesign, useDesigns } from '../designs/useDesigns';
 import { PLAN_COPY } from '../plan/copy';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
@@ -83,8 +82,6 @@ export function TicketDetailPanel({
   const planRunActive = (runs.data ?? []).some(
     (run) => run.jobType === 'plan_ticket' && isActiveRunStatus(run.status),
   );
-  const designs = useDesigns(ticket.status === 'plan_review' ? ticket.id : undefined);
-  const designOutOfDate = planCardDesign(designs.data ?? [])?.choice.planOutOfDate ?? false;
   const descriptionFiles = descriptionAttachments(ticket);
 
   async function attachToTicket(incoming: File[]) {
@@ -246,7 +243,7 @@ export function TicketDetailPanel({
           ) : (
             <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3">
               {description.trim() ? (
-                <TicketMarkdown>{description}</TicketMarkdown>
+                <TicketMarkdown>{stripDesignMarkers(description)}</TicketMarkdown>
               ) : (
                 <p className="font-body text-sm italic text-text-muted">
                   No description yet.
@@ -268,8 +265,6 @@ export function TicketDetailPanel({
         <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />
       )}
 
-      <DesignPlanCard ticketId={ticket.id} />
-
       {ticket.status === 'plan_review' && !isArchived && (
         <PlanReviewActions
           ticketId={ticket.id}
@@ -285,7 +280,6 @@ export function TicketDetailPanel({
           changeRequests={ticket.pendingPlan?.changeRequests}
           planQuestions={ticket.planQuestions}
           planRunActive={planRunActive}
-          designOutOfDate={designOutOfDate}
           suggestSkipHumanReview={ticket.pendingPlan?.suggestSkipHumanReview}
           skipHumanReview={ticket.skipHumanReview}
         />

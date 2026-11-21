@@ -1684,7 +1684,7 @@ async fn pick_is_refused_after_approval_and_saves_nothing() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
-            "{}",
+            r#"{"acceptRecommended":true}"#,
             &fx.cookie,
             &fx.csrf,
         ))
@@ -2812,4 +2812,142 @@ async fn no_visible_change_retires_plan_designs() {
         .any(|set| { set["id"] == second_set.to_string() && set["superseded"] == true }));
 
     assert_refused(&fx, second_set, "b", DESIGN_SUPERSEDED).await;
+}
+
+#[tokio::test]
+async fn list_returns_kind_ui_by_default() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let body = set_json(&fx, set_id).await;
+    assert_eq!(body["kind"], "ui");
+}
+
+#[tokio::test]
+async fn approve_refuses_unpicked_sets_without_accept_recommended() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, _set_id) = plan_review_with_set().await;
+    let refused = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("approve");
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let body = common::json_body(refused).await;
+    let message = body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("recommended default") || message.contains("Pick a design"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn publishing_a_second_kind_on_the_same_run_keeps_both_live() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, ui_set) = plan_review_with_set().await;
+    let run_id: Uuid = sqlx::query_scalar("SELECT run_id FROM design_sets WHERE id = $1")
+        .bind(ui_set)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("run");
+    let agent_id: Uuid = sqlx::query_scalar("SELECT agent_id FROM design_sets WHERE id = $1")
+        .bind(ui_set)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("agent");
+    let other = Uuid::new_v4();
+    let dir = format!("designs/{other}");
+    std::fs::create_dir_all(
+        PathBuf::from(&fx.state.config.storage.artifacts_dir).join(&dir),
+    )
+    .expect("dir");
+    sqlx::query(
+        r#"
+        INSERT INTO design_sets (
+            id, title, kind, ticket_id, run_id, agent_id, dir, options,
+            recommended_option_id, published_at
+        )
+        VALUES (
+            $1, 'Arch', 'architecture', $2, $3, $4, $5,
+            $6::jsonb, 'a', now()
+        )
+        "#,
+    )
+    .bind(other)
+    .bind(fx.ticket_id)
+    .bind(run_id)
+    .bind(agent_id)
+    .bind(&dir)
+    .bind(json!([{"id":"a","title":"Layered","entry":"a.html"},{"id":"b","title":"Flat","entry":"b.html"}]))
+    .execute(&fx.pool)
+    .await
+    .expect("insert architecture set");
+
+    let listed = design_svc(&fx)
+        .list_for_ticket(fx.ticket_id)
+        .await
+        .expect("list");
+    let live: Vec<_> = listed
+        .into_iter()
+        .filter(|set| !set.superseded)
+        .map(|set| (set.id, set.kind))
+        .collect();
+    assert!(
+        live.iter().any(|(id, kind)| *id == ui_set && *kind == coppice_server::services::design_service::DesignKind::Ui),
+        "{live:?}"
+    );
+    assert!(
+        live.iter().any(|(id, kind)| *id == other
+            && *kind == coppice_server::services::design_service::DesignKind::Architecture),
+        "{live:?}"
+    );
+}
+
+#[tokio::test]
+async fn approve_strips_design_markers_from_the_description() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let (fx, set_id) = plan_review_with_set().await;
+    let marked = format!(
+        "## Plan\n\n### Approach\nShip it.\n\n## UI design\n\n{{{{design:{set_id}}}}}\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n"
+    );
+    sqlx::query("UPDATE ticket_plans SET body = $2 WHERE ticket_id = $1")
+        .bind(fx.ticket_id)
+        .bind(&marked)
+        .execute(&fx.pool)
+        .await
+        .expect("mark plan");
+    let approved = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+            r#"{"acceptRecommended":true}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("approve");
+    assert_eq!(approved.status(), StatusCode::OK);
+    let ticket = common::get_ticket(&fx.app, &fx.ticket_id.to_string(), &fx.cookie, &fx.csrf).await;
+    let description = ticket["description"].as_str().unwrap_or("");
+    assert!(
+        !description.contains("{{design:"),
+        "raw marker leaked: {description}"
+    );
+    assert!(description.contains("## UI design"), "{description}");
 }

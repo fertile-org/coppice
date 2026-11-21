@@ -84,15 +84,21 @@ function footerFor(design: DesignSet, viewed: DesignOption): Footer {
 export function DesignDialog({
   design,
   scope,
+  initialOptionId,
   onClose,
 }: {
   design: DesignSet;
   scope?: DesignScope;
+  /** Open on this option when set (e.g. from an inline Open button). */
+  initialOptionId?: string;
   onClose: () => void;
 }) {
   const choose = useChooseDesign(scope);
   const [activeId, setActiveId] = useState(
-    design.selected?.id ?? design.options[0]?.id ?? '',
+    initialOptionId
+      && design.options.some((option) => option.id === initialOptionId)
+      ? initialOptionId
+      : (design.selected?.id ?? design.options[0]?.id ?? ''),
   );
   const [error, setError] = useState<string | null>(null);
   const active = design.options.find((option) => option.id === activeId) ?? design.options[0];

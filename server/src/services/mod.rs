@@ -23,6 +23,7 @@ pub mod context_budget;
 pub mod context_builder;
 pub mod criteria_results;
 pub mod design_choice;
+pub mod design_markers;
 pub mod design_service;
 pub mod git_chain;
 pub mod git_cmd;

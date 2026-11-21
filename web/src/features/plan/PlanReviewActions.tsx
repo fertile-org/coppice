@@ -1,15 +1,21 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey, type PlanQuestions } from '../board/useTickets';
 import type { SplitTicketSpec } from '../../lib/schemas/ticket';
 import { agentRunsQueryKey } from '../tickets/useAgentRuns';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
+import { DesignPlanSummary } from '../designs/DesignPlanCard';
 import { DESIGN_COPY } from '../designs/designCopy';
+import {
+  anyPlanDesignOutOfDate,
+  unpickedPlanDesigns,
+  useDesigns,
+} from '../designs/useDesigns';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { approveTicketPlan } from './approvePlan';
 import { PLAN_COPY } from './copy';
+import { PlanBodyWithDesigns } from './PlanBodyWithDesigns';
 
 async function postPlan(ticketId: string, path: string, body?: string) {
   const res = await apiFetch(`/api/tickets/${ticketId}/${path}`, {
@@ -187,7 +193,7 @@ export function PlanReviewActions({
   changeRequests = [],
   planQuestions,
   planRunActive = false,
-  designOutOfDate = false,
+  designOutOfDate: designOutOfDateProp,
   suggestSkipHumanReview = false,
   skipHumanReview = false,
 }: {
@@ -204,7 +210,7 @@ export function PlanReviewActions({
   planQuestions?: PlanQuestions | null;
   /** A plan run is queued or running: the plan on screen is about to change. */
   planRunActive?: boolean;
-  /** The chosen design isn't the one the plan reflects. Approve stays available. */
+  /** Override when tests inject out-of-date without loading designs. */
   designOutOfDate?: boolean;
   /** The planner judged the change trivial. Pre-ticks Skip human review. */
   suggestSkipHumanReview?: boolean;
@@ -212,6 +218,11 @@ export function PlanReviewActions({
   skipHumanReview?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const designs = useDesigns(ticketId);
+  const sets = designs.data ?? [];
+  const unpicked = unpickedPlanDesigns(sets);
+  const designOutOfDate =
+    designOutOfDateProp ?? anyPlanDesignOutOfDate(sets);
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [skipReview, setSkipReview] = useState(skipHumanReview || suggestSkipHumanReview);
@@ -223,10 +234,12 @@ export function PlanReviewActions({
     void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
     // Approve and plan changes can queue the Tech Lead or the planner.
     void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
+    void queryClient.invalidateQueries({ queryKey: ['designs', 'ticket', ticketId] });
   }
 
   const approve = useMutation({
-    mutationFn: () => approveTicketPlan(ticketId, skipReview),
+    mutationFn: () =>
+      approveTicketPlan(ticketId, skipReview, unpicked.length > 0),
     onSuccess: () => {
       setError(null);
       refresh();
@@ -251,7 +264,9 @@ export function PlanReviewActions({
     ? PLAN_COPY.approving
     : splitCount > 0
       ? PLAN_COPY.approvePlanAndStart(splitCount)
-      : PLAN_COPY.approvePlan;
+      : unpicked.length > 0
+        ? PLAN_COPY.approveWithRecommended(unpicked.length)
+        : PLAN_COPY.approvePlan;
 
   const waiting = Boolean(planQuestions?.waiting);
 
@@ -282,11 +297,14 @@ export function PlanReviewActions({
               <p className="font-body text-xs text-text-secondary">{PLAN_COPY.revision(revision)}</p>
             )}
           </div>
+          <DesignPlanSummary sets={sets} planMarkdown={plan ?? ''} />
           <div
             data-testid="pending-plan"
             className="rounded-md border border-accent/40 bg-surface px-4 py-3"
           >
-            {plan?.trim() && <TicketMarkdown>{plan}</TicketMarkdown>}
+            {plan?.trim() && (
+              <PlanBodyWithDesigns plan={plan} sets={sets} ticketId={ticketId} />
+            )}
             {splitCount > 0 && <ProposedSubTickets splits={proposedSplits} />}
           </div>
           {changeRequests.length > 0 && (

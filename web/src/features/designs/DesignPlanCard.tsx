@@ -1,45 +1,90 @@
-import { useState } from 'react';
-import { Button } from '../../components/ui/button';
-import { DesignDialog } from './DesignDialog';
+import type { DesignSet } from '../../lib/schemas/design';
 import { DESIGN_COPY } from './designCopy';
-import { designDrivesWork, planCardDesign, useDesigns } from './useDesigns';
+import { livePlanDesigns } from './useDesigns';
 
-/** Opens the design options the plan was written around, above the plan. */
-export function DesignPlanCard({ ticketId }: { ticketId: string }) {
-  const { data } = useDesigns(ticketId);
-  const [open, setOpen] = useState(false);
-  const sets = data ?? [];
-  const design = planCardDesign(sets);
-  if (!design) return null;
+export function pickerDomId(setId: string): string {
+  return `design-picker-${setId}`;
+}
 
-  const { selected } = design;
-  const detail = selected && designDrivesWork(design, sets)
-    ? `${DESIGN_COPY.options(design.options.length)} · ${DESIGN_COPY.using(
-        selected,
-        design.chosen !== null,
-      )}`
-    : DESIGN_COPY.options(design.options.length);
+/** One-line summary of every live plan-run set; each entry scrolls to its picker. */
+export function DesignPlanSummary({
+  sets,
+  planMarkdown = '',
+  sections,
+}: {
+  sets: DesignSet[];
+  planMarkdown?: string;
+  /** Precomputed section labels keyed by set id (from markers / fallbacks). */
+  sections?: Record<string, string>;
+}) {
+  const live = livePlanDesigns(sets);
+  if (live.length === 0) return null;
+
+  function labelFor(set: DesignSet): string {
+    return sections?.[set.id]
+      ?? sectionFromPlan(planMarkdown, set.id)
+      ?? set.title;
+  }
+
+  function pickLabel(set: DesignSet): string {
+    if (set.chosen) {
+      return DESIGN_COPY.optionName(set.chosen);
+    }
+    return DESIGN_COPY.notPicked;
+  }
+
+  function jump(setId: string) {
+    const el = document.getElementById(pickerDomId(setId));
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   return (
-    <>
-      <section
-        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent bg-surface-raised px-4 py-3 cursor-pointer transition-colors hover:bg-surface-raised"
-        onClick={() => setOpen(true)}
-      >
-        <div>
-          <h3 className="font-body text-sm font-medium text-text-primary">{DESIGN_COPY.cardTitle}</h3>
-          <p className="font-body text-xs text-text-secondary">{detail}</p>
-          {design.choice.planOutOfDate ? (
-            <p className="font-body text-xs text-danger">{DESIGN_COPY.planNotUpdated}</p>
-          ) : null}
-        </div>
-        <Button type="button" size="sm">
-          {DESIGN_COPY.open}
-        </Button>
-      </section>
-      {open ? (
-        <DesignDialog design={design} scope={ticketId} onClose={() => setOpen(false)} />
-      ) : null}
-    </>
+    <p
+      data-testid="design-plan-summary"
+      className="rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-secondary"
+    >
+      <span className="font-medium text-text-primary">
+        {DESIGN_COPY.decisionsInPlan(live.length)}
+      </span>
+      {live.map((set) => (
+        <span key={set.id}>
+          {' · '}
+          <button
+            type="button"
+            className="text-accent underline-offset-2 hover:underline"
+            onClick={() => jump(set.id)}
+          >
+            {DESIGN_COPY.sectionPick(labelFor(set), pickLabel(set))}
+          </button>
+        </span>
+      ))}
+    </p>
   );
+}
+
+function sectionFromPlan(markdown: string, setId: string): string | null {
+  const needle = `{{design:${setId}}}`;
+  const pos = markdown.indexOf(needle);
+  if (pos < 0) return null;
+  let heading: string | null = null;
+  for (const line of markdown.slice(0, pos).split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('## ') && !trimmed.startsWith('###')) {
+      heading = trimmed.slice(3).trim();
+    }
+  }
+  return heading;
+}
+
+/** @deprecated Prefer DesignPlanSummary; kept name for import sites during the swap. */
+export function DesignPlanCard({
+  sets,
+  planMarkdown,
+}: {
+  ticketId?: string;
+  sets?: DesignSet[];
+  planMarkdown?: string;
+}) {
+  if (!sets) return null;
+  return <DesignPlanSummary sets={sets} planMarkdown={planMarkdown} />;
 }

@@ -3,8 +3,8 @@ use crate::api::tickets::{map_plan_error, publish_ticket_state, UpdateStatusErro
 use crate::services::chat_service::{ChatError, ChatService};
 use crate::services::design_choice::{choice_state, choose_design, ChoiceState, DesignChoiceError};
 use crate::services::design_service::{
-    chosen_option, ChosenOption, DesignError, DesignOption, DesignService, DesignSetRecord,
-    DesignSetSummary,
+    chosen_option, ChosenOption, DesignError, DesignKind, DesignOption, DesignService,
+    DesignSetRecord, DesignSetSummary,
 };
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
@@ -64,6 +64,7 @@ fn option_responses(options: Vec<DesignOption>) -> Vec<DesignOptionResponse> {
 struct DesignSetResponse {
     id: Uuid,
     title: String,
+    kind: DesignKind,
     run_id: Uuid,
     options: Vec<DesignOptionResponse>,
     chosen: Option<ChosenOption>,
@@ -99,6 +100,7 @@ async fn to_response(
     Ok(DesignSetResponse {
         id: set.id,
         title: set.title,
+        kind: set.kind,
         run_id: set.run_id,
         options: option_responses(set.options),
         chosen: set.chosen,

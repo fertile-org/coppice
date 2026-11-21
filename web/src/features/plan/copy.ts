@@ -2,6 +2,8 @@
 export const PLAN_COPY = {
   column: 'Plan Review',
   approvePlan: 'Approve plan',
+  approveWithRecommended: (n: number) =>
+    `Approve with ${n} recommended default${n === 1 ? '' : 's'}`,
   approvePlanAndStart: (count: number) =>
     `Approve plan · start sub-ticket 1 of ${count}`,
   approving: 'Approving…',

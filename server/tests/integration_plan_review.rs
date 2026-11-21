@@ -1789,6 +1789,10 @@ async fn inserted_plan_records_the_selected_design() {
     let plan = planning.latest_plan(ticket).await.unwrap().expect("plan");
     assert_eq!(plan.design_set_id, Some(created.id));
     assert_eq!(plan.design_option_id.as_deref(), Some("b"));
+    assert_eq!(
+        plan.design_picks.get(&created.id.to_string()).and_then(|v| v.as_str()),
+        Some("b")
+    );
 }
 
 #[tokio::test]

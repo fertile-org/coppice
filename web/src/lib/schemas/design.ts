@@ -20,9 +20,14 @@ export const designChoiceSchema = z.object({
   planOutOfDate: z.boolean(),
 });
 
+export const designKindSchema = z
+  .enum(['ui', 'architecture', 'module', 'refactor', 'dependency'])
+  .default('ui');
+
 export const designSetSchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
+  kind: designKindSchema,
   runId: z.string().uuid(),
   options: z.array(designOptionSchema),
   chosen: chosenDesignOptionSchema.nullable(),

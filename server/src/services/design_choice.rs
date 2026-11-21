@@ -7,7 +7,9 @@ use crate::domain::substatus::TicketStatus;
 use crate::services::design_service::{
     chosen_option, save_choice, DesignError, DesignService, DesignSetSummary,
 };
-use crate::services::planning_service::{PlanError, PlanningService, StartOutcome};
+use crate::services::planning_service::{
+    plan_option_for_set, PlanError, PlanningService, StartOutcome,
+};
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use std::path::Path;
@@ -95,16 +97,9 @@ pub async fn choice_state(
         return Ok(mode_only(ChoiceMode::SaveOnly));
     };
 
-    // A plan with no recorded design or option counts as up to date. Plans
-    // written around a set with no recommendation and no choice record no option.
-    let plan_out_of_date = match (
-        &set.selected,
-        plan.design_set_id,
-        plan.design_option_id.as_deref(),
-    ) {
-        (Some(selected), Some(plan_set_id), Some(plan_option_id)) => {
-            plan_set_id != set.id || plan_option_id != selected.id
-        }
+    // design_picks first; legacy columns for older plans. No entry ⇒ up to date.
+    let plan_out_of_date = match (&set.selected, plan_option_for_set(&plan, set.id)) {
+        (Some(selected), Some(plan_option_id)) => plan_option_id != selected.id,
         _ => false,
     };
     Ok(ChoiceState {

@@ -503,7 +503,7 @@ describe('board keyboard navigation', () => {
     press('r');
     expect(approveTicketPlan).not.toHaveBeenCalled();
     press('p');
-    expect(approveTicketPlan).toHaveBeenCalledWith('alpha');
+    expect(approveTicketPlan).toHaveBeenCalledWith('alpha', undefined, true);
   });
 
   it('opens Accept… for Wait for Human Review and does not accept until Accept', async () => {

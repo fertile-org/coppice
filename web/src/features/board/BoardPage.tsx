@@ -343,7 +343,8 @@ export function BoardPage() {
   }
 
   function approveFocusedPlan(ticketId: string) {
-    void approveTicketPlan(ticketId)
+    // Accept recommended defaults for any unpicked plan-run sets.
+    void approveTicketPlan(ticketId, undefined, true)
       .then(() => {
         void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
         void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });

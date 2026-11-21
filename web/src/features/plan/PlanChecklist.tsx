@@ -1,5 +1,6 @@
 import type { CriterionStatus, PlanCriterion } from '../board/useTickets';
 import { PLAN_COPY } from './copy';
+import { stripDesignMarkers } from './designMarkers';
 
 export interface ApprovedPlan {
   planId: string;
@@ -48,6 +49,7 @@ function CriterionRow({ criterion }: { criterion: PlanCriterion }) {
 
 export function PlanChecklist({ plan }: { plan: ApprovedPlan }) {
   const criteria = plan.criteria ?? [];
+  const steps = plan.steps.map((step) => stripDesignMarkers(step));
   return (
     <aside
       aria-label={PLAN_COPY.approvedPlan}
@@ -68,16 +70,16 @@ export function PlanChecklist({ plan }: { plan: ApprovedPlan }) {
           </ul>
         </section>
       )}
-      {criteria.length > 0 && plan.steps.length > 0 && (
+      {criteria.length > 0 && steps.length > 0 && (
         <h3 className="mt-4 font-body text-xs font-semibold uppercase text-text-muted">
           {PLAN_COPY.steps}
         </h3>
       )}
-      {plan.steps.length === 0 ? (
+      {steps.length === 0 ? (
         <p className="mt-3 font-body text-sm text-text-muted">{PLAN_COPY.noSteps}</p>
       ) : (
         <ul className="mt-3 space-y-2">
-          {plan.steps.map((step, index) => (
+          {steps.map((step, index) => (
             <li key={`${index}-${step}`}>
               <label className="flex items-start gap-2 font-body text-sm text-text-primary">
                 <input

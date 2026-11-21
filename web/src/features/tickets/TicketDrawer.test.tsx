@@ -892,7 +892,7 @@ describe('TicketDrawer keyboard sections', () => {
     expect(approveTicketPlan).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: 'p' });
     await waitFor(() => {
-      expect(approveTicketPlan).toHaveBeenCalledWith(ticketState.ticket.id, false);
+      expect(approveTicketPlan).toHaveBeenCalledWith(ticketState.ticket.id, false, false);
     });
   });
 

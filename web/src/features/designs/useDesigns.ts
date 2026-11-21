@@ -6,10 +6,25 @@ import { ticketQueryKey } from '../tickets/useTicket';
 
 export type DesignScope = string | { chatSessionId: string };
 
-/** The set the Detail card opens: the plan's, else the newest live one. */
+/** Live plan-run sets shown in the plan summary and approval gate (newest first). */
+export function livePlanDesigns(sets: DesignSet[]): DesignSet[] {
+  return sets.filter((set) => !set.superseded && set.fromPlanRun && !set.inherited);
+}
+
+/** @deprecated Prefer livePlanDesigns. The plan's set, else the newest live one. */
 export function planCardDesign(sets: DesignSet[]): DesignSet | undefined {
   const live = sets.filter((set) => !set.superseded);
   return live.find((set) => set.fromPlanRun) ?? live[0];
+}
+
+/** Sets that need an explicit pick before Approve (chosen is null). */
+export function unpickedPlanDesigns(sets: DesignSet[]): DesignSet[] {
+  return livePlanDesigns(sets).filter((set) => set.chosen === null);
+}
+
+/** True when any live plan-run set's selection is ahead of the plan. */
+export function anyPlanDesignOutOfDate(sets: DesignSet[]): boolean {
+  return livePlanDesigns(sets).some((set) => set.choice.planOutOfDate);
 }
 
 /**

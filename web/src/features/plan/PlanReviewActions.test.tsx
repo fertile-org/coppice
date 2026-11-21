@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { useKeyboardEnvironment } from '../keyboard/useKeyboard';
+import { makeDesignSet } from '../designs/designFixtures';
 import { PLAN_COPY } from './copy';
 import { PlanReviewActions } from './PlanReviewActions';
 
@@ -52,7 +53,12 @@ const questions = {
 describe('PlanReviewActions', () => {
   beforeEach(() => {
     mocks.apiFetch.mockReset();
-    mocks.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/designs')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
   });
 
   it('asks the questions instead of offering Approve plan', () => {
@@ -210,7 +216,9 @@ describe('PlanReviewActions', () => {
     ask.focus();
     fireEvent.keyDown(ask, { key: 'r' });
     fireEvent.keyDown(ask, { key: 'p' });
-    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    expect(mocks.apiFetch.mock.calls.some(([path]) => String(path).includes('approve-plan'))).toBe(
+      false,
+    );
 
     fireEvent.change(box, { target: { value: '' } });
     fireEvent.keyDown(document, { key: 'r' });
@@ -301,5 +309,62 @@ describe('PlanReviewActions', () => {
     expect(requested.closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('Use Postgres.')).toBeInTheDocument();
     expect(screen.getByText('Split the API change.')).toBeInTheDocument();
+  });
+
+  it('renders the picker under the marked section, not above the plan', async () => {
+    const set = makeDesignSet();
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/designs')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [set] });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    const plan = `## Approach\nMove options.\n\n## UI design\n\n{{design:${set.id}}}\n\n### Steps\n- [ ] Ship`;
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan={plan} />);
+    const pending = await screen.findByTestId('pending-plan');
+    const picker = await screen.findByTestId(`design-picker-${set.id}`);
+    expect(pending).toContainElement(picker);
+    expect(pending.textContent?.indexOf('UI design') ?? -1).toBeLessThan(
+      pending.textContent?.indexOf('Quiet button') ?? -1,
+    );
+    expect(screen.queryByText(`{{design:${set.id}}}`)).toBeNull();
+  });
+
+  it('falls back to a top picker when the plan has no marker', async () => {
+    const set = makeDesignSet();
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/designs')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [set] });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan={'## Plan\n\n### Approach\nGo.'} />);
+    expect(await screen.findByTestId(`design-picker-${set.id}`)).toBeInTheDocument();
+    expect(await screen.findByTestId('design-plan-summary')).toHaveTextContent(
+      '1 decision in this plan',
+    );
+  });
+
+  it('labels Approve with recommended defaults and sends acceptRecommended', async () => {
+    const set = makeDesignSet({ chosen: null });
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).endsWith('/designs')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [set] });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
+    const approve = await screen.findByRole('button', {
+      name: PLAN_COPY.approveWithRecommended(1),
+    });
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        '/api/tickets/t1/approve-plan',
+        expect.objectContaining({
+          body: JSON.stringify({ skipHumanReview: false, acceptRecommended: true }),
+        }),
+      ),
+    );
   });
 });

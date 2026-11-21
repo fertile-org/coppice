@@ -96,6 +96,8 @@ pub struct TicketPlan {
     /// The design set the plan reflects, and the option it was written against.
     pub design_set_id: Option<Uuid>,
     pub design_option_id: Option<String>,
+    /// Live plan-run set id → option id the plan was written around.
+    pub design_picks: serde_json::Map<String, serde_json::Value>,
     /// The planner judged the change trivial enough to skip Human Review.
     pub suggest_skip_review: bool,
     pub created_at: time::OffsetDateTime,
@@ -344,7 +346,7 @@ impl<'a> PlanningService<'a> {
         // A plan with no visible change drops the old options instead of
         // linking them. The flag is the agent's final word, so a set this
         // same run published is retired too.
-        let (design_set_id, design_option_id) = if no_visible_change {
+        let (design_set_id, design_option_id, design_picks) = if no_visible_change {
             sqlx::query(
                 r#"
                 UPDATE design_sets
@@ -361,12 +363,11 @@ impl<'a> PlanningService<'a> {
             .bind(ticket_id)
             .execute(&mut *tx)
             .await?;
-            (None, None)
+            (None, None, serde_json::Map::new())
         } else {
-            // The newest live plan-run design set and the option picked (or
-            // recommended) in it. Picks are refused during a plan run, so reading
-            // here also covers options the run itself published.
-            let design: Option<(Uuid, Option<String>)> = sqlx::query_as(
+            // Every live plan-run set → option (chosen or recommended). Legacy
+            // columns keep the newest set for older readers.
+            let designs: Vec<(Uuid, Option<String>)> = sqlx::query_as(
                 r#"
                 SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
                 FROM design_sets d
@@ -379,27 +380,34 @@ impl<'a> PlanningService<'a> {
                       WHERE r.id = d.run_id AND r.job_type = 'plan_ticket'
                   )
                 ORDER BY d.created_at DESC, d.id DESC
-                LIMIT 1
                 "#,
             )
             .bind(ticket_id)
-            .fetch_optional(&mut *tx)
+            .fetch_all(&mut *tx)
             .await?;
-            match design {
-                Some((set, option)) => (Some(set), option),
-                None => (None, None),
+            let mut picks = serde_json::Map::new();
+            for (set_id, option) in &designs {
+                if let Some(option_id) = option {
+                    picks.insert(set_id.to_string(), serde_json::Value::String(option_id.clone()));
+                }
+            }
+            match designs.first() {
+                Some((set, option)) => (Some(*set), option.clone(), picks),
+                None => (None, None, picks),
             }
         };
+        let picks_json = serde_json::Value::Object(design_picks);
         let id = Uuid::new_v4();
         let row = sqlx::query(
             r#"
             INSERT INTO ticket_plans (
                 id, ticket_id, run_id, agent_id, revision, body, content_version,
-                design_set_id, design_option_id, suggest_skip_review
+                design_set_id, design_option_id, design_picks, suggest_skip_review
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id, ticket_id, run_id, agent_id, revision, body, content_version,
-                      change_request, design_set_id, design_option_id, suggest_skip_review, created_at
+                      change_request, design_set_id, design_option_id, design_picks,
+                      suggest_skip_review, created_at
             "#,
         )
         .bind(id)
@@ -411,6 +419,7 @@ impl<'a> PlanningService<'a> {
         .bind(ticket.ticket.content_version)
         .bind(design_set_id)
         .bind(design_option_id)
+        .bind(&picks_json)
         .bind(suggest_skip_review)
         .fetch_one(&mut *tx)
         .await?;
@@ -454,6 +463,7 @@ impl<'a> PlanningService<'a> {
         ticket_id: Uuid,
         workflow: &crate::config::WorkflowConfig,
         skip_human_review: Option<bool>,
+        accept_recommended: bool,
     ) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
@@ -477,6 +487,9 @@ impl<'a> PlanningService<'a> {
         if plan.content_version != ticket.ticket.content_version {
             return Err(PlanError::Validation(PLAN_STALE.into()));
         }
+
+        self.refuse_unready_designs(ticket_id, &plan, accept_recommended)
+            .await?;
 
         sqlx::query(
             r#"
@@ -545,7 +558,10 @@ impl<'a> PlanningService<'a> {
         description: &str,
         plan_body: &str,
     ) -> Result<(), PlanError> {
-        let section = plan::approved_plan_section_body(plan_body);
+        let section =
+            crate::services::design_markers::strip_design_markers(&plan::approved_plan_section_body(
+                plan_body,
+            ));
         if section.is_empty() {
             return Ok(());
         }
@@ -1114,7 +1130,8 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, design_set_id, design_option_id, suggest_skip_review, created_at
+                   change_request, design_set_id, design_option_id, design_picks,
+                   suggest_skip_review, created_at
             FROM ticket_plans
             WHERE ticket_id = $1
             ORDER BY revision DESC
@@ -1131,7 +1148,8 @@ impl<'a> PlanningService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
-                   change_request, design_set_id, design_option_id, suggest_skip_review, created_at
+                   change_request, design_set_id, design_option_id, design_picks,
+                   suggest_skip_review, created_at
             FROM ticket_plans
             WHERE id = $1
             "#,
@@ -1141,6 +1159,71 @@ impl<'a> PlanningService<'a> {
         .await?;
         Ok(row.as_ref().map(row_to_plan))
     }
+
+    /// Live plan-run sets must be picked or accepted at the recommended option,
+    /// and none may be out of date relative to the plan.
+    async fn refuse_unready_designs(
+        &self,
+        ticket_id: Uuid,
+        plan: &TicketPlan,
+        accept_recommended: bool,
+    ) -> Result<(), PlanError> {
+        let sets = crate::services::design_service::DesignService::new(
+            self.pool,
+            std::env::temp_dir(), // dir unused for list queries
+        )
+        .list_for_ticket(ticket_id)
+        .await
+        .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let live: Vec<_> = sets
+            .into_iter()
+            .filter(|set| set.from_plan_run && !set.superseded && !set.inherited)
+            .collect();
+        if live.is_empty() {
+            return Ok(());
+        }
+
+        let mut out_of_date = false;
+        let mut unpicked_sections = Vec::new();
+        for set in &live {
+            // Same rule as choice_state: both sides must name an option.
+            if let (Some(selected), Some(plan_option)) =
+                (&set.selected, plan_option_for_set(plan, set.id))
+            {
+                if selected.id != plan_option {
+                    out_of_date = true;
+                }
+            }
+            if set.chosen.is_none() {
+                let section = crate::services::design_markers::section_for_set(&plan.body, set.id)
+                    .unwrap_or_else(|| set.title.clone());
+                unpicked_sections.push(section);
+            }
+        }
+        if out_of_date {
+            return Err(PlanError::Validation(
+                "The plan wasn't updated to the chosen design option.".into(),
+            ));
+        }
+        if !unpicked_sections.is_empty() && !accept_recommended {
+            return Err(PlanError::Validation(format!(
+                "Pick a design option or approve with the recommended default for: {}.",
+                unpicked_sections.join(", ")
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Option id the plan was written around for `set_id` (picks map, else legacy columns).
+pub fn plan_option_for_set(plan: &TicketPlan, set_id: Uuid) -> Option<String> {
+    if let Some(value) = plan.design_picks.get(&set_id.to_string()) {
+        return value.as_str().map(str::to_string);
+    }
+    if plan.design_set_id == Some(set_id) {
+        return plan.design_option_id.clone();
+    }
+    None
 }
 
 /// Input for a verification run.
@@ -1170,6 +1253,10 @@ pub struct PlanRevisionContext {
 }
 
 fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
+    let picks_value: serde_json::Value = row
+        .try_get("design_picks")
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let design_picks = picks_value.as_object().cloned().unwrap_or_default();
     TicketPlan {
         id: row.get("id"),
         ticket_id: row.get("ticket_id"),
@@ -1181,6 +1268,7 @@ fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
         change_request: row.get("change_request"),
         design_set_id: row.get("design_set_id"),
         design_option_id: row.get("design_option_id"),
+        design_picks,
         suggest_skip_review: row.get("suggest_skip_review"),
         created_at: row.get("created_at"),
     }

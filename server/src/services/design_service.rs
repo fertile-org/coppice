@@ -109,10 +109,45 @@ pub struct CreatedSet {
     pub dir: String,
 }
 
+/// What a design set decides. Only `ui` is publishable until non-UI sets land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignKind {
+    Ui,
+    Architecture,
+    Module,
+    Refactor,
+    Dependency,
+}
+
+impl DesignKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ui => "ui",
+            Self::Architecture => "architecture",
+            Self::Module => "module",
+            Self::Refactor => "refactor",
+            Self::Dependency => "dependency",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "ui" => Some(Self::Ui),
+            "architecture" => Some(Self::Architecture),
+            "module" => Some(Self::Module),
+            "refactor" => Some(Self::Refactor),
+            "dependency" => Some(Self::Dependency),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesignSetSummary {
     pub id: Uuid,
     pub title: String,
+    pub kind: DesignKind,
     pub run_id: Uuid,
     /// Relative to the artifacts dir, as stored.
     pub dir: String,
@@ -288,17 +323,26 @@ impl<'a> DesignService<'a> {
         let options_json =
             serde_json::to_value(&options).map_err(|err| DesignError::Invalid(err.to_string()))?;
 
+        let kind: String = row.get("kind");
+        // Only UI sets ship through publish until non-UI option sets land.
+        if DesignKind::parse(&kind) != Some(DesignKind::Ui) {
+            return Err(DesignError::Invalid(
+                "only ui design sets can be published".into(),
+            ));
+        }
+
         let mut tx = self.pool.begin().await?;
-        // One published row per run. A later publish on this run replaces that card.
+        // One published row per (run, kind). A later publish replaces that card.
         sqlx::query(
             r#"
             UPDATE design_sets
             SET published_at = NULL
-            WHERE run_id = $1 AND published_at IS NOT NULL AND id <> $2
+            WHERE run_id = $1 AND kind = $3 AND published_at IS NOT NULL AND id <> $2
             "#,
         )
         .bind(run_id)
         .bind(set_id)
+        .bind(&kind)
         .execute(&mut *tx)
         .await?;
         let updated = sqlx::query(
@@ -325,6 +369,7 @@ impl<'a> DesignService<'a> {
             SET superseded_by = $1
             WHERE id <> $1
               AND published_at IS NOT NULL
+              AND kind = $5
               AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
               AND (EXISTS (
                       SELECT 1 FROM agent_runs r
@@ -343,6 +388,7 @@ impl<'a> DesignService<'a> {
         .bind(ticket_id)
         .bind(chat_session_id)
         .bind(run_id)
+        .bind(&kind)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -495,7 +541,7 @@ impl<'a> DesignService<'a> {
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, title, run_id, dir, options, chosen_option_id, recommended_option_id,
+            SELECT id, title, kind, run_id, dir, options, chosen_option_id, recommended_option_id,
                    (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
@@ -520,7 +566,7 @@ impl<'a> DesignService<'a> {
     async fn load(&self, set_id: Uuid) -> Result<sqlx::postgres::PgRow, DesignError> {
         sqlx::query(
             r#"
-            SELECT id, title, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
+            SELECT id, title, kind, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
                    recommended_option_id,
                    (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
@@ -585,9 +631,14 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
     let chosen = find(row.get("chosen_option_id"));
     let recommended = find(row.get("recommended_option_id"));
     let selected = chosen.clone().or_else(|| recommended.clone());
+    let kind_raw: String = row.get("kind");
+    let kind = DesignKind::parse(&kind_raw).ok_or_else(|| {
+        DesignError::Invalid(format!("unknown design kind {kind_raw}"))
+    })?;
     Ok(DesignSetSummary {
         id: row.get("id"),
         title: row.get("title"),
+        kind,
         run_id: row.get("run_id"),
         dir: row.get("dir"),
         options,
