@@ -365,6 +365,33 @@ impl<'a> PlanningService<'a> {
             .await?;
             (None, None, serde_json::Map::new())
         } else {
+            // Technical sets supersede by plan marker: any live technical set
+            // whose id is not marked in this plan is replaced.
+            let markers = crate::services::design_markers::design_marker_ids(body);
+            if !markers.is_empty() {
+                let newest = markers[0];
+                sqlx::query(
+                    r#"
+                    UPDATE design_sets
+                    SET superseded_by = $2
+                    WHERE ticket_id = $1
+                      AND published_at IS NOT NULL
+                      AND superseded_by IS NULL
+                      AND retired_at IS NULL
+                      AND kind IN ('architecture', 'module', 'dependency')
+                      AND NOT (id = ANY($3))
+                      AND EXISTS (
+                          SELECT 1 FROM agent_runs r
+                          WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                      )
+                    "#,
+                )
+                .bind(ticket_id)
+                .bind(newest)
+                .bind(&markers)
+                .execute(&mut *tx)
+                .await?;
+            }
             // Every live plan-run set → option (chosen or recommended). Legacy
             // columns keep the newest set for older readers.
             let designs: Vec<(Uuid, Option<String>)> = sqlx::query_as(

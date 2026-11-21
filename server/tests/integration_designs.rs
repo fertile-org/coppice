@@ -11,7 +11,7 @@ use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 use coppice_server::mcp::tools::result::take_submitted_result;
 use coppice_server::providers::AgentRunResult;
 use coppice_server::services::design_service::{
-    CreateScope, DesignError, DesignOption, DesignService,
+    CreateScope, DesignError, DesignKind, DesignOption, DesignService,
 };
 use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::run_service::RunService;
@@ -95,6 +95,7 @@ async fn create_write_publish_choose_roundtrip() {
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(ticket_uuid),
                 chat_session_id: None,
@@ -140,14 +141,17 @@ async fn create_write_publish_choose_roundtrip() {
                     id: "a".into(),
                     title: "A".into(),
                     entry: "a/index.html".into(),
-                },
+            ..Default::default()
+        },
                 DesignOption {
                     id: "b".into(),
                     title: "B".into(),
                     entry: "b/index.html".into(),
-                },
+            ..Default::default()
+        },
             ],
             "a",
+            None,
         )
         .await
         .expect("publish");
@@ -620,11 +624,13 @@ fn two_options() -> Vec<DesignOption> {
             id: "a".into(),
             title: "A".into(),
             entry: "a/index.html".into(),
+            ..Default::default()
         },
         DesignOption {
             id: "b".into(),
             title: "B".into(),
             entry: "b/index.html".into(),
+            ..Default::default()
         },
     ]
 }
@@ -644,6 +650,7 @@ async fn publish_html(
     let created = svc
         .create(
             title,
+            DesignKind::Ui,
             CreateScope {
                 ticket_id,
                 chat_session_id,
@@ -659,7 +666,7 @@ async fn publish_html(
     svc.write(created.id, run_id, "b/index.html", html_b.as_bytes())
         .await
         .expect("write b");
-    svc.publish(created.id, run_id, two_options(), "b")
+    svc.publish(created.id, run_id, two_options(), "b", None)
         .await
         .expect("publish");
     created.id
@@ -802,6 +809,7 @@ async fn ticket_design_list_is_published_newest_first() {
     DesignService::new(&fx.pool, &artifacts)
         .create(
             "Draft",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(fx.ticket_id),
                 chat_session_id: None,
@@ -1105,6 +1113,7 @@ async fn unpublished_design_is_hidden() {
     let created = svc
         .create(
             "Draft",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(fx.ticket_id),
                 chat_session_id: None,
@@ -1241,6 +1250,7 @@ async fn publish_rejects_unknown_recommendation() {
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(fx.ticket_id),
                 chat_session_id: None,
@@ -1256,7 +1266,7 @@ async fn publish_rejects_unknown_recommendation() {
             .expect("write");
     }
     let err = svc
-        .publish(created.id, run_id, two_options(), "z")
+        .publish(created.id, run_id, two_options(), "z", None)
         .await
         .unwrap_err();
     assert!(
@@ -1409,6 +1419,7 @@ async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> 
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(fx.ticket_id),
                 chat_session_id: None,
@@ -1433,14 +1444,16 @@ async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> 
             id: "a".into(),
             title: "Quiet button after the last card".into(),
             entry: "a/index.html".into(),
+            ..Default::default()
         },
         DesignOption {
             id: "b".into(),
             title: "Full-width button with Show all".into(),
             entry: "b/index.html".into(),
+            ..Default::default()
         },
     ];
-    svc.publish(created.id, run_id, options, "a")
+    svc.publish(created.id, run_id, options, "a", None)
         .await
         .expect("publish");
     created.id
@@ -2533,6 +2546,7 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(fx.ticket_id),
                 chat_session_id: None,
@@ -2557,14 +2571,16 @@ async fn slug_ids_and_prefixed_titles_get_labels_and_clean_titles() {
             id: "option-a".into(),
             title: "A: Quiet button after the last card".into(),
             entry: "option-a/index.html".into(),
+            ..Default::default()
         },
         DesignOption {
             id: "option-b".into(),
             title: "B: Full-width button with Show all".into(),
             entry: "option-b/index.html".into(),
+            ..Default::default()
         },
     ];
-    svc.publish(created.id, run_id, options, "option-a")
+    svc.publish(created.id, run_id, options, "option-a", None)
         .await
         .expect("publish");
     plans
@@ -2905,7 +2921,7 @@ async fn publishing_a_second_kind_on_the_same_run_keeps_both_live() {
         .map(|set| (set.id, set.kind))
         .collect();
     assert!(
-        live.iter().any(|(id, kind)| *id == ui_set && *kind == coppice_server::services::design_service::DesignKind::Ui),
+        live.iter().any(|(id, kind)| *id == ui_set && *kind == DesignKind::Ui),
         "{live:?}"
     );
     assert!(
@@ -2950,4 +2966,148 @@ async fn approve_strips_design_markers_from_the_description() {
         "raw marker leaked: {description}"
     );
     assert!(description.contains("## UI design"), "{description}");
+}
+
+#[tokio::test]
+async fn technical_publish_validates_options_and_reason() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = design_run().await;
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let svc = DesignService::new(&fx.pool, &artifacts);
+    let created = svc
+        .create(
+            "Event delivery",
+            DesignKind::Architecture,
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id: fx.run_id,
+                agent_id: fx.agent_id,
+            },
+        )
+        .await
+        .expect("create");
+
+    let option = |id: &str| DesignOption {
+        id: id.into(),
+        title: id.to_uppercase(),
+        changes: Some("server/src/events.rs".into()),
+        effort: Some("S".into()),
+        risk: Some("Low".into()),
+        reversibility: Some("Easy".into()),
+        rules_out: Some("Multi-node".into()),
+        sketch: Some("flowchart LR\n  A --> B".into()),
+        ..Default::default()
+    };
+
+    let four = svc
+        .publish(
+            created.id,
+            fx.run_id,
+            vec![option("a"), option("b"), option("c"), option("d")],
+            "a",
+            Some("fits Postgres"),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(four, DesignError::Invalid(ref msg) if msg.contains("2 or 3")),
+        "{four}"
+    );
+
+    let missing_reason = svc
+        .publish(
+            created.id,
+            fx.run_id,
+            vec![option("a"), option("b")],
+            "a",
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(missing_reason, DesignError::Invalid(ref msg) if msg.contains("recommendedReason")),
+        "{missing_reason}"
+    );
+
+    let id = svc
+        .publish(
+            created.id,
+            fx.run_id,
+            vec![option("a"), option("b")],
+            "a",
+            Some("fits Postgres"),
+        )
+        .await
+        .expect("publish technical");
+    assert_eq!(id, created.id);
+
+    let listed = svc.list_for_ticket(fx.ticket_id).await.expect("list");
+    let set = listed.iter().find(|s| s.id == created.id).expect("set");
+    assert_eq!(set.kind, DesignKind::Architecture);
+    assert_eq!(set.recommended_reason.as_deref(), Some("fits Postgres"));
+    assert_eq!(set.options[0].changes.as_deref(), Some("server/src/events.rs"));
+    assert_eq!(set.options[0].sketch.as_deref(), Some("flowchart LR\n  A --> B"));
+
+    assert_eq!(
+        svc.technical_sets_on_run(fx.run_id).await.expect("count"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn third_technical_kind_on_one_run_is_counted_for_the_plan_cap() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = design_run().await;
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let svc = DesignService::new(&fx.pool, &artifacts);
+
+    let option = |id: &str| DesignOption {
+        id: id.into(),
+        title: id.to_uppercase(),
+        changes: Some("x".into()),
+        effort: Some("S".into()),
+        risk: Some("Low".into()),
+        reversibility: Some("Easy".into()),
+        rules_out: Some("y".into()),
+        ..Default::default()
+    };
+
+    for kind in [
+        DesignKind::Architecture,
+        DesignKind::Module,
+        DesignKind::Dependency,
+    ] {
+        let created = svc
+            .create(
+                kind.as_str(),
+                kind,
+                CreateScope {
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    run_id: fx.run_id,
+                    agent_id: fx.agent_id,
+                },
+            )
+            .await
+            .expect("create");
+        svc.publish(
+            created.id,
+            fx.run_id,
+            vec![option("a"), option("b")],
+            "a",
+            Some("why"),
+        )
+        .await
+        .expect("publish");
+    }
+
+    assert_eq!(
+        svc.technical_sets_on_run(fx.run_id).await.expect("count"),
+        3
+    );
 }

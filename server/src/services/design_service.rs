@@ -2,9 +2,15 @@ use sqlx::{PgPool, Row};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use super::design_sketch;
+
 const ALLOWED_EXT: &[&str] = &["html", "css", "png", "jpg", "jpeg", "gif", "webp"];
 pub(crate) const MAX_FILE_BYTES: u64 = 512 * 1024;
 pub(crate) const MAX_SET_BYTES: u64 = 2 * 1024 * 1024;
+pub const MIN_OPTIONS: usize = 2;
+pub const MAX_UI_OPTIONS: usize = 4;
+pub const MAX_TECHNICAL_OPTIONS: usize = 3;
+pub const MAX_TECHNICAL_SETS_PER_PLAN: usize = 2;
 
 pub fn reject_rel_path(path: &str) -> Option<&'static str> {
     let p = std::path::Path::new(path);
@@ -31,11 +37,26 @@ pub struct CreateScope {
     pub agent_id: Uuid,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DesignOption {
     pub id: String,
     pub title: String,
+    /// HTML entry for UI sets. Empty for technical sets.
+    #[serde(default)]
     pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reversibility: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_out: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -109,7 +130,7 @@ pub struct CreatedSet {
     pub dir: String,
 }
 
-/// What a design set decides. Only `ui` is publishable until non-UI sets land.
+/// What a design set decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DesignKind {
@@ -141,6 +162,15 @@ impl DesignKind {
             _ => None,
         }
     }
+
+    /// Architecture, module, or dependency — not UI, and not `refactor` yet.
+    pub fn is_technical(self) -> bool {
+        matches!(self, Self::Architecture | Self::Module | Self::Dependency)
+    }
+
+    pub fn is_publishable(self) -> bool {
+        matches!(self, Self::Ui) || self.is_technical()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +184,8 @@ pub struct DesignSetSummary {
     pub options: Vec<DesignOption>,
     pub chosen: Option<ChosenOption>,
     pub recommended: Option<ChosenOption>,
+    /// Why the agent recommended the option (technical sets).
+    pub recommended_reason: Option<String>,
     /// The human's choice, else the agent's recommendation.
     pub selected: Option<ChosenOption>,
     pub superseded: bool,
@@ -205,7 +237,18 @@ impl<'a> DesignService<'a> {
         }
     }
 
-    pub async fn create(&self, title: &str, scope: CreateScope) -> Result<CreatedSet, DesignError> {
+    pub async fn create(
+        &self,
+        title: &str,
+        kind: DesignKind,
+        scope: CreateScope,
+    ) -> Result<CreatedSet, DesignError> {
+        if !kind.is_publishable() {
+            return Err(DesignError::Invalid(format!(
+                "design kind `{}` cannot be created yet",
+                kind.as_str()
+            )));
+        }
         let (ticket_id, chat_session_id) = match (scope.ticket_id, scope.chat_session_id) {
             (Some(ticket_id), None) => (Some(ticket_id), None),
             (None, Some(chat_session_id)) => (None, Some(chat_session_id)),
@@ -221,13 +264,14 @@ impl<'a> DesignService<'a> {
         sqlx::query(
             r#"
             INSERT INTO design_sets (
-                id, title, ticket_id, chat_session_id, run_id, agent_id, dir
+                id, title, kind, ticket_id, chat_session_id, run_id, agent_id, dir
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
         )
         .bind(id)
         .bind(title)
+        .bind(kind.as_str())
         .bind(ticket_id)
         .bind(chat_session_id)
         .bind(scope.run_id)
@@ -283,9 +327,22 @@ impl<'a> DesignService<'a> {
         run_id: Uuid,
         options: Vec<DesignOption>,
         recommended_option_id: &str,
+        recommended_reason: Option<&str>,
     ) -> Result<Uuid, DesignError> {
-        if !(2..=4).contains(&options.len()) {
-            return Err(DesignError::Invalid("publish 2 to 4 options".into()));
+        let row = self.load(set_id).await?;
+        let row_run: Uuid = row.get("run_id");
+        if row_run != run_id {
+            return Err(DesignError::Invalid("run does not match design set".into()));
+        }
+        let kind_raw: String = row.get("kind");
+        let kind = DesignKind::parse(&kind_raw).ok_or_else(|| {
+            DesignError::Invalid(format!("unknown design kind {kind_raw}"))
+        })?;
+        if !kind.is_publishable() {
+            return Err(DesignError::Invalid(format!(
+                "design kind `{}` cannot be published yet",
+                kind.as_str()
+            )));
         }
         if !options
             .iter()
@@ -295,42 +352,22 @@ impl<'a> DesignService<'a> {
                 "recommendedOptionId must be one of the options".into(),
             ));
         }
-        let row = self.load(set_id).await?;
-        let row_run: Uuid = row.get("run_id");
-        if row_run != run_id {
-            return Err(DesignError::Invalid("run does not match design set".into()));
-        }
-        let dir: String = row.get("dir");
-        let ticket_id: Option<Uuid> = row.get("ticket_id");
-        let chat_session_id: Option<Uuid> = row.get("chat_session_id");
-        let (artifacts, root) = resolve_set_dir(&self.artifacts_dir, &dir)?;
-        for option in &options {
-            if let Some(reason) = reject_rel_path(&option.entry) {
-                return Err(DesignError::Invalid(reason.into()));
+
+        let reason = match kind {
+            DesignKind::Ui => {
+                validate_ui_options(&self.artifacts_dir, row.get("dir"), &options)?;
+                None
             }
-            let ext = Path::new(&option.entry)
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("");
-            if !ext.eq_ignore_ascii_case("html") {
-                return Err(DesignError::Invalid("entry must be html".into()));
+            _ => {
+                let reason = validate_technical_options(&options, recommended_reason)?;
+                Some(reason)
             }
-            let dest = dest_under(&artifacts, &root, &option.entry, false)?;
-            if !dest.is_file() {
-                return Err(DesignError::Invalid("missing entry file".into()));
-            }
-        }
+        };
         let options_json =
             serde_json::to_value(&options).map_err(|err| DesignError::Invalid(err.to_string()))?;
 
-        let kind: String = row.get("kind");
-        // Only UI sets ship through publish until non-UI option sets land.
-        if DesignKind::parse(&kind) != Some(DesignKind::Ui) {
-            return Err(DesignError::Invalid(
-                "only ui design sets can be published".into(),
-            ));
-        }
-
+        let ticket_id: Option<Uuid> = row.get("ticket_id");
+        let chat_session_id: Option<Uuid> = row.get("chat_session_id");
         let mut tx = self.pool.begin().await?;
         // One published row per (run, kind). A later publish replaces that card.
         sqlx::query(
@@ -342,13 +379,13 @@ impl<'a> DesignService<'a> {
         )
         .bind(run_id)
         .bind(set_id)
-        .bind(&kind)
+        .bind(kind.as_str())
         .execute(&mut *tx)
         .await?;
         let updated = sqlx::query(
             r#"
             UPDATE design_sets
-            SET options = $1, recommended_option_id = $3,
+            SET options = $1, recommended_option_id = $3, recommended_reason = $4,
                 published_at = COALESCE(published_at, now())
             WHERE id = $2
             "#,
@@ -356,6 +393,7 @@ impl<'a> DesignService<'a> {
         .bind(&options_json)
         .bind(set_id)
         .bind(recommended_option_id)
+        .bind(reason.as_deref())
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -363,36 +401,93 @@ impl<'a> DesignService<'a> {
             tx.rollback().await?;
             return Err(DesignError::NotFound);
         }
+        // UI still supersedes by kind. Technical sets supersede by plan marker
+        // when the plan is saved (see PlanningService::insert_plan).
+        if kind == DesignKind::Ui {
+            sqlx::query(
+                r#"
+                UPDATE design_sets
+                SET superseded_by = $1
+                WHERE id <> $1
+                  AND published_at IS NOT NULL
+                  AND kind = $5
+                  AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
+                  AND (EXISTS (
+                          SELECT 1 FROM agent_runs r
+                          WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                      )) = (EXISTS (
+                          SELECT 1 FROM agent_runs r
+                          WHERE r.id = $4 AND r.job_type = 'plan_ticket'
+                      ))
+                  AND (
+                      ($2::uuid IS NOT NULL AND ticket_id = $2)
+                      OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
+                  )
+                "#,
+            )
+            .bind(set_id)
+            .bind(ticket_id)
+            .bind(chat_session_id)
+            .bind(run_id)
+            .bind(kind.as_str())
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(set_id)
+    }
+
+    /// Count technical sets published on this run (for the plan set cap).
+    pub async fn technical_sets_on_run(&self, run_id: Uuid) -> Result<usize, DesignError> {
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM design_sets
+            WHERE run_id = $1
+              AND published_at IS NOT NULL
+              AND kind IN ('architecture', 'module', 'dependency')
+            "#,
+        )
+        .bind(run_id)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(count as usize)
+    }
+
+    /// Mark live plan-run technical sets not listed in `keep` as superseded by
+    /// the newest kept set (or leave superseded_by null when keep is empty —
+    /// caller should retire via noVisibleChange instead).
+    pub async fn supersede_technical_not_in(
+        &self,
+        ticket_id: Uuid,
+        keep: &[Uuid],
+    ) -> Result<(), DesignError> {
+        if keep.is_empty() {
+            return Ok(());
+        }
+        let newest = *keep.first().unwrap_or(&Uuid::nil());
         sqlx::query(
             r#"
             UPDATE design_sets
-            SET superseded_by = $1
-            WHERE id <> $1
+            SET superseded_by = $2
+            WHERE ticket_id = $1
               AND published_at IS NOT NULL
-              AND kind = $5
-              AND created_at < (SELECT created_at FROM design_sets WHERE id = $1)
-              AND (EXISTS (
-                      SELECT 1 FROM agent_runs r
-                      WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
-                  )) = (EXISTS (
-                      SELECT 1 FROM agent_runs r
-                      WHERE r.id = $4 AND r.job_type = 'plan_ticket'
-                  ))
-              AND (
-                  ($2::uuid IS NOT NULL AND ticket_id = $2)
-                  OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
+              AND superseded_by IS NULL
+              AND retired_at IS NULL
+              AND kind IN ('architecture', 'module', 'dependency')
+              AND NOT (id = ANY($3))
+              AND EXISTS (
+                  SELECT 1 FROM agent_runs r
+                  WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
               )
             "#,
         )
-        .bind(set_id)
         .bind(ticket_id)
-        .bind(chat_session_id)
-        .bind(run_id)
-        .bind(&kind)
-        .execute(&mut *tx)
+        .bind(newest)
+        .bind(keep)
+        .execute(self.pool)
         .await?;
-        tx.commit().await?;
-        Ok(set_id)
+        Ok(())
     }
 
     pub async fn get(&self, set_id: Uuid) -> Result<DesignSetRecord, DesignError> {
@@ -542,6 +637,7 @@ impl<'a> DesignService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT id, title, kind, run_id, dir, options, chosen_option_id, recommended_option_id,
+                   recommended_reason,
                    (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
@@ -567,7 +663,7 @@ impl<'a> DesignService<'a> {
         sqlx::query(
             r#"
             SELECT id, title, kind, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
-                   recommended_option_id,
+                   recommended_option_id, recommended_reason,
                    (superseded_by IS NOT NULL OR retired_at IS NOT NULL) AS superseded,
                    EXISTS (
                        SELECT 1 FROM agent_runs r
@@ -635,6 +731,7 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
     let kind = DesignKind::parse(&kind_raw).ok_or_else(|| {
         DesignError::Invalid(format!("unknown design kind {kind_raw}"))
     })?;
+    let recommended_reason: Option<String> = row.try_get("recommended_reason").ok().flatten();
     Ok(DesignSetSummary {
         id: row.get("id"),
         title: row.get("title"),
@@ -644,11 +741,75 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
         options,
         chosen,
         recommended,
+        recommended_reason,
         selected,
         superseded: row.get("superseded"),
         from_plan_run: row.get("from_plan_run"),
         inherited: false,
     })
+}
+
+fn require_field(label: &str, value: Option<&str>) -> Result<String, DesignError> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| DesignError::Invalid(format!("{label} is required")))
+}
+
+fn validate_ui_options(
+    artifacts_dir: &Path,
+    dir: String,
+    options: &[DesignOption],
+) -> Result<(), DesignError> {
+    if !(MIN_OPTIONS..=MAX_UI_OPTIONS).contains(&options.len()) {
+        return Err(DesignError::Invalid("publish 2 to 4 options".into()));
+    }
+    let (artifacts, root) = resolve_set_dir(artifacts_dir, &dir)?;
+    for option in options {
+        if let Some(reason) = reject_rel_path(&option.entry) {
+            return Err(DesignError::Invalid(reason.into()));
+        }
+        let ext = Path::new(&option.entry)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        if !ext.eq_ignore_ascii_case("html") {
+            return Err(DesignError::Invalid("entry must be html".into()));
+        }
+        let dest = dest_under(&artifacts, &root, &option.entry, false)?;
+        if !dest.is_file() {
+            return Err(DesignError::Invalid("missing entry file".into()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_technical_options(
+    options: &[DesignOption],
+    recommended_reason: Option<&str>,
+) -> Result<String, DesignError> {
+    if !(MIN_OPTIONS..=MAX_TECHNICAL_OPTIONS).contains(&options.len()) {
+        return Err(DesignError::Invalid(
+            "publish 2 or 3 technical options".into(),
+        ));
+    }
+    let reason = require_field("recommendedReason", recommended_reason)?;
+    for option in options {
+        if !option.entry.trim().is_empty() {
+            return Err(DesignError::Invalid(
+                "technical options must not set entry".into(),
+            ));
+        }
+        require_field("changes", option.changes.as_deref())?;
+        require_field("effort", option.effort.as_deref())?;
+        require_field("risk", option.risk.as_deref())?;
+        require_field("reversibility", option.reversibility.as_deref())?;
+        require_field("rulesOut", option.rules_out.as_deref())?;
+        design_sketch::validate_sketch(option.sketch.as_deref())
+            .map_err(DesignError::Invalid)?;
+    }
+    Ok(reason)
 }
 
 fn options_from_row(row: &sqlx::postgres::PgRow) -> Result<Vec<DesignOption>, DesignError> {
@@ -736,7 +897,7 @@ fn invalid_io(err: std::io::Error) -> DesignError {
 mod tests {
     use super::{
         chosen_option, option_display_title, option_label, reject_rel_path, resolve_set_dir,
-        DesignError, DesignOption,
+        validate_technical_options, DesignError, DesignKind, DesignOption,
     };
 
     #[test]
@@ -805,15 +966,78 @@ mod tests {
                 id: "option-a".into(),
                 title: "A: Quiet".into(),
                 entry: "a/index.html".into(),
+                ..Default::default()
             },
             DesignOption {
                 id: "option-b".into(),
                 title: "B: Full".into(),
                 entry: "b/index.html".into(),
+                ..Default::default()
             },
         ];
         let b = chosen_option(&options, 1);
         assert_eq!((b.label.as_str(), b.display_title.as_str()), ("B", "Full"));
         assert_eq!(b.title, "B: Full");
+    }
+
+    fn tech_option(id: &str) -> DesignOption {
+        DesignOption {
+            id: id.into(),
+            title: id.to_uppercase(),
+            changes: Some("server/src/x.rs".into()),
+            effort: Some("S".into()),
+            risk: Some("Low".into()),
+            reversibility: Some("Easy".into()),
+            rules_out: Some("Nothing".into()),
+            sketch: Some("flowchart LR\n  A --> B".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn technical_publish_requires_fields_reason_and_two_or_three_options() {
+        let ok = validate_technical_options(&[tech_option("a"), tech_option("b")], Some("fits"));
+        assert_eq!(ok.unwrap(), "fits");
+
+        let four = vec![
+            tech_option("a"),
+            tech_option("b"),
+            tech_option("c"),
+            tech_option("d"),
+        ];
+        assert!(validate_technical_options(&four, Some("x"))
+            .unwrap_err()
+            .to_string()
+            .contains("2 or 3"));
+
+        assert!(validate_technical_options(&[tech_option("a"), tech_option("b")], None)
+            .unwrap_err()
+            .to_string()
+            .contains("recommendedReason"));
+
+        let mut with_entry = tech_option("a");
+        with_entry.entry = "a.html".into();
+        assert!(validate_technical_options(&[with_entry, tech_option("b")], Some("x"))
+            .unwrap_err()
+            .to_string()
+            .contains("must not set entry"));
+
+        let mut bad_sketch = tech_option("a");
+        bad_sketch.sketch = Some("%%{init: {}}%%\nflowchart LR\nA-->B".into());
+        assert!(validate_technical_options(&[bad_sketch, tech_option("b")], Some("x"))
+            .unwrap_err()
+            .to_string()
+            .contains("init"));
+    }
+
+    #[test]
+    fn only_ui_and_technical_kinds_are_publishable() {
+        assert!(DesignKind::Ui.is_publishable());
+        assert!(DesignKind::Architecture.is_publishable());
+        assert!(DesignKind::Module.is_publishable());
+        assert!(DesignKind::Dependency.is_publishable());
+        assert!(!DesignKind::Refactor.is_publishable());
+        assert!(!DesignKind::Refactor.is_technical());
+        assert!(DesignKind::Architecture.is_technical());
     }
 }

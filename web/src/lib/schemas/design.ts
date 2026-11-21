@@ -6,6 +6,12 @@ export const designOptionSchema = z.object({
   entry: z.string(),
   label: z.string(),
   displayTitle: z.string(),
+  changes: z.string().optional(),
+  effort: z.string().optional(),
+  risk: z.string().optional(),
+  reversibility: z.string().optional(),
+  rulesOut: z.string().optional(),
+  sketch: z.string().optional(),
 });
 
 export const chosenDesignOptionSchema = z.object({
@@ -32,6 +38,7 @@ export const designSetSchema = z.object({
   options: z.array(designOptionSchema),
   chosen: chosenDesignOptionSchema.nullable(),
   recommended: chosenDesignOptionSchema.nullable(),
+  recommendedReason: z.string().nullable().optional(),
   selected: chosenDesignOptionSchema.nullable(),
   superseded: z.boolean(),
   fromPlanRun: z.boolean(),

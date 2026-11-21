@@ -33,11 +33,16 @@ pub const BUILTIN_SKILLS: &[(&str, &str)] = &[
 
 const DESIGN_PLUGIN_JSON: &str =
     include_str!("../../builtin-plugins/design/.claude-plugin/plugin.json");
-const DESIGN_SKILL: &str =
+const DESIGN_UI_SKILL: &str =
     include_str!("../../builtin-plugins/design/skills/design-ui-options/SKILL.md");
+const DESIGN_TECHNICAL_SKILL: &str =
+    include_str!("../../builtin-plugins/design/skills/design-technical-options/SKILL.md");
 
-/// How agents load the design skill: `<plugin>:<skill>`.
+/// How agents load the UI design skill: `<plugin>:<skill>`.
 pub const DESIGN_SKILL_ID: &str = "design:design-ui-options";
+
+/// How agents load the technical options skill: `<plugin>:<skill>`.
+pub const DESIGN_TECHNICAL_SKILL_ID: &str = "design:design-technical-options";
 
 /// Writes the embedded built-in skills to `<dir>/coppice/skills/<name>/SKILL.md`.
 /// The `coppice/skills` subtree is replaced wholesale so an upgrade both
@@ -63,9 +68,14 @@ pub fn materialize_builtin(dir: &Path) -> io::Result<()> {
     let manifest_dir = design_root.join(".claude-plugin");
     std::fs::create_dir_all(&manifest_dir)?;
     std::fs::write(manifest_dir.join("plugin.json"), DESIGN_PLUGIN_JSON)?;
-    let skill_dir = design_root.join("skills").join("design-ui-options");
-    std::fs::create_dir_all(&skill_dir)?;
-    std::fs::write(skill_dir.join("SKILL.md"), DESIGN_SKILL)?;
+    for (name, contents) in [
+        ("design-ui-options", DESIGN_UI_SKILL),
+        ("design-technical-options", DESIGN_TECHNICAL_SKILL),
+    ] {
+        let skill_dir = design_root.join("skills").join(name);
+        std::fs::create_dir_all(&skill_dir)?;
+        std::fs::write(skill_dir.join("SKILL.md"), contents)?;
+    }
     Ok(())
 }
 
@@ -74,19 +84,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn design_skill_id_matches_the_shipped_skill() {
-        let (plugin, name) = DESIGN_SKILL_ID.split_once(':').unwrap();
-        assert_eq!(plugin, "design");
-        assert!(DESIGN_SKILL.contains(&format!("name: {name}\n")));
+    fn design_skill_ids_match_the_shipped_skills() {
+        for (id, body) in [
+            (DESIGN_SKILL_ID, DESIGN_UI_SKILL),
+            (DESIGN_TECHNICAL_SKILL_ID, DESIGN_TECHNICAL_SKILL),
+        ] {
+            let (plugin, name) = id.split_once(':').unwrap();
+            assert_eq!(plugin, "design");
+            assert!(body.contains(&format!("name: {name}\n")), "{id}");
+        }
     }
 
     #[test]
-    fn materialize_builtin_writes_design_skill() {
+    fn materialize_builtin_writes_both_design_skills() {
         let dir = tempfile::tempdir().unwrap();
         materialize_builtin(dir.path()).unwrap();
         assert!(dir
             .path()
             .join("design/skills/design-ui-options/SKILL.md")
+            .is_file());
+        assert!(dir
+            .path()
+            .join("design/skills/design-technical-options/SKILL.md")
             .is_file());
         assert!(dir
             .path()

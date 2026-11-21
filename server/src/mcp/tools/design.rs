@@ -1,6 +1,6 @@
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::design_service::{
-    ChosenOption, CreateScope, DesignError, DesignOption, DesignService,
+    ChosenOption, CreateScope, DesignError, DesignKind, DesignOption, DesignService,
 };
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -12,9 +12,14 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
     match name {
         "design__create" => {
             let title = required_str(&args, "title")?;
-            let created = svc.create(title, scope).await.map_err(map_err)?;
+            let kind = parse_kind(args.get("kind").and_then(Value::as_str))?;
+            let created = svc.create(title, kind, scope).await.map_err(map_err)?;
             let dir = PathBuf::from(&ctx.state.config.storage.artifacts_dir).join(&created.dir);
-            Ok(json!({ "setId": created.id, "dir": dir.display().to_string() }))
+            Ok(json!({
+                "setId": created.id,
+                "dir": dir.display().to_string(),
+                "kind": kind.as_str(),
+            }))
         }
         "design__write" => {
             let set_id = required_uuid(&args, "setId")?;
@@ -34,8 +39,11 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
             let options: Vec<DesignOption> = serde_json::from_value(options)
                 .map_err(|err| ToolError::InvalidArgs(err.to_string()))?;
             let recommended = required_str(&args, "recommendedOptionId")?;
+            let reason = args
+                .get("recommendedReason")
+                .and_then(Value::as_str);
             let id = svc
-                .publish(set_id, ctx.scope.run_id, options, recommended)
+                .publish(set_id, ctx.scope.run_id, options, recommended, reason)
                 .await
                 .map_err(map_err)?;
             Ok(json!({ "setId": id }))
@@ -61,9 +69,11 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
                     json!({
                         "id": set.id,
                         "title": set.title,
+                        "kind": set.kind.as_str(),
                         "options": set.options,
                         "chosen": pick(&set.chosen),
                         "recommended": pick(&set.recommended),
+                        "recommendedReason": set.recommended_reason,
                         "selected": pick(&set.selected),
                         "superseded": set.superseded,
                         "inherited": set.inherited,
@@ -116,6 +126,17 @@ fn create_scope(ctx: &ToolCtx<'_>) -> Result<CreateScope, ToolError> {
         run_id: ctx.scope.run_id,
         agent_id: ctx.scope.agent_id,
     })
+}
+
+fn parse_kind(raw: Option<&str>) -> Result<DesignKind, ToolError> {
+    match raw {
+        None | Some("") => Ok(DesignKind::Ui),
+        Some(raw) => DesignKind::parse(raw).ok_or_else(|| {
+            ToolError::InvalidArgs(format!(
+                "kind must be ui, architecture, module, or dependency (got `{raw}`)"
+            ))
+        }),
+    }
 }
 
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {

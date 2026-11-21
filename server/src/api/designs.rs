@@ -42,18 +42,37 @@ struct DesignOptionResponse {
     entry: String,
     label: String,
     display_title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reversibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rules_out: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sketch: Option<String>,
 }
 
 fn option_responses(options: Vec<DesignOption>) -> Vec<DesignOptionResponse> {
     (0..options.len())
         .map(|index| {
             let shown = chosen_option(&options, index);
+            let option = &options[index];
             DesignOptionResponse {
                 id: shown.id,
                 title: shown.title,
-                entry: options[index].entry.clone(),
+                entry: option.entry.clone(),
                 label: shown.label,
                 display_title: shown.display_title,
+                changes: option.changes.clone(),
+                effort: option.effort.clone(),
+                risk: option.risk.clone(),
+                reversibility: option.reversibility.clone(),
+                rules_out: option.rules_out.clone(),
+                sketch: option.sketch.clone(),
             }
         })
         .collect()
@@ -69,6 +88,8 @@ struct DesignSetResponse {
     options: Vec<DesignOptionResponse>,
     chosen: Option<ChosenOption>,
     recommended: Option<ChosenOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recommended_reason: Option<String>,
     selected: Option<ChosenOption>,
     superseded: bool,
     from_plan_run: bool,
@@ -105,6 +126,7 @@ async fn to_response(
         options: option_responses(set.options),
         chosen: set.chosen,
         recommended: set.recommended,
+        recommended_reason: set.recommended_reason,
         selected: set.selected,
         superseded: set.superseded,
         from_plan_run: set.from_plan_run,
