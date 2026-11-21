@@ -8,10 +8,19 @@ export interface SplitLane {
   tickets: Ticket[];
 }
 
+function familyFinished(progress: SplitProgress): boolean {
+  return (
+    progress.children.length > 0 &&
+    progress.children.every((child) => child.archived || child.status === 'done')
+  );
+}
+
 /**
  * Plan-review splits (`splitProgress`) share a lane while the parent is on the
  * board, not archived, and not Done. A missing, archived, or finished parent
- * sends the family back to the columns. Other parent links stay in the columns.
+ * sends the family back to the columns, and so does a family whose children are all
+ * Done or archived (an archived child is hidden, so the lane would stay empty).
+ * Other parent links stay in the columns.
  */
 export function splitLanes(
   tickets: readonly Ticket[],
@@ -32,7 +41,8 @@ export function splitLanes(
       !progress ||
       !parent ||
       parent.archivedAt ||
-      parent.status === 'done'
+      parent.status === 'done' ||
+      familyFinished(progress)
     ) {
       rest.push(ticket);
       continue;

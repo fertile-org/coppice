@@ -104,6 +104,41 @@ describe('splitLanes', () => {
     expect(ids('backlog', new Set(['parent']))).toEqual(['plain']);
   });
 
+  it('returns the family to the columns once every child is Done or archived', () => {
+    const child = (id: string, status: TicketStatus, archived: boolean) => ({
+      id,
+      title: id,
+      status,
+      position: 1,
+      archived,
+      merged: status === 'done',
+    });
+    const family = (children: ReturnType<typeof child>[]) => {
+      const split = progress({ children });
+      return [
+        makeTicket({ id: 'parent', title: 'P', status: 'in_progress', splitProgress: split }),
+        makeTicket({
+          id: 'c1',
+          title: 'c1',
+          status: 'done',
+          parentTicketId: 'parent',
+          splitProgress: { ...split, position: 1 },
+        }),
+      ];
+    };
+
+    const finished = splitLanes(
+      family([child('c1', 'done', false), child('c2', 'ready', true)]),
+    );
+    expect(finished.lanes).toHaveLength(0);
+    expect(finished.rest).toHaveLength(2);
+
+    const open = splitLanes(
+      family([child('c1', 'done', false), child('c2', 'ready', false)]),
+    );
+    expect(open.lanes).toHaveLength(1);
+  });
+
   it('returns a finished split to the columns', () => {
     const finishedParent = makeTicket({
       id: 'parent',
