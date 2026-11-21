@@ -83,16 +83,17 @@ pub fn setup_worktree_with_commit(
     repo_name: &str,
     ticket_id: &str,
 ) -> PathBuf {
-    use coppice_server::services::worktree_service::compute_paths;
+    use coppice_server::services::worktree_service::{compute_paths, legacy_ticket_branch};
     let ticket_uuid: uuid::Uuid = ticket_id.parse().expect("ticket uuid");
     let paths = compute_paths(worktrees_root, repo_name, ticket_uuid);
+    let branch = legacy_ticket_branch(ticket_uuid);
     std::fs::create_dir_all(&paths.worktree_dir).expect("worktree dir");
     let worktree_output = Command::new("git")
         .args([
             "worktree",
             "add",
             "-B",
-            &paths.branch_name,
+            &branch,
             paths.worktree_dir.to_str().unwrap(),
             "main",
         ])

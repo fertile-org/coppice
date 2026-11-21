@@ -7,7 +7,7 @@ use coppice_server::copy::plan::{
 };
 use coppice_server::services::design_service::{CreateScope, DesignOption, DesignService};
 use coppice_server::services::planning_service::PlanningService;
-use coppice_server::services::worktree_service::compute_paths;
+use coppice_server::services::worktree_service::legacy_ticket_branch;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -593,14 +593,11 @@ async fn open_planned_repo(
     let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
     let worktree =
         common::setup_worktree_with_commit(&local_path, &worktrees, "test-repo", &ticket_id);
-    let paths = compute_paths(
-        &worktrees,
-        "test-repo",
-        Uuid::parse_str(&ticket_id).expect("ticket uuid"),
-    );
+    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
+    let branch = legacy_ticket_branch(ticket_uuid);
     let git = TicketGit {
         main_sha: git_stdout(&local_path, &["rev-parse", "main"]),
-        branch_sha: git_stdout(&local_path, &["rev-parse", &paths.branch_name]),
+        branch_sha: git_stdout(&local_path, &["rev-parse", &branch]),
         worktree,
         repo: local_path,
         _repo_dir: repo_dir,

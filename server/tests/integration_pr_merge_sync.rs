@@ -15,7 +15,6 @@ use coppice_server::services::pr_merge_sync::{
     self, leftover_local_commits_comment, merge_recorded_comment,
 };
 use coppice_server::services::ticket_attachments;
-use coppice_server::services::worktree_service::compute_paths;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -178,8 +177,8 @@ fn branch_exists(repo: &Path, ticket_id: Uuid) -> bool {
         .success()
 }
 
-fn ticket_branch(worktrees: &Path, ticket_id: Uuid) -> String {
-    compute_paths(worktrees, "test-repo", ticket_id).branch_name
+fn ticket_branch(_worktrees: &Path, ticket_id: Uuid) -> String {
+    coppice_server::services::worktree_service::legacy_ticket_branch(ticket_id)
 }
 
 fn merged_pr(head_sha: &str, base: &str) -> Value {

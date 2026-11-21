@@ -45,7 +45,8 @@ use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{
-    compute_paths, finalize_worktree_git, format_git_comment_footer, git_head_sha,
+    compute_paths, ensure_ticket_branch_name, finalize_worktree_git, format_git_comment_footer,
+    git_head_sha,
     sync_worktree_to_branch_tip, GitAuthor, WorktreeService,
 };
 use crate::util::error_format::format_job_error;
@@ -553,13 +554,16 @@ async fn execute_job(
     let worktree_service = WorktreeService::new(state.config.agent.worktrees_path.clone().into());
     let paths = compute_paths(worktree_service.worktrees_root(), &repo_name, ticket_id);
     let git_dir = PathBuf::from(&local_path);
+    let branch_name = ensure_ticket_branch_name(pool, ticket_id, &ticket.ticket.title)
+        .await
+        .context("persist ticket branch name")?;
 
     worktree_service
-        .ensure_worktree(&git_dir, &paths.worktree_dir, &paths.branch_name)
+        .ensure_worktree(&git_dir, &paths.worktree_dir, &branch_name)
         .await
         .context("ensure worktree")?;
 
-    sync_worktree_to_branch_tip(&git_dir, &paths.worktree_dir, &paths.branch_name)
+    sync_worktree_to_branch_tip(&git_dir, &paths.worktree_dir, &branch_name)
         .await
         .context("sync worktree to branch tip")?;
 
@@ -570,7 +574,7 @@ async fn execute_job(
         .record_worktree_start(
             run.id,
             &paths.worktree_dir.to_string_lossy(),
-            &paths.branch_name,
+            &branch_name,
             &start_sha,
         )
         .await
@@ -837,7 +841,7 @@ async fn execute_job(
         );
         match finalize_worktree_git(
             &paths.worktree_dir,
-            &paths.branch_name,
+            &branch_name,
             &commit_message,
             Some(&GitAuthor {
                 name: state.config.git.author_name.clone(),
@@ -897,7 +901,7 @@ async fn execute_job(
             &result,
             apply,
             Some(worktree_path),
-            Some(paths.branch_name.clone()),
+            Some(branch_name.clone()),
         )
         .await
         .context("finish run via orchestrator")?;

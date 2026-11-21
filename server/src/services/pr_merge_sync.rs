@@ -26,7 +26,7 @@ use crate::services::ticket_attachments::{self, AttachmentFolderEnd};
 use crate::services::ticket_git_service::{TicketGitError, TicketGitService};
 use crate::services::ticket_service::TicketService;
 use crate::services::worktree_cleanup;
-use crate::services::worktree_service::compute_paths;
+use crate::services::worktree_service::resolve_stored_branch;
 use crate::AppState;
 
 pub const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -42,11 +42,11 @@ pub struct SweepOutcome {
 
 struct EligibleTicket {
     ticket_id: Uuid,
-    repo_name: String,
     remote_url: String,
     default_branch: String,
     forge_token_secret_id: Uuid,
     accepted_sha: String,
+    branch_name: Option<String>,
 }
 
 struct MatchedPr {
@@ -163,7 +163,7 @@ async fn sync_ticket(
         }
     };
 
-    let branch = compute_paths(worktrees_root, &row.repo_name, row.ticket_id).branch_name;
+    let branch = resolve_stored_branch(row.ticket_id, row.branch_name.as_deref());
     let matched = match find_matching_pr(
         client,
         github_api_base,
@@ -385,7 +385,7 @@ async fn list_eligible(pool: &sqlx::PgPool) -> Result<Vec<EligibleTicket>, sqlx:
         r#"
         SELECT
             ticket.id,
-            repo.name,
+            ticket.branch_name,
             repo.remote_url,
             repo.default_branch,
             repo.forge_token_secret_id,
@@ -410,11 +410,11 @@ async fn list_eligible(pool: &sqlx::PgPool) -> Result<Vec<EligibleTicket>, sqlx:
         .into_iter()
         .map(|row| EligibleTicket {
             ticket_id: row.get("id"),
-            repo_name: row.get("name"),
             remote_url: row.get("remote_url"),
             default_branch: row.get("default_branch"),
             forge_token_secret_id: row.get("forge_token_secret_id"),
             accepted_sha: row.get("head_sha"),
+            branch_name: row.get("branch_name"),
         })
         .collect())
 }

@@ -1910,7 +1910,7 @@ async function record(scene) {
       });
       await psql(`
         UPDATE tickets
-        SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
+        SET branch_name = ${sqlQuote(`agent/${short}-theme-toggle`)}
         WHERE id = ${sqlQuote(ticket.id)}::uuid;
       `);
       await reloadBoard();

@@ -20,7 +20,8 @@ use crate::services::pr_create_url::{
 use crate::services::secret_service::SecretService;
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::services::worktree_service::{
-    compute_paths, finalize_worktree_git, sync_worktree_to_branch_tip, GitAuthor, WorktreeError,
+    compute_paths, finalize_worktree_git, resolve_stored_branch, sync_worktree_to_branch_tip,
+    GitAuthor, WorktreeError,
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -267,11 +268,13 @@ impl<'a> TicketGitService<'a> {
             .await?;
 
         let paths = compute_paths(&self.worktrees_root, &repo_name, ticket_id);
+        let ticket_branch =
+            resolve_stored_branch(ticket_id, ticket.ticket.branch_name.as_deref());
 
         Ok(TicketGitContext {
             git_dir: PathBuf::from(local_path),
             worktree_dir: paths.worktree_dir,
-            ticket_branch: paths.branch_name,
+            ticket_branch,
             default_branch,
             remote_url,
             forge_token_secret_id,
@@ -791,8 +794,9 @@ pub enum WorktreeCleanup {
 
 impl TicketGitService<'_> {
     /// Remove a finished (archived or merged) ticket's worktree and prune its
-    /// local `agent/TICKET-*` branch. Safe to call again. Keeps a worktree
-    /// with uncommitted changes and never touches one with an active run.
+    /// local ticket branch (`tickets.branch_name`, or legacy `agent/TICKET-*`).
+    /// Safe to call again. Keeps a worktree with uncommitted changes and never
+    /// touches one with an active run.
     pub async fn cleanup_finished_worktree(
         &self,
         ticket_id: Uuid,
@@ -911,21 +915,11 @@ pub fn worktree_exists(worktree_dir: &Path) -> bool {
 }
 
 pub(crate) fn validate_branch_name(branch: &str) -> Result<(), TicketGitError> {
-    let trimmed = branch.trim();
-    if trimmed.is_empty()
-        || trimmed.len() > 200
-        || trimmed.contains("..")
-        || trimmed.starts_with('-')
-    {
-        return Err(TicketGitError::InvalidBranchName);
+    if crate::services::worktree_service::is_valid_branch_name(branch) {
+        Ok(())
+    } else {
+        Err(TicketGitError::InvalidBranchName)
     }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
-    {
-        return Err(TicketGitError::InvalidBranchName);
-    }
-    Ok(())
 }
 
 fn path_to_string(path: &Path) -> Result<String, TicketGitError> {

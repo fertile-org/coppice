@@ -18,7 +18,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 
 - Postgres-backed `agent_jobs` queue and background worker
 - Job types: `work_on_ticket` (others in later milestones)
-- Git worktree lifecycle from registered `local_path`; branch `agent/TICKET-{id}-{agent-slug}`
+- Git worktree lifecycle from registered `local_path`; branch `agent/<8hex>-<title-slug>` (stored on `tickets.branch_name` at first worktree creation; legacy `agent/TICKET-<8hex>` when the slug is empty)
 - Agent run lifecycle: queued → running → succeeded | failed | blocked | cancelled
 - Context package generation (`.agent/context.md`) with ticket, role, repo, rules, sandbox note
 - Result contract parser (product design §17)

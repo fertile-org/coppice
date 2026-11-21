@@ -32,7 +32,7 @@ use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
 use crate::services::worktree_service::{
-    compute_paths, snapshot_repo_refs, PlanScratch, PlanScratchSource, RepoRefSnapshot,
+    resolve_ticket_branch, snapshot_repo_refs, PlanScratch, PlanScratchSource, RepoRefSnapshot,
 };
 use crate::AppState;
 
@@ -228,7 +228,7 @@ fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
 }
 
 async fn plan_scratch_source(
-    state: &AppState,
+    _state: &AppState,
     pool: &PgPool,
     ticket_id: uuid::Uuid,
     repo_id: Option<uuid::Uuid>,
@@ -240,11 +240,9 @@ async fn plan_scratch_source(
         .get(repo_id)
         .await
         .context("load repo")?;
-    let paths = compute_paths(
-        Path::new(&state.config.agent.worktrees_path),
-        &repo.name,
-        ticket_id,
-    );
+    let ticket_branch = resolve_ticket_branch(pool, ticket_id)
+        .await
+        .context("resolve ticket branch for plan scratch")?;
     let fallback_branch = if repo.default_branch.is_empty() {
         "main".to_string()
     } else {
@@ -252,7 +250,7 @@ async fn plan_scratch_source(
     };
     Ok(Some(PlanScratchSource {
         git_dir: PathBuf::from(repo.local_path),
-        ticket_branch: paths.branch_name,
+        ticket_branch,
         fallback_branch,
     }))
 }

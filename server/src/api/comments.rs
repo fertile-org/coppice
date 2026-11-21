@@ -168,7 +168,9 @@ fn map_ticket_error(err: TicketError) -> StatusCode {
         | TicketError::InvalidSubstatus
         | TicketError::InvalidPriority
         | TicketError::Validation(_) => StatusCode::BAD_REQUEST,
-        TicketError::ActiveRunExists | TicketError::Archived => StatusCode::CONFLICT,
+        TicketError::ActiveRunExists
+        | TicketError::Archived
+        | TicketError::BranchNameLocked => StatusCode::CONFLICT,
         TicketError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

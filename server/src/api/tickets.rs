@@ -566,7 +566,9 @@ pub(crate) fn map_error(err: TicketError) -> StatusCode {
         | TicketError::InvalidSubstatus
         | TicketError::InvalidPriority
         | TicketError::Validation(_) => StatusCode::BAD_REQUEST,
-        TicketError::ActiveRunExists | TicketError::Archived => StatusCode::CONFLICT,
+        TicketError::ActiveRunExists
+        | TicketError::Archived
+        | TicketError::BranchNameLocked => StatusCode::CONFLICT,
         TicketError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1655,7 +1657,8 @@ fn map_restart_error(err: RestartError) -> RestartApiError {
         }
         RestartError::Run(RunError::ActiveRunExists)
         | RestartError::Ticket(TicketError::ActiveRunExists)
-        | RestartError::Ticket(TicketError::Archived) => {
+        | RestartError::Ticket(TicketError::Archived)
+        | RestartError::Ticket(TicketError::BranchNameLocked) => {
             RestartApiError::Status(StatusCode::CONFLICT)
         }
         RestartError::Run(RunError::NotFound)
