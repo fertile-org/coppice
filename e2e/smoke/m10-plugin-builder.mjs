@@ -138,22 +138,22 @@ async function createMockAgent(presetKey, name, auth) {
 }
 
 function removeInstalledPluginDir(name) {
+  const rm = `rm -rf "/data/plugins/${name}"`;
   try {
-    execFileSync(
-      'docker',
-      [
-        'compose',
-        '-f',
-        COMPOSE_FILE,
-        'exec',
-        '-T',
-        'server',
-        'sh',
-        '-c',
-        `rm -rf "/data/plugins/${name}"`,
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    // Prefer Compose v2 plugin; fall back to docker-compose (Makefile path).
+    try {
+      execFileSync(
+        'docker',
+        ['compose', '-f', COMPOSE_FILE, 'exec', '-T', 'server', 'sh', '-c', rm],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+    } catch {
+      execFileSync(
+        'docker-compose',
+        ['-f', COMPOSE_FILE, 'exec', '-T', 'server', 'sh', '-c', rm],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+    }
   } catch (err) {
     // Volume may already be empty on first run.
     console.log(`smoke: remove ${name} (ok if missing): ${err.message}`);
