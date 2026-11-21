@@ -53,7 +53,7 @@ fi
 short="$2"
 slug="acme-web"
 wt="/data/worktrees/TICKET-${short}-${slug}"
-branch="agent/TICKET-${short}"
+branch="agent/${short}-theme-toggle"
 
 rm -rf "$wt"
 git -C "$repo" worktree add -b "$branch" "$wt" >/dev/null

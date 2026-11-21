@@ -26,7 +26,7 @@ fi
 
 short="$2"
 wt="/data/worktrees/TICKET-${short}-demo"
-branch="agent/TICKET-${short}"
+branch="agent/${short}-demo-note"
 rm -rf "$wt"
 git -C "$repo" worktree add -b "$branch" "$wt" >/dev/null
 printf '%s\n' 'export function note() { return "reviewed"; }' > "$wt/src/note.js"

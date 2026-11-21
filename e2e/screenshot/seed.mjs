@@ -166,7 +166,7 @@ async function seedRepo(ticketId) {
   }
   return {
     worktree,
-    branch: `agent/TICKET-${short}`,
+    branch: `agent/${short}-bundle-postgres`,
   };
 }
 

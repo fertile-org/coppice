@@ -7,7 +7,7 @@ short="$1"
 slug="$2"
 repo=/tmp/coppice-screenshot-repo
 wt="/data/worktrees/TICKET-${short}-${slug}"
-branch="agent/TICKET-${short}"
+branch="agent/${short}-bundle-postgres"
 
 rm -rf "$repo" "$wt"
 mkdir -p "$repo/desktop/src" "$repo/server/src" "$repo/docs"

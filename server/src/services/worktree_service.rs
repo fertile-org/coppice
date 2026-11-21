@@ -1,21 +1,112 @@
 use std::path::{Path, PathBuf};
 
+use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::domain::slug::{slugify, slugify_truncated};
+
+/// Max slug length after `agent/<8hex>-` so the full name stays well under git's practical limit.
+const TITLE_SLUG_MAX: usize = 40;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreePaths {
     pub worktree_dir: PathBuf,
-    pub branch_name: String,
 }
 
-/// One worktree and branch per ticket — shared by all agents working sequentially on it.
+/// First 8 hex chars of the ticket UUID (the segment before the first `-`).
+pub fn ticket_short_id(ticket_id: Uuid) -> String {
+    ticket_id
+        .to_string()
+        .split('-')
+        .next()
+        .unwrap_or("ticket")
+        .to_string()
+}
+
+/// Legacy branch used before title slugs, and when the title yields an empty slug.
+pub fn legacy_ticket_branch(ticket_id: Uuid) -> String {
+    format!("agent/TICKET-{}", ticket_short_id(ticket_id))
+}
+
+/// `agent/<8hex>-<title-slug>`, or [`legacy_ticket_branch`] when the slug is empty.
+pub fn build_ticket_branch(ticket_id: Uuid, title: &str) -> String {
+    let slug = slugify_truncated(title, TITLE_SLUG_MAX);
+    if slug.is_empty() {
+        return legacy_ticket_branch(ticket_id);
+    }
+    format!("agent/{}-{slug}", ticket_short_id(ticket_id))
+}
+
+pub fn is_valid_branch_name(branch: &str) -> bool {
+    let trimmed = branch.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 200
+        || trimmed.contains("..")
+        || trimmed.starts_with('-')
+    {
+        return false;
+    }
+    trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+}
+
+/// Prefer a stored, valid `tickets.branch_name`; otherwise the legacy UUID name.
+pub fn resolve_stored_branch(ticket_id: Uuid, stored: Option<&str>) -> String {
+    match stored.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) if is_valid_branch_name(name) => name.to_string(),
+        _ => legacy_ticket_branch(ticket_id),
+    }
+}
+
+/// Load `tickets.branch_name` and resolve (legacy when unset or invalid).
+pub async fn resolve_ticket_branch(
+    pool: &PgPool,
+    ticket_id: Uuid,
+) -> Result<String, sqlx::Error> {
+    let stored: Option<Option<String>> =
+        sqlx::query_scalar("SELECT branch_name FROM tickets WHERE id = $1")
+            .bind(ticket_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(resolve_stored_branch(
+        ticket_id,
+        stored.flatten().as_deref(),
+    ))
+}
+
+/// Set `tickets.branch_name` once on first worktree creation. Concurrent callers share one name.
+pub async fn ensure_ticket_branch_name(
+    pool: &PgPool,
+    ticket_id: Uuid,
+    title: &str,
+) -> Result<String, sqlx::Error> {
+    let candidate = build_ticket_branch(ticket_id, title);
+    let inserted: Option<String> = sqlx::query_scalar(
+        r#"
+        UPDATE tickets
+        SET branch_name = $1, updated_at = now()
+        WHERE id = $2 AND branch_name IS NULL
+        RETURNING branch_name
+        "#,
+    )
+    .bind(&candidate)
+    .bind(ticket_id)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(name) = inserted {
+        return Ok(name);
+    }
+    resolve_ticket_branch(pool, ticket_id).await
+}
+
+/// One worktree dir per ticket — shared by all agents working sequentially on it.
+/// Branch names live on `tickets.branch_name` (see [`ensure_ticket_branch_name`]).
 pub fn compute_paths(worktrees_root: &Path, repo_name: &str, ticket_id: Uuid) -> WorktreePaths {
-    let repo_slug = crate::domain::slug::slugify(repo_name);
-    let ticket_id_str = ticket_id.to_string();
-    let ticket_short = ticket_id_str.split('-').next().unwrap_or("ticket");
+    let repo_slug = slugify(repo_name);
+    let ticket_short = ticket_short_id(ticket_id);
     WorktreePaths {
         worktree_dir: worktrees_root.join(format!("TICKET-{ticket_short}-{repo_slug}")),
-        branch_name: format!("agent/TICKET-{ticket_short}"),
     }
 }
 
@@ -537,7 +628,7 @@ mod tests {
     use uuid::uuid;
 
     #[test]
-    fn compute_paths_builds_per_ticket_strings() {
+    fn compute_paths_builds_per_ticket_dir() {
         let worktrees_root = Path::new("/data/worktrees");
         let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
 
@@ -547,7 +638,49 @@ mod tests {
             paths.worktree_dir,
             PathBuf::from("/data/worktrees/TICKET-550e8400-my-repo")
         );
-        assert_eq!(paths.branch_name, "agent/TICKET-550e8400");
+    }
+
+    #[test]
+    fn build_ticket_branch_uses_title_slug() {
+        let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            build_ticket_branch(ticket_id, "Fix login redirect"),
+            "agent/550e8400-fix-login-redirect"
+        );
+        assert_eq!(
+            build_ticket_branch(ticket_id, "!!!"),
+            "agent/TICKET-550e8400"
+        );
+        assert_eq!(
+            build_ticket_branch(ticket_id, "Đăng nhập"),
+            "agent/550e8400-dang-nhap"
+        );
+        assert!(is_valid_branch_name(&build_ticket_branch(
+            ticket_id,
+            "Fix login redirect"
+        )));
+        assert!(is_valid_branch_name(&build_ticket_branch(ticket_id, "!!!")));
+        assert!(is_valid_branch_name(&build_ticket_branch(
+            ticket_id,
+            "Đăng nhập"
+        )));
+    }
+
+    #[test]
+    fn resolve_stored_branch_prefers_valid_stored() {
+        let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            resolve_stored_branch(ticket_id, Some("agent/550e8400-fix-login")),
+            "agent/550e8400-fix-login"
+        );
+        assert_eq!(
+            resolve_stored_branch(ticket_id, Some("bad branch")),
+            "agent/TICKET-550e8400"
+        );
+        assert_eq!(
+            resolve_stored_branch(ticket_id, None),
+            "agent/TICKET-550e8400"
+        );
     }
 
     #[test]

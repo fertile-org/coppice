@@ -52,6 +52,8 @@ pub enum TicketError {
     ActiveRunExists,
     #[error("ticket is archived; unarchive before continuing")]
     Archived,
+    #[error("ticket branch name is locked after the first worktree run")]
+    BranchNameLocked,
     #[error("validation error: {0}")]
     Validation(String),
     #[error(transparent)]
@@ -422,7 +424,21 @@ impl<'a> TicketService<'a> {
             None => current.ticket.priority,
         };
         let branch_name = match branch_name {
-            Some(value) => value.map(str::to_string),
+            Some(value) => {
+                if current.ticket.branch_name.is_some()
+                    || ticket_has_worktree_bearing_run(self.pool, ticket_id).await?
+                {
+                    return Err(TicketError::BranchNameLocked);
+                }
+                if let Some(name) = value {
+                    if !crate::services::worktree_service::is_valid_branch_name(name) {
+                        return Err(TicketError::Validation(
+                            "branch name must be a valid git branch".into(),
+                        ));
+                    }
+                }
+                value.map(str::to_string)
+            }
             None => current.ticket.branch_name.clone(),
         };
         let owner_user_id = match owner_user_id {
@@ -1262,6 +1278,26 @@ impl<'a> TicketService<'a> {
         let version: i32 = row.get("content_version");
         Ok(id == approved_id && version == ticket.content_version)
     }
+}
+
+async fn ticket_has_worktree_bearing_run(
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+) -> Result<bool, TicketError> {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM agent_runs
+            WHERE ticket_id = $1
+              AND (worktree_path IS NOT NULL OR branch_name IS NOT NULL)
+        )
+        "#,
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .map_err(TicketError::from)
 }
 
 fn priority_for_create(priority: Option<TicketPriority>) -> TicketPriority {

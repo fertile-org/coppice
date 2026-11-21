@@ -6,7 +6,7 @@ use std::process::Command;
 use axum::http::StatusCode;
 use axum::Router;
 use coppice_server::services::human_review_service::HumanReviewService;
-use coppice_server::services::worktree_service::compute_paths;
+use coppice_server::services::worktree_service::{compute_paths, legacy_ticket_branch};
 use coppice_server::AppState;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -474,13 +474,14 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
 
 fn worktree_with_file(git_dir: &Path, worktrees: &Path, ticket_id: Uuid, file: &str) -> PathBuf {
     let paths = compute_paths(worktrees, "test-repo", ticket_id);
+    let branch = legacy_ticket_branch(ticket_id);
     std::fs::create_dir_all(&paths.worktree_dir).unwrap();
     let added = Command::new("git")
         .args([
             "worktree",
             "add",
             "-B",
-            &paths.branch_name,
+            &branch,
             paths.worktree_dir.to_str().unwrap(),
             "main",
         ])
