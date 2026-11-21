@@ -70,6 +70,8 @@ const samplePlugin: Plugin = {
   marketplace: null,
   external: null,
   gitRoot: null,
+  builderMade: false,
+  publishTarget: null,
   agentAccess: 'explicit',
   agentIds: [],
 };
