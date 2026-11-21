@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -7,13 +8,11 @@ use coppice_server::copy::plan::{
 };
 use coppice_server::services::design_service::{CreateScope, DesignKind, DesignOption, DesignService};
 use coppice_server::services::planning_service::PlanningService;
-use coppice_server::services::worktree_service::legacy_ticket_branch;
+use coppice_server::services::worktree_service::build_ticket_branch;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn message(res: axum::response::Response) -> String {
     let body: serde_json::Value = common::json_body(res).await;
     body["message"].as_str().unwrap_or_default().to_string()
@@ -277,13 +276,13 @@ const CANONICAL_PLAN: &str = "## Plan\n\n### Approach\nShip the parser first.\n\
 async fn post_plan(
     app: &axum::Router,
     ticket_id: &str,
-    agent_id: Uuid,
+    agent_id: Id,
     pool: &sqlx::PgPool,
     cookie: &str,
     csrf: &str,
 ) {
     let planning = PlanningService::new(pool);
-    let ticket = Uuid::parse_str(ticket_id).unwrap();
+    let ticket = Id::parse_str(ticket_id).unwrap();
     planning
         .insert_plan(ticket, agent_id, CANONICAL_PLAN, None, false, false)
         .await
@@ -318,7 +317,7 @@ async fn ask_for_changes_revises_the_plan_and_refuses_a_second_request() {
     post_plan(
         &app,
         &ticket_id,
-        Uuid::parse_str(&pm_id).unwrap(),
+        Id::parse_str(&pm_id).unwrap(),
         pool,
         &cookie,
         &csrf,
@@ -377,7 +376,7 @@ async fn approve_posts_the_note_and_the_review_checklist() {
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
-    let pm_uuid = Uuid::parse_str(&pm_id).unwrap();
+    let pm_uuid = Id::parse_str(&pm_id).unwrap();
     post_plan(&app, &ticket_id, pm_uuid, pool, &cookie, &csrf).await;
 
     let edited = app
@@ -464,7 +463,7 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
@@ -582,7 +581,7 @@ async fn open_planned_repo(
             .await;
     let pool = state.db.as_ref().expect("db");
     sqlx::query("UPDATE agents SET preset_source = $2, role = 'PM' WHERE id = $1")
-        .bind(Uuid::parse_str(&agent_id).expect("agent uuid"))
+        .bind(Id::parse_str(&agent_id).expect("agent uuid"))
         .bind(preset_source)
         .execute(pool)
         .await
@@ -592,9 +591,16 @@ async fn open_planned_repo(
     common::assign_agent_to_ticket(app, &ticket_id, &agent_id, cookie, csrf).await;
     let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
     let worktree =
-        common::setup_worktree_with_commit(&local_path, &worktrees, "test-repo", &ticket_id);
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
-    let branch = legacy_ticket_branch(ticket_uuid);
+        common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket uuid");
+    let branch = build_ticket_branch(ticket_uuid, "Test ticket");
     let git = TicketGit {
         main_sha: git_stdout(&local_path, &["rev-parse", "main"]),
         branch_sha: git_stdout(&local_path, &["rev-parse", &branch]),
@@ -897,8 +903,8 @@ async fn ask_for_changes(
 }
 
 /// Mark the queued plan run finished so another Ask for changes can start.
-async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) {
-    let run_id: Uuid = sqlx::query_scalar(
+async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Id) {
+    let run_id: Id = sqlx::query_scalar(
         r#"
         SELECT id FROM agent_runs
         WHERE ticket_id = $1 AND job_type = 'plan_ticket' AND status IN ('queued', 'running')
@@ -925,9 +931,9 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
     let planning = PlanningService::new(pool);
@@ -1058,7 +1064,7 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     // A waiting ticket is outside the review cap.
     let pool = state.db.as_ref().expect("db");
     let occupancy = coppice_server::services::review_capacity::ReviewCapacityService::new(pool)
-        .occupancy(Uuid::parse_str(&board_id).unwrap(), true)
+        .occupancy(Id::parse_str(&board_id).unwrap(), true)
         .await
         .unwrap();
     assert_eq!(occupancy, 0);
@@ -1095,8 +1101,8 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
     assert_eq!(message(empty).await, SEND_ANSWERS_REQUIRED);
 
     // The next run writes a plan.
-    let planner: Uuid = sqlx::query_scalar("SELECT assignee_agent_id FROM tickets WHERE id = $1")
-        .bind(Uuid::parse_str(&ticket_id).unwrap())
+    let planner: Id = sqlx::query_scalar("SELECT assignee_agent_id FROM tickets WHERE id = $1")
+        .bind(Id::parse_str(&ticket_id).unwrap())
         .fetch_one(pool)
         .await
         .unwrap();
@@ -1160,7 +1166,7 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let planning = PlanningService::new(pool);
     let question = |text: &str| PlanQuestion {
@@ -1217,7 +1223,7 @@ async fn a_split_at_plan_review_then_verify_parent() {
         common::bootstrap_and_login_with_auto_start_workers().await;
     let (ticket_id, _git) = open_planned_repo(&app, &state, "plan_splitter", &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
-    let parent = Uuid::parse_str(&ticket_id).unwrap();
+    let parent = Id::parse_str(&ticket_id).unwrap();
 
     let ticket = common::poll_ticket_until(
         &app,
@@ -1264,7 +1270,7 @@ async fn a_split_at_plan_review_then_verify_parent() {
     assert_eq!(ticket["splitParent"], true);
     assert_eq!(ticket["verifyAvailable"], false);
     assert!(ticket["pendingSplitRecommendation"].is_null());
-    let children: Vec<(Uuid, String, String)> = sqlx::query_as(
+    let children: Vec<(Id, String, String)> = sqlx::query_as(
         "SELECT id, title, status FROM tickets WHERE parent_ticket_id = $1 ORDER BY title",
     )
     .bind(parent)
@@ -1330,7 +1336,7 @@ async fn a_split_at_plan_review_then_verify_parent() {
         .await
         .unwrap();
     }
-    let dropped = Uuid::new_v4();
+    let dropped = Id::new();
     sqlx::query(
         r#"
         INSERT INTO tickets (id, board_id, title, description, status, parent_ticket_id, created_by, archived_at)
@@ -1363,7 +1369,7 @@ async fn a_split_at_plan_review_then_verify_parent() {
         common::create_agent_with_preset_key(&app, "backend_engineer", "Verifier", &cookie, &csrf)
             .await;
     sqlx::query("UPDATE agents SET preset_source = 'verifier' WHERE id = $1")
-        .bind(Uuid::parse_str(&verifier).unwrap())
+        .bind(Id::parse_str(&verifier).unwrap())
         .execute(pool)
         .await
         .unwrap();
@@ -1429,13 +1435,13 @@ async fn asking_for_changes_drops_the_split_proposed_with_the_plan() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
     let ticket = coppice_server::services::ticket_service::TicketService::new(pool)
-        .get(Uuid::parse_str(&ticket_id).unwrap())
+        .get(Id::parse_str(&ticket_id).unwrap())
         .await
         .unwrap();
     let spec = |title: &str| coppice_server::domain::workflow::SplitTicketSpec {
@@ -1457,7 +1463,7 @@ async fn asking_for_changes_drops_the_split_proposed_with_the_plan() {
     assert!(after["pendingSplitRecommendation"].is_null(), "{after}");
 }
 
-async fn plan_count(pool: &sqlx::PgPool, ticket_id: Uuid) -> i64 {
+async fn plan_count(pool: &sqlx::PgPool, ticket_id: Id) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM ticket_plans WHERE ticket_id = $1")
         .bind(ticket_id)
         .fetch_one(pool)
@@ -1465,7 +1471,7 @@ async fn plan_count(pool: &sqlx::PgPool, ticket_id: Uuid) -> i64 {
         .unwrap()
 }
 
-async fn intent_count(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) -> i64 {
+async fn intent_count(pool: &sqlx::PgPool, ticket_id: Id, intent: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND intent = $2")
         .bind(ticket_id)
         .bind(intent)
@@ -1483,9 +1489,9 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
     let planning = PlanningService::new(pool);
@@ -1584,7 +1590,7 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
         .as_str()
         .is_some_and(|body| body.contains("### Approach"))));
 
-    let run_id: Uuid = sqlx::query_scalar(
+    let run_id: Id = sqlx::query_scalar(
         "SELECT id FROM agent_runs WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(ticket)
@@ -1592,12 +1598,12 @@ async fn plans_and_change_requests_stay_off_the_comment_thread() {
     .await
     .unwrap();
     let scope = coppice_server::mcp::token::RunToolScope {
-        token_id: Uuid::new_v4(),
+        token_id: Id::new(),
         run_id,
         agent_id: pm,
         ticket_id: Some(ticket),
         chat_session_id: None,
-        board_id: Some(Uuid::parse_str(&board_id).unwrap()),
+        board_id: Some(Id::parse_str(&board_id).unwrap()),
         profile: coppice_server::domain::context_profile::ContextProfile::Full,
         job_type: "plan_ticket".into(),
         compaction_ticket_ids: vec![],
@@ -1635,9 +1641,9 @@ async fn a_second_ask_after_a_failed_revision_appends_on_that_revision() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
@@ -1678,7 +1684,7 @@ async fn a_second_ask_after_a_failed_revision_appends_on_that_revision() {
     );
 }
 
-async fn queued_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> (Uuid, Uuid) {
+async fn queued_plan_run(pool: &sqlx::PgPool, ticket_id: Id) -> (Id, Id) {
     sqlx::query_as(
         r#"
         SELECT id, agent_id FROM agent_runs
@@ -1701,9 +1707,9 @@ async fn approve_is_refused_while_a_plan_run_is_active() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
     ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
@@ -1718,7 +1724,7 @@ async fn approve_is_refused_while_a_plan_run_is_active() {
     .await;
     assert_eq!(approve.status(), StatusCode::BAD_REQUEST);
     assert_eq!(message(approve).await, PLAN_ALREADY_RUNNING);
-    let approved: Option<Uuid> =
+    let approved: Option<Id> =
         sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
             .bind(ticket)
             .fetch_one(pool)
@@ -1736,9 +1742,9 @@ async fn inserted_plan_records_the_selected_design() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let planning = PlanningService::new(pool);
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
@@ -1803,9 +1809,9 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let pm = Id::parse_str(&pm_id).unwrap();
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket = Id::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let planning = PlanningService::new(pool);
     post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
@@ -1907,7 +1913,7 @@ async fn planned_ticket(
     post_plan(
         app,
         &ticket_id,
-        Uuid::parse_str(&pm_id).unwrap(),
+        Id::parse_str(&pm_id).unwrap(),
         pool,
         cookie,
         csrf,
@@ -1972,13 +1978,13 @@ async fn plan_records_suggestion() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
-    let pool = _state.db.as_ref().expect("db");
+    let pool = state.db.as_ref().expect("db");
     sqlx::query("UPDATE agents SET preset_source = 'plan_skip_suggester' WHERE id = $1")
-        .bind(Uuid::parse_str(&pm_id).unwrap())
+        .bind(Id::parse_str(&pm_id).unwrap())
         .execute(pool)
         .await
         .expect("point planner at the suggesting fixture");

@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use std::path::Path;
 
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::workflow::{self, is_ready_tech_lead_refinement};
 use crate::plugins::skills::SkillInfo;
-use uuid::Uuid;
-
 pub struct HumanRequest<'a> {
     pub body: &'a str,
     pub posted_at: &'a str,
@@ -30,7 +29,7 @@ pub struct ContextInput<'a> {
     pub resume_context: Option<&'a str>,
     pub context_profile: ContextProfile,
     pub human_request: Option<HumanRequest<'a>>,
-    pub ticket_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
     pub assignee_agent_key: Option<&'a str>,
     // HumanChat: recent-thread excerpt. Full: None for owned work, Some("") for
     // other non-work runs, or Some(request) for a bounded consultation.
@@ -300,12 +299,12 @@ pub fn write_context_document(worktree: &Path, markdown: &str) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     fn full_profile_defaults() -> (
         ContextProfile,
         Option<HumanRequest<'static>>,
-        Option<Uuid>,
+        Option<Id>,
         Option<&'static str>,
         Option<&'static str>,
     ) {
@@ -537,7 +536,7 @@ mod tests {
 
     #[test]
     fn tool_first_human_agent_puts_request_before_ticket_and_keeps_snapshot() {
-        let ticket_id = Uuid::new_v4();
+        let ticket_id = Id::new();
         let mut input = fixture_full_input();
         input.context_profile = ContextProfile::HumanAgent;
         input.ticket_substatus = Some("implementing");

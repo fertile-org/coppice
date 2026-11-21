@@ -118,13 +118,15 @@ fn emit(stream: &Arc<RunStreamHandle>, event: Value) {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
 
     #[test]
     fn publishes_assistant_text_from_session_message() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = KiloConsolePublisher::new();
 
@@ -155,7 +157,7 @@ mod tests {
     #[test]
     fn ignores_user_and_tool_messages() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = KiloConsolePublisher::new();
 
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn publishes_result_contract_once() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = KiloConsolePublisher::new();
         let contract =

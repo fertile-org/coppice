@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -9,8 +10,6 @@ use coppice_server::services::review_rounds::{
     FinishedReview, ReviewRoundService, DEFAULT_REVIEW_ROUND_CAP,
 };
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn comments(
     app: &axum::Router,
     ticket_id: &str,
@@ -71,8 +70,8 @@ async fn a_capped_review_posts_one_comment_and_waits_for_a_person() {
     let agent_id =
         common::create_agent_with_preset_key(&app, "reviewer", "Reviewer", &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
 
     sqlx::query(
         r#"
@@ -139,8 +138,8 @@ async fn a_capped_review_lists_the_last_rounds_open_findings() {
     let agent_id =
         common::create_agent_with_preset_key(&app, "reviewer", "Reviewer", &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
 
     sqlx::query(
         r#"
@@ -190,7 +189,7 @@ async fn round_two_context_is_the_new_diff_and_earlier_findings() {
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
     sqlx::query(
         r#"
         UPDATE tickets
@@ -245,7 +244,7 @@ async fn the_third_change_request_stops_the_loop() {
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
     sqlx::query("UPDATE tickets SET status = 'in_review', review_round = 2 WHERE id = $1")
         .bind(ticket_uuid)
         .execute(pool)
@@ -256,7 +255,7 @@ async fn the_third_change_request_stops_the_loop() {
         new_status: Some(TicketStatus::InProgress),
         enqueue_jobs: vec![coppice_server::domain::workflow::JobRequest {
             job_type: "work_on_ticket".into(),
-            agent_id: Uuid::nil(),
+            agent_id: Id::nil(),
             resume_agent_id: None,
         }],
         ..TransitionAction::default()

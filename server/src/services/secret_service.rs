@@ -1,8 +1,7 @@
+use crate::domain::Id;
 use sqlx::PgPool;
 use sqlx::Row;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 use crate::crypto::{SecretStore, SecretStoreError};
 
 #[derive(Debug, thiserror::Error)]
@@ -28,7 +27,7 @@ impl<'a> SecretService<'a> {
     }
 
     /// Create or replace a named secret; returns the secret id.
-    pub async fn upsert_named(&self, name: &str, value: &str) -> Result<Uuid, SecretError> {
+    pub async fn upsert_named(&self, name: &str, value: &str) -> Result<Id, SecretError> {
         let _guard = crate::crypto::operations_lock().lock().await;
         let name = name.trim();
         let value = value.trim();
@@ -43,7 +42,7 @@ impl<'a> SecretService<'a> {
         let now = OffsetDateTime::now_utc();
 
         if let Some(existing_id) =
-            sqlx::query_scalar::<_, Uuid>("SELECT id FROM secrets WHERE name = $1")
+            sqlx::query_scalar::<_, Id>("SELECT id FROM secrets WHERE name = $1")
                 .bind(name)
                 .fetch_optional(self.pool)
                 .await?
@@ -64,7 +63,7 @@ impl<'a> SecretService<'a> {
             return Ok(existing_id);
         }
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO secrets (id, name, ciphertext, nonce, created_at, updated_at)
@@ -82,11 +81,11 @@ impl<'a> SecretService<'a> {
         Ok(id)
     }
 
-    pub async fn decrypt_by_id(&self, id: Uuid) -> Result<String, SecretError> {
+    pub async fn decrypt_by_id(&self, id: Id) -> Result<String, SecretError> {
         self.decrypt_named(id).await.map(|(_, value)| value)
     }
 
-    pub async fn decrypt_named(&self, id: Uuid) -> Result<(String, String), SecretError> {
+    pub async fn decrypt_named(&self, id: Id) -> Result<(String, String), SecretError> {
         let _guard = crate::crypto::operations_lock().lock().await;
         let row =
             sqlx::query("SELECT name, ciphertext, nonce, needs_reentry FROM secrets WHERE id = $1")
@@ -121,7 +120,7 @@ impl<'a> SecretService<'a> {
             if self.store.decrypt(&ciphertext, &nonce).is_ok() {
                 continue;
             }
-            let id: Uuid = row.get("id");
+            let id: Id = row.get("id");
             sqlx::query(
                 r#"
                 UPDATE secrets
@@ -137,7 +136,7 @@ impl<'a> SecretService<'a> {
         Ok(flagged)
     }
 
-    pub async fn delete_by_id(&self, id: Uuid) -> Result<(), SecretError> {
+    pub async fn delete_by_id(&self, id: Id) -> Result<(), SecretError> {
         let _guard = crate::crypto::operations_lock().lock().await;
         let result = sqlx::query("DELETE FROM secrets WHERE id = $1")
             .bind(id)

@@ -118,7 +118,7 @@ fn git_stdout(path: &Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
     use std::process::Command;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     #[test]
     fn git_spawn_error_message_explains_missing_git() {
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn missing_path_returns_path_missing() {
-        let path = std::env::temp_dir().join(format!("does-not-exist-{}", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("does-not-exist-{}", Id::new()));
         let result = verify_local_path(&path);
         assert_eq!(result.status, VerificationStatus::PathMissing);
         assert!(result.error.is_none());

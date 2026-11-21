@@ -1,4 +1,5 @@
 //! Token usage for one run, for a ticket's runs, and for the workspace.
+use crate::domain::Id;
 
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::middleware::admin::AdminUser;
@@ -16,8 +17,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agent-runs/{run_id}/usage", get(run_usage))
@@ -50,7 +49,7 @@ impl From<sqlx::Error> for UsageApiError {
 async fn run_usage(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<Json<RunUsageDetail>, UsageApiError> {
     let service = UsageService::new(pool_from_state(&state)?);
     if !service.run_exists(run_id).await? {
@@ -62,7 +61,7 @@ async fn run_usage(
 async fn ticket_usage(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketUsage>, UsageApiError> {
     let service = UsageService::new(pool_from_state(&state)?);
     if !service.ticket_exists(ticket_id).await? {
@@ -78,7 +77,7 @@ struct SummaryParams {
     to: Option<String>,
     tz: Option<String>,
     group_by: Option<String>,
-    board: Option<Uuid>,
+    board: Option<Id>,
     connector: Option<String>,
 }
 
@@ -135,7 +134,7 @@ async fn summary(
 async fn chat_session_usage(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
 ) -> Result<Json<UsageGroup>, UsageApiError> {
     let pool = pool_from_state(&state)?;
     match ChatService::new(pool).get_session(session_id, user.id).await {

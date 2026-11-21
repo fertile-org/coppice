@@ -1,10 +1,9 @@
 //! Human-admin sync of a registered repository's default branch with its remote.
+use crate::domain::Id;
 
 use std::path::PathBuf;
 
 use sqlx::{PgPool, Row};
-use uuid::Uuid;
-
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
     ahead_behind, fetch_default_refspec, fetch_gate, git_rev_parse, git_status_clean,
@@ -101,7 +100,7 @@ struct RepoGitContext {
     git_dir: PathBuf,
     default_branch: String,
     remote_url: Option<String>,
-    forge_token_secret_id: Option<Uuid>,
+    forge_token_secret_id: Option<Id>,
 }
 
 pub struct RepoGitService<'a> {
@@ -119,7 +118,7 @@ impl<'a> RepoGitService<'a> {
         }
     }
 
-    async fn resolve(&self, repo_id: Uuid) -> Result<RepoGitContext, RepoGitError> {
+    async fn resolve(&self, repo_id: Id) -> Result<RepoGitContext, RepoGitError> {
         let row = sqlx::query(
             r#"
             SELECT local_path, default_branch, verification_status, remote_url,
@@ -148,7 +147,7 @@ impl<'a> RepoGitService<'a> {
 
     pub async fn default_branch_sync_status(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<DefaultBranchSyncStatus, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
         self.build_status(&ctx).await
@@ -224,7 +223,7 @@ impl<'a> RepoGitService<'a> {
 
     pub async fn fetch_default_branch(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<DefaultBranchSyncStatus, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
         let remote_url = ctx
@@ -252,7 +251,7 @@ impl<'a> RepoGitService<'a> {
 
     pub async fn push_default_branch(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<PushDefaultBranchResult, RepoGitError> {
         if !self.push_enabled {
             return Err(RepoGitError::PushDisabled);
@@ -311,7 +310,7 @@ impl<'a> RepoGitService<'a> {
     /// Same refspec and gates as production HTTPS push; does not embed a forge token.
     pub async fn push_default_branch_to_remote(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         remote: &str,
     ) -> Result<PushDefaultBranchResult, RepoGitError> {
         if !self.push_enabled {
@@ -347,7 +346,7 @@ impl<'a> RepoGitService<'a> {
     /// default branch when strictly behind. Never merges diverged history.
     pub async fn pull_default_branch(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<PullDefaultBranchResult, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
         let remote_url = ctx
@@ -364,7 +363,7 @@ impl<'a> RepoGitService<'a> {
     /// Fetch from an explicit remote URL then fast-forward (tests with a bare sibling).
     pub async fn pull_default_branch_from_remote(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         remote: &str,
     ) -> Result<PullDefaultBranchResult, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
@@ -375,7 +374,7 @@ impl<'a> RepoGitService<'a> {
     /// report up to date. Diverged history and blocked pushes return errors (never force).
     pub async fn sync_default_branch(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<SyncDefaultBranchResult, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
         let remote_url = ctx
@@ -392,7 +391,7 @@ impl<'a> RepoGitService<'a> {
     /// Fetch from an explicit remote then sync (tests with a bare sibling).
     pub async fn sync_default_branch_with_remote(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         remote: &str,
     ) -> Result<SyncDefaultBranchResult, RepoGitError> {
         let ctx = self.resolve(repo_id).await?;
@@ -403,7 +402,7 @@ impl<'a> RepoGitService<'a> {
     async fn fetch_then_sync(
         &self,
         ctx: &RepoGitContext,
-        repo_id: Uuid,
+        repo_id: Id,
         fetch_remote: &str,
         token: Option<&str>,
         // When set (tests), push to this URL instead of the production network remote.

@@ -1,4 +1,5 @@
 //! Connector checks: a "Test connection" agent run owned by a `connector_checks` row.
+use crate::domain::Id;
 
 use crate::domain::connector_check::{sanitize_failure, CheckStatus};
 use crate::services::agent_service::{AgentError, AgentService};
@@ -10,8 +11,6 @@ use sqlx::Row;
 use std::collections::HashMap;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 const ONE_ACTIVE_CHECK_INDEX: &str = "connector_checks_one_active_per_connector";
 const SERVER_RESTARTED: &str = "server restarted";
 
@@ -49,7 +48,7 @@ impl From<RunError> for CheckError {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckSummary {
-    pub id: Uuid,
+    pub id: Id,
     pub status: &'static str,
     pub failure: Option<String>,
     pub created_at: String,
@@ -65,12 +64,12 @@ pub struct CheckToolCall {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckDetail {
-    pub id: Uuid,
+    pub id: Id,
     pub connector: String,
-    pub agent_id: Uuid,
+    pub agent_id: Id,
     pub status: &'static str,
     pub failure: Option<String>,
-    pub run_id: Option<Uuid>,
+    pub run_id: Option<Id>,
     pub created_at: String,
     pub finished_at: Option<String>,
     pub tool_calls: Vec<CheckToolCall>,
@@ -92,9 +91,9 @@ impl<'a> ConnectorCheckService<'a> {
         &self,
         config: &AppConfig,
         connector: &str,
-        agent_id: Uuid,
-        created_by: Uuid,
-    ) -> Result<(Uuid, Uuid), CheckError> {
+        agent_id: Id,
+        created_by: Id,
+    ) -> Result<(Id, Id), CheckError> {
         let agent = AgentService::new(self.pool)
             .get(agent_id)
             .await
@@ -113,7 +112,7 @@ impl<'a> ConnectorCheckService<'a> {
             coppice_config::ConnectorSwitch::On | coppice_config::ConnectorSwitch::Automatic => {}
         }
 
-        let check_id = Uuid::new_v4();
+        let check_id = Id::new();
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
@@ -141,7 +140,7 @@ impl<'a> ConnectorCheckService<'a> {
         Ok((check_id, run.id))
     }
 
-    pub async fn mark_running(&self, check_id: Uuid) -> Result<(), CheckError> {
+    pub async fn mark_running(&self, check_id: Id) -> Result<(), CheckError> {
         sqlx::query(
             "UPDATE connector_checks SET status = 'running' WHERE id = $1 AND status = 'queued'",
         )
@@ -155,7 +154,7 @@ impl<'a> ConnectorCheckService<'a> {
     /// The failure text is capped and stored only for failed checks.
     pub async fn finish(
         &self,
-        check_id: Uuid,
+        check_id: Id,
         passed: bool,
         failure: Option<&str>,
     ) -> Result<bool, CheckError> {
@@ -185,8 +184,8 @@ impl<'a> ConnectorCheckService<'a> {
     }
 
     /// Fail the active check owning `run_id`, if any.
-    pub async fn fail_for_run(&self, run_id: Uuid, failure: &str) -> Result<(), CheckError> {
-        let check_id: Option<Option<Uuid>> =
+    pub async fn fail_for_run(&self, run_id: Id, failure: &str) -> Result<(), CheckError> {
+        let check_id: Option<Option<Id>> =
             sqlx::query_scalar("SELECT connector_check_id FROM agent_runs WHERE id = $1")
                 .bind(run_id)
                 .fetch_optional(self.pool)
@@ -197,7 +196,7 @@ impl<'a> ConnectorCheckService<'a> {
         Ok(())
     }
 
-    pub async fn get(&self, check_id: Uuid) -> Result<CheckDetail, CheckError> {
+    pub async fn get(&self, check_id: Id) -> Result<CheckDetail, CheckError> {
         let row = sqlx::query(
             r#"
             SELECT c.id, c.connector, c.agent_id, c.status, c.failure, c.created_at,
@@ -211,7 +210,7 @@ impl<'a> ConnectorCheckService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or(CheckError::NotFound)?;
-        let run_id: Option<Uuid> = row.get("run_id");
+        let run_id: Option<Id> = row.get("run_id");
         let tool_calls = match run_id {
             Some(run_id) => sqlx::query_as::<_, (String, String)>(
                 "SELECT tool, status FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at, id",
@@ -240,7 +239,7 @@ impl<'a> ConnectorCheckService<'a> {
 
     /// Most recent check per connector.
     pub async fn latest_by_connector(&self) -> Result<HashMap<String, CheckSummary>, CheckError> {
-        let rows: Vec<(String, Uuid, String, Option<String>, OffsetDateTime)> = sqlx::query_as(
+        let rows: Vec<(String, Id, String, Option<String>, OffsetDateTime)> = sqlx::query_as(
             r#"
             SELECT DISTINCT ON (connector) connector, id, status, failure, created_at
             FROM connector_checks

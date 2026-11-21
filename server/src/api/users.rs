@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::pool_from_state;
 use crate::domain::user::User;
 use crate::middleware::admin::AdminUser;
@@ -15,7 +16,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UserResponse {
-    id: uuid::Uuid,
+    id: Id,
     email: String,
     role: String,
     created_at: String,

@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -404,7 +405,7 @@ async fn chat_second_turn_sets_provider_session_id() {
         }
     }
 
-    let session_uuid = uuid::Uuid::parse_str(session_id).unwrap();
+    let session_uuid = Id::parse_str(session_id).unwrap();
     let row: (Option<String>, Option<String>) = sqlx::query_as(
         "SELECT provider_session_id, provider_session_connector FROM chat_sessions WHERE id = $1",
     )
@@ -560,7 +561,7 @@ async fn chat_resume_fallback_succeeds() {
         .unwrap();
     let session: serde_json::Value = common::json_body(created).await;
     let session_id = session["id"].as_str().unwrap();
-    let session_uuid = uuid::Uuid::parse_str(session_id).unwrap();
+    let session_uuid = Id::parse_str(session_id).unwrap();
 
     app.clone()
         .oneshot(common::json_request(
@@ -1180,7 +1181,7 @@ async fn kilo_chat_second_turn_passes_session_id() {
         &csrf,
     )
     .await;
-    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     set_agent_connector(pool, agent_uuid, "kilo-code").await;
 
     let created = app
@@ -1197,7 +1198,7 @@ async fn kilo_chat_second_turn_passes_session_id() {
     assert_eq!(created.status(), StatusCode::CREATED);
     let session: serde_json::Value = common::json_body(created).await;
     let session_id = session["id"].as_str().unwrap().to_string();
-    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
+    let session_uuid = Id::parse_str(&session_id).unwrap();
 
     let fixture = std::fs::read_to_string(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1306,7 +1307,7 @@ async fn kilo_chat_resumed_turn_lists_latest_attachment() {
         &csrf,
     )
     .await;
-    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     set_agent_connector(pool, agent_uuid, "kilo-code").await;
 
     let created = app
@@ -1323,7 +1324,7 @@ async fn kilo_chat_resumed_turn_lists_latest_attachment() {
     assert_eq!(created.status(), StatusCode::CREATED);
     let session: serde_json::Value = common::json_body(created).await;
     let session_id = session["id"].as_str().unwrap().to_string();
-    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
+    let session_uuid = Id::parse_str(&session_id).unwrap();
 
     let fixture = std::fs::read_to_string(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1489,7 +1490,7 @@ async fn wait_run(app: &axum::Router, cookie: &str, csrf: &str, run_id: &str) ->
 }
 
 #[cfg(feature = "embedded-test-db")]
-async fn wait_provider_session(pool: &sqlx::PgPool, session_id: uuid::Uuid) -> Option<String> {
+async fn wait_provider_session(pool: &sqlx::PgPool, session_id: Id) -> Option<String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
         let stored: Option<String> =
@@ -1537,7 +1538,7 @@ async fn kilo_chat_resume_failure_retries_once_with_earlier_context() {
         &csrf,
     )
     .await;
-    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     set_agent_connector(pool, agent_uuid, "kilo-code").await;
 
     let created = app
@@ -1554,7 +1555,7 @@ async fn kilo_chat_resume_failure_retries_once_with_earlier_context() {
     assert_eq!(created.status(), StatusCode::CREATED);
     let session: serde_json::Value = common::json_body(created).await;
     let session_id = session["id"].as_str().unwrap().to_string();
-    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
+    let session_uuid = Id::parse_str(&session_id).unwrap();
 
     let fixture = std::fs::read_to_string(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1677,7 +1678,7 @@ async fn chat_session_starts_on_cursor_and_kilo() {
         &csrf,
     )
     .await;
-    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
 
     for connector in ["cursor", "kilo-code", "codex", "claude-code", "opencode"] {
         set_agent_connector(pool, agent_uuid, connector).await;
@@ -1719,7 +1720,7 @@ async fn chat_session_starts_on_cursor_and_kilo() {
     }
 }
 
-async fn set_agent_connector(pool: &sqlx::PgPool, agent_id: uuid::Uuid, connector: &str) {
+async fn set_agent_connector(pool: &sqlx::PgPool, agent_id: Id, connector: &str) {
     sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
         .bind(agent_id)
         .bind(connector)
@@ -1836,8 +1837,8 @@ async fn seed_agent_proposal(
     session_id: &str,
     mut proposal: serde_json::Value,
 ) -> (String, String) {
-    let message_id = uuid::Uuid::new_v4();
-    let proposal_id = uuid::Uuid::new_v4();
+    let message_id = Id::new();
+    let proposal_id = Id::new();
     proposal["id"] = proposal_id.to_string().into();
     let metadata = serde_json::json!({ "proposals": [proposal] });
     sqlx::query(
@@ -1851,7 +1852,7 @@ async fn seed_agent_proposal(
         "#,
     )
     .bind(message_id)
-    .bind(uuid::Uuid::parse_str(session_id).unwrap())
+    .bind(Id::parse_str(session_id).unwrap())
     .bind(metadata)
     .execute(pool)
     .await
@@ -1861,7 +1862,7 @@ async fn seed_agent_proposal(
 
 async fn ticket_count(pool: &sqlx::PgPool, board_id: &str) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM tickets WHERE board_id = $1")
-        .bind(uuid::Uuid::parse_str(board_id).unwrap())
+        .bind(Id::parse_str(board_id).unwrap())
         .fetch_one(pool)
         .await
         .unwrap()
@@ -1968,9 +1969,9 @@ async fn accept_ticket_proposal_creates_one_ticket_then_conflicts() {
     );
     assert_eq!(ticket_count(pool, &board_id).await, before + 1);
 
-    let source: Option<uuid::Uuid> =
+    let source: Option<Id> =
         sqlx::query_scalar("SELECT source_chat_session_id FROM tickets WHERE id = $1")
-            .bind(uuid::Uuid::parse_str(&ticket_id).unwrap())
+            .bind(Id::parse_str(&ticket_id).unwrap())
             .fetch_one(pool)
             .await
             .unwrap();
@@ -2353,7 +2354,7 @@ async fn chat_session_usage_adds_up_its_turns() {
     assert_eq!(total["tokens"]["output"], 12, "{total}");
     assert_eq!(total["tokens"]["cacheRead"], 200, "{total}");
 
-    let missing = uuid::Uuid::new_v4();
+    let missing = Id::new();
     let (status, _) = usage(format!("/api/chat/sessions/{missing}/usage")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

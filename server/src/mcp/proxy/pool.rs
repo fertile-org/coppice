@@ -1,4 +1,5 @@
 //! Shared plugin MCP server instances, one per `(plugin, server)` across runs.
+use crate::domain::Id;
 
 use super::transport::{McpConnection, McpTransport, ProxyError, RemoteTool, Transports};
 use crate::mcp::protocol::{ToolContent, ToolResult};
@@ -13,11 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ServerKey {
-    pub plugin_id: Uuid,
+    pub plugin_id: Id,
     pub server: String,
 }
 
@@ -282,12 +281,12 @@ impl McpServerPool {
         health
     }
 
-    pub async fn stop_plugin(&self, plugin_id: Uuid) {
+    pub async fn stop_plugin(&self, plugin_id: Id) {
         self.stop_where(|id| id == plugin_id).await;
     }
 
     /// Stops the instances of every plugin not in `keep`.
-    pub async fn retain_plugins(&self, keep: &HashSet<Uuid>) {
+    pub async fn retain_plugins(&self, keep: &HashSet<Id>) {
         self.stop_where(|id| !keep.contains(&id)).await;
     }
 
@@ -296,7 +295,7 @@ impl McpServerPool {
         self.stop_where(|_| true).await;
     }
 
-    async fn stop_where(&self, stop: impl Fn(Uuid) -> bool) {
+    async fn stop_where(&self, stop: impl Fn(Id) -> bool) {
         let stale: Vec<_> = self
             .all_slots()
             .into_iter()
@@ -758,7 +757,7 @@ mod tests {
         (Arc::new(McpServerPool::new(transports, cfg())), fake)
     }
 
-    fn spec_for(plugin_id: Uuid, server: &str, token: Option<&str>) -> PoolServerSpec {
+    fn spec_for(plugin_id: Id, server: &str, token: Option<&str>) -> PoolServerSpec {
         PoolServerSpec {
             key: ServerKey {
                 plugin_id,
@@ -782,7 +781,7 @@ mod tests {
     }
 
     fn spec() -> PoolServerSpec {
-        spec_for(Uuid::nil(), "main", Some("tok"))
+        spec_for(Id::nil(), "main", Some("tok"))
     }
 
     async fn settle() {
@@ -907,7 +906,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn config_error_is_unhealthy_immediately() {
         let (pool, fake) = pool();
-        let spec = spec_for(Uuid::nil(), "main", None);
+        let spec = spec_for(Id::nil(), "main", None);
         assert_eq!(
             pool.tools(&spec).await,
             Err(PoolError::Config("missing setting \"API_TOKEN\"".into()))
@@ -943,7 +942,7 @@ mod tests {
     async fn fingerprint_change_restarts() {
         let (pool, fake) = pool();
         pool.tools(&spec()).await.unwrap();
-        let changed = spec_for(Uuid::nil(), "main", Some("other"));
+        let changed = spec_for(Id::nil(), "main", Some("other"));
         pool.tools(&changed).await.unwrap();
         settle().await;
         assert!(fake.conn(0).closed.load(Ordering::SeqCst));
@@ -980,8 +979,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn stop_plugin_closes_all_its_servers() {
         let (pool, fake) = pool();
-        let a = Uuid::from_u128(1);
-        let b = Uuid::from_u128(2);
+        let a = Id::from_u128(1);
+        let b = Id::from_u128(2);
         let specs = [
             spec_for(a, "one", Some("t")),
             spec_for(a, "two", Some("t")),
@@ -1002,7 +1001,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn retain_plugins_stops_the_others() {
         let (pool, fake) = pool();
-        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let (a, b) = (Id::from_u128(1), Id::from_u128(2));
         let specs = [spec_for(a, "one", Some("t")), spec_for(b, "one", Some("t"))];
         for spec in &specs {
             pool.tools(spec).await.unwrap();
@@ -1018,8 +1017,8 @@ mod tests {
     async fn shutdown_all_closes_every_server() {
         let (pool, fake) = pool();
         let specs = [
-            spec_for(Uuid::from_u128(1), "one", Some("t")),
-            spec_for(Uuid::from_u128(2), "one", Some("t")),
+            spec_for(Id::from_u128(1), "one", Some("t")),
+            spec_for(Id::from_u128(2), "one", Some("t")),
         ];
         for spec in &specs {
             pool.tools(spec).await.unwrap();
@@ -1117,7 +1116,7 @@ mod tests {
             Some("start timed out after 20s")
         );
 
-        let missing = spec_for(Uuid::nil(), "main", None);
+        let missing = spec_for(Id::nil(), "main", None);
         let _ = pool.tools(&missing).await;
         assert_eq!(
             pool.last_error(&key).as_deref(),
@@ -1154,7 +1153,7 @@ mod tests {
         };
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(pool.health(&spec().key), ServerHealth::Starting);
-        pool.stop_plugin(Uuid::nil()).await;
+        pool.stop_plugin(Id::nil()).await;
         assert_eq!(pool.health(&spec().key), ServerHealth::Stopped);
 
         assert_eq!(waiter.await.unwrap(), Err(PoolError::Unavailable));

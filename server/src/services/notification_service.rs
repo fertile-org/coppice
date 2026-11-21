@@ -1,11 +1,10 @@
+use crate::domain::Id;
 use crate::domain::git_state::TicketGitState;
 use crate::domain::notification::{Notification, NotificationType};
 use sqlx::PgPool;
 use sqlx::Row;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
@@ -17,11 +16,11 @@ struct FanOutInput<'a> {
     kind: NotificationType,
     title: &'a str,
     body: Option<&'a str>,
-    ticket_id: Option<Uuid>,
-    run_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
-    comment_id: Option<Uuid>,
-    mention_id: Option<Uuid>,
+    ticket_id: Option<Id>,
+    run_id: Option<Id>,
+    agent_id: Option<Id>,
+    comment_id: Option<Id>,
+    mention_id: Option<Id>,
     source_key: &'a str,
 }
 
@@ -50,11 +49,11 @@ impl<'a> NotificationService<'a> {
     /// create duplicate rows. Only the four terminal statuses produce rows.
     pub async fn create_for_run_finished(
         &self,
-        run_id: Uuid,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        run_id: Id,
+        ticket_id: Id,
+        agent_id: Id,
         status: &str,
-    ) -> Result<Vec<Uuid>, NotificationError> {
+    ) -> Result<Vec<Id>, NotificationError> {
         if !matches!(status, "succeeded" | "blocked" | "failed" | "cancelled") {
             return Ok(Vec::new());
         }
@@ -95,11 +94,11 @@ impl<'a> NotificationService<'a> {
     /// Idempotent per `(recipient, mention_id)`.
     pub async fn create_for_agent_mentioned(
         &self,
-        mention_id: Uuid,
-        ticket_id: Uuid,
-        comment_id: Uuid,
-        mentioned_agent_id: Uuid,
-    ) -> Result<Vec<Uuid>, NotificationError> {
+        mention_id: Id,
+        ticket_id: Id,
+        comment_id: Id,
+        mentioned_agent_id: Id,
+    ) -> Result<Vec<Id>, NotificationError> {
         let agent_name: Option<String> =
             sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
                 .bind(mentioned_agent_id)
@@ -136,11 +135,11 @@ impl<'a> NotificationService<'a> {
     /// Idempotent per `(recipient, batch_id)`. Success never notifies.
     pub async fn create_for_knowledge_compaction_failed(
         &self,
-        batch_id: Uuid,
-        run_id: Option<Uuid>,
-        agent_id: Uuid,
+        batch_id: Id,
+        run_id: Option<Id>,
+        agent_id: Id,
         error_message: &str,
-    ) -> Result<Vec<Uuid>, NotificationError> {
+    ) -> Result<Vec<Id>, NotificationError> {
         let agent_name: Option<String> =
             sqlx::query_scalar("SELECT name FROM agents WHERE id = $1")
                 .bind(agent_id)
@@ -172,10 +171,10 @@ impl<'a> NotificationService<'a> {
     /// new stop from a repeat of the same one.
     pub async fn create_for_git_needs_action(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         state: TicketGitState,
         reason: Option<&str>,
-    ) -> Result<Vec<Uuid>, NotificationError> {
+    ) -> Result<Vec<Id>, NotificationError> {
         let ticket_title: Option<String> =
             sqlx::query_scalar("SELECT title FROM tickets WHERE id = $1")
                 .bind(ticket_id)
@@ -216,15 +215,15 @@ impl<'a> NotificationService<'a> {
         .await
     }
 
-    async fn fan_out(&self, input: FanOutInput<'_>) -> Result<Vec<Uuid>, NotificationError> {
-        let user_ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at")
+    async fn fan_out(&self, input: FanOutInput<'_>) -> Result<Vec<Id>, NotificationError> {
+        let user_ids: Vec<Id> = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at")
             .fetch_all(self.pool)
             .await?;
 
         let mut created = Vec::new();
         for user_id in user_ids {
-            let id = Uuid::new_v4();
-            let inserted: Option<Uuid> = sqlx::query_scalar(
+            let id = Id::new();
+            let inserted: Option<Id> = sqlx::query_scalar(
                 r#"
                 INSERT INTO notifications (
                     id, recipient_user_id, type, title, body,
@@ -261,7 +260,7 @@ impl<'a> NotificationService<'a> {
     /// Newest-first listing with keyset pagination over `(created_at DESC, id DESC)`.
     pub async fn list_for_user(
         &self,
-        recipient_user_id: Uuid,
+        recipient_user_id: Id,
         filter: NotificationFilter,
         limit: Option<i64>,
         cursor: Option<&str>,
@@ -329,7 +328,7 @@ impl<'a> NotificationService<'a> {
         Ok(NotificationPage { items, next_cursor })
     }
 
-    pub async fn unread_count(&self, recipient_user_id: Uuid) -> Result<i64, NotificationError> {
+    pub async fn unread_count(&self, recipient_user_id: Id) -> Result<i64, NotificationError> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM notifications
@@ -347,8 +346,8 @@ impl<'a> NotificationService<'a> {
     /// found so callers can return a 404 without leaking existence.
     pub async fn mark_read(
         &self,
-        notification_id: Uuid,
-        recipient_user_id: Uuid,
+        notification_id: Id,
+        recipient_user_id: Id,
     ) -> Result<(), NotificationError> {
         let result = sqlx::query(
             r#"
@@ -386,7 +385,7 @@ impl<'a> NotificationService<'a> {
         Ok(())
     }
 
-    pub async fn mark_all_read(&self, recipient_user_id: Uuid) -> Result<u64, NotificationError> {
+    pub async fn mark_all_read(&self, recipient_user_id: Id) -> Result<u64, NotificationError> {
         let result = sqlx::query(
             r#"
             UPDATE notifications
@@ -423,20 +422,20 @@ impl NotificationFilter {
     }
 }
 
-fn encode_cursor(ts: OffsetDateTime, id: Uuid) -> String {
+fn encode_cursor(ts: OffsetDateTime, id: Id) -> String {
     let rfc = ts.format(&Rfc3339).unwrap_or_default();
     let raw = format!("{rfc}|{id}");
     hex::encode(raw.as_bytes())
 }
 
-fn decode_cursor(raw: &str) -> (OffsetDateTime, Uuid) {
+fn decode_cursor(raw: &str) -> (OffsetDateTime, Id) {
     let decoded = hex::decode(raw.as_bytes()).ok();
     let text = decoded
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .unwrap_or_default();
     let (ts_str, id_str) = text.split_once('|').unwrap_or(("", ""));
     let ts = OffsetDateTime::parse(ts_str, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    let id = Uuid::parse_str(id_str).unwrap_or_else(|_| Uuid::nil());
+    let id = Id::parse_str(id_str).unwrap_or_else(|_| Id::nil());
     (ts, id)
 }
 
@@ -468,7 +467,7 @@ mod tests {
     #[test]
     fn cursor_roundtrip() {
         let ts = OffsetDateTime::now_utc();
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let encoded = encode_cursor(ts, id);
         let (dec_ts, dec_id) = decode_cursor(&encoded);
         assert_eq!(dec_id, id);
@@ -478,7 +477,7 @@ mod tests {
     #[test]
     fn decode_garbage_cursor_yields_epoch_and_nil() {
         let (ts, id) = decode_cursor("not-real-hex");
-        assert_eq!(id, Uuid::nil());
+        assert_eq!(id, Id::nil());
         assert_eq!(ts, OffsetDateTime::UNIX_EPOCH);
     }
 

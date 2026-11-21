@@ -585,6 +585,8 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::mcp::protocol::SERVER_NAME;
     use crate::sessions::opencode_events::extract_result_from_text;
@@ -1309,7 +1311,7 @@ mod tests {
             std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
 
         publish_fixture_lines(&handle, &raw);
 
@@ -1337,7 +1339,7 @@ mod tests {
             .expect("read agentic.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
 
         publish_fixture_lines(&handle, &raw);
 
@@ -1362,7 +1364,7 @@ mod tests {
             .expect("read blocked.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
 
         publish_fixture_lines(&handle, &raw);
 
@@ -1380,7 +1382,7 @@ mod tests {
             std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
 
         publish_fixture_lines(&handle, &raw);
 

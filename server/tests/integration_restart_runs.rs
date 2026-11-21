@@ -1,5 +1,7 @@
-//! After a crash, the next launch waits for a person. The worktree stays.
 #![cfg(feature = "embedded-test-db")]
+
+//! After a crash, the next launch waits for a person. The worktree stays.
+use coppice_server::domain::Id;
 
 mod common;
 
@@ -18,8 +20,6 @@ use coppice_server::serve::sweep_orphaned_runs;
 use coppice_server::services::comment_service::CommentService;
 use coppice_server::services::run_service::RunService;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
         .args(args)
@@ -85,12 +85,12 @@ fn head_sha(dir: &Path) -> String {
 
 async fn insert_running_run(
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
-    agent_id: Uuid,
+    ticket_id: Id,
+    agent_id: Id,
     worktree: &Path,
     start_sha: &str,
-) -> Uuid {
-    let run_id = Uuid::new_v4();
+) -> Id {
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -218,8 +218,8 @@ async fn sweep_keeps_the_worktree_and_waits_for_a_choice() {
         common::register_test_repo(&app, tree.main.to_str().unwrap(), &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     let run_id = insert_running_run(
         pool,
         ticket_uuid,
@@ -343,8 +343,8 @@ async fn clean_restart_offers_resume_and_cancel_without_confirm() {
     let repo_id =
         common::register_test_repo(&app, tree.main.to_str().unwrap(), &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     insert_running_run(
         pool,
         ticket_uuid,
@@ -412,8 +412,8 @@ async fn cancel_removes_a_clean_worktree() {
         common::create_test_agent_from_preset(&app, "Cancel Agent", &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
     let tree = linked_worktree(&[]);
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     insert_running_run(
         pool,
         ticket_uuid,
@@ -453,8 +453,8 @@ async fn untracked_new_file_is_counted_and_discard_removes_it() {
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
     let tree = linked_worktree(&["notes.txt"]);
     let start = head_sha(&tree.worktree);
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     insert_running_run(pool, ticket_uuid, agent_uuid, &tree.worktree, &start).await;
     sweep_orphaned_runs(&state).await;
 
@@ -506,8 +506,8 @@ async fn committed_change_is_counted_and_discard_returns_to_start() {
     git(&tree.worktree, &["commit", "-m", "before the crash"]);
     assert_ne!(head_sha(&tree.worktree), start);
 
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
     insert_running_run(pool, ticket_uuid, agent_uuid, &tree.worktree, &start).await;
     sweep_orphaned_runs(&state).await;
 
@@ -551,7 +551,7 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
     let session = coppice_server::db::session_database_url()
         .await
         .expect("session database");
-    let name = format!("restart_kill_{}", Uuid::new_v4().simple());
+    let name = format!("restart_kill_{}", Id::new().simple());
     let admin = sqlx::PgPool::connect(&session).await.expect("admin");
     sqlx::query(&format!("CREATE DATABASE \"{name}\""))
         .execute(&admin)
@@ -566,7 +566,7 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
 
     let tree = linked_worktree(&["notes.txt"]);
     let pool = sqlx::PgPool::connect(&url).await.expect("case db");
-    let board_id = Uuid::new_v4();
+    let board_id = Id::new();
     sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
         .bind(board_id)
         .bind("restart")
@@ -574,7 +574,7 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
         .execute(&pool)
         .await
         .expect("board");
-    let agent_id = Uuid::new_v4();
+    let agent_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agents (id, name, role, responsibilities, system_prompt, connector)
@@ -586,7 +586,7 @@ async fn killing_the_server_mid_run_blocks_on_the_next_launch() {
     .execute(&pool)
     .await
     .expect("agent");
-    let ticket_id = Uuid::new_v4();
+    let ticket_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO tickets (id, board_id, title, status, created_by, assignee_agent_id)
@@ -675,9 +675,9 @@ async fn remove_blocked_status_migration_remaps_open_and_archived_tickets() {
     let archived_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id =
         common::create_test_agent_from_preset(&app, "Migration Agent", &cookie, &csrf).await;
-    let open = Uuid::parse_str(&open_id).unwrap();
-    let archived = Uuid::parse_str(&archived_id).unwrap();
-    let agent = Uuid::parse_str(&agent_id).unwrap();
+    let open = Id::parse_str(&open_id).unwrap();
+    let archived = Id::parse_str(&archived_id).unwrap();
+    let agent = Id::parse_str(&agent_id).unwrap();
 
     sqlx::query("UPDATE tickets SET status = 'blocked', substatus = 'blocked_by_error' WHERE id = $1")
         .bind(open)
@@ -692,7 +692,7 @@ async fn remove_blocked_status_migration_remaps_open_and_archived_tickets() {
     .await
     .expect("force archived blocked");
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (

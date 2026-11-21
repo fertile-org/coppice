@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::agent_runs::{
     load_single_run_response, runs_list_response, RunsListResponse, SingleRunResponse,
 };
@@ -50,8 +51,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -152,9 +151,9 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TicketResponse {
-    id: Uuid,
-    board_id: Uuid,
-    repo_id: Option<Uuid>,
+    id: Id,
+    board_id: Id,
+    repo_id: Option<Id>,
     title: String,
     /// Left out of board lists; the ticket view loads it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,14 +163,14 @@ pub(crate) struct TicketResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     substatus_metadata: Option<Value>,
     priority: Option<String>,
-    assignee_agent_id: Option<Uuid>,
+    assignee_agent_id: Option<Id>,
     /// PM to offer on an unassigned Backlog ticket. Absent once anyone is assigned.
     #[serde(skip_serializing_if = "Option::is_none")]
     suggested_assignee: Option<SuggestedAssignee>,
-    owner_user_id: Option<Uuid>,
+    owner_user_id: Option<Id>,
     branch_name: Option<String>,
     created_by: String,
-    created_by_id: Option<Uuid>,
+    created_by_id: Option<Id>,
     created_at: String,
     updated_at: String,
     last_activity_at: String,
@@ -180,7 +179,7 @@ pub(crate) struct TicketResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pending_assign_recommendation: Option<PendingRecommendation>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    parent_ticket_id: Option<Uuid>,
+    parent_ticket_id: Option<Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
@@ -216,14 +215,14 @@ pub(crate) struct TicketResponse {
     /// Present only when an implementation run reported a reviewer brief.
     #[serde(skip_serializing_if = "Option::is_none")]
     reviewer_brief: Option<crate::services::reviewer_brief::ReviewerBrief>,
-    attachment_ids: Vec<Uuid>,
+    attachment_ids: Vec<Id>,
     attachments: Vec<AttachmentSummary>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentSummary {
-    id: Uuid,
+    id: Id,
     filename: String,
     content_type: String,
     size_bytes: i64,
@@ -232,7 +231,7 @@ struct AttachmentSummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingPlanResponse {
-    plan_id: Uuid,
+    plan_id: Id,
     revision: i32,
     markdown: String,
     change_requests: Vec<String>,
@@ -242,7 +241,7 @@ struct PendingPlanResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovedPlanResponse {
-    plan_id: Uuid,
+    plan_id: Id,
     markdown: String,
     steps: Vec<String>,
     /// The plan's acceptance criteria, each with the latest result for the
@@ -262,8 +261,8 @@ pub(crate) struct HumanReviewResponse {
     accepted_by_coppice: bool,
     merged_sha: Option<String>,
     merged_base_branch: Option<String>,
-    comment_ids: Vec<Uuid>,
-    run_ids: Vec<Uuid>,
+    comment_ids: Vec<Id>,
+    run_ids: Vec<Id>,
 }
 
 #[derive(Deserialize)]
@@ -272,12 +271,12 @@ struct CreateTicketBody {
     title: String,
     #[serde(default)]
     description: String,
-    repo_id: Option<Uuid>,
+    repo_id: Option<Id>,
     priority: Option<String>,
     #[serde(default)]
     skip_human_review: bool,
     #[serde(default)]
-    attachment_ids: Vec<Uuid>,
+    attachment_ids: Vec<Id>,
 }
 
 #[derive(Deserialize)]
@@ -285,13 +284,13 @@ struct CreateTicketBody {
 struct UpdateTicketBody {
     title: Option<String>,
     description: Option<String>,
-    repo_id: Option<Uuid>,
+    repo_id: Option<Id>,
     priority: Option<String>,
     branch_name: Option<String>,
-    owner_user_id: Option<Uuid>,
+    owner_user_id: Option<Id>,
     skip_planning: Option<bool>,
     skip_human_review: Option<bool>,
-    attachment_ids: Option<Vec<Uuid>>,
+    attachment_ids: Option<Vec<Id>>,
 }
 
 #[derive(Deserialize)]
@@ -313,14 +312,14 @@ struct UpdateStatusBody {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AssignAgentBody {
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListTicketsQuery {
     status: Option<String>,
-    assignee_agent_id: Option<Uuid>,
+    assignee_agent_id: Option<Id>,
     #[serde(default)]
     include_archived: bool,
 }
@@ -401,7 +400,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
 
 async fn load_attachment_summaries(
     pool: &sqlx::PgPool,
-    ids: &[Uuid],
+    ids: &[Id],
 ) -> Result<Vec<AttachmentSummary>, CommentError> {
     if ids.is_empty() {
         return Ok(Vec::new());
@@ -409,7 +408,7 @@ async fn load_attachment_summaries(
     let rows = CommentService::new(pool)
         .list_attachments_by_ids(ids)
         .await?;
-    let by_id: HashMap<Uuid, _> = rows.into_iter().map(|row| (row.id, row)).collect();
+    let by_id: HashMap<Id, _> = rows.into_iter().map(|row| (row.id, row)).collect();
     Ok(ids
         .iter()
         .filter_map(|id| by_id.get(id))
@@ -426,7 +425,7 @@ async fn store_attachment_ids(
     pool: &sqlx::PgPool,
     store: &crate::storage::attachment_store::AttachmentStore,
     ticket: TicketWithDisplay,
-    attachment_ids: Option<Vec<Uuid>>,
+    attachment_ids: Option<Vec<Id>>,
 ) -> Result<TicketWithDisplay, StatusCode> {
     let Some(attachment_ids) = attachment_ids else {
         return Ok(ticket);
@@ -446,7 +445,7 @@ async fn store_attachment_ids(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    let dropped: Vec<Uuid> = ticket
+    let dropped: Vec<Id> = ticket
         .ticket
         .attachment_ids
         .iter()
@@ -710,7 +709,7 @@ fn connector_is_ready(state: &AppState, connector: &str) -> bool {
 async fn git_failure_response(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     err: TicketGitError,
 ) -> TicketGitApiError {
     match err {
@@ -763,8 +762,8 @@ fn ticket_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> Ticket
 async fn create_git_action_comment(
     pool: &sqlx::PgPool,
     state: &AppState,
-    ticket_id: Uuid,
-    user_id: Uuid,
+    ticket_id: Id,
+    user_id: Id,
     body: &str,
 ) -> Result<(), StatusCode> {
     git_flow::create_git_action_comment(state, pool, ticket_id, Actor::User(user_id), body)
@@ -814,7 +813,7 @@ fn build_filters(query: ListTicketsQuery) -> Result<TicketFilters, TicketError> 
 async fn list_tickets(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(board_id): Path<Uuid>,
+    Path(board_id): Path<Id>,
     Query(query): Query<ListTicketsQuery>,
 ) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -842,7 +841,7 @@ async fn list_tickets(
 async fn create_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(board_id): Path<Uuid>,
+    Path(board_id): Path<Id>,
     Json(body): Json<CreateTicketBody>,
 ) -> Result<(StatusCode, Json<TicketResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -884,7 +883,7 @@ async fn create_ticket(
 async fn get_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
@@ -904,7 +903,7 @@ async fn get_ticket(
 async fn archive_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, RunAgentError> {
     let pool = pool_from_state(&state).map_err(RunAgentError::Status)?;
     let ticket = TicketService::new(pool)
@@ -917,7 +916,7 @@ async fn archive_ticket(
 
 /// Off the request path: drop the archived ticket's worktree, branch and run
 /// artifacts.
-fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Uuid) {
+fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Id) {
     crate::services::worktree_cleanup::spawn_cleanup(state, ticket_id);
     let Some(pool) = state.db.clone() else {
         return;
@@ -939,7 +938,7 @@ fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Uuid) {
 async fn unarchive_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let ticket = TicketService::new(pool)
@@ -952,7 +951,7 @@ async fn unarchive_ticket(
 async fn update_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<UpdateTicketBody>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -1039,7 +1038,7 @@ fn map_update_status_error(err: TicketError) -> UpdateStatusError {
 async fn update_status(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<UpdateStatusBody>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -1098,7 +1097,7 @@ struct PlanChangesBody {
 async fn start_plan_run(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     let current = TicketService::new(pool)
@@ -1127,7 +1126,7 @@ async fn start_plan_run(
 async fn approve_plan(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     body: axum::body::Bytes,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -1166,7 +1165,7 @@ async fn approve_plan(
 async fn ask_for_plan_changes(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<PlanChangesBody>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -1190,7 +1189,7 @@ struct PlanAnswersBody {
 async fn send_plan_answers(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<PlanAnswersBody>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -1210,7 +1209,7 @@ async fn send_plan_answers(
 #[serde(rename_all = "camelCase")]
 struct VerifyParentBody {
     #[serde(default)]
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
 }
 
 async fn attach_split_progress(
@@ -1220,7 +1219,7 @@ async fn attach_split_progress(
     if tickets.is_empty() {
         return Ok(());
     }
-    let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
+    let ids: Vec<Id> = tickets.iter().map(|ticket| ticket.id).collect();
     let progress = SplitAutopilot::new(pool)
         .progress_for(&ids)
         .await
@@ -1243,7 +1242,7 @@ async fn attach_split_progress(
 async fn split_control_response(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let ticket = TicketService::new(pool)
         .get(ticket_id)
@@ -1262,7 +1261,7 @@ async fn split_control_response(
 async fn split_pause(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     SplitAutopilot::new(pool)
@@ -1275,7 +1274,7 @@ async fn split_pause(
 async fn split_resume(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     SplitAutopilot::new(pool)
@@ -1288,7 +1287,7 @@ async fn split_resume(
 async fn split_start_next(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     SplitAutopilot::new(pool)
@@ -1301,7 +1300,7 @@ async fn split_start_next(
 async fn split_merged_elsewhere(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     SplitAutopilot::new(pool)
@@ -1314,7 +1313,7 @@ async fn split_merged_elsewhere(
 async fn verify_parent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     body: Option<Json<VerifyParentBody>>,
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -1432,7 +1431,7 @@ async fn with_approved_plan(
 async fn reviewed_commit(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<Option<String>, TicketError> {
     match ticket_git_service(state, pool)
         .reviewed_head_sha(ticket_id)
@@ -1451,7 +1450,7 @@ async fn reviewed_commit(
 async fn reviewer_brief_for_ticket(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     status: TicketStatus,
 ) -> Result<Option<crate::services::reviewer_brief::ReviewerBrief>, TicketError> {
     let brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
@@ -1477,7 +1476,7 @@ async fn reviewer_brief_for_ticket(
 async fn assign_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<AssignAgentBody>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -1510,7 +1509,7 @@ async fn assign_agent(
 async fn run_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<(StatusCode, Json<SingleRunResponse>), RunAgentError> {
     let pool = pool_from_state(&state).map_err(RunAgentError::Status)?;
     let ticket = TicketService::new(pool)
@@ -1590,7 +1589,7 @@ async fn run_agent(
 struct RestartResponse {
     pending: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    run_id: Option<Uuid>,
+    run_id: Option<Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     changed_files: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1694,7 +1693,7 @@ fn map_restart_error(err: RestartError) -> RestartApiError {
 async fn get_restart(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<RestartResponse>, RestartApiError> {
     let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
     let choice = RestartService::new(pool)
@@ -1707,7 +1706,7 @@ async fn get_restart(
 async fn resume_restart(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<RestartResponse>, RestartApiError> {
     let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
     RestartService::new(pool)
@@ -1721,7 +1720,7 @@ async fn resume_restart(
 async fn discard_restart(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<RestartResponse>, RestartApiError> {
     let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
     RestartService::new(pool)
@@ -1735,7 +1734,7 @@ async fn discard_restart(
 async fn cancel_restart(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<RestartResponse>, RestartApiError> {
     let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
     RestartService::new(pool)
@@ -1749,7 +1748,7 @@ async fn cancel_restart(
 async fn list_runs(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<RunsListResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
@@ -1790,7 +1789,7 @@ impl From<TicketGitApiError> for FinalApproveError {
 async fn final_approve(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, FinalApproveError> {
     let pool = pool_from_state(&state).map_err(FinalApproveError::Status)?;
     let updated = AcceptService::new(&state, pool)
@@ -1809,7 +1808,7 @@ async fn final_approve(
     Ok(Json(ticket_to_response(updated)))
 }
 
-pub(super) async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
+pub(super) async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Id) {
     crate::events::publish_ticket_state(&state.event_bus, pool, ticket_id).await;
 }
 
@@ -1824,7 +1823,7 @@ async fn publish_ticket_and_runs(
 async fn ticket_git_info(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -1853,7 +1852,7 @@ struct MergeBranchResponse {
 async fn merge_ticket_branch(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<MergeBranchBody>,
 ) -> Result<Json<MergeBranchResponse>, TicketGitApiError> {
     let pool = pool_from_state(&state)
@@ -1883,7 +1882,7 @@ struct RebaseBranchResponse {
 async fn rebase_ticket_branch(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<RebaseBranchBody>,
 ) -> Result<Json<RebaseBranchResponse>, TicketGitApiError> {
     let pool = pool_from_state(&state)
@@ -1928,7 +1927,7 @@ struct ResolveConflictBody {
     operation: Option<String>,
     /// Agent shown in the picker. Missing uses the server preselection rule.
     #[serde(default)]
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
 }
 
 enum ResolveConflictApiError {
@@ -2013,7 +2012,7 @@ fn map_resolve_error(err: ConflictResolveError) -> ResolveConflictApiError {
 async fn resolve_ticket_conflict(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<ResolveConflictBody>,
 ) -> Result<Json<SingleRunResponse>, ResolveConflictApiError> {
     let pool = pool_from_state(&state).map_err(ResolveConflictApiError::Status)?;
@@ -2070,7 +2069,7 @@ async fn resolve_ticket_conflict(
 async fn remove_ticket_worktree(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -2122,7 +2121,7 @@ struct CreatePrResponse {
 async fn push_ticket_branch(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<PushBranchResponse>, TicketGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| TicketGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -2148,7 +2147,7 @@ async fn push_ticket_branch(
 async fn create_ticket_pr(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<CreatePrBody>,
 ) -> Result<Json<CreatePrResponse>, TicketGitApiError> {
     let pool = pool_from_state(&state)
@@ -2172,7 +2171,7 @@ async fn create_ticket_pr(
 async fn approve_splits(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let children = SplitService::new(pool, &state.config.workflow)
@@ -2193,7 +2192,7 @@ async fn approve_splits(
 async fn dismiss_splits(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let parent = SplitService::new(pool, &state.config.workflow)
@@ -2206,7 +2205,7 @@ async fn dismiss_splits(
 async fn list_children(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let children = SplitService::new(pool, &state.config.workflow)
@@ -2219,7 +2218,7 @@ async fn list_children(
 async fn resolve_blocker(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let ticket_svc = TicketService::new(pool);

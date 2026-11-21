@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use crate::knowledge::retrieval::RetrievedKnowledge;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 pub trait TokenCounter: Send + Sync {
     fn count(&self, text: &str) -> usize;
     fn name(&self) -> &'static str;
@@ -22,8 +21,8 @@ impl TokenCounter for ByteTokenCounter {
 
 #[derive(Debug, Clone)]
 pub struct RenderedKnowledge {
-    pub item_id: Uuid,
-    pub revision_id: Uuid,
+    pub item_id: Id,
+    pub revision_id: Id,
     pub rank: i32,
     pub score: f64,
     pub token_count: i32,
@@ -57,13 +56,13 @@ const KNOWLEDGE_PREAMBLE: &str = concat!(
 /// The fields one `<knowledge>` block is built from. Revisions are immutable,
 /// so the same fields always render the same text.
 pub struct KnowledgeEntryFields<'a> {
-    pub item_id: Uuid,
-    pub revision_id: Uuid,
+    pub item_id: Id,
+    pub revision_id: Id,
     pub knowledge_type: &'a str,
     pub scope: &'a str,
     pub confidence: &'a str,
     pub source_type: &'a str,
-    pub source_id: Option<Uuid>,
+    pub source_id: Option<Id>,
     pub title: &'a str,
     pub content: &'a str,
 }
@@ -144,7 +143,7 @@ pub fn render_knowledge(
 
 pub async fn record_usage(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: Id,
     entries: &[RenderedKnowledge],
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -157,7 +156,7 @@ pub async fn record_usage(
             ON CONFLICT (run_id, revision_id) DO NOTHING
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(entry.item_id)
         .bind(entry.revision_id)
@@ -177,8 +176,8 @@ mod tests {
 
     fn retrieved(title: &str, content_len: usize, score: f64) -> RetrievedKnowledge {
         RetrievedKnowledge {
-            item_id: Uuid::new_v4(),
-            revision_id: Uuid::new_v4(),
+            item_id: Id::new(),
+            revision_id: Id::new(),
             scope: "board".into(),
             knowledge_type: "test_command".into(),
             title: title.into(),

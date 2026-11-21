@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::code_reviews::map_code_review_error;
 use crate::domain::repo::{verification_status_to_str, Repo};
@@ -29,8 +30,6 @@ use serde::{Deserialize, Serialize};
 use std::path::Path as FsPath;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/repos", get(list_repos).post(create_repo))
@@ -73,7 +72,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct DiffQuery {
     worktree_path: String,
     base_branch: String,
-    ticket_id: Option<Uuid>,
+    ticket_id: Option<Id>,
     #[serde(default)]
     ignore_whitespace: bool,
 }
@@ -100,7 +99,7 @@ struct FileContentQuery {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RepoResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     local_path: String,
     remote_url: Option<String>,
@@ -247,7 +246,7 @@ async fn create_repo(
 async fn get_repo(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<RepoResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
@@ -258,7 +257,7 @@ async fn get_repo(
 async fn update_repo(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
     Json(body): Json<UpdateRepoBody>,
 ) -> Result<Json<RepoResponse>, (StatusCode, String)> {
     let pool = pool_from_state(&state).map_err(|s| (s, String::new()))?;
@@ -300,7 +299,7 @@ async fn update_repo(
 async fn delete_repo(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<StatusCode, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
@@ -311,7 +310,7 @@ async fn delete_repo(
 async fn verify_repo(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<RepoResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
@@ -328,7 +327,7 @@ struct ForgeTokenBody {
 async fn set_forge_token(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
     Json(body): Json<ForgeTokenBody>,
 ) -> Result<Json<RepoResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -352,7 +351,7 @@ async fn set_forge_token(
 async fn clear_forge_token(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<RepoResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let repo_svc = RepoService::new(pool);
@@ -430,7 +429,7 @@ fn repo_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> RepoGitS
 async fn default_branch_sync(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -444,7 +443,7 @@ async fn default_branch_sync(
 async fn fetch_default_branch(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -458,7 +457,7 @@ async fn fetch_default_branch(
 async fn push_default_branch(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<PushDefaultBranchResult>, RepoGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -478,7 +477,7 @@ async fn push_default_branch(
 async fn pull_default_branch(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<PullDefaultBranchResult>, RepoGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -492,7 +491,7 @@ async fn pull_default_branch(
 async fn sync_default_branch(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<SyncDefaultBranchResult>, RepoGitApiError> {
     let pool = pool_from_state(&state)
         .map_err(|code| RepoGitApiError::Message(code, "Database unavailable.".into()))?;
@@ -514,7 +513,7 @@ async fn sync_default_branch(
 async fn list_repo_worktrees(
     AuthUser { .. }: AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
@@ -528,7 +527,7 @@ async fn list_repo_worktrees(
 async fn list_repo_branches(
     AuthUser { .. }: AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
 ) -> Result<Json<BranchesResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = CodeReviewService::new(pool, state.config.agent.worktrees_path.clone().into());
@@ -542,7 +541,7 @@ async fn list_repo_branches(
 async fn get_repo_diff(
     AuthUser { .. }: AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
     Query(query): Query<DiffQuery>,
 ) -> Result<Json<DiffSummary>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -567,7 +566,7 @@ async fn get_repo_diff(
 /// no files leaves every flag off.
 async fn mark_files_outside_plan(
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     diff: &mut DiffSummary,
 ) -> Result<(), StatusCode> {
     let ticket = match TicketService::new(pool).get(ticket_id).await {
@@ -601,7 +600,7 @@ async fn mark_files_outside_plan(
 async fn get_repo_diff_file(
     AuthUser { .. }: AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
     Query(query): Query<DiffFileQuery>,
 ) -> Result<Json<FilePatch>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -622,7 +621,7 @@ async fn get_repo_diff_file(
 async fn get_repo_diff_file_content(
     AuthUser { .. }: AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(repo_id): Path<Uuid>,
+    Path(repo_id): Path<Id>,
     Query(query): Query<FileContentQuery>,
 ) -> Result<Json<FileContent>, StatusCode> {
     let pool = pool_from_state(&state)?;

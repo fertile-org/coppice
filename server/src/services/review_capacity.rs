@@ -2,11 +2,10 @@
 //!
 //! The Ready check counts tickets in the review columns. It does not read the
 //! plan, the ticket description, or any comment, and it does not send a prompt.
+use crate::domain::Id;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::copy::review::{ready_held, review_entry_held, waiting_on_review};
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::TicketStatus;
@@ -86,7 +85,7 @@ impl<'a> ReviewCapacityService<'a> {
         Self { pool }
     }
 
-    pub async fn policy(&self, board_id: Uuid) -> Result<ReviewPolicy, ReviewCapacityError> {
+    pub async fn policy(&self, board_id: Id) -> Result<ReviewPolicy, ReviewCapacityError> {
         let row = sqlx::query(
             r#"
             SELECT review_cap, review_cap_counts_in_review
@@ -106,7 +105,7 @@ impl<'a> ReviewCapacityService<'a> {
 
     pub async fn set_policy(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         policy: ReviewPolicy,
     ) -> Result<(), ReviewCapacityError> {
         let updated = sqlx::query(
@@ -132,7 +131,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// Tickets currently occupying the cap. Does not read the plan.
     pub async fn occupancy(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         count_in_review: bool,
     ) -> Result<i64, ReviewCapacityError> {
         let statuses = counted_status_strings(count_in_review);
@@ -146,7 +145,7 @@ impl<'a> ReviewCapacityService<'a> {
 
     pub async fn waiting_line(
         &self,
-        board_id: Uuid,
+        board_id: Id,
     ) -> Result<Option<String>, ReviewCapacityError> {
         let policy = self.policy(board_id).await?;
         let Some(cap) = policy.cap else {
@@ -159,7 +158,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// `None` when the Ready ticket may start. Does not read the plan.
     pub async fn block_ready_start(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<ReadyHold>, ReviewCapacityError> {
         let row = sqlx::query(
             r#"
@@ -172,7 +171,7 @@ impl<'a> ReviewCapacityService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or_else(|| ReviewCapacityError::Message("ticket not found".into()))?;
-        let board_id: Uuid = row.get("board_id");
+        let board_id: Id = row.get("board_id");
         let already: bool = row.get("review_hold");
         let policy = self.policy(board_id).await?;
         let occupancy = self.occupancy(board_id, policy.count_in_review).await?;
@@ -198,7 +197,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// Entering Wait for Human Review is queued. Leaving Ready into work is refused.
     pub async fn direct_status_block(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         from: TicketStatus,
         to: TicketStatus,
     ) -> Result<Option<String>, ReviewCapacityError> {
@@ -230,7 +229,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// `Some(message)` when the ticket must not enter Wait for Human Review.
     pub async fn entry_denial(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         from: TicketStatus,
     ) -> Result<Option<String>, ReviewCapacityError> {
         let row = sqlx::query(
@@ -244,7 +243,7 @@ impl<'a> ReviewCapacityService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or_else(|| ReviewCapacityError::Message("ticket not found".into()))?;
-        let board_id: Uuid = row.get("board_id");
+        let board_id: Id = row.get("board_id");
         let exempt: bool = row.get("review_cap_exempt");
         let policy = self.policy(board_id).await?;
         let occupancy = self.occupancy(board_id, policy.count_in_review).await?;
@@ -259,7 +258,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// Hold a finished run that would enter Wait for Human Review while the cap is full.
     pub async fn constrain_finished_run(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         current: TicketStatus,
         action: &mut TransitionAction,
     ) -> Result<(), ReviewCapacityError> {
@@ -281,7 +280,7 @@ impl<'a> ReviewCapacityService<'a> {
     /// A merge-conflict reopen may enter Wait for Human Review while the cap is full.
     pub async fn mark_merge_conflict_exempt(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<(), ReviewCapacityError> {
         sqlx::query(
             r#"
@@ -300,8 +299,8 @@ impl<'a> ReviewCapacityService<'a> {
     /// when a review slot opened.
     pub async fn after_status_write(
         &self,
-        board_id: Uuid,
-        ticket_id: Uuid,
+        board_id: Id,
+        ticket_id: Id,
         from: TicketStatus,
         to: TicketStatus,
     ) -> Result<(), ReviewCapacityError> {
@@ -338,7 +337,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(())
     }
 
-    async fn release(&self, board_id: Uuid) -> Result<(), ReviewCapacityError> {
+    async fn release(&self, board_id: Id) -> Result<(), ReviewCapacityError> {
         for _ in 0..50 {
             let Some(held_id) = self.oldest_entry_held(board_id).await? else {
                 break;
@@ -411,7 +410,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(())
     }
 
-    async fn oldest_entry_held(&self, board_id: Uuid) -> Result<Option<Uuid>, ReviewCapacityError> {
+    async fn oldest_entry_held(&self, board_id: Id) -> Result<Option<Id>, ReviewCapacityError> {
         let waiting = status_to_str(TicketStatus::WaitForFinalReview);
         let id = sqlx::query_scalar(
             r#"
@@ -434,8 +433,8 @@ impl<'a> ReviewCapacityService<'a> {
 
     async fn held_ready(
         &self,
-        board_id: Uuid,
-    ) -> Result<Vec<(Uuid, Option<Uuid>)>, ReviewCapacityError> {
+        board_id: Id,
+    ) -> Result<Vec<(Id, Option<Id>)>, ReviewCapacityError> {
         let ready = status_to_str(TicketStatus::Ready);
         let rows = sqlx::query(
             r#"
@@ -458,7 +457,7 @@ impl<'a> ReviewCapacityService<'a> {
             .collect())
     }
 
-    async fn ticket_status(&self, ticket_id: Uuid) -> Result<TicketStatus, ReviewCapacityError> {
+    async fn ticket_status(&self, ticket_id: Id) -> Result<TicketStatus, ReviewCapacityError> {
         let status: String = sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
             .bind(ticket_id)
             .fetch_one(self.pool)
@@ -466,7 +465,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(crate::domain::ticket::status_from_str(&status).unwrap_or(TicketStatus::Backlog))
     }
 
-    async fn board_id(&self, ticket_id: Uuid) -> Result<Uuid, ReviewCapacityError> {
+    async fn board_id(&self, ticket_id: Id) -> Result<Id, ReviewCapacityError> {
         sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
             .bind(ticket_id)
             .fetch_one(self.pool)
@@ -474,7 +473,7 @@ impl<'a> ReviewCapacityService<'a> {
             .map_err(ReviewCapacityError::from)
     }
 
-    async fn mark_ready_hold(&self, ticket_id: Uuid) -> Result<(), ReviewCapacityError> {
+    async fn mark_ready_hold(&self, ticket_id: Id) -> Result<(), ReviewCapacityError> {
         sqlx::query("UPDATE tickets SET review_hold = true WHERE id = $1")
             .bind(ticket_id)
             .execute(self.pool)
@@ -482,7 +481,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(())
     }
 
-    async fn clear_ready_hold(&self, ticket_id: Uuid) -> Result<(), ReviewCapacityError> {
+    async fn clear_ready_hold(&self, ticket_id: Id) -> Result<(), ReviewCapacityError> {
         sqlx::query("UPDATE tickets SET review_hold = false WHERE id = $1")
             .bind(ticket_id)
             .execute(self.pool)
@@ -490,7 +489,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(())
     }
 
-    async fn mark_entry_held(&self, ticket_id: Uuid) -> Result<bool, ReviewCapacityError> {
+    async fn mark_entry_held(&self, ticket_id: Id) -> Result<bool, ReviewCapacityError> {
         let updated = sqlx::query(
             r#"
             UPDATE tickets
@@ -505,7 +504,7 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(updated.rows_affected() > 0)
     }
 
-    async fn post_system(&self, ticket_id: Uuid, body: &str) -> Result<(), ReviewCapacityError> {
+    async fn post_system(&self, ticket_id: Id, body: &str) -> Result<(), ReviewCapacityError> {
         CommentService::new(self.pool)
             .create(
                 ticket_id,

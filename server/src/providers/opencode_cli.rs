@@ -300,6 +300,8 @@ fn error_message(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
     use crate::sessions::LiveMessage;
@@ -352,7 +354,7 @@ mod tests {
 
     fn feed(lines: &[Value]) -> (RunLines, Vec<Value>, Vec<Option<String>>) {
         let registry = RunStreamRegistry::new();
-        let stream = registry.register(uuid::Uuid::new_v4());
+        let stream = registry.register(Id::new());
         let mut rx = stream.subscribe();
         let mut handler = RunLines::new(
             AcpConsole::new(CONSOLE_PREFIX, Some(stream)),

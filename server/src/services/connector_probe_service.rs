@@ -1,4 +1,5 @@
 //! Cached local connector probes and the admin System → Connectors status view.
+use crate::domain::Id;
 
 use crate::services::connector_check_service::{
     CheckError as ConnectorCheckError, CheckSummary, ConnectorCheckService,
@@ -14,8 +15,6 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -194,8 +193,8 @@ pub fn diagnosable(id: &str) -> Option<&'static ConnectorDescriptor> {
 
 #[derive(Debug, Clone)]
 pub struct LastRun {
-    pub run_id: Uuid,
-    pub ticket_id: Option<Uuid>,
+    pub run_id: Id,
+    pub ticket_id: Option<Id>,
     pub status: String,
     pub finished_at: OffsetDateTime,
     pub ticket_get: bool,
@@ -208,8 +207,8 @@ pub async fn last_real_runs(pool: &PgPool) -> Result<HashMap<String, LastRun>, s
     #[allow(clippy::type_complexity)]
     let rows: Vec<(
         String,
-        Uuid,
-        Option<Uuid>,
+        Id,
+        Option<Id>,
         String,
         OffsetDateTime,
         bool,
@@ -293,8 +292,8 @@ pub struct AuthStatus {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LastRunResponse {
-    pub run_id: Uuid,
-    pub ticket_id: Option<Uuid>,
+    pub run_id: Id,
+    pub ticket_id: Option<Id>,
     pub status: String,
     pub finished_at: String,
     pub ticket_get: bool,

@@ -1,11 +1,10 @@
 //! Code citations on knowledge candidates: path validation, anchoring to the
 //! default branch head, and storage. Nothing here fails a compaction batch.
+use crate::domain::Id;
 
 use sqlx::{PgPool, Postgres, Transaction};
 use std::path::Path;
 use std::time::Duration;
-use uuid::Uuid;
-
 use crate::services::git_cmd;
 
 pub const MAX_CITATIONS_PER_CANDIDATE: usize = 10;
@@ -47,7 +46,7 @@ pub struct ResolvedCitation {
 /// missing repo, a missing branch, or a git error leaves every sha `None`.
 pub async fn resolve_anchors(
     pool: &PgPool,
-    repo_id: Option<Uuid>,
+    repo_id: Option<Id>,
     paths: &[String],
 ) -> Vec<ResolvedCitation> {
     let unanchored = || {
@@ -113,8 +112,8 @@ pub(crate) async fn head_sha(cwd: &Path, branch: &str) -> Option<String> {
 
 pub async fn insert_citations(
     tx: &mut Transaction<'_, Postgres>,
-    revision_id: Uuid,
-    repo_id: Option<Uuid>,
+    revision_id: Id,
+    repo_id: Option<Id>,
     citations: &[ResolvedCitation],
 ) -> Result<(), sqlx::Error> {
     for citation in citations {
@@ -125,7 +124,7 @@ pub async fn insert_citations(
             ON CONFLICT DO NOTHING
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(revision_id)
         .bind(repo_id)
         .bind(&citation.path)
@@ -139,8 +138,8 @@ pub async fn insert_citations(
 /// Give a new revision the same citations, anchors included, as an earlier one.
 pub async fn copy_citations(
     tx: &mut Transaction<'_, Postgres>,
-    from_revision_id: Uuid,
-    to_revision_id: Uuid,
+    from_revision_id: Id,
+    to_revision_id: Id,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"

@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use std::process::Command;
@@ -8,8 +9,6 @@ use coppice_server::services::worktree_service::{
     build_ticket_branch, legacy_ticket_branch, resolve_stored_branch,
 };
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn create_titled_ticket(
     app: &axum::Router,
     board_id: &str,
@@ -121,7 +120,7 @@ async fn first_implementation_run_persists_title_slug_branch() {
     );
     let run = poll_succeeded(&app, &ticket_id, &cookie, &csrf).await;
 
-    let uuid: Uuid = ticket_id.parse().unwrap();
+    let uuid: Id = ticket_id.parse().unwrap();
     let expected = build_ticket_branch(uuid, "Fix login redirect");
     assert_eq!(expected, format!("agent/{}-fix-login-redirect", &ticket_id[..8]));
     assert_eq!(run["branchName"].as_str(), Some(expected.as_str()));
@@ -138,7 +137,7 @@ async fn planning_run_leaves_branch_name_null() {
         return;
     }
 
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
@@ -175,7 +174,7 @@ async fn planning_run_leaves_branch_name_null() {
 
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert!(ticket["branchName"].is_null());
-    let uuid: Uuid = ticket_id.parse().unwrap();
+    let uuid: Id = ticket_id.parse().unwrap();
     assert!(!branch_exists(&local_path, &legacy_ticket_branch(uuid)));
     assert!(!branch_exists(
         &local_path,
@@ -208,7 +207,7 @@ async fn title_edit_does_not_rename_stored_branch() {
     );
     poll_succeeded(&app, &ticket_id, &cookie, &csrf).await;
 
-    let uuid: Uuid = ticket_id.parse().unwrap();
+    let uuid: Id = ticket_id.parse().unwrap();
     let original = build_ticket_branch(uuid, "Fix login redirect");
 
     let rename = app
@@ -253,7 +252,7 @@ async fn legacy_null_branch_name_still_resolves() {
         return;
     }
 
-    let (_state, app, cookie, csrf, env) =
+    let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
@@ -270,7 +269,7 @@ async fn legacy_null_branch_name_still_resolves() {
     );
     assert!(worktree.exists());
 
-    let uuid: Uuid = ticket_id.parse().unwrap();
+    let uuid: Id = ticket_id.parse().unwrap();
     let legacy = legacy_ticket_branch(uuid);
     assert_eq!(resolve_stored_branch(uuid, None), legacy);
 

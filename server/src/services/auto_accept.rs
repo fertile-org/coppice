@@ -2,13 +2,12 @@
 //!
 //! Coppice accepts only when every safety check passes. Anything else leaves
 //! the ticket waiting for a person.
+use crate::domain::Id;
 
 use std::sync::Arc;
 
 use sqlx::PgPool;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::TicketStatus;
 use crate::services::accept_service::{AcceptError, AcceptService};
@@ -73,7 +72,7 @@ pub fn skip_review_eligibility(facts: &SkipReviewFacts) -> Result<(), SkipReview
 async fn current_head(
     state: &AppState,
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<Option<String>, TicketGitError> {
     TicketGitService::from_state(state, pool)
         .reviewed_head_sha(ticket_id)
@@ -88,7 +87,7 @@ async fn current_head(
 pub async fn record_agent_review_pass(
     pool: &PgPool,
     state: Option<&AppState>,
-    ticket_id: Uuid,
+    ticket_id: Id,
     at: Option<OffsetDateTime>,
 ) -> Result<(), sqlx::Error> {
     let head = match state {
@@ -113,7 +112,7 @@ pub async fn record_agent_review_pass(
 }
 
 /// Forget an earlier pass: the code or the review changed since.
-pub async fn clear_agent_review_pass(pool: &PgPool, ticket_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn clear_agent_review_pass(pool: &PgPool, ticket_id: Id) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE tickets SET agent_review_passed_at = NULL, agent_review_passed_sha = NULL \
          WHERE id = $1 AND (agent_review_passed_at IS NOT NULL OR agent_review_passed_sha IS NOT NULL)",
@@ -127,7 +126,7 @@ pub async fn clear_agent_review_pass(pool: &PgPool, ticket_id: Uuid) -> Result<(
 /// Accept a ticket waiting in final review when it is flagged to skip human
 /// review and every check passes. Returns `true` when Coppice accepted it.
 /// A flagged ticket that is blocked gets one comment that says why.
-pub async fn try_auto_accept(state: &Arc<AppState>, ticket_id: Uuid) -> Result<bool, AcceptError> {
+pub async fn try_auto_accept(state: &Arc<AppState>, ticket_id: Id) -> Result<bool, AcceptError> {
     let Some(pool) = state.db.as_ref() else {
         return Ok(false);
     };
@@ -222,7 +221,7 @@ async fn load_facts(
 async fn post_notice_once(
     state: &AppState,
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     notice: &str,
 ) -> Result<(), AcceptError> {
     let latest: Option<(String, String)> = sqlx::query_as(

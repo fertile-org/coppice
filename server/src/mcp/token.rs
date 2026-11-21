@@ -1,36 +1,35 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::str::FromStr;
 use std::time::Duration;
-use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct NewRunToolScope {
-    pub run_id: Uuid,
-    pub agent_id: Uuid,
-    pub ticket_id: Option<Uuid>,
-    pub chat_session_id: Option<Uuid>,
-    pub board_id: Option<Uuid>,
+    pub run_id: Id,
+    pub agent_id: Id,
+    pub ticket_id: Option<Id>,
+    pub chat_session_id: Option<Id>,
+    pub board_id: Option<Id>,
     pub profile: ContextProfile,
     pub job_type: String,
-    pub compaction_ticket_ids: Vec<Uuid>,
-    pub plugin_ids: Vec<Uuid>,
+    pub compaction_ticket_ids: Vec<Id>,
+    pub plugin_ids: Vec<Id>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RunToolScope {
-    pub token_id: Uuid,
-    pub run_id: Uuid,
-    pub agent_id: Uuid,
-    pub ticket_id: Option<Uuid>,
-    pub chat_session_id: Option<Uuid>,
-    pub board_id: Option<Uuid>,
+    pub token_id: Id,
+    pub run_id: Id,
+    pub agent_id: Id,
+    pub ticket_id: Option<Id>,
+    pub chat_session_id: Option<Id>,
+    pub board_id: Option<Id>,
     pub profile: ContextProfile,
     pub job_type: String,
-    pub compaction_ticket_ids: Vec<Uuid>,
-    pub plugin_ids: Vec<Uuid>,
+    pub compaction_ticket_ids: Vec<Id>,
+    pub plugin_ids: Vec<Id>,
 }
 
 impl RunToolScope {
@@ -77,7 +76,7 @@ impl<'a> TokenService<'a> {
             )
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(hash_token(&plaintext))
         .bind(scope.run_id)
         .bind(scope.agent_id)
@@ -133,7 +132,7 @@ impl<'a> TokenService<'a> {
         }))
     }
 
-    pub async fn revoke_for_run(&self, run_id: Uuid) -> Result<(), sqlx::Error> {
+    pub async fn revoke_for_run(&self, run_id: Id) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE run_tool_tokens SET revoked_at = now() WHERE run_id = $1 AND revoked_at IS NULL",
         )

@@ -16,6 +16,7 @@
 //! superuser. The runtime role password is `pg_app_password`. Replace keys
 //! rotates both. A non-desktop start still finishes a pending database
 //! password, master key, or session secret left beside `config.toml`.
+use crate::domain::Id;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -25,8 +26,6 @@ use std::time::Duration;
 use rand::RngCore;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions, Connection, Row};
-use uuid::Uuid;
-
 use crate::crypto::{SecretStore, SecretStoreError};
 use crate::services::auth_service::{hash_password, verify_password, MIN_PASSWORD_CHARS};
 
@@ -783,7 +782,7 @@ fn adopt_url_password(pool: &sqlx::PgPool, url: &str) {
 }
 
 async fn ensure_admin(pool: &sqlx::PgPool, email: &str) -> Result<(), ReplaceError> {
-    let found: Option<Uuid> =
+    let found: Option<Id> =
         sqlx::query_scalar("SELECT id FROM users WHERE email = $1 AND role = 'admin' LIMIT 1")
             .bind(email)
             .fetch_optional(pool)
@@ -1124,7 +1123,7 @@ async fn reencrypt_admin_and_sign_out(
         if row.get::<bool, _>("needs_reentry") {
             continue;
         }
-        let id: Uuid = row.get("id");
+        let id: Id = row.get("id");
         let ciphertext: Vec<u8> = row.get("ciphertext");
         let nonce: Vec<u8> = row.get("nonce");
         let plain = old.decrypt(&ciphertext, &nonce).map_err(map_decrypt)?;
@@ -1556,7 +1555,7 @@ mod tests {
     use crate::crypto::SecretStore;
     use sqlx::Row;
     use tracing_subscriber::layer::SubscriberExt;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     async fn pool() -> sqlx::PgPool {
         let pool = crate::db::shared_test_pool()
@@ -1592,7 +1591,7 @@ mod tests {
     async fn insert_secret(pool: &sqlx::PgPool, store: &SecretStore, plain: &str) {
         let (ciphertext, nonce) = store.encrypt(plain).unwrap();
         sqlx::query("INSERT INTO secrets (id, name, ciphertext, nonce) VALUES ($1, $2, $3, $4)")
-            .bind(Uuid::new_v4())
+            .bind(Id::new())
             .bind("forge")
             .bind(&ciphertext)
             .bind(&nonce)
@@ -1606,7 +1605,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, 'admin')",
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(email)
         .bind(hash)
         .execute(pool)
@@ -1615,7 +1614,7 @@ mod tests {
     }
 
     async fn insert_session(pool: &sqlx::PgPool) {
-        let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
             .fetch_one(pool)
             .await
             .unwrap();
@@ -1623,7 +1622,7 @@ mod tests {
             "INSERT INTO sessions (id, user_id, token_hash, csrf_token, expires_at) \
              VALUES ($1, $2, $3, 'csrf', now() + interval '1 day')",
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(user_id)
         .bind(format!("token-{user_id}"))
         .execute(pool)
@@ -1801,7 +1800,7 @@ mod tests {
     impl RoleGuard {
         async fn create(pool: &sqlx::PgPool, password: &str) -> Self {
             let opts = (*pool.connect_options()).clone();
-            let name = format!("rk_{:x}", Uuid::new_v4().as_u128());
+            let name = format!("rk_{:x}", Id::new().as_u128());
             let database = opts.get_database().unwrap().to_string();
             let create = format!(
                 "CREATE ROLE {name} LOGIN PASSWORD '{}'",
@@ -2276,7 +2275,7 @@ mod tests {
         let _pool = pool().await;
         let login = super_login().await;
         let new_password = generate_secret();
-        let role = format!("absent_{:x}", Uuid::new_v4().as_u128());
+        let role = format!("absent_{:x}", Id::new().as_u128());
         let root = secrets_dir();
         let dir = root.path().join("secrets");
         let (logs, _guard) = capture_logs();

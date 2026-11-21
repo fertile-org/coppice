@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::tickets::{map_error as map_ticket_error, ticket_to_response, TicketResponse};
 use crate::domain::substatus::Substatus;
@@ -11,8 +12,6 @@ use axum::{
     Json, Router,
 };
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/api/mentions/{mention_id}/ignore", post(ignore_mention))
 }
@@ -27,7 +26,7 @@ fn map_mention_error(err: MentionError) -> StatusCode {
 async fn ignore_mention(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(mention_id): Path<Uuid>,
+    Path(mention_id): Path<Id>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let mention_svc = MentionService::new(pool);

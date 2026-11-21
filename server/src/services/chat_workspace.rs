@@ -1,4 +1,5 @@
 //! Load linked repositories and start, restore, or sweep per-chat copies.
+use crate::domain::Id;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -7,8 +8,6 @@ use std::time::{Duration, SystemTime};
 use coppice_config::AgentConfig;
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::services::chat_repos::{
     self, assign_slug, begin_chat_workspace, chat_dir, choose_focus_repo, clear_swept_flag,
     copies_were_swept, one_line_description, open_repo, refresh_index, slugs_to_restore,
@@ -31,7 +30,7 @@ pub fn limits_from_config(agent: &AgentConfig) -> ChatRepoLimits {
 
 pub async fn load_linked_repos(
     pool: &PgPool,
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
 ) -> Result<Vec<LinkedRepo>, sqlx::Error> {
     let repo_rows = sqlx::query(
         r#"
@@ -56,10 +55,10 @@ pub async fn load_linked_repos(
     .fetch_all(pool)
     .await?;
 
-    let mut boards_by_repo: std::collections::HashMap<Uuid, Vec<String>> =
+    let mut boards_by_repo: std::collections::HashMap<Id, Vec<String>> =
         std::collections::HashMap::new();
     for row in &board_rows {
-        let repo_id: Uuid = row.get("repo_id");
+        let repo_id: Id = row.get("repo_id");
         let name: String = row.get("board_name");
         boards_by_repo.entry(repo_id).or_default().push(name);
     }
@@ -78,7 +77,7 @@ pub async fn load_linked_repos(
             .bind(board_id)
             .fetch_all(pool)
             .await?;
-            let counts: Vec<(Uuid, String, i64)> = counts
+            let counts: Vec<(Id, String, i64)> = counts
                 .iter()
                 .map(|row| (row.get("repo_id"), row.get("name"), row.get("ticket_count")))
                 .collect();
@@ -90,7 +89,7 @@ pub async fn load_linked_repos(
     let mut used = std::collections::HashSet::new();
     let mut repos = Vec::with_capacity(repo_rows.len());
     for row in &repo_rows {
-        let id: Uuid = row.get("id");
+        let id: Id = row.get("id");
         let name: String = row.get("name");
         let local_path: String = row.get("local_path");
         let default_branch: String = row.get("default_branch");
@@ -113,8 +112,8 @@ pub async fn load_linked_repos(
 pub fn start_session(
     state: &AppState,
     pool: PgPool,
-    session_id: Uuid,
-    board_id: Option<Uuid>,
+    session_id: Id,
+    board_id: Option<Id>,
     carried: &[String],
 ) {
     let worktrees = state.config.agent.worktrees_path.clone();
@@ -147,8 +146,8 @@ pub fn start_session(
 pub async fn on_chat_turn(
     state: &AppState,
     pool: &PgPool,
-    session_id: Uuid,
-    board_id: Option<Uuid>,
+    session_id: Id,
+    board_id: Option<Id>,
 ) {
     let root = Path::new(&state.config.agent.worktrees_path);
     let dir = chat_dir(root, session_id);
@@ -227,7 +226,7 @@ async fn sweep(state: &AppState) {
 fn spawn_restore(
     pool: PgPool,
     dir: std::path::PathBuf,
-    session_id: Uuid,
+    session_id: Id,
     repos: Vec<LinkedRepo>,
     slugs: Vec<String>,
     limits: ChatRepoLimits,
@@ -245,7 +244,7 @@ fn spawn_restore(
         .ok();
 }
 
-fn note_sender(pool: PgPool, session_id: Uuid) -> impl FnMut(&str) + Send + 'static {
+fn note_sender(pool: PgPool, session_id: Id) -> impl FnMut(&str) + Send + 'static {
     let handle = tokio::runtime::Handle::current();
     move |line: &str| {
         let line = line.to_string();
@@ -261,7 +260,7 @@ fn note_sender(pool: PgPool, session_id: Uuid) -> impl FnMut(&str) + Send + 'sta
     }
 }
 
-async fn message_count(pool: &PgPool, session_id: Uuid) -> Result<i64, sqlx::Error> {
+async fn message_count(pool: &PgPool, session_id: Id) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar("SELECT COUNT(*) FROM chat_messages WHERE session_id = $1")
         .bind(session_id)
         .fetch_one(pool)

@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 use crate::domain::run::RunStatus;
 use crate::events::mark_run_interrupted;
 use crate::services::run_orchestrator::RunOrchestrator;
@@ -83,7 +82,7 @@ pub async fn run_watchdog_pass_once(state: &AppState) {
             continue;
         };
 
-        let Some(base_url) = state.opencode_runs.base_url(&run.id.to_string()) else {
+        let Some(base_url) = state.opencode_runs.base_url(run.id.as_ref()) else {
             // The worker stops the server before recording the final status and
             // drops the stream only afterwards; while it owns the run, a missing
             // server is not a lost one.
@@ -137,7 +136,7 @@ pub async fn run_watchdog_pass_once(state: &AppState) {
     }
 }
 
-async fn interrupt_run(state: &AppState, pool: &PgPool, run_id: Uuid, reason: &str) {
+async fn interrupt_run(state: &AppState, pool: &PgPool, run_id: Id, reason: &str) {
     match mark_run_interrupted(state, run_id, reason).await {
         Ok(interrupted) => {
             RunOrchestrator::new(pool, &state.config.workflow)
@@ -165,7 +164,7 @@ fn run_elapsed_secs(started_at: &Option<OffsetDateTime>, created_at: &OffsetDate
 
 fn publish_heartbeat(
     state: &AppState,
-    run_id: Uuid,
+    run_id: Id,
     session_status: Option<String>,
     elapsed_secs: u64,
 ) {

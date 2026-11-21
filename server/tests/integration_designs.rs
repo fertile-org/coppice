@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::body::Body;
@@ -25,8 +26,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 macro_rules! require_db {
     () => {
         if !common::db_available().await {
@@ -73,8 +72,8 @@ async fn create_write_publish_choose_roundtrip() {
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let pool = state.db.clone().expect("db pool");
-    let ticket_uuid: Uuid = ticket_id.parse().unwrap();
-    let agent_uuid: Uuid = agent_id.parse().unwrap();
+    let ticket_uuid: Id = ticket_id.parse().unwrap();
+    let agent_uuid: Id = agent_id.parse().unwrap();
     let run = RunService::new(&pool)
         .start_run_for_agent(
             ticket_uuid,
@@ -86,7 +85,7 @@ async fn create_write_publish_choose_roundtrip() {
         .expect("start run");
 
     let artifacts = PathBuf::from(&state.config.storage.artifacts_dir);
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&pool)
         .await
         .expect("user");
@@ -109,7 +108,7 @@ async fn create_write_publish_choose_roundtrip() {
     let set_dir = artifacts.join(format!("designs/{}", created.id));
     assert!(set_dir.is_dir(), "dir on disk is designs/{{set_id}}");
 
-    let stamp = Uuid::new_v4();
+    let stamp = Id::new();
     let html_a =
         format!("<!doctype html><title>A</title>design-preview-marker-a-{stamp}").into_bytes();
     let html_b =
@@ -118,7 +117,7 @@ async fn create_write_publish_choose_roundtrip() {
         .await
         .expect("write a");
     let wrong_run = svc
-        .write(created.id, Uuid::new_v4(), "a/index.html", b"hijack")
+        .write(created.id, Id::new(), "a/index.html", b"hijack")
         .await
         .unwrap_err();
     assert!(
@@ -220,7 +219,7 @@ async fn design_plugin_starts_enabled_and_stays_off_after_rescan() {
     assert!(enabled);
     assert_eq!(agent_access, "all");
 
-    let id: Uuid = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design'")
+    let id: Id = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design'")
         .fetch_one(&pool)
         .await
         .expect("design id");
@@ -317,11 +316,11 @@ struct DesignRun {
     state: Arc<AppState>,
     app: Router,
     pool: PgPool,
-    run_id: Uuid,
-    agent_id: Uuid,
-    ticket_id: Uuid,
-    board_id: Uuid,
-    design_id: Uuid,
+    run_id: Id,
+    agent_id: Id,
+    ticket_id: Id,
+    board_id: Id,
+    design_id: Id,
     _git_dir: tempfile::TempDir,
 }
 
@@ -336,8 +335,8 @@ async fn design_run() -> DesignRun {
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let pool = state.db.clone().expect("db pool");
-    let ticket_uuid: Uuid = ticket_id.parse().unwrap();
-    let agent_uuid: Uuid = agent_id.parse().unwrap();
+    let ticket_uuid: Id = ticket_id.parse().unwrap();
+    let agent_uuid: Id = agent_id.parse().unwrap();
     let run = RunService::new(&pool)
         .start_run_for_agent(
             ticket_uuid,
@@ -347,7 +346,7 @@ async fn design_run() -> DesignRun {
         )
         .await
         .expect("start run");
-    let design_id: Uuid =
+    let design_id: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&pool)
             .await
@@ -576,9 +575,9 @@ struct TicketHttp {
     cookie: String,
     csrf: String,
     pool: PgPool,
-    ticket_id: Uuid,
-    agent_id: Uuid,
-    design_id: Uuid,
+    ticket_id: Id,
+    agent_id: Id,
+    design_id: Id,
     _git_dir: Option<tempfile::TempDir>,
 }
 
@@ -592,7 +591,7 @@ async fn ticket_http() -> TicketHttp {
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let pool = state.db.clone().expect("db pool");
-    let design_id: Uuid =
+    let design_id: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&pool)
             .await
@@ -610,7 +609,7 @@ async fn ticket_http() -> TicketHttp {
     }
 }
 
-async fn start_ticket_run(fx: &TicketHttp, agent_id: Uuid) -> Uuid {
+async fn start_ticket_run(fx: &TicketHttp, agent_id: Id) -> Id {
     RunService::new(&fx.pool)
         .start_run_for_agent(fx.ticket_id, agent_id, "work_on_ticket", Default::default())
         .await
@@ -637,14 +636,14 @@ fn two_options() -> Vec<DesignOption> {
 
 async fn publish_html(
     fx: &TicketHttp,
-    run_id: Uuid,
-    agent_id: Uuid,
+    run_id: Id,
+    agent_id: Id,
     title: &str,
-    ticket_id: Option<Uuid>,
-    chat_session_id: Option<Uuid>,
+    ticket_id: Option<Id>,
+    chat_session_id: Option<Id>,
     html_a: &str,
     html_b: &str,
-) -> Uuid {
+) -> Id {
     let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
     let svc = DesignService::new(&fx.pool, &artifacts);
     let created = svc
@@ -762,7 +761,7 @@ async fn choose_requires_session_and_known_option() {
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/designs/{}/choose", Uuid::new_v4()),
+            &format!("/api/designs/{}/choose", Id::new()),
             r#"{"optionId":"a"}"#,
             &fx.cookie,
             &fx.csrf,
@@ -952,7 +951,7 @@ async fn ticket_get_includes_design_summary_without_html() {
         "<!doctype html><title>B</title>",
     )
     .await;
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&fx.pool)
         .await
         .expect("user");
@@ -1012,10 +1011,10 @@ async fn chat_design_list_returns_published_set() {
         .await
         .expect("session");
     assert_eq!(created.status(), StatusCode::CREATED);
-    let session_id = Uuid::parse_str(common::json_body(created).await["id"].as_str().unwrap())
+    let session_id = Id::parse_str(common::json_body(created).await["id"].as_str().unwrap())
         .expect("session id");
     let pool = state.db.clone().expect("db pool");
-    let message_id = Uuid::new_v4();
+    let message_id = Id::new();
     sqlx::query(
         "INSERT INTO chat_messages (id, session_id, seq, role, body) VALUES ($1, $2, 0, 'human', 'hi')",
     )
@@ -1034,9 +1033,9 @@ async fn chat_design_list_returns_published_set() {
         cookie: cookie.clone(),
         csrf: csrf.clone(),
         pool,
-        ticket_id: Uuid::nil(),
+        ticket_id: Id::nil(),
         agent_id: agent_id.parse().unwrap(),
-        design_id: Uuid::nil(),
+        design_id: Id::nil(),
         _git_dir: None,
     };
     let set_id = publish_html(
@@ -1070,7 +1069,7 @@ async fn chat_design_list_returns_published_set() {
     assert_eq!(sets[0]["runId"], run.id.to_string());
     assert!(sets[0]["chosen"].is_null());
 
-    let member_email = format!("member-{}@localhost", Uuid::new_v4());
+    let member_email = format!("member-{}@localhost", Id::new());
     create_member(&app, &cookie, &csrf, &member_email).await;
     let (member_cookie, member_csrf) = login_as(&app, &member_email, "secret123").await;
     let denied = app
@@ -1305,7 +1304,7 @@ async fn selected_follows_choice_then_falls_back_to_recommendation() {
     assert!(!summary.superseded);
     assert!(!summary.from_plan_run);
 
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&fx.pool)
         .await
         .expect("user");
@@ -1414,7 +1413,7 @@ fn design_svc(fx: &TicketHttp) -> DesignService<'_> {
     )
 }
 
-async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> Uuid {
+async fn publish_plan_options(fx: &TicketHttp, run_id: Id, agent_id: Id) -> Id {
     let svc = design_svc(fx);
     let created = svc
         .create(
@@ -1459,7 +1458,7 @@ async fn publish_plan_options(fx: &TicketHttp, run_id: Uuid, agent_id: Uuid) -> 
     created.id
 }
 
-async fn active_plan_run(fx: &TicketHttp) -> Uuid {
+async fn active_plan_run(fx: &TicketHttp) -> Id {
     planning(fx)
         .active_plan_run(fx.ticket_id)
         .await
@@ -1467,7 +1466,7 @@ async fn active_plan_run(fx: &TicketHttp) -> Uuid {
         .expect("a plan run is active")
 }
 
-async fn set_run_status(fx: &TicketHttp, run_id: Uuid, status: &str) {
+async fn set_run_status(fx: &TicketHttp, run_id: Id, status: &str) {
     sqlx::query("UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1")
         .bind(run_id)
         .bind(status)
@@ -1491,14 +1490,14 @@ async fn unplanned_with_pm() -> TicketHttp {
         pool,
         ticket_id: ticket_id.parse().unwrap(),
         agent_id: pm_id.parse().unwrap(),
-        design_id: Uuid::nil(),
+        design_id: Id::nil(),
         _git_dir: None,
     }
 }
 
 /// A Plan Review ticket whose current plan was written around option "a",
 /// the recommendation of the set its plan run published.
-async fn plan_review_with_set() -> (TicketHttp, Uuid) {
+async fn plan_review_with_set() -> (TicketHttp, Id) {
     let fx = unplanned_with_pm().await;
     let plans = planning(&fx);
     plans
@@ -1527,7 +1526,7 @@ async fn plan_review_with_set() -> (TicketHttp, Uuid) {
     (fx, set_id)
 }
 
-async fn pick(fx: &TicketHttp, set_id: Uuid, option_id: &str) -> axum::response::Response {
+async fn pick(fx: &TicketHttp, set_id: Id, option_id: &str) -> axum::response::Response {
     fx.app
         .clone()
         .oneshot(common::json_request(
@@ -1541,7 +1540,7 @@ async fn pick(fx: &TicketHttp, set_id: Uuid, option_id: &str) -> axum::response:
         .expect("pick")
 }
 
-async fn set_json(fx: &TicketHttp, set_id: Uuid) -> Value {
+async fn set_json(fx: &TicketHttp, set_id: Id) -> Value {
     let res = fx
         .app
         .clone()
@@ -1577,7 +1576,7 @@ async fn change_request(fx: &TicketHttp) -> Option<String> {
         .change_request
 }
 
-async fn assert_refused(fx: &TicketHttp, set_id: Uuid, option_id: &str, expected: &str) {
+async fn assert_refused(fx: &TicketHttp, set_id: Id, option_id: &str, expected: &str) {
     let runs = plan_runs(fx).await;
     let res = pick(fx, set_id, option_id).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
@@ -1806,7 +1805,7 @@ async fn failed_start_restores_the_earlier_choice() {
     assert_eq!(set["selected"]["id"], "a");
 
     // An earlier choice comes back with who made it and when.
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&fx.pool)
         .await
         .expect("user");
@@ -1828,7 +1827,7 @@ async fn failed_start_restores_the_earlier_choice() {
     let res = pick(&fx, set_id, "b").await;
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    let restored: (Option<String>, Option<Uuid>, Option<time::OffsetDateTime>) = sqlx::query_as(
+    let restored: (Option<String>, Option<Id>, Option<time::OffsetDateTime>) = sqlx::query_as(
         "SELECT chosen_option_id, chosen_by_user_id, chosen_at FROM design_sets WHERE id = $1",
     )
     .bind(set_id)
@@ -2009,12 +2008,12 @@ async fn work_run_and_chat_sets_save_and_start_no_run() {
         .await
         .expect("session");
     assert_eq!(created.status(), StatusCode::CREATED);
-    let session_id: Uuid = common::json_body(created).await["id"]
+    let session_id: Id = common::json_body(created).await["id"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
-    let message_id = Uuid::new_v4();
+    let message_id = Id::new();
     sqlx::query(
         "INSERT INTO chat_messages (id, session_id, seq, role, body) VALUES ($1, $2, 0, 'human', 'hi')",
     )
@@ -2126,7 +2125,7 @@ async fn failed_run_insert_leaves_note_split_approval_and_choice_unchanged() {
     let asked = planning(&fx)
         .ask_for_changes(fx.ticket_id, "Change it.")
         .await;
-    let approved: Option<Uuid> =
+    let approved: Option<Id> =
         sqlx::query_scalar("SELECT approved_plan_id FROM tickets WHERE id = $1")
             .bind(fx.ticket_id)
             .fetch_one(&fx.pool)
@@ -2209,8 +2208,8 @@ async fn pick_is_refused_with_skip_planning_and_saves_nothing() {
 }
 
 /// Work runs need a repo; the plan-run fixtures have none.
-async fn ensure_repo(fx: &TicketHttp, ticket_id: Uuid) {
-    let has: Option<Uuid> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
+async fn ensure_repo(fx: &TicketHttp, ticket_id: Id) {
+    let has: Option<Id> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_one(&fx.pool)
         .await
@@ -2219,7 +2218,7 @@ async fn ensure_repo(fx: &TicketHttp, ticket_id: Uuid) {
         return;
     }
     let (dir, path) = common::create_temp_git_checkout();
-    let repo_id = match sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos LIMIT 1")
+    let repo_id = match sqlx::query_scalar::<_, Id>("SELECT id FROM repos LIMIT 1")
         .fetch_optional(&fx.pool)
         .await
         .expect("repos")
@@ -2241,7 +2240,7 @@ async fn ensure_repo(fx: &TicketHttp, ticket_id: Uuid) {
     .await;
 }
 
-async fn work_set(fx: &TicketHttp) -> Uuid {
+async fn work_set(fx: &TicketHttp) -> Id {
     ensure_repo(fx, fx.ticket_id).await;
     // One active run per ticket: finish the earlier work run first.
     sqlx::query(
@@ -2266,13 +2265,13 @@ async fn work_set(fx: &TicketHttp) -> Uuid {
     .await
 }
 
-async fn child_ticket(fx: &TicketHttp) -> Uuid {
-    let board_id: Uuid = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
+async fn child_ticket(fx: &TicketHttp) -> Id {
+    let board_id: Id = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
         .bind(fx.ticket_id)
         .fetch_one(&fx.pool)
         .await
         .expect("board");
-    let child: Uuid =
+    let child: Id =
         common::create_unplanned_ticket(&fx.app, &board_id.to_string(), &fx.cookie, &fx.csrf)
             .await
             .parse()
@@ -2397,7 +2396,7 @@ async fn a_missing_design_folder_keeps_the_title_with_a_null_path() {
         .await
         .expect("child run")
         .id;
-    let design_plugin: Uuid =
+    let design_plugin: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&fx.pool)
             .await
@@ -2469,7 +2468,7 @@ async fn sub_ticket_inherits_the_parent_selected_design() {
         .await
         .expect("child run")
         .id;
-    let design_plugin: Uuid =
+    let design_plugin: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&fx.pool)
             .await
@@ -2659,7 +2658,7 @@ async fn revision_that_republishes_supersedes_the_old_set() {
         .expect("revised plan");
     set_run_status(&fx, run_id, "succeeded").await;
 
-    let superseded_by: Option<Uuid> =
+    let superseded_by: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM design_sets WHERE id = $1")
             .bind(first_set)
             .fetch_one(&fx.pool)
@@ -2698,7 +2697,7 @@ async fn no_visible_change_retires_plan_designs() {
         .await
         .expect("mark running");
 
-    let design_id: Uuid =
+    let design_id: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&fx.pool)
             .await
@@ -2762,7 +2761,7 @@ async fn no_visible_change_retires_plan_designs() {
     assert!(plan.design_set_id.is_none());
     assert!(plan.design_option_id.is_none());
 
-    let (retired, superseded_by): (bool, Option<Uuid>) = sqlx::query_as(
+    let (retired, superseded_by): (bool, Option<Id>) = sqlx::query_as(
         "SELECT retired_at IS NOT NULL, superseded_by FROM design_sets WHERE id = $1",
     )
     .bind(second_set)
@@ -2873,17 +2872,17 @@ async fn publishing_a_second_kind_on_the_same_run_keeps_both_live() {
     require_db!();
 
     let (fx, ui_set) = plan_review_with_set().await;
-    let run_id: Uuid = sqlx::query_scalar("SELECT run_id FROM design_sets WHERE id = $1")
+    let run_id: Id = sqlx::query_scalar("SELECT run_id FROM design_sets WHERE id = $1")
         .bind(ui_set)
         .fetch_one(&fx.pool)
         .await
         .expect("run");
-    let agent_id: Uuid = sqlx::query_scalar("SELECT agent_id FROM design_sets WHERE id = $1")
+    let agent_id: Id = sqlx::query_scalar("SELECT agent_id FROM design_sets WHERE id = $1")
         .bind(ui_set)
         .fetch_one(&fx.pool)
         .await
         .expect("agent");
-    let other = Uuid::new_v4();
+    let other = Id::new();
     let dir = format!("designs/{other}");
     std::fs::create_dir_all(
         PathBuf::from(&fx.state.config.storage.artifacts_dir).join(&dir),

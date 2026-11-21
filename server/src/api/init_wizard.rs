@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::pool_from_state;
 use crate::middleware::admin::AdminUser;
 use crate::services::init_wizard::{
@@ -13,8 +14,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/api/init", get(preview).post(confirm))
 }
@@ -69,8 +68,8 @@ fn default_branch() -> String {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfirmResponse {
-    board_id: Uuid,
-    repository_id: Uuid,
+    board_id: Id,
+    repository_id: Id,
     connector_id: String,
     connector_display_name: String,
     connector_turned_on: bool,
@@ -80,7 +79,7 @@ struct ConfirmResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreatedAgentResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     preset_key: String,
 }

@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -248,7 +249,14 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     common::set_ticket_repo(&app, &reopened, &repo_id, &cookie, &csrf).await;
-    common::setup_worktree_with_commit(&local_path, worktrees.path(), "test-repo", &reopened);
+    common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        worktrees.path(),
+        "test-repo",
+        &reopened,
+    )
+    .await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Ada", &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &reopened, &agent_id, &cookie, &csrf).await;
@@ -277,7 +285,7 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
         .unwrap();
     assert_eq!(approved.status(), StatusCode::OK);
 
-    let reopened_id = uuid::Uuid::parse_str(&reopened).unwrap();
+    let reopened_id = Id::parse_str(&reopened).unwrap();
     let asked = app
         .clone()
         .oneshot(common::json_request(
@@ -397,7 +405,7 @@ async fn review_cap_defaults_to_empty_on_new_and_existing_boards() {
         "the migration must not default review_cap to a number"
     );
 
-    let existing_id = uuid::Uuid::new_v4();
+    let existing_id = Id::new();
     sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
         .bind(existing_id)
         .bind("Already here")

@@ -2,11 +2,10 @@
 //! worktree, then push. Each step follows the repo's switches, which default
 //! to off. A failed step is recorded on the review row; the ticket stays in
 //! Done.
+use crate::domain::Id;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use uuid::Uuid;
 
 use crate::domain::git_state::GitOutcome;
 use crate::domain::repo::Repo;
@@ -22,10 +21,10 @@ use crate::AppState;
 
 /// One lock per repo id. A merge and the push after it run under it, so two
 /// accepts on the same repo never merge at the same time.
-pub type GitChainLocks = Arc<std::sync::Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>>;
+pub type GitChainLocks = Arc<std::sync::Mutex<HashMap<Id, Arc<tokio::sync::Mutex<()>>>>>;
 
 /// The lock for `repo_id`, created on first use.
-pub fn repo_lock(state: &AppState, repo_id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
+pub fn repo_lock(state: &AppState, repo_id: Id) -> Arc<tokio::sync::Mutex<()>> {
     let mut locks = state
         .git_chain_locks
         .lock()
@@ -47,7 +46,7 @@ pub enum ChainOutcome {
 }
 
 /// Run the chain off the request path.
-pub fn spawn_after_accept(state: &Arc<AppState>, ticket_id: Uuid) {
+pub fn spawn_after_accept(state: &Arc<AppState>, ticket_id: Id) {
     let state = Arc::clone(state);
     tokio::spawn(async move {
         let outcome = run_after_accept(&state, ticket_id).await;
@@ -58,7 +57,7 @@ pub fn spawn_after_accept(state: &Arc<AppState>, ticket_id: Uuid) {
 /// Merge the accepted ticket into the repo's default branch when the repo
 /// asks for it. The merge pushes afterwards when the repo asks for that too.
 /// Safe to run twice: an already merged ticket is skipped.
-pub async fn run_after_accept(state: &Arc<AppState>, ticket_id: Uuid) -> ChainOutcome {
+pub async fn run_after_accept(state: &Arc<AppState>, ticket_id: Id) -> ChainOutcome {
     let Some(pool) = state.db.as_ref() else {
         return ChainOutcome::Skipped;
     };
@@ -136,7 +135,7 @@ fn merge_failure_reason(err: &TicketGitError) -> String {
 }
 
 /// The outcome once the merge succeeded: the push may still have failed.
-async fn after_merge(pool: &sqlx::PgPool, ticket_id: Uuid, repo: &Repo) -> ChainOutcome {
+async fn after_merge(pool: &sqlx::PgPool, ticket_id: Id, repo: &Repo) -> ChainOutcome {
     let not_pushed = match HumanReviewService::new(pool).get(ticket_id).await {
         Ok(review) => review.and_then(|r| r.git_outcome) == Some(GitOutcome::NotPushed),
         Err(err) => {
@@ -160,7 +159,7 @@ async fn after_merge(pool: &sqlx::PgPool, ticket_id: Uuid, repo: &Repo) -> Chain
 /// Callers hold the repo's chain lock.
 pub async fn push_after_merge(
     state: &Arc<AppState>,
-    ticket_id: Uuid,
+    ticket_id: Id,
     repo: &Repo,
     base_branch: &str,
 ) {

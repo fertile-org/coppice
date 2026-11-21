@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::attachment::Attachment;
 use crate::domain::comment::{
     author_type_from_str, author_type_to_str, intent_from_str, intent_to_str, AuthorType, Comment,
@@ -5,8 +6,6 @@ use crate::domain::comment::{
 };
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 pub struct CommentService<'a> {
     pool: &'a PgPool,
 }
@@ -32,7 +31,7 @@ impl<'a> CommentService<'a> {
         Self { pool }
     }
 
-    pub async fn get(&self, comment_id: Uuid) -> Result<Comment, CommentError> {
+    pub async fn get(&self, comment_id: Id) -> Result<Comment, CommentError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -50,7 +49,7 @@ impl<'a> CommentService<'a> {
         Ok(row_to_comment(&row))
     }
 
-    pub async fn list_by_ticket(&self, ticket_id: Uuid) -> Result<Vec<Comment>, CommentError> {
+    pub async fn list_by_ticket(&self, ticket_id: Id) -> Result<Vec<Comment>, CommentError> {
         self.ensure_ticket_exists(ticket_id).await?;
 
         let rows = sqlx::query(
@@ -74,8 +73,8 @@ impl<'a> CommentService<'a> {
     /// `before` when given. The second value says whether older ones remain.
     pub async fn list_page(
         &self,
-        ticket_id: Uuid,
-        before: Option<Uuid>,
+        ticket_id: Id,
+        before: Option<Id>,
         limit: i64,
     ) -> Result<(Vec<Comment>, bool), CommentError> {
         self.ensure_ticket_exists(ticket_id).await?;
@@ -127,12 +126,12 @@ impl<'a> CommentService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         author_type: AuthorType,
-        author_id: Option<Uuid>,
+        author_id: Option<Id>,
         body: &str,
         intent: CommentIntent,
-        attachment_ids: &[Uuid],
+        attachment_ids: &[Id],
         mentions: &[String],
     ) -> Result<Comment, CommentError> {
         self.ensure_ticket_exists(ticket_id).await?;
@@ -145,7 +144,7 @@ impl<'a> CommentService<'a> {
             self.ensure_attachments_exist(attachment_ids).await?;
         }
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let mentions = serde_json::json!(mentions);
 
         let row = sqlx::query(
@@ -175,7 +174,7 @@ impl<'a> CommentService<'a> {
     }
 
     /// Remove a system comment that was posted for an action that then failed.
-    pub async fn delete(&self, comment_id: Uuid) -> Result<(), CommentError> {
+    pub async fn delete(&self, comment_id: Id) -> Result<(), CommentError> {
         sqlx::query("DELETE FROM ticket_comments WHERE id = $1")
             .bind(comment_id)
             .execute(self.pool)
@@ -185,7 +184,7 @@ impl<'a> CommentService<'a> {
 
     pub async fn list_attachments_by_ids(
         &self,
-        attachment_ids: &[Uuid],
+        attachment_ids: &[Id],
     ) -> Result<Vec<Attachment>, CommentError> {
         if attachment_ids.is_empty() {
             return Ok(Vec::new());
@@ -207,7 +206,7 @@ impl<'a> CommentService<'a> {
         Ok(rows.iter().map(row_to_attachment).collect())
     }
 
-    pub async fn get_attachment(&self, attachment_id: Uuid) -> Result<Attachment, CommentError> {
+    pub async fn get_attachment(&self, attachment_id: Id) -> Result<Attachment, CommentError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -227,12 +226,12 @@ impl<'a> CommentService<'a> {
 
     pub async fn create_attachment(
         &self,
-        id: Uuid,
+        id: Id,
         filename: &str,
         content_type: &str,
         size_bytes: i64,
         storage_path: &str,
-        uploaded_by: Uuid,
+        uploaded_by: Id,
     ) -> Result<Attachment, CommentError> {
         let row = sqlx::query(
             r#"
@@ -263,8 +262,8 @@ impl<'a> CommentService<'a> {
     /// or it is linked from a ticket comment or the ticket description.
     pub async fn user_can_access_attachment(
         &self,
-        attachment_id: Uuid,
-        user_id: Uuid,
+        attachment_id: Id,
+        user_id: Id,
     ) -> Result<bool, CommentError> {
         let attachment = self.get_attachment(attachment_id).await?;
         if attachment.uploaded_by == user_id {
@@ -321,7 +320,7 @@ impl<'a> CommentService<'a> {
         Ok(linked_to_ticket)
     }
 
-    async fn ensure_ticket_exists(&self, ticket_id: Uuid) -> Result<(), CommentError> {
+    async fn ensure_ticket_exists(&self, ticket_id: Id) -> Result<(), CommentError> {
         let exists =
             sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM tickets WHERE id = $1)")
                 .bind(ticket_id)
@@ -334,7 +333,7 @@ impl<'a> CommentService<'a> {
         Ok(())
     }
 
-    async fn ensure_attachments_exist(&self, attachment_ids: &[Uuid]) -> Result<(), CommentError> {
+    async fn ensure_attachments_exist(&self, attachment_ids: &[Id]) -> Result<(), CommentError> {
         let count =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attachments WHERE id = ANY($1)")
                 .bind(attachment_ids)

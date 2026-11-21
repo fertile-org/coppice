@@ -4,6 +4,7 @@
 //! on GitHub does not notify Coppice, so the board would otherwise stay on
 //! "Accepted, not merged". The sweep uses the GitHub API because squash and
 //! rebase merges leave the accepted SHA off the default branch.
+use crate::domain::Id;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,8 +12,6 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::events::publish_ticket_updated;
@@ -41,10 +40,10 @@ pub struct SweepOutcome {
 }
 
 struct EligibleTicket {
-    ticket_id: Uuid,
+    ticket_id: Id,
     remote_url: String,
     default_branch: String,
-    forge_token_secret_id: Uuid,
+    forge_token_secret_id: Id,
     accepted_sha: String,
     branch_name: Option<String>,
 }
@@ -241,7 +240,7 @@ async fn sync_ticket(
 async fn after_recorded_merge(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     pr_url: &str,
     worktrees_root: &Path,
 ) {
@@ -338,7 +337,7 @@ async fn local_work_would_be_lost(
 async fn announce_leftover_local_commits(
     state: &AppState,
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     pr_url: &str,
 ) {
     match CommentService::new(pool)

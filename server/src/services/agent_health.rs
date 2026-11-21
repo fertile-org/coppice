@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use dashmap::DashMap;
-use uuid::Uuid;
-
 use crate::domain::agent::Agent;
 use crate::providers::ConnectorRegistry;
 
@@ -14,7 +13,7 @@ pub struct AgentHealthRecord {
 }
 
 pub struct AgentHealthRegistry {
-    inner: DashMap<Uuid, AgentHealthRecord>,
+    inner: DashMap<Id, AgentHealthRecord>,
 }
 
 impl Default for AgentHealthRegistry {
@@ -30,7 +29,7 @@ impl AgentHealthRegistry {
         }
     }
 
-    pub fn ensure_agent(&self, agent_id: Uuid) {
+    pub fn ensure_agent(&self, agent_id: Id) {
         self.inner.entry(agent_id).or_insert(AgentHealthRecord {
             status: AgentHealthStatus::Unknown,
             detail: None,
@@ -38,7 +37,7 @@ impl AgentHealthRegistry {
         });
     }
 
-    pub fn set(&self, agent_id: Uuid, status: AgentHealthStatus, detail: Option<String>) {
+    pub fn set(&self, agent_id: Id, status: AgentHealthStatus, detail: Option<String>) {
         self.inner.insert(
             agent_id,
             AgentHealthRecord {
@@ -49,7 +48,7 @@ impl AgentHealthRegistry {
         );
     }
 
-    pub fn get(&self, agent_id: Uuid) -> AgentHealthRecord {
+    pub fn get(&self, agent_id: Id) -> AgentHealthRecord {
         self.inner
             .get(&agent_id)
             .map(|e| e.clone())
@@ -113,7 +112,7 @@ mod tests {
     fn agent(connector: &str, model_provider: Option<&str>) -> Agent {
         let now = time::OffsetDateTime::now_utc();
         Agent {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             name: "Bot".into(),
             role: "Developer".into(),
             responsibilities: vec![],
@@ -186,7 +185,7 @@ mod tests {
     #[test]
     fn registry_starts_unknown() {
         let reg = AgentHealthRegistry::new();
-        let id = Uuid::new_v4();
+        let id = Id::new();
         reg.ensure_agent(id);
         assert_eq!(reg.get(id).status, AgentHealthStatus::Unknown);
     }

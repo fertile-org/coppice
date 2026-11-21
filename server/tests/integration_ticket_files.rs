@@ -37,7 +37,7 @@ async fn previews_files_from_repo_then_worktree() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, env) =
+    let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -79,7 +79,14 @@ async fn previews_files_from_repo_then_worktree() {
     }
 
     // Once the ticket has a worktree, previews read the agent's copy.
-    common::setup_worktree_with_commit(&local_path, env.worktrees.path(), "test-repo", &ticket_id);
+    common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        env.worktrees.path(),
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     let res = get_file(&app, &ticket_id, "feature.txt", &cookie, &csrf).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["x-coppice-file-source"], "worktree");
@@ -125,7 +132,7 @@ async fn exact_nested_path_works_without_a_worktree() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -160,7 +167,7 @@ async fn resolves_unique_suffix_and_rejects_ambiguous_or_partial_noise() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -217,7 +224,7 @@ async fn suffix_match_skips_deleted_and_escaping_and_serves_unicode() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -275,7 +282,7 @@ async fn suffix_match_serves_a_conflicted_file_once() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -334,7 +341,7 @@ async fn suffix_match_drops_an_escaping_symlink_and_keeps_a_real_file() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;

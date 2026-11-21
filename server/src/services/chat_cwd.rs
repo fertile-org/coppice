@@ -1,13 +1,12 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
-
 /// Working directory for a chat turn.
 ///
 /// Every connector, including ones whose read-only mode was verified, uses
 /// `$WORKTREES_PATH/chat/{session_id}/`. Repository files are copied into that
 /// folder by [`crate::services::chat_repos`]. This never returns the registered
 /// checkout and never attaches to a `TICKET-*` worktree.
-pub fn resolve_chat_cwd(worktrees_root: &Path, session_id: Uuid) -> std::io::Result<PathBuf> {
+pub fn resolve_chat_cwd(worktrees_root: &Path, session_id: Id) -> std::io::Result<PathBuf> {
     let path = worktrees_root.join("chat").join(session_id.to_string());
     validate_cwd(&path)?;
     std::fs::create_dir_all(&path)?;
@@ -45,7 +44,7 @@ mod tests {
     #[test]
     fn chat_cwd_is_the_session_folder() {
         let root = tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let cwd = resolve_chat_cwd(root.path(), session).unwrap();
         assert_eq!(cwd, root.path().join("chat").join(session.to_string()));
         assert!(cwd.is_dir());

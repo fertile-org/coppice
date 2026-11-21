@@ -1,8 +1,7 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::slug::{slugify, slugify_truncated};
 
 /// Max slug length after `agent/<8hex>-` so the full name stays well under git's practical limit.
@@ -14,22 +13,20 @@ pub struct WorktreePaths {
 }
 
 /// First 8 hex chars of the ticket UUID (the segment before the first `-`).
-pub fn ticket_short_id(ticket_id: Uuid) -> String {
-    ticket_id
-        .to_string()
-        .split('-')
+pub fn ticket_short_id(ticket_id: Id) -> String {
+    ticket_id.as_ref().split('-')
         .next()
         .unwrap_or("ticket")
         .to_string()
 }
 
 /// Legacy branch used before title slugs, and when the title yields an empty slug.
-pub fn legacy_ticket_branch(ticket_id: Uuid) -> String {
+pub fn legacy_ticket_branch(ticket_id: Id) -> String {
     format!("agent/TICKET-{}", ticket_short_id(ticket_id))
 }
 
 /// `agent/<8hex>-<title-slug>`, or [`legacy_ticket_branch`] when the slug is empty.
-pub fn build_ticket_branch(ticket_id: Uuid, title: &str) -> String {
+pub fn build_ticket_branch(ticket_id: Id, title: &str) -> String {
     let slug = slugify_truncated(title, TITLE_SLUG_MAX);
     if slug.is_empty() {
         return legacy_ticket_branch(ticket_id);
@@ -52,7 +49,7 @@ pub fn is_valid_branch_name(branch: &str) -> bool {
 }
 
 /// Prefer a stored, valid `tickets.branch_name`; otherwise the legacy UUID name.
-pub fn resolve_stored_branch(ticket_id: Uuid, stored: Option<&str>) -> String {
+pub fn resolve_stored_branch(ticket_id: Id, stored: Option<&str>) -> String {
     match stored.map(str::trim).filter(|s| !s.is_empty()) {
         Some(name) if is_valid_branch_name(name) => name.to_string(),
         _ => legacy_ticket_branch(ticket_id),
@@ -62,7 +59,7 @@ pub fn resolve_stored_branch(ticket_id: Uuid, stored: Option<&str>) -> String {
 /// Load `tickets.branch_name` and resolve (legacy when unset or invalid).
 pub async fn resolve_ticket_branch(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<String, sqlx::Error> {
     let stored: Option<Option<String>> =
         sqlx::query_scalar("SELECT branch_name FROM tickets WHERE id = $1")
@@ -78,7 +75,7 @@ pub async fn resolve_ticket_branch(
 /// Set `tickets.branch_name` once on first worktree creation. Concurrent callers share one name.
 pub async fn ensure_ticket_branch_name(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     title: &str,
 ) -> Result<String, sqlx::Error> {
     let candidate = build_ticket_branch(ticket_id, title);
@@ -102,7 +99,7 @@ pub async fn ensure_ticket_branch_name(
 
 /// One worktree dir per ticket — shared by all agents working sequentially on it.
 /// Branch names live on `tickets.branch_name` (see [`ensure_ticket_branch_name`]).
-pub fn compute_paths(worktrees_root: &Path, repo_name: &str, ticket_id: Uuid) -> WorktreePaths {
+pub fn compute_paths(worktrees_root: &Path, repo_name: &str, ticket_id: Id) -> WorktreePaths {
     let repo_slug = slugify(repo_name);
     let ticket_short = ticket_short_id(ticket_id);
     WorktreePaths {
@@ -323,12 +320,12 @@ fn branch_already_exists(stderr: &str) -> bool {
 }
 
 /// Where a plan run works. Never the ticket worktree.
-pub fn plan_scratch_dir(worktrees_root: &Path, run_id: Uuid) -> PathBuf {
+pub fn plan_scratch_dir(worktrees_root: &Path, run_id: Id) -> PathBuf {
     worktrees_root.join("plan-scratch").join(run_id.to_string())
 }
 
 /// Where a plugin builder run works. Never the ticket worktree or plugins install dir.
-pub fn plugin_build_dir(worktrees_root: &Path, build_id: Uuid) -> PathBuf {
+pub fn plugin_build_dir(worktrees_root: &Path, build_id: Id) -> PathBuf {
     worktrees_root.join("plugin-builds").join(build_id.to_string())
 }
 
@@ -411,7 +408,7 @@ impl PlanScratch {
     /// With no source repo, init a private detached repo that is not a ticket worktree.
     pub async fn create(
         worktrees_root: &Path,
-        run_id: Uuid,
+        run_id: Id,
         source: Option<PlanScratchSource>,
     ) -> Result<Self, WorktreeError> {
         let path = plan_scratch_dir(worktrees_root, run_id);
@@ -632,12 +629,11 @@ async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::uuid;
 
     #[test]
     fn compute_paths_builds_per_ticket_dir() {
         let worktrees_root = Path::new("/data/worktrees");
-        let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
+        let ticket_id = Id::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
 
         let paths = compute_paths(worktrees_root, "My Repo", ticket_id);
 
@@ -649,7 +645,7 @@ mod tests {
 
     #[test]
     fn build_ticket_branch_uses_title_slug() {
-        let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
+        let ticket_id = Id::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         assert_eq!(
             build_ticket_branch(ticket_id, "Fix login redirect"),
             "agent/550e8400-fix-login-redirect"
@@ -675,7 +671,7 @@ mod tests {
 
     #[test]
     fn resolve_stored_branch_prefers_valid_stored() {
-        let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
+        let ticket_id = Id::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         assert_eq!(
             resolve_stored_branch(ticket_id, Some("agent/550e8400-fix-login")),
             "agent/550e8400-fix-login"
@@ -870,7 +866,7 @@ mod tests {
         assert!(refs_before.remotes.contains("origin"));
 
         let worktrees = tmp.path().join("worktrees");
-        let run_id = Uuid::from_u128(7);
+        let run_id = Id::from_u128(7);
         let scratch = PlanScratch::create(
             &worktrees,
             run_id,
@@ -972,7 +968,7 @@ mod tests {
         let worktrees = tmp.path().join("worktrees");
         let scratch = PlanScratch::create(
             &worktrees,
-            Uuid::from_u128(8),
+            Id::from_u128(8),
             Some(PlanScratchSource {
                 git_dir: repo.clone(),
                 ticket_branch: "agent/TICKET-missing".into(),

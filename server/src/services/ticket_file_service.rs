@@ -3,12 +3,11 @@
 //! A ticket's files come from its worktree when one exists (the agent's work in
 //! progress), otherwise from the registered repo checkout. Only previewable
 //! kinds are served; add a variant to [`FilePreviewKind`] to support more.
+use crate::domain::Id;
 
 use std::path::{Path, PathBuf};
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::repo::VerificationStatus;
 use crate::services::code_review_service::validate_diff_file_path;
 use crate::services::repo_service::{RepoError, RepoService};
@@ -235,7 +234,7 @@ impl<'a> TicketFileService<'a> {
         }
     }
 
-    pub async fn read(&self, ticket_id: Uuid, path: &str) -> Result<TicketFile, TicketFileError> {
+    pub async fn read(&self, ticket_id: Id, path: &str) -> Result<TicketFile, TicketFileError> {
         let relative = normalize_preview_path(path)?;
         let (root, source) = self.resolve_root(ticket_id).await?;
         let canonical_root = root.canonicalize()?;
@@ -273,7 +272,7 @@ impl<'a> TicketFileService<'a> {
 
     async fn resolve_root(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<(PathBuf, FileSource), TicketFileError> {
         let ticket =
             TicketService::new(self.pool)

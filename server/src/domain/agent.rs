@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use std::cmp::Ordering;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 // Board order for preset roles. A new preset seed must be added here, or it sorts as custom.
 const PRESET_ORDER: [&str; 10] = [
     "pm",
@@ -72,7 +71,7 @@ impl ThinkingLevel {
 
 #[derive(Debug, Clone)]
 pub struct AgentPreset {
-    pub id: Uuid,
+    pub id: Id,
     pub key: String,
     pub role: String,
     pub responsibilities: Vec<String>,
@@ -81,7 +80,7 @@ pub struct AgentPreset {
 
 #[derive(Debug, Clone)]
 pub struct Agent {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     pub role: String,
     pub responsibilities: Vec<String>,
@@ -102,7 +101,7 @@ mod tests {
 
     fn agent(id: u128, role: &str, preset: Option<&str>, created_at: i64) -> Agent {
         Agent {
-            id: Uuid::from_u128(id),
+            id: Id::from_u128(id),
             name: role.to_string(),
             role: role.to_string(),
             responsibilities: vec![],

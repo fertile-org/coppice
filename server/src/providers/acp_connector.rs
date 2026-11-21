@@ -370,12 +370,14 @@ fn plan_markdown(update: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
 
     fn events(updates: &[Value]) -> Vec<Value> {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut console = AcpConsole::new("opencode", Some(handle.clone()));
         console.on_session("s1", Some("opencode/big-pickle"));

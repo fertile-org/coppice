@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::catalog::object;
 use crate::mcp::protocol::ToolDefinition;
@@ -7,8 +8,6 @@ use crate::mcp::tools::{design, ToolCtx, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-use uuid::Uuid;
-
 pub struct DesignToolSource {
     pub pool: PgPool,
 }
@@ -75,7 +74,7 @@ impl ToolSource for DesignToolSource {
     }
 }
 
-async fn design_plugin_id(pool: &PgPool, plugin_ids: &[Uuid]) -> Result<Option<Uuid>, sqlx::Error> {
+async fn design_plugin_id(pool: &PgPool, plugin_ids: &[Id]) -> Result<Option<Id>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT id FROM plugins WHERE name = 'design' AND enabled AND status = 'ok' AND id = ANY($1)",
     )

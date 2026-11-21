@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::knowledge::{
     confidence_from_str, confidence_to_str, scope_from_str, scope_to_str, source_type_from_str,
@@ -24,8 +25,6 @@ use sqlx::Row;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/knowledge", get(list_knowledge).post(create_knowledge))
@@ -121,7 +120,7 @@ impl IntoResponse for KnowledgeApiError {
 #[serde(rename_all = "camelCase")]
 struct ListQuery {
     status: Option<String>,
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
     knowledge_type: Option<String>,
     #[serde(default)]
     flagged: bool,
@@ -133,15 +132,15 @@ struct ListQuery {
 #[serde(rename_all = "camelCase")]
 struct RevisionBody {
     scope: String,
-    board_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
+    board_id: Option<Id>,
+    agent_id: Option<Id>,
     knowledge_type: String,
     title: String,
     content: String,
     #[serde(default = "default_source_type")]
     source_type: String,
-    source_id: Option<Uuid>,
-    source_run_id: Option<Uuid>,
+    source_id: Option<Id>,
+    source_run_id: Option<Id>,
     #[serde(default = "default_confidence")]
     confidence: String,
 }
@@ -173,9 +172,9 @@ struct EditBody {
     expected_version: i32,
     scope: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
-    board_id: Option<Option<Uuid>>,
+    board_id: Option<Option<Id>>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
-    agent_id: Option<Option<Uuid>>,
+    agent_id: Option<Option<Id>>,
     knowledge_type: Option<String>,
     title: Option<String>,
     content: Option<String>,
@@ -188,7 +187,7 @@ struct SupersedeBody {
     expected_version: i32,
     replacement: RevisionBody,
     /// The item whose text `replacement` copies, when not the superseded one.
-    citations_from_item_id: Option<Uuid>,
+    citations_from_item_id: Option<Id>,
 }
 
 #[derive(Deserialize)]
@@ -201,38 +200,38 @@ struct ExpireBody {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct KnowledgeResponse {
-    id: Uuid,
+    id: Id,
     version: i32,
     status: String,
-    revision_id: Uuid,
+    revision_id: Id,
     revision_number: i32,
-    active_revision_id: Option<Uuid>,
+    active_revision_id: Option<Id>,
     scope: String,
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
     board_name: Option<String>,
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
     agent_name: Option<String>,
     knowledge_type: String,
     title: String,
     content: String,
     source_type: String,
-    source_id: Option<Uuid>,
-    source_run_id: Option<Uuid>,
+    source_id: Option<Id>,
+    source_run_id: Option<Id>,
     confidence: String,
-    approved_by: Option<Uuid>,
+    approved_by: Option<Id>,
     approved_at: Option<String>,
     approval_mode: Option<String>,
     policy_decision: Option<String>,
     policy_reason: Option<String>,
     rejection_reason: Option<String>,
     expires_at: Option<String>,
-    supersedes_item_id: Option<Uuid>,
-    superseded_by: Option<Uuid>,
+    supersedes_item_id: Option<Id>,
+    superseded_by: Option<Id>,
     stale_at: Option<String>,
-    compaction_batch_id: Option<Uuid>,
-    compaction_agent_id: Option<Uuid>,
+    compaction_batch_id: Option<Id>,
+    compaction_agent_id: Option<Id>,
     compaction_agent_name: Option<String>,
-    source_ticket_ids: Vec<Uuid>,
+    source_ticket_ids: Vec<Id>,
     usage_count: i64,
     open_flag_count: i64,
     last_used_at: Option<String>,
@@ -250,8 +249,8 @@ struct KnowledgeListResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeUsageResponse {
-    item_id: Uuid,
-    revision_id: Uuid,
+    item_id: Id,
+    revision_id: Id,
     rank: i32,
     score: f64,
     token_count: i32,
@@ -260,7 +259,7 @@ struct KnowledgeUsageResponse {
     knowledge_type: String,
     scope: String,
     source_type: String,
-    source_id: Option<Uuid>,
+    source_id: Option<Id>,
     included_at: String,
 }
 
@@ -404,7 +403,7 @@ async fn list_inbox(
 async fn get_knowledge(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
         .get(item_id)
@@ -430,7 +429,7 @@ struct FreshnessResponse {
 async fn knowledge_freshness(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
 ) -> Result<Json<FreshnessResponse>, KnowledgeApiError> {
     let report = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
         .freshness(item_id)
@@ -466,7 +465,7 @@ struct FlagListResponse {
 async fn knowledge_feedback(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
 ) -> Result<Json<FlagListResponse>, KnowledgeApiError> {
     let items = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
         .open_flags(item_id)
@@ -485,7 +484,7 @@ async fn knowledge_feedback(
 async fn dismiss_knowledge_flags(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
         .dismiss_flags(item_id)
@@ -502,12 +501,12 @@ struct SimilarQuery {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SimilarNeighborResponse {
-    item_id: Uuid,
-    revision_id: Uuid,
+    item_id: Id,
+    revision_id: Id,
     title: String,
     knowledge_type: String,
     scope: String,
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
     score: f64,
     status: String,
 }
@@ -534,7 +533,7 @@ fn similar_neighbor_response(neighbor: SimilarKnowledgeNeighbor) -> SimilarNeigh
 async fn similar_knowledge(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Query(query): Query<SimilarQuery>,
 ) -> Result<Json<SimilarListResponse>, KnowledgeApiError> {
     let items = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
@@ -560,7 +559,7 @@ async fn create_knowledge(
 async fn approve_knowledge(
     State(state): State<Arc<AppState>>,
     AdminUser(auth): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<VersionBody>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
@@ -572,7 +571,7 @@ async fn approve_knowledge(
 async fn edit_knowledge(
     State(state): State<Arc<AppState>>,
     AdminUser(auth): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<EditBody>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let patch = KnowledgeRevisionPatch {
@@ -613,7 +612,7 @@ async fn edit_knowledge(
 async fn reject_knowledge(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<RejectBody>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
@@ -625,7 +624,7 @@ async fn reject_knowledge(
 async fn mark_stale(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<VersionBody>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
@@ -637,7 +636,7 @@ async fn mark_stale(
 async fn expire_knowledge(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<ExpireBody>,
 ) -> Result<Json<KnowledgeResponse>, KnowledgeApiError> {
     let expires_at = body
@@ -656,7 +655,7 @@ async fn expire_knowledge(
 async fn supersede_knowledge(
     State(state): State<Arc<AppState>>,
     AdminUser(auth): AdminUser,
-    Path(item_id): Path<Uuid>,
+    Path(item_id): Path<Id>,
     Json(body): Json<SupersedeBody>,
 ) -> Result<(StatusCode, Json<KnowledgeResponse>), KnowledgeApiError> {
     let item = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
@@ -674,7 +673,7 @@ async fn supersede_knowledge(
 async fn knowledge_used(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<Json<KnowledgeUsageListResponse>, KnowledgeApiError> {
     let pool = pool(&state)?;
     let run_exists: bool =
@@ -708,14 +707,14 @@ async fn knowledge_used(
         .into_iter()
         .map(|row| -> Result<KnowledgeUsageResponse, sqlx::Error> {
             let included_at: OffsetDateTime = row.try_get("included_at")?;
-            let item_id: Uuid = row.try_get("item_id")?;
-            let revision_id: Uuid = row.try_get("revision_id")?;
+            let item_id: Id = row.try_get("item_id")?;
+            let revision_id: Id = row.try_get("revision_id")?;
             let title: String = row.try_get("title")?;
             let content: String = row.try_get("content")?;
             let knowledge_type: String = row.try_get("knowledge_type")?;
             let scope: String = row.try_get("scope")?;
             let source_type: String = row.try_get("source_type")?;
-            let source_id: Option<Uuid> = row.try_get("source_id")?;
+            let source_id: Option<Id> = row.try_get("source_id")?;
             let confidence: String = row.try_get("confidence")?;
             // The revision is immutable, so this is the exact text the run saw.
             let rendered_content = render_entry(&KnowledgeEntryFields {

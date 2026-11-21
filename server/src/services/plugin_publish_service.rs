@@ -1,5 +1,6 @@
 //! Push a builder-made plugin into an admin git marketplace repo (PB-12).
 //! Host credentials only — never TicketGitService / forge secrets.
+use crate::domain::Id;
 
 use crate::plugins::capability::MARKETPLACE_JSON;
 use crate::plugins::git_install::{self, validate_git_url};
@@ -10,8 +11,6 @@ use sqlx::PgPool;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use uuid::Uuid;
-
 pub const INVALID_URL_MSG: &str = "That doesn't look like a repository URL.";
 
 pub fn unreachable_msg(repo: &str) -> String {
@@ -139,9 +138,9 @@ impl<'a> PluginPublishService<'a> {
     /// Accepted builder row for this plugin, if any.
     pub async fn accepted_build_for_plugin(
         &self,
-        plugin_id: Uuid,
-    ) -> Result<Option<(Uuid, Option<String>, Option<String>)>, PluginPublishError> {
-        let row = sqlx::query_as::<_, (Uuid, Option<String>, Option<String>)>(
+        plugin_id: Id,
+    ) -> Result<Option<(Id, Option<String>, Option<String>)>, PluginPublishError> {
+        let row = sqlx::query_as::<_, (Id, Option<String>, Option<String>)>(
             r#"
             SELECT id, plugin_name, publish_target
             FROM plugin_builds
@@ -159,12 +158,12 @@ impl<'a> PluginPublishService<'a> {
     /// Latest accepted publish target per builder-made plugin id.
     pub async fn builder_made_targets(
         &self,
-        plugin_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, Option<String>>, PluginPublishError> {
+        plugin_ids: &[Id],
+    ) -> Result<std::collections::HashMap<Id, Option<String>>, PluginPublishError> {
         if plugin_ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
-        let rows: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        let rows: Vec<(Id, Option<String>)> = sqlx::query_as(
             r#"
             SELECT DISTINCT ON (plugin_id) plugin_id, publish_target
             FROM plugin_builds
@@ -181,7 +180,7 @@ impl<'a> PluginPublishService<'a> {
     /// Publish after Accept. Never fails the Accept — maps errors into `PublishResult`.
     pub async fn publish_after_accept(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         plugin_name: &str,
         url: &str,
         plugins: &PluginService<'_>,
@@ -201,7 +200,7 @@ impl<'a> PluginPublishService<'a> {
     /// Dedicated Publish… / retry / suffix-confirm path.
     pub async fn publish_for_plugin(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         url: &str,
         confirm_suffix: bool,
         plugins: &PluginService<'_>,
@@ -229,7 +228,7 @@ impl<'a> PluginPublishService<'a> {
 
     async fn publish_plugin(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         plugin_name: &str,
         url: &str,
         confirm_suffix: bool,

@@ -1,5 +1,4 @@
-use uuid::Uuid;
-
+use crate::domain::Id;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MentionStatus {
     Pending,
@@ -8,10 +7,10 @@ pub enum MentionStatus {
 }
 
 pub struct TicketMention {
-    pub id: Uuid,
-    pub ticket_id: Uuid,
-    pub comment_id: Uuid,
-    pub mentioned_agent_id: Uuid,
-    pub resume_agent_id: Option<Uuid>,
+    pub id: Id,
+    pub ticket_id: Id,
+    pub comment_id: Id,
+    pub mentioned_agent_id: Id,
+    pub resume_agent_id: Option<Id>,
     pub status: MentionStatus,
 }

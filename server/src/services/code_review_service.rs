@@ -1,8 +1,7 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 
 use sqlx::{PgPool, Row};
-use uuid::Uuid;
-
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
@@ -129,7 +128,7 @@ pub struct WorktreeSummary {
     pub path: String,
     pub branch: String,
     pub head_sha: String,
-    pub ticket_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
     pub ticket_title: Option<String>,
 }
 
@@ -205,7 +204,7 @@ pub struct FileContent {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTicketInput {
-    pub board_id: Uuid,
+    pub board_id: Id,
     pub title: String,
     pub description: Option<String>,
 }
@@ -213,23 +212,23 @@ pub struct NewTicketInput {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitReviewInput {
-    pub repo_id: Uuid,
+    pub repo_id: Id,
     pub worktree_path: String,
     pub base_branch: String,
     pub head_sha: String,
-    pub ticket_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
     pub new_ticket: Option<NewTicketInput>,
     pub summary: String,
     pub inline_comments: Vec<InlineCommentInput>,
     pub workflow_action: Option<String>,
-    pub reassign_agent_id: Option<Uuid>,
+    pub reassign_agent_id: Option<Id>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitReviewResponse {
-    pub ticket_id: Uuid,
-    pub comment_id: Uuid,
+    pub ticket_id: Id,
+    pub comment_id: Id,
     pub ticket_created: bool,
     /// Set when the submit changed status or assignee, so the API can start a run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,7 +260,7 @@ impl<'a> CodeReviewService<'a> {
 
     pub async fn list_worktrees(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
     ) -> Result<Vec<WorktreeSummary>, CodeReviewError> {
         let repo = RepoService::new(self.pool)
             .get(repo_id)
@@ -310,9 +309,9 @@ impl<'a> CodeReviewService<'a> {
 
     async fn lookup_ticket_by_short(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         ticket_short: &str,
-    ) -> Result<(Option<Uuid>, Option<String>), CodeReviewError> {
+    ) -> Result<(Option<Id>, Option<String>), CodeReviewError> {
         if ticket_short.is_empty() {
             return Ok((None, None));
         }
@@ -334,7 +333,7 @@ impl<'a> CodeReviewService<'a> {
         })
     }
 
-    pub async fn list_branches(&self, repo_id: Uuid) -> Result<BranchesResponse, CodeReviewError> {
+    pub async fn list_branches(&self, repo_id: Id) -> Result<BranchesResponse, CodeReviewError> {
         let repo = RepoService::new(self.pool)
             .get(repo_id)
             .await
@@ -358,7 +357,7 @@ impl<'a> CodeReviewService<'a> {
 
     pub async fn diff_summary(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         worktree_path: &str,
         base_branch: &str,
         ignore_whitespace: bool,
@@ -391,7 +390,7 @@ impl<'a> CodeReviewService<'a> {
 
     pub async fn file_patch(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         worktree_path: &str,
         base_branch: &str,
         path: &str,
@@ -430,7 +429,7 @@ impl<'a> CodeReviewService<'a> {
 
     pub async fn file_content(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         worktree_path: &str,
         base_branch: &str,
         path: &str,
@@ -469,7 +468,7 @@ impl<'a> CodeReviewService<'a> {
 
     pub async fn submit_review(
         &self,
-        user_id: Uuid,
+        user_id: Id,
         input: SubmitReviewInput,
     ) -> Result<SubmitReviewResponse, CodeReviewError> {
         if input.summary.trim().is_empty() {
@@ -603,7 +602,7 @@ impl<'a> CodeReviewService<'a> {
 
     async fn resolve_worktree_repo(
         &self,
-        repo_id: Uuid,
+        repo_id: Id,
         worktree_path: &str,
         base_branch: &str,
     ) -> Result<WorktreeRepoContext, CodeReviewError> {

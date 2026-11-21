@@ -1,13 +1,12 @@
 //! Removes a ticket's worktree and local branch once the ticket is archived
 //! or merged. Runs off the request path and is safe to repeat.
+use crate::domain::Id;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::git_state::GitOutcome;
 use crate::events::bus::EventBus;
@@ -29,7 +28,7 @@ pub async fn cleanup_ticket(
     pool: &PgPool,
     bus: &EventBus,
     worktrees_root: PathBuf,
-    ticket_id: Uuid,
+    ticket_id: Id,
     announce: bool,
 ) -> WorktreeCleanup {
     let outcome = match TicketGitService::new(pool, worktrees_root)
@@ -91,7 +90,7 @@ pub async fn cleanup_ticket(
 
 async fn set_outcome(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     outcome: Option<GitOutcome>,
     reason: Option<&str>,
 ) {
@@ -103,7 +102,7 @@ async fn set_outcome(
 }
 
 /// Clean up in the background, for example after archive or merge.
-pub fn spawn_cleanup(state: &Arc<crate::AppState>, ticket_id: Uuid) {
+pub fn spawn_cleanup(state: &Arc<crate::AppState>, ticket_id: Id) {
     let Some(pool) = state.db.clone() else {
         return;
     };
@@ -138,7 +137,7 @@ pub async fn sweep(
     bus: &EventBus,
     worktrees_root: PathBuf,
 ) -> Result<usize, sqlx::Error> {
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+    let rows: Vec<(Id, String)> = sqlx::query_as(
         r#"
         SELECT ticket.id, repo.name
         FROM tickets ticket
@@ -169,7 +168,7 @@ pub async fn sweep(
 /// Tickets waiting on a push or a kept worktree may have been resolved by
 /// hand since. Local git only.
 async fn recheck_pending(state: &crate::AppState, pool: &PgPool) -> Result<(), sqlx::Error> {
-    let ids: Vec<Uuid> = sqlx::query_scalar(
+    let ids: Vec<Id> = sqlx::query_scalar(
         "SELECT ticket_id FROM ticket_human_reviews WHERE git_outcome IN ('not_pushed', 'worktree_kept')",
     )
     .fetch_all(pool)

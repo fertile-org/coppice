@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::notification::{Notification, NotificationType};
 use crate::events::bus::AppEvent;
@@ -14,8 +15,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/notifications", get(list_notifications))
@@ -35,16 +34,16 @@ struct ListQuery {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NotificationResponse {
-    id: Uuid,
+    id: Id,
     #[serde(rename = "type")]
     kind: String,
     title: String,
     body: Option<String>,
-    ticket_id: Option<Uuid>,
-    run_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
-    comment_id: Option<Uuid>,
-    mention_id: Option<Uuid>,
+    ticket_id: Option<Id>,
+    run_id: Option<Id>,
+    agent_id: Option<Id>,
+    comment_id: Option<Id>,
+    mention_id: Option<Id>,
     read_at: Option<String>,
     created_at: String,
 }
@@ -130,7 +129,7 @@ async fn unread_count(
 async fn mark_read(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<StatusCode, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = NotificationService::new(pool);

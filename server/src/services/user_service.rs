@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use crate::domain::user::User;
 use crate::services::auth_service::hash_password;
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 pub struct UserService<'a> {
     pool: &'a PgPool,
 }
@@ -38,7 +37,7 @@ impl<'a> UserService<'a> {
     }
 
     pub async fn create_member(&self, email: &str, password: &str) -> Result<User, UserError> {
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let password_hash = hash_password(password).map_err(|_| UserError::PasswordHash)?;
 
         let row = sqlx::query(

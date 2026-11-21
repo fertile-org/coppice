@@ -2,11 +2,10 @@
 //! against the approved plan's acceptance criteria (#150).
 //!
 //! Information only: nothing here gates Accept or Merge.
+use crate::domain::Id;
 
 use serde::Serialize;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::providers::{AgentRunResult, CriterionResult, CriterionStatus};
 
 pub struct StoredCriteriaResults {
@@ -38,7 +37,7 @@ impl<'a> CriteriaResultsService<'a> {
     /// and reads as not checked.
     pub async fn record(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         result: &AgentRunResult,
         commit_sha: &str,
     ) -> Result<(), sqlx::Error> {
@@ -70,7 +69,7 @@ impl<'a> CriteriaResultsService<'a> {
         Ok(())
     }
 
-    pub async fn get(&self, ticket_id: Uuid) -> Result<Option<StoredCriteriaResults>, sqlx::Error> {
+    pub async fn get(&self, ticket_id: Id) -> Result<Option<StoredCriteriaResults>, sqlx::Error> {
         let row: Option<(String, serde_json::Value)> = sqlx::query_as(
             "SELECT commit_sha, results FROM ticket_criteria_results WHERE ticket_id = $1",
         )

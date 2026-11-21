@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use crate::domain::knowledge::{scope_from_str, type_from_str};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 /// Compact server-validated chat actions (distinct from ticket result contract).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -11,9 +10,9 @@ pub enum ChatAction {
         #[serde(default)]
         description: String,
         #[serde(default, rename = "repoId")]
-        repo_id: Option<Uuid>,
+        repo_id: Option<Id>,
         #[serde(default, rename = "boardId")]
-        board_id: Option<Uuid>,
+        board_id: Option<Id>,
     },
     CreateKnowledge {
         title: String,
@@ -23,7 +22,7 @@ pub enum ChatAction {
         #[serde(default = "default_scope")]
         scope: String,
         #[serde(default, rename = "boardId")]
-        board_id: Option<Uuid>,
+        board_id: Option<Id>,
     },
 }
 
@@ -40,9 +39,9 @@ fn default_scope() -> String {
 pub struct ChatActionResultMeta {
     pub action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ticket_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub knowledge_item_id: Option<Uuid>,
+    pub knowledge_item_id: Option<Id>,
 }
 
 /// Most proposals one chat turn may carry.
@@ -129,7 +128,7 @@ pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
                 repo_id,
                 board_id,
             } => serde_json::json!({
-                "id": Uuid::new_v4(),
+                "id": Id::new(),
                 "type": "create_ticket",
                 "title": title,
                 "description": description,
@@ -144,7 +143,7 @@ pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
                 scope,
                 board_id,
             } => serde_json::json!({
-                "id": Uuid::new_v4(),
+                "id": Id::new(),
                 "type": "create_knowledge",
                 "title": title,
                 "content": content,

@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::copy::review::{
     BOARD_NAME_CONFLICT, BOARD_NAME_INVALID, BOARD_NAME_LABEL, BOARD_SETTINGS_LABEL,
@@ -19,8 +20,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/boards", get(list_boards).post(create_board))
@@ -34,7 +33,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BoardResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     slug: String,
     created_at: String,
@@ -156,7 +155,7 @@ async fn create_board(
 async fn get_board(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(board_id): Path<Uuid>,
+    Path(board_id): Path<Id>,
 ) -> Result<Json<BoardResponse>, BoardApiError> {
     let pool = pool_from_state(&state).map_err(BoardApiError::Status)?;
     let service = BoardService::new(pool);
@@ -167,7 +166,7 @@ async fn get_board(
 async fn update_board(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(board_id): Path<Uuid>,
+    Path(board_id): Path<Id>,
     Json(body): Json<UpdateBoardBody>,
 ) -> Result<Json<BoardResponse>, BoardApiError> {
     let pool = pool_from_state(&state).map_err(BoardApiError::Status)?;
@@ -182,7 +181,7 @@ async fn update_board(
 async fn put_review_capacity(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(board_id): Path<Uuid>,
+    Path(board_id): Path<Id>,
     Json(body): Json<ReviewCapacityBody>,
 ) -> Result<Json<BoardResponse>, BoardApiError> {
     let review_cap = review_cap_limit(body.review_cap, REVIEW_CAP_INVALID)

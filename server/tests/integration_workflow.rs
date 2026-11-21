@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -79,7 +80,7 @@ async fn human_mention_does_not_change_ticket_status() {
     let mention_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1 AND status = 'pending'",
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
     .fetch_one(pool)
     .await
     .expect("count mentions");
@@ -478,8 +479,8 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
     let context_profile = sqlx::query_scalar::<_, String>(
         "SELECT context_profile FROM agent_runs WHERE ticket_id = $1 AND agent_id = $2",
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
     .fetch_one(pool)
     .await
     .expect("Human Agent context profile");
@@ -498,8 +499,8 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
         LIMIT 1
         "#,
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
     .fetch_one(pool)
     .await
     .expect("Human Agent Tech Lead comment");
@@ -758,8 +759,8 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
         LIMIT 1
         "#,
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
     .fetch_one(pool)
     .await
     .expect("Tech Lead refinement comment");
@@ -845,8 +846,8 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
     let engineer_run_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND agent_id = $2",
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&engineer_id).expect("engineer UUID"))
     .fetch_one(pool)
     .await
     .expect("count manual handoff engineer runs");
@@ -883,8 +884,8 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
         &csrf,
     )
     .await;
-    let tech_lead_uuid = uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID");
-    let engineer_uuid = uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID");
+    let tech_lead_uuid = Id::parse_str(&tech_lead_id).expect("Tech Lead UUID");
+    let engineer_uuid = Id::parse_str(&engineer_id).expect("engineer UUID");
 
     for (fixture_key, disable_engineer, expected_reason) in [
         ("tech_lead_missing", false, "did not return `assignTo`"),
@@ -948,7 +949,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
         let target_run_count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND agent_id != $2",
         )
-        .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+        .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
         .bind(tech_lead_uuid)
         .fetch_one(pool)
         .await
@@ -963,7 +964,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
             LIMIT 1
             "#,
         )
-        .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+        .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
         .fetch_one(pool)
         .await
         .expect("invalid handoff system comment");
@@ -1007,7 +1008,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
     )
     .await;
     sqlx::query("UPDATE agents SET preset_source = 'tech_lead_clarification' WHERE id = $1")
-        .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+        .bind(Id::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
         .execute(pool)
         .await
         .expect("select Tech Lead clarification fixtures");
@@ -1074,7 +1075,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
     );
     let clarification_round =
         sqlx::query_scalar::<_, i32>("SELECT clarification_round FROM tickets WHERE id = $1")
-            .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+            .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
             .fetch_one(pool)
             .await
             .expect("clarification round");
@@ -1087,8 +1088,8 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
         ORDER BY created_at ASC
         "#,
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
     .fetch_all(pool)
     .await
     .expect("Tech Lead comments");
@@ -1436,7 +1437,7 @@ async fn system_comments(pool: &sqlx::PgPool, ticket_id: &str) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "SELECT body FROM ticket_comments WHERE ticket_id = $1 AND author_type = 'system' ORDER BY created_at",
     )
-    .bind(uuid::Uuid::parse_str(ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(ticket_id).expect("ticket UUID"))
     .fetch_all(pool)
     .await
     .expect("system comments")
@@ -1678,8 +1679,8 @@ async fn drag_into_in_review_during_an_active_run_starts_no_second_agent() {
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
-    let engineer_uuid = uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket UUID");
+    let engineer_uuid = Id::parse_str(&engineer_id).expect("engineer UUID");
     sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
         .bind(ticket_uuid)
         .bind(engineer_uuid)
@@ -1695,7 +1696,7 @@ async fn drag_into_in_review_during_an_active_run_starts_no_second_agent() {
         VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default', 'full', now())
         "#,
     )
-    .bind(uuid::Uuid::new_v4())
+    .bind(Id::new())
     .bind(ticket_uuid)
     .bind(engineer_uuid)
     .execute(pool)

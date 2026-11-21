@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use std::collections::HashMap;
@@ -17,8 +18,6 @@ use coppice_server::services::pr_merge_sync::{
 use coppice_server::services::ticket_attachments;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use uuid::Uuid;
-
 const FORGE_TOKEN: &str = "ghs_testtoken";
 
 #[derive(Clone, Default)]
@@ -160,15 +159,15 @@ fn commit_file(dir: &Path, name: &str, body: &str, message: &str) {
     );
 }
 
-fn branch_exists(repo: &Path, ticket_id: Uuid) -> bool {
-    let short = ticket_id.to_string();
-    let short = short.split('-').next().unwrap();
+fn branch_exists(repo: &Path, ticket_id: Id) -> bool {
+    let branch =
+        coppice_server::services::worktree_service::build_ticket_branch(ticket_id, "Test ticket");
     Command::new("git")
         .args([
             "rev-parse",
             "--verify",
             "--quiet",
-            &format!("refs/heads/agent/TICKET-{short}"),
+            &format!("refs/heads/{branch}"),
         ])
         .current_dir(repo)
         .output()
@@ -177,8 +176,8 @@ fn branch_exists(repo: &Path, ticket_id: Uuid) -> bool {
         .success()
 }
 
-fn ticket_branch(_worktrees: &Path, ticket_id: Uuid) -> String {
-    coppice_server::services::worktree_service::legacy_ticket_branch(ticket_id)
+fn ticket_branch(_worktrees: &Path, ticket_id: Id) -> String {
+    coppice_server::services::worktree_service::build_ticket_branch(ticket_id, "Test ticket")
 }
 
 fn merged_pr(head_sha: &str, base: &str) -> Value {
@@ -203,7 +202,7 @@ struct Workspace {
 }
 
 struct TicketFx {
-    id: Uuid,
+    id: Id,
     worktree: PathBuf,
     accepted_sha: String,
 }
@@ -272,12 +271,14 @@ impl Workspace {
             &self.csrf,
         )
         .await;
-        let worktree = common::setup_worktree_with_commit(
+        let worktree = common::setup_persisted_worktree(
+            self.state.db.as_ref().expect("db"),
             &self.local_path,
             self.env.worktrees.path(),
             "test-repo",
             &ticket_id,
-        );
+        )
+        .await;
         let res = self
             .app
             .clone()
@@ -312,7 +313,7 @@ impl Workspace {
         }
     }
 
-    async fn get_ticket(&self, ticket_id: Uuid) -> Value {
+    async fn get_ticket(&self, ticket_id: Id) -> Value {
         let res = self
             .app
             .clone()
@@ -329,7 +330,7 @@ impl Workspace {
         common::json_body(res).await
     }
 
-    async fn comment_count(&self, ticket_id: Uuid, body: &str) -> i64 {
+    async fn comment_count(&self, ticket_id: Id, body: &str) -> i64 {
         let pool = self.state.db.clone().unwrap();
         sqlx::query_scalar(
             "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
@@ -341,7 +342,7 @@ impl Workspace {
         .unwrap()
     }
 
-    async fn merge_comment_count(&self, ticket_id: Uuid, pr_url: &str) -> i64 {
+    async fn merge_comment_count(&self, ticket_id: Id, pr_url: &str) -> i64 {
         self.comment_count(ticket_id, &merge_recorded_comment(pr_url))
             .await
     }
@@ -832,9 +833,9 @@ async fn sweep_merge_of_a_split_child_starts_the_next() {
     let ws = Workspace::new("https://github.com/acme/coppice.git", true).await;
     let ticket = ws.accept_ticket().await;
     let pool = ws.state.db.clone().unwrap();
-    let parent = Uuid::new_v4();
-    let sibling = Uuid::new_v4();
-    let plan = Uuid::new_v4();
+    let parent = Id::new();
+    let sibling = Id::new();
+    let plan = Id::new();
     sqlx::query(
         r#"
         INSERT INTO tickets (id, board_id, title, description, status, created_by)

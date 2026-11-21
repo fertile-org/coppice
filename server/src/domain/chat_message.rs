@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatMessageRole {
     Human,
@@ -33,14 +32,14 @@ impl std::str::FromStr for ChatMessageRole {
 
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
-    pub id: Uuid,
-    pub session_id: Uuid,
+    pub id: Id,
+    pub session_id: Id,
     pub seq: i64,
     pub role: ChatMessageRole,
     pub body: String,
-    pub agent_run_id: Option<Uuid>,
+    pub agent_run_id: Option<Id>,
     pub action_metadata: Option<serde_json::Value>,
-    pub attachment_ids: Vec<Uuid>,
+    pub attachment_ids: Vec<Id>,
     pub created_at: OffsetDateTime,
 }
 

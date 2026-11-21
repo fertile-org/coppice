@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -560,7 +561,7 @@ async fn successful_default_branch_push_via_bare_sibling() {
     .await;
     set_forge_token(&app, &repo_id, "ghs_testtoken", &cookie, &csrf).await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let result = svc
@@ -645,7 +646,7 @@ async fn successful_default_branch_pull_via_bare_sibling() {
         "{body}"
     );
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let result = svc
@@ -759,7 +760,7 @@ async fn pull_blocked_when_dirty_or_diverged() {
         "{body}"
     );
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let err = svc
@@ -797,7 +798,7 @@ async fn sync_pushes_when_ahead() {
     )
     .await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let result = svc
@@ -865,7 +866,7 @@ async fn sync_pulls_when_behind() {
     )
     .await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let result = svc
@@ -906,7 +907,7 @@ async fn sync_up_to_date_when_equal() {
     )
     .await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let result = svc
@@ -944,7 +945,7 @@ async fn sync_errors_when_diverged() {
     )
     .await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, true, &state.secret_store);
     let err = svc
@@ -983,7 +984,7 @@ async fn sync_errors_when_push_disabled_and_ahead() {
     )
     .await;
 
-    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let repo_uuid = Id::parse_str(&repo_id).unwrap();
     let pool = state.db.as_ref().expect("db");
     let svc = RepoGitService::new(pool, false, &state.secret_store);
     let err = svc

@@ -5,6 +5,7 @@
 //! picks the oldest enabled Tech Lead/reviewer (In Review) or QC (In QA), then
 //! starts its run. With no eligible agent the ticket stays unassigned and a
 //! comment names the missing role.
+use crate::domain::Id;
 
 use crate::config::WorkflowConfig;
 use crate::domain::comment::{AuthorType, CommentIntent};
@@ -20,8 +21,6 @@ use crate::services::run_orchestrator::board_agent_infos;
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::ticket_service::TicketService;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 pub struct StageOwnerService<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
@@ -35,7 +34,7 @@ impl<'a> StageOwnerService<'a> {
     /// A person moved the ticket into In Review or In QA. A ticket with a
     /// queued or running run is left alone: that run finishes first and the
     /// workflow gate hands off from there.
-    pub async fn on_entered_review_stage(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    pub async fn on_entered_review_stage(&self, ticket_id: Id) -> Result<(), PlanError> {
         let tickets = TicketService::new(self.pool);
         let ticket = tickets.get(ticket_id).await?.ticket;
         let status = ticket.status;
@@ -101,7 +100,7 @@ impl<'a> StageOwnerService<'a> {
         }
     }
 
-    async fn note(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
+    async fn note(&self, ticket_id: Id, body: &str) -> Result<(), PlanError> {
         CommentService::new(self.pool)
             .create(
                 ticket_id,

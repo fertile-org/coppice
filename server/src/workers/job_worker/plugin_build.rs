@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use super::{best_effort_persist_artifacts, JobCancelled};
 use crate::domain::plugin_build::{
     is_plugin_build_job, BUILD_FORMAT_RULES, JOB_TYPE_PLAN_PLUGIN_BUILD,
@@ -59,7 +58,7 @@ async fn drive(
     run_svc: &RunService<'_>,
     run: &AgentRun,
     builds: &PluginBuildService<'_>,
-    build_id: Uuid,
+    build_id: Id,
 ) -> anyhow::Result<()> {
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());

@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::config::{KnowledgeConfig, KnowledgeRetrievalConfig};
 use crate::domain::knowledge::{
     confidence_from_str, confidence_to_str, scope_from_str, scope_to_str, source_type_from_str,
@@ -15,8 +16,6 @@ use crate::knowledge::retrieval::{
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 /// Lowest [`near_duplicate_score`] at which a proposal counts as already known.
 /// `policy_reason` of every item a working agent proposes. Compaction uses it
 /// to tell unreviewed agent text from its own candidates.
@@ -101,25 +100,25 @@ pub enum KnowledgeError {
 /// Provenance for an item proposed by a compaction batch.
 #[derive(Debug, Clone)]
 pub struct CompactionProvenance<'a> {
-    pub batch_id: Uuid,
+    pub batch_id: Id,
     pub candidate_index: i32,
-    pub source_ticket_ids: &'a [Uuid],
-    pub supersedes_item_id: Option<Uuid>,
+    pub source_ticket_ids: &'a [Id],
+    pub supersedes_item_id: Option<Id>,
 }
 
 /// The run that proposes an item, and where its work happens.
 #[derive(Debug, Clone, Copy)]
 pub struct RunProposal {
-    pub run_id: Uuid,
-    pub ticket_id: Uuid,
-    pub board_id: Uuid,
-    pub repo_id: Option<Uuid>,
+    pub run_id: Id,
+    pub ticket_id: Id,
+    pub board_id: Id,
+    pub repo_id: Option<Id>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct KnowledgeListFilter {
     pub status: Option<KnowledgeStatus>,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
     pub knowledge_type: Option<KnowledgeType>,
     /// Only live approved items with open flags, most recently flagged first.
     pub flagged: bool,
@@ -136,8 +135,8 @@ pub struct KnowledgePage {
 #[derive(Debug, Clone, Default)]
 pub struct KnowledgeRevisionPatch {
     pub scope: Option<KnowledgeScope>,
-    pub board_id: Option<Option<Uuid>>,
-    pub agent_id: Option<Option<Uuid>>,
+    pub board_id: Option<Option<Id>>,
+    pub agent_id: Option<Option<Id>>,
     pub knowledge_type: Option<KnowledgeType>,
     pub title: Option<String>,
     pub content: Option<String>,
@@ -148,9 +147,9 @@ pub struct KnowledgeRevisionPatch {
 struct LockedItem {
     version: i32,
     status: KnowledgeStatus,
-    current_revision_id: Uuid,
-    supersedes_item_id: Option<Uuid>,
-    superseded_by: Option<Uuid>,
+    current_revision_id: Id,
+    supersedes_item_id: Option<Id>,
+    superseded_by: Option<Id>,
 }
 
 pub struct KnowledgeService<'a> {
@@ -165,7 +164,7 @@ impl<'a> KnowledgeService<'a> {
 
     pub async fn create_manual(
         &self,
-        user_id: Uuid,
+        user_id: Id,
         mut input: KnowledgeRevisionInput,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
@@ -197,9 +196,9 @@ impl<'a> KnowledgeService<'a> {
         status: KnowledgeStatus,
         policy_decision: &str,
         policy_reason: &str,
-    ) -> Result<Uuid, KnowledgeError> {
+    ) -> Result<Id, KnowledgeError> {
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
-        if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
+        if let Some(existing) = sqlx::query_scalar::<_, Id>(
             "SELECT id FROM knowledge_items WHERE compaction_batch_id = $1 AND compaction_candidate_index = $2",
         )
         .bind(provenance.batch_id)
@@ -214,7 +213,7 @@ impl<'a> KnowledgeService<'a> {
         let item_id = self
             .insert_item_revision(
                 tx,
-                Uuid::nil(),
+                Id::nil(),
                 &input,
                 provenance.supersedes_item_id,
                 Some((provenance.batch_id, provenance.candidate_index)),
@@ -233,7 +232,7 @@ impl<'a> KnowledgeService<'a> {
             .await?;
         }
         if status == KnowledgeStatus::Approved {
-            let revision_id: Uuid =
+            let revision_id: Id =
                 sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
                     .bind(item_id)
                     .fetch_one(&mut **tx)
@@ -252,7 +251,7 @@ impl<'a> KnowledgeService<'a> {
         run: RunProposal,
         mut input: KnowledgeRevisionInput,
         citations: &[ResolvedCitation],
-    ) -> Result<Uuid, KnowledgeError> {
+    ) -> Result<Id, KnowledgeError> {
         input.scope = KnowledgeScope::Board;
         input.board_id = Some(run.board_id);
         input.agent_id = None;
@@ -264,7 +263,7 @@ impl<'a> KnowledgeService<'a> {
         let item_id = self
             .insert_item_revision(
                 tx,
-                Uuid::nil(),
+                Id::nil(),
                 &input,
                 None,
                 None,
@@ -273,7 +272,7 @@ impl<'a> KnowledgeService<'a> {
                 Some(("human_review", PROPOSED_BY_AGENT_REASON)),
             )
             .await?;
-        let revision_id: Uuid =
+        let revision_id: Id =
             sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
                 .bind(item_id)
                 .fetch_one(&mut **tx)
@@ -282,7 +281,7 @@ impl<'a> KnowledgeService<'a> {
         Ok(item_id)
     }
 
-    pub async fn get(&self, item_id: Uuid) -> Result<KnowledgeItemView, KnowledgeError> {
+    pub async fn get(&self, item_id: Id) -> Result<KnowledgeItemView, KnowledgeError> {
         let sql = format!("{VIEW_SELECT} WHERE i.id = $1");
         let row = sqlx::query(&sql)
             .bind(item_id)
@@ -294,8 +293,8 @@ impl<'a> KnowledgeService<'a> {
 
     /// Freshness of the item's active revision (the current one when it has
     /// none), with the citations behind it.
-    pub async fn freshness(&self, item_id: Uuid) -> Result<KnowledgeFreshness, KnowledgeError> {
-        let revision_id: Uuid = sqlx::query_scalar(
+    pub async fn freshness(&self, item_id: Id) -> Result<KnowledgeFreshness, KnowledgeError> {
+        let revision_id: Id = sqlx::query_scalar(
             "SELECT COALESCE(active_revision_id, current_revision_id) FROM knowledge_items WHERE id = $1",
         )
         .bind(item_id)
@@ -332,9 +331,9 @@ impl<'a> KnowledgeService<'a> {
     /// Open flags on the item's active revision, newest first.
     pub async fn open_flags(
         &self,
-        item_id: Uuid,
+        item_id: Id,
     ) -> Result<Vec<KnowledgeFlagView>, KnowledgeError> {
-        let active_revision_id: Option<Uuid> =
+        let active_revision_id: Option<Id> =
             sqlx::query_scalar("SELECT active_revision_id FROM knowledge_items WHERE id = $1")
                 .bind(item_id)
                 .fetch_optional(self.pool)
@@ -367,9 +366,9 @@ impl<'a> KnowledgeService<'a> {
 
     /// Close every open flag on the item's active revision. The rows stay, and
     /// the item itself does not change.
-    pub async fn dismiss_flags(&self, item_id: Uuid) -> Result<KnowledgeItemView, KnowledgeError> {
+    pub async fn dismiss_flags(&self, item_id: Id) -> Result<KnowledgeItemView, KnowledgeError> {
         let mut tx = self.pool.begin().await?;
-        let active_revision_id: Option<Uuid> = sqlx::query_scalar(
+        let active_revision_id: Option<Id> = sqlx::query_scalar(
             "SELECT active_revision_id FROM knowledge_items WHERE id = $1 FOR UPDATE",
         )
         .bind(item_id)
@@ -395,7 +394,7 @@ impl<'a> KnowledgeService<'a> {
     /// against approved, live knowledge.
     pub async fn find_similar(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         limit: Option<usize>,
     ) -> Result<Vec<SimilarKnowledgeNeighbor>, KnowledgeError> {
         let item = self.get(item_id).await?;
@@ -444,7 +443,7 @@ WHERE flags.flagged_at IS NOT NULL
   AND i.superseded_by IS NULL
   AND (i.expires_at IS NULL OR i.expires_at > now())
   AND ($1::text IS NULL OR i.status = $1)
-  AND ($2::uuid IS NULL OR r.board_id = $2)
+  AND ($2::varchar IS NULL OR r.board_id = $2)
   AND ($3::text IS NULL OR r.knowledge_type = $3)
   AND ($4::timestamptz IS NULL OR (flags.flagged_at, i.id) < ($4, $5))
 ORDER BY flags.flagged_at DESC, i.id DESC
@@ -454,7 +453,7 @@ LIMIT $6"#
             format!(
                 r#"{VIEW_SELECT}
 WHERE ($1::text IS NULL OR i.status = $1)
-  AND ($2::uuid IS NULL OR r.board_id = $2)
+  AND ($2::varchar IS NULL OR r.board_id = $2)
   AND ($3::text IS NULL OR r.knowledge_type = $3)
   AND ($4::timestamptz IS NULL OR (i.updated_at, i.id) < ($4, $5))
 ORDER BY i.updated_at DESC, i.id DESC
@@ -490,9 +489,9 @@ LIMIT $6"#
 
     pub async fn approve(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
-        user_id: Uuid,
+        user_id: Id,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         let mut tx = self.pool.begin().await?;
         let item = lock_item_for_activation(&mut tx, item_id).await?;
@@ -529,9 +528,9 @@ LIMIT $6"#
 
     pub async fn edit(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
-        user_id: Uuid,
+        user_id: Id,
         patch: KnowledgeRevisionPatch,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         let mut tx = self.pool.begin().await?;
@@ -601,7 +600,7 @@ LIMIT $6"#
 
     pub async fn reject(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
         reason: Option<&str>,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
@@ -611,7 +610,7 @@ LIMIT $6"#
 
     pub async fn mark_stale(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         self.simple_lifecycle(item_id, expected_version, "stale", None)
@@ -620,7 +619,7 @@ LIMIT $6"#
 
     pub async fn expire(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
         expires_at: OffsetDateTime,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
@@ -643,11 +642,11 @@ LIMIT $6"#
     /// the superseded item.
     pub async fn supersede(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
-        user_id: Uuid,
+        user_id: Id,
         mut replacement: KnowledgeRevisionInput,
-        citations_from: Option<Uuid>,
+        citations_from: Option<Id>,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         validate_revision(&mut replacement).map_err(KnowledgeError::Validation)?;
         let mut tx = self.pool.begin().await?;
@@ -694,7 +693,7 @@ LIMIT $6"#
                 None,
             )
             .await?;
-        let replacement_revision_id: Uuid =
+        let replacement_revision_id: Id =
             sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
                 .bind(replacement_id)
                 .fetch_one(&mut *tx)
@@ -712,7 +711,7 @@ LIMIT $6"#
 
     async fn simple_lifecycle(
         &self,
-        item_id: Uuid,
+        item_id: Id,
         expected_version: i32,
         status: &str,
         reason: Option<&str>,
@@ -744,7 +743,7 @@ LIMIT $6"#
         &self,
         tx: &mut Transaction<'_, Postgres>,
         input: &KnowledgeRevisionInput,
-        exclude_item_id: Option<Uuid>,
+        exclude_item_id: Option<Id>,
     ) -> Result<(), KnowledgeError> {
         self.enforce_capacity_for_scope(tx, input.scope, input.board_id, exclude_item_id)
             .await
@@ -754,8 +753,8 @@ LIMIT $6"#
         &self,
         tx: &mut Transaction<'_, Postgres>,
         scope: KnowledgeScope,
-        board_id: Option<Uuid>,
-        exclude_item_id: Option<Uuid>,
+        board_id: Option<Id>,
+        exclude_item_id: Option<Id>,
     ) -> Result<(), KnowledgeError> {
         enforce_capacity_for_scope(tx, &self.config.retrieval, scope, board_id, exclude_item_id)
             .await
@@ -765,17 +764,17 @@ LIMIT $6"#
     async fn insert_item_revision(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        user_id: Uuid,
+        user_id: Id,
         input: &KnowledgeRevisionInput,
-        supersedes_item_id: Option<Uuid>,
-        compaction: Option<(Uuid, i32)>,
+        supersedes_item_id: Option<Id>,
+        compaction: Option<(Id, i32)>,
         status: KnowledgeStatus,
         approval_mode: Option<&str>,
         policy: Option<(&str, &str)>,
-    ) -> Result<Uuid, KnowledgeError> {
-        let item_id = Uuid::new_v4();
-        let revision_id = Uuid::new_v4();
-        let created_by = (user_id != Uuid::nil()).then_some(user_id);
+    ) -> Result<Id, KnowledgeError> {
+        let item_id = Id::new();
+        let revision_id = Id::new();
+        let created_by = (user_id != Id::nil()).then_some(user_id);
         let (policy_decision, policy_reason) = policy.unzip();
         let (compaction_batch_id, compaction_candidate_index) = compaction.unzip();
         sqlx::query(
@@ -815,8 +814,8 @@ LIMIT $6"#
 /// pending supersession in the same transaction.
 pub async fn activate_revision(
     tx: &mut Transaction<'_, Postgres>,
-    item_id: Uuid,
-    revision_id: Uuid,
+    item_id: Id,
+    revision_id: Id,
     config: &KnowledgeConfig,
 ) -> Result<bool, KnowledgeError> {
     let candidate = lock_item_for_activation(tx, item_id).await?;
@@ -845,7 +844,7 @@ pub async fn activate_revision(
             .fetch_optional(&mut **tx)
             .await?
             .ok_or(KnowledgeError::ActivationConflict)?;
-        let superseded_by: Option<Uuid> = original.try_get("superseded_by")?;
+        let superseded_by: Option<Id> = original.try_get("superseded_by")?;
         match superseded_by {
             None => {
                 sqlx::query(
@@ -886,8 +885,8 @@ async fn enforce_capacity_for_scope(
     tx: &mut Transaction<'_, Postgres>,
     config: &KnowledgeRetrievalConfig,
     scope: KnowledgeScope,
-    board_id: Option<Uuid>,
-    exclude_item_id: Option<Uuid>,
+    board_id: Option<Id>,
+    exclude_item_id: Option<Id>,
 ) -> Result<(), KnowledgeError> {
     sqlx::query("LOCK TABLE knowledge_items IN SHARE ROW EXCLUSIVE MODE")
         .execute(&mut **tx)
@@ -901,7 +900,7 @@ async fn enforce_capacity_for_scope(
                 JOIN knowledge_revisions current_r ON current_r.id = i.current_revision_id
                 LEFT JOIN knowledge_revisions active_r ON active_r.id = i.active_revision_id
                 WHERE i.superseded_by IS NULL
-                  AND ($1::uuid IS NULL OR i.id <> $1)
+                  AND ($1::varchar IS NULL OR i.id <> $1)
                   AND (
                         (
                             (i.status = 'pending' OR (
@@ -938,7 +937,7 @@ async fn enforce_capacity_for_scope(
                 JOIN knowledge_revisions current_r ON current_r.id = i.current_revision_id
                 LEFT JOIN knowledge_revisions active_r ON active_r.id = i.active_revision_id
                 WHERE i.superseded_by IS NULL
-                  AND ($2::uuid IS NULL OR i.id <> $2)
+                  AND ($2::varchar IS NULL OR i.id <> $2)
                   AND (
                         (
                             (i.status = 'pending' OR (
@@ -973,7 +972,7 @@ async fn enforce_capacity_for_scope(
 /// An existing item that says nearly the same thing as a proposal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CloseItem {
-    pub item_id: Uuid,
+    pub item_id: Id,
     /// A reviewer already turned this text down.
     pub rejected: bool,
 }
@@ -983,7 +982,7 @@ pub struct CloseItem {
 /// least [`PROPOSE_DUPLICATE_SCORE`].
 pub async fn find_close_item(
     conn: &mut sqlx::PgConnection,
-    board_id: Uuid,
+    board_id: Id,
     title: &str,
     content: &str,
 ) -> Result<Option<CloseItem>, sqlx::Error> {
@@ -1055,7 +1054,7 @@ fn map_database_error(error: sqlx::Error) -> KnowledgeError {
 
 async fn lock_item(
     tx: &mut Transaction<'_, Postgres>,
-    item_id: Uuid,
+    item_id: Id,
 ) -> Result<LockedItem, KnowledgeError> {
     let row = sqlx::query(
         "SELECT version, status, current_revision_id, supersedes_item_id, superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE",
@@ -1075,14 +1074,14 @@ async fn lock_item(
 
 async fn lock_item_for_activation(
     tx: &mut Transaction<'_, Postgres>,
-    item_id: Uuid,
+    item_id: Id,
 ) -> Result<LockedItem, KnowledgeError> {
     let discovered = sqlx::query("SELECT supersedes_item_id FROM knowledge_items WHERE id = $1")
         .bind(item_id)
         .fetch_optional(&mut **tx)
         .await?
         .ok_or(KnowledgeError::NotFound)?;
-    let supersedes_item_id: Option<Uuid> = discovered.try_get("supersedes_item_id")?;
+    let supersedes_item_id: Option<Id> = discovered.try_get("supersedes_item_id")?;
 
     if let Some(original_id) = supersedes_item_id {
         sqlx::query("SELECT id FROM knowledge_items WHERE id = $1 FOR UPDATE")
@@ -1110,22 +1109,22 @@ fn check_version(item: LockedItem, expected: i32) -> Result<(), KnowledgeError> 
 
 async fn insert_revision(
     tx: &mut Transaction<'_, Postgres>,
-    item_id: Uuid,
+    item_id: Id,
     revision_number: i32,
-    user_id: Uuid,
+    user_id: Id,
     input: &KnowledgeRevisionInput,
-) -> Result<Uuid, sqlx::Error> {
-    let id = Uuid::new_v4();
+) -> Result<Id, sqlx::Error> {
+    let id = Id::new();
     insert_revision_with_id(tx, id, item_id, revision_number, Some(user_id), input).await?;
     Ok(id)
 }
 
 async fn insert_revision_with_id(
     tx: &mut Transaction<'_, Postgres>,
-    id: Uuid,
-    item_id: Uuid,
+    id: Id,
+    item_id: Id,
     revision_number: i32,
-    user_id: Option<Uuid>,
+    user_id: Option<Id>,
     input: &KnowledgeRevisionInput,
 ) -> Result<(), sqlx::Error> {
     let provenance_id = match input.source_run_id {
@@ -1164,8 +1163,8 @@ async fn insert_revision_with_id(
 /// ticket, agent and job type, so it outlives the run itself.
 async fn provenance_for_run(
     tx: &mut Transaction<'_, Postgres>,
-    run_id: Uuid,
-) -> Result<Uuid, sqlx::Error> {
+    run_id: Id,
+) -> Result<Id, sqlx::Error> {
     sqlx::query_scalar(
         r#"
         INSERT INTO knowledge_provenance (id, run_id, ticket_id, agent_id, job_type, run_created_at)
@@ -1176,7 +1175,7 @@ async fn provenance_for_run(
         RETURNING id
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(run_id)
     .fetch_one(&mut **tx)
     .await
@@ -1224,11 +1223,11 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, Knowled
     })
 }
 
-pub fn format_cursor(updated_at: OffsetDateTime, id: Uuid) -> String {
+pub fn format_cursor(updated_at: OffsetDateTime, id: Id) -> String {
     format!("{}:{id}", updated_at.unix_timestamp_nanos())
 }
 
-pub fn parse_cursor(cursor: &str) -> Result<(OffsetDateTime, Uuid), KnowledgeError> {
+pub fn parse_cursor(cursor: &str) -> Result<(OffsetDateTime, Id), KnowledgeError> {
     let (timestamp, id) = cursor
         .split_once(':')
         .ok_or_else(|| KnowledgeError::Validation("invalid cursor".into()))?;
@@ -1238,7 +1237,7 @@ pub fn parse_cursor(cursor: &str) -> Result<(OffsetDateTime, Uuid), KnowledgeErr
     let timestamp = OffsetDateTime::from_unix_timestamp_nanos(nanos)
         .map_err(|_| KnowledgeError::Validation("invalid cursor".into()))?;
     let id =
-        Uuid::parse_str(id).map_err(|_| KnowledgeError::Validation("invalid cursor".into()))?;
+        Id::parse_str(id).map_err(|_| KnowledgeError::Validation("invalid cursor".into()))?;
     Ok((timestamp, id))
 }
 
@@ -1269,7 +1268,7 @@ mod tests {
     #[test]
     fn cursor_round_trip_is_stable() {
         let at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let parsed = parse_cursor(&format_cursor(at, id)).unwrap();
         assert_eq!(parsed, (at, id));
     }

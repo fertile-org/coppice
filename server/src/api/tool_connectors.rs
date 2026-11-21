@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::AuthUser;
 use crate::connectors_runtime::ConnectorConfigError;
 use crate::middleware::admin::AdminUser;
@@ -18,8 +19,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/tools/connectors", get(list_connectors))
@@ -85,14 +84,14 @@ async fn check(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TestConnectionRequest {
-    agent_id: Uuid,
+    agent_id: Id,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestConnectionResponse {
-    check_id: Uuid,
-    run_id: Uuid,
+    check_id: Id,
+    run_id: Id,
 }
 
 async fn test_connection(
@@ -228,7 +227,7 @@ fn uncovered_error_status(err: UncoveredModelError) -> StatusCode {
 async fn check_detail(
     State(state): State<Arc<AppState>>,
     AdminUser(_admin): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<Json<CheckDetail>, StatusCode> {
     let pool = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     ConnectorCheckService::new(pool)

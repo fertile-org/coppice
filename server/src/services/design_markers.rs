@@ -1,7 +1,6 @@
 //! Shared `{{design:<uuid>}}` markers in plan markdown.
 //! Pattern matches the web helper: `\{\{design:([0-9a-f-]{36})\}\}`.
-
-use uuid::Uuid;
+use crate::domain::Id;
 
 const PREFIX: &str = "{{design:";
 const SUFFIX: &str = "}}";
@@ -10,7 +9,7 @@ const ID_LEN: usize = 36;
 fn is_marker_id(id: &str) -> bool {
     id.len() == ID_LEN
         && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'-'))
-        && Uuid::parse_str(id).is_ok()
+        && Id::parse_str(id).is_ok()
 }
 
 /// Walk `markdown`, calling `on_marker` for each well-formed marker. Returns text
@@ -50,10 +49,10 @@ pub fn strip_design_markers(markdown: &str) -> String {
 }
 
 /// Each marker's set id in document order.
-pub fn design_marker_ids(markdown: &str) -> Vec<Uuid> {
+pub fn design_marker_ids(markdown: &str) -> Vec<Id> {
     let mut ids = Vec::new();
     for_each_marker(markdown, |_, _, id| {
-        if let Ok(uuid) = Uuid::parse_str(id) {
+        if let Ok(uuid) = Id::parse_str(id) {
             ids.push(uuid);
         }
     });
@@ -61,7 +60,7 @@ pub fn design_marker_ids(markdown: &str) -> Vec<Uuid> {
 }
 
 /// Nearest preceding `##` heading above the first marker for `set_id`.
-pub fn section_for_set(markdown: &str, set_id: Uuid) -> Option<String> {
+pub fn section_for_set(markdown: &str, set_id: Id) -> Option<String> {
     let needle = format!("{{{{design:{set_id}}}}}");
     let pos = markdown.find(&needle)?;
     let before = &markdown[..pos];
@@ -101,7 +100,7 @@ mod tests {
 
     #[test]
     fn strips_markers_and_keeps_prose() {
-        let id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let id = Id::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let md = format!("## UI design\n\nPick here.\n\n{{{{design:{id}}}}}\n\n### Steps\n- [ ] Ship");
         let out = strip_design_markers(&md);
         assert!(!out.contains("{{design:"));
@@ -111,7 +110,7 @@ mod tests {
 
     #[test]
     fn section_reads_nearest_h2() {
-        let id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let id = Id::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let md = format!("## Approach\nGo.\n\n## UI design\n\n{{{{design:{id}}}}}\n\n## Steps\nDone.");
         assert_eq!(section_for_set(&md, id).as_deref(), Some("UI design"));
     }

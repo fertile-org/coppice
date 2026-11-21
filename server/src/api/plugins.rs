@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::mcp::proxy::{McpServerPool, ServerHealth, ServerKey};
 use crate::middleware::admin::AdminUser;
@@ -26,8 +27,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/plugin-dirs", get(list_dirs).post(add_dir))
@@ -64,7 +63,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PluginDirResponse {
-    id: Uuid,
+    id: Id,
     path: String,
     position: i32,
     is_default: bool,
@@ -73,8 +72,8 @@ struct PluginDirResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PluginResponse {
-    id: Uuid,
-    plugin_dir_id: Uuid,
+    id: Id,
+    plugin_dir_id: Id,
     rel_path: String,
     name: String,
     version: String,
@@ -94,7 +93,7 @@ pub(crate) struct PluginResponse {
     unsupported: Vec<String>,
     settings: Vec<PluginSettingResponse>,
     agent_access: String,
-    agent_ids: Vec<Uuid>,
+    agent_ids: Vec<Id>,
     /// True when an accepted `plugin_builds` row links to this plugin.
     builder_made: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,13 +162,13 @@ struct SettingsBody {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PluginInstallResponse {
-    id: Uuid,
-    plugin_dir_id: Uuid,
+    id: Id,
+    plugin_dir_id: Id,
     kind: String,
     git_url: String,
     git_ref: Option<String>,
-    plugin_id: Option<Uuid>,
-    plugin_ids: Vec<Uuid>,
+    plugin_id: Option<Id>,
+    plugin_ids: Vec<Id>,
     status: String,
     error: Option<String>,
 }
@@ -180,7 +179,7 @@ struct InstallBody {
     git_url: String,
     #[serde(rename = "ref")]
     git_ref: Option<String>,
-    plugin_dir_id: Uuid,
+    plugin_dir_id: Id,
 }
 
 #[derive(Deserialize)]
@@ -201,14 +200,14 @@ struct SetEnabledBody {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentPluginsBody {
-    plugin_ids: Vec<Uuid>,
+    plugin_ids: Vec<Id>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PluginAgentsBody {
     mode: String,
-    agent_ids: Vec<Uuid>,
+    agent_ids: Vec<Id>,
 }
 
 pub(crate) struct ApiError(StatusCode, String);
@@ -327,7 +326,7 @@ fn allowed_setting_keys(plugin: &PluginRow) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
-fn server_health(mcp: &McpServerPool, plugin_id: Uuid, entry: &McpServerEntry) -> &'static str {
+fn server_health(mcp: &McpServerPool, plugin_id: Id, entry: &McpServerEntry) -> &'static str {
     if let McpServerTransport::Unsupported { .. } = entry.transport {
         return ServerHealth::Stopped.as_str();
     }
@@ -343,7 +342,7 @@ fn plugin_response(
     configured: &BTreeSet<String>,
     reentry: &BTreeSet<String>,
     mcp: &McpServerPool,
-    agent_ids: &[Uuid],
+    agent_ids: &[Id],
     builder_made: bool,
     publish_target: Option<String>,
 ) -> PluginResponse {
@@ -468,7 +467,7 @@ async fn plugins_response(
     let settings = PluginSettingsService::new(pool, &state.secret_store);
     let configured = settings.configured_keys_by_plugin().await?;
     let reentry = settings.reentry_keys_by_plugin().await?;
-    let ids: Vec<Uuid> = plugins.iter().map(|plugin| plugin.id).collect();
+    let ids: Vec<Id> = plugins.iter().map(|plugin| plugin.id).collect();
     let members = PluginService::new(pool).explicit_members(&ids).await?;
     let builder_targets = publish_service(state, pool)
         .builder_made_targets(&ids)
@@ -513,9 +512,9 @@ pub(crate) fn install_response(install: PluginInstall) -> Json<PluginInstallResp
 /// taken other plugins out of `ok`.
 fn spawn_git_job<F>(
     state: Arc<AppState>,
-    install_id: Uuid,
+    install_id: Id,
     dest_rel: String,
-    updated: Vec<Uuid>,
+    updated: Vec<Id>,
     job: F,
 ) where
     F: Future<Output = Result<String, String>> + Send + 'static,
@@ -531,7 +530,7 @@ fn spawn_git_job<F>(
             .complete_git_job(install_id, result, &dest_rel, &state.skills)
             .await;
         if succeeded && !updated.is_empty() {
-            let mut stop: BTreeSet<Uuid> = updated.into_iter().collect();
+            let mut stop: BTreeSet<Id> = updated.into_iter().collect();
             match service.get_install(install_id).await {
                 Ok(install) => stop.extend(install.plugin_ids),
                 Err(err) => tracing::error!(error = %err, "failed to read finished plugin update"),
@@ -581,7 +580,7 @@ async fn install(
 async fn update(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
 ) -> Result<(StatusCode, Json<PluginInstallResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
     let cfg = &state.config.plugins;
@@ -600,7 +599,7 @@ async fn update(
 async fn get_install(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(install_id): Path<Uuid>,
+    Path(install_id): Path<Id>,
 ) -> Result<Json<PluginInstallResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let install = PluginService::new(pool).get_install(install_id).await?;
@@ -636,7 +635,7 @@ async fn add_dir(
 async fn move_dir(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(dir_id): Path<Uuid>,
+    Path(dir_id): Path<Id>,
     Json(body): Json<MoveDirBody>,
 ) -> Result<Json<Vec<PluginDirResponse>>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -649,7 +648,7 @@ async fn move_dir(
 async fn remove_dir(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(dir_id): Path<Uuid>,
+    Path(dir_id): Path<Id>,
 ) -> Result<StatusCode, ApiError> {
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
@@ -681,7 +680,7 @@ async fn list_plugins(
 async fn get_plugin(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let plugin = PluginService::new(pool).get_plugin(plugin_id).await?;
@@ -691,7 +690,7 @@ async fn get_plugin(
 async fn set_settings(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
     Json(body): Json<SettingsBody>,
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -705,7 +704,7 @@ async fn set_settings(
 async fn test_plugin(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
 ) -> Result<Json<PluginTestResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
@@ -746,7 +745,7 @@ fn server_test_response(result: ServerTestResult) -> ServerTestResponse {
 async fn publish_plugin(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
     Json(body): Json<PublishBody>,
 ) -> Result<Response, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -777,7 +776,7 @@ async fn publish_plugin(
 async fn set_enabled(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
     Json(body): Json<SetEnabledBody>,
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -794,7 +793,7 @@ async fn set_enabled(
 async fn set_skill_enabled(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path((plugin_id, skill)): Path<(Uuid, String)>,
+    Path((plugin_id, skill)): Path<(Id, String)>,
     Json(body): Json<SetEnabledBody>,
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -818,7 +817,7 @@ fn assignment_body(assignment: PluginAgentAssignment) -> Json<PluginAgentsBody> 
 async fn get_plugin_agents(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
 ) -> Result<Json<PluginAgentsBody>, ApiError> {
     let pool = pool_from_state(&state)?;
     let assignment = PluginService::new(pool)
@@ -830,7 +829,7 @@ async fn get_plugin_agents(
 async fn set_plugin_agents(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
     Json(body): Json<PluginAgentsBody>,
 ) -> Result<Json<PluginAgentsBody>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -843,7 +842,7 @@ async fn set_plugin_agents(
 async fn get_agent_plugins(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(agent_id): Path<Uuid>,
+    Path(agent_id): Path<Id>,
 ) -> Result<Json<AgentPluginsBody>, ApiError> {
     let pool = pool_from_state(&state)?;
     let plugin_ids = PluginService::new(pool).agent_plugin_ids(agent_id).await?;
@@ -853,7 +852,7 @@ async fn get_agent_plugins(
 async fn set_agent_plugins(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(agent_id): Path<Uuid>,
+    Path(agent_id): Path<Id>,
     Json(body): Json<AgentPluginsBody>,
 ) -> Result<Json<AgentPluginsBody>, ApiError> {
     let pool = pool_from_state(&state)?;
