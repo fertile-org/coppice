@@ -365,11 +365,31 @@ impl<'a> PlanningService<'a> {
             .await?;
             (None, None, serde_json::Map::new())
         } else {
-            // Technical sets supersede by plan marker: any live technical set
-            // whose id is not marked in this plan is replaced.
+            // Technical sets follow plan markers, not kind. A set whose id is
+            // absent from this plan is replaced (or retired when no markers).
             let markers = crate::services::design_markers::design_marker_ids(body);
-            if !markers.is_empty() {
-                let newest = markers[0];
+            if markers.is_empty() {
+                sqlx::query(
+                    r#"
+                    UPDATE design_sets
+                    SET retired_at = now()
+                    WHERE ticket_id = $1
+                      AND published_at IS NOT NULL
+                      AND superseded_by IS NULL
+                      AND retired_at IS NULL
+                      AND kind IN ('architecture', 'module', 'dependency')
+                      AND EXISTS (
+                          SELECT 1 FROM agent_runs r
+                          WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
+                      )
+                    "#,
+                )
+                .bind(ticket_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                // superseded_by is only a tombstone pointer; markers[0] may be a
+                // UI set when the plan keeps a UI marker and drops a technical one.
                 sqlx::query(
                     r#"
                     UPDATE design_sets
@@ -387,7 +407,7 @@ impl<'a> PlanningService<'a> {
                     "#,
                 )
                 .bind(ticket_id)
-                .bind(newest)
+                .bind(markers[0])
                 .bind(&markers)
                 .execute(&mut *tx)
                 .await?;

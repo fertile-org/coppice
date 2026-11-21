@@ -3057,57 +3057,355 @@ async fn technical_publish_validates_options_and_reason() {
     );
 }
 
-#[tokio::test]
-async fn third_technical_kind_on_one_run_is_counted_for_the_plan_cap() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let fx = design_run().await;
-    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
-    let svc = DesignService::new(&fx.pool, &artifacts);
-
-    let option = |id: &str| DesignOption {
+fn tech_option(id: &str) -> DesignOption {
+    DesignOption {
         id: id.into(),
         title: id.to_uppercase(),
-        changes: Some("x".into()),
+        changes: Some("server/src/x.rs".into()),
         effort: Some("S".into()),
         risk: Some("Low".into()),
         reversibility: Some("Easy".into()),
-        rules_out: Some("y".into()),
+        rules_out: Some("Nothing".into()),
+        sketch: Some("flowchart LR\n  A --> B".into()),
         ..Default::default()
-    };
+    }
+}
+
+async fn publish_technical(
+    fx: &TicketHttp,
+    run_id: Uuid,
+    agent_id: Uuid,
+    kind: DesignKind,
+) -> Uuid {
+    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
+    let svc = DesignService::new(&fx.pool, &artifacts);
+    let created = svc
+        .create(
+            kind.as_str(),
+            kind,
+            CreateScope {
+                ticket_id: Some(fx.ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create technical");
+    svc.publish(
+        created.id,
+        run_id,
+        vec![tech_option("a"), tech_option("b")],
+        "a",
+        Some("fits the gate"),
+    )
+    .await
+    .expect("publish technical");
+    created.id
+}
+
+fn plan_with_design_marker(set_id: Uuid) -> String {
+    format!(
+        "## Plan\n\n### Approach\nShip it.\n\n## Architecture\n\n{{{{design:{set_id}}}}}\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n"
+    )
+}
+
+const TRIVIAL_REFACTOR_PLAN: &str = "## Plan\n\n### Approach\nRename the helper in place. No new dependency or module split.\n\nRejected alternatives: extract a shared crate (too much for a rename); introduce a facade trait (no second caller yet).\n\n### Steps\n- [ ] Rename the helper and update call sites\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n";
+
+#[tokio::test]
+async fn result_submit_rejects_a_third_technical_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+        .bind(run_id)
+        .execute(&fx.pool)
+        .await
+        .expect("mark running");
 
     for kind in [
         DesignKind::Architecture,
         DesignKind::Module,
         DesignKind::Dependency,
     ] {
-        let created = svc
-            .create(
-                kind.as_str(),
-                kind,
-                CreateScope {
-                    ticket_id: Some(fx.ticket_id),
-                    chat_session_id: None,
-                    run_id: fx.run_id,
-                    agent_id: fx.agent_id,
-                },
-            )
-            .await
-            .expect("create");
-        svc.publish(
-            created.id,
-            fx.run_id,
-            vec![option("a"), option("b")],
-            "a",
-            Some("why"),
-        )
-        .await
-        .expect("publish");
+        publish_technical(&fx, run_id, fx.agent_id, kind).await;
     }
 
-    assert_eq!(
-        svc.technical_sets_on_run(fx.run_id).await.expect("count"),
-        3
+    let design_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("design plugin");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        run_id,
+        ContextProfile::Full,
+        vec![design_id],
+    )
+    .await;
+    let url = mcp_url(fx.app.clone()).await;
+    let refused = rpc(
+        &url,
+        &token,
+        "tools/call",
+        json!({
+            "name": "result_submit",
+            "arguments": {
+                "status": "done",
+                "summary": PICK_PLAN
+            }
+        }),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    let text = refused["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        text.contains("technical design sets") && text.contains("at most 2"),
+        "{text}"
     );
+}
+
+#[tokio::test]
+async fn approve_refuses_unpicked_technical_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show architecture options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let set_id = publish_technical(&fx, run_id, fx.agent_id, DesignKind::Architecture).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &plan_with_design_marker(set_id),
+            Some(run_id),
+            false,
+            false,
+        )
+        .await
+        .expect("plan with technical");
+    set_run_status(&fx, run_id, "succeeded").await;
+
+    let refused = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("approve");
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let body = common::json_body(refused).await;
+    let message = body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("recommended default") || message.contains("Pick a design"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn plan_without_markers_retires_technical_sets() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let set_id = publish_technical(&fx, run_id, fx.agent_id, DesignKind::Architecture).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &plan_with_design_marker(set_id),
+            Some(run_id),
+            false,
+            false,
+        )
+        .await
+        .expect("plan with marker");
+
+    // Revision drops the technical decision: no markers, list rejected alternatives.
+    plans
+        .ask_for_changes(fx.ticket_id, "Skip the architecture picker.")
+        .await
+        .expect("revise");
+    let revision_run = active_plan_run(&fx).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            TRIVIAL_REFACTOR_PLAN,
+            Some(revision_run),
+            false,
+            false,
+        )
+        .await
+        .expect("plan without markers");
+
+    let retired: bool =
+        sqlx::query_scalar("SELECT retired_at IS NOT NULL FROM design_sets WHERE id = $1")
+            .bind(set_id)
+            .fetch_one(&fx.pool)
+            .await
+            .expect("retired_at");
+    assert!(retired, "technical set should be retired");
+
+    let listed = DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    )
+    .list_for_ticket(fx.ticket_id)
+    .await
+    .expect("list");
+    assert!(
+        listed
+            .iter()
+            .filter(|set| set.kind.is_technical())
+            .all(|set| set.superseded),
+        "{listed:?}"
+    );
+}
+
+#[tokio::test]
+async fn plan_marker_supersedes_unmarked_technical_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let old_set = publish_technical(&fx, run_id, fx.agent_id, DesignKind::Architecture).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &plan_with_design_marker(old_set),
+            Some(run_id),
+            false,
+            false,
+        )
+        .await
+        .expect("plan with old set");
+
+    plans
+        .ask_for_changes(fx.ticket_id, "Republish architecture.")
+        .await
+        .expect("revise");
+    let revision_run = active_plan_run(&fx).await;
+    let new_set =
+        publish_technical(&fx, revision_run, fx.agent_id, DesignKind::Architecture).await;
+    plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &plan_with_design_marker(new_set),
+            Some(revision_run),
+            false,
+            false,
+        )
+        .await
+        .expect("plan with new set");
+
+    let superseded_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT superseded_by FROM design_sets WHERE id = $1")
+            .bind(old_set)
+            .fetch_one(&fx.pool)
+            .await
+            .expect("superseded_by");
+    assert_eq!(superseded_by, Some(new_set));
+}
+
+#[tokio::test]
+async fn trivial_refactor_fixture_publishes_no_technical_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    // Fixture documents the gate-fail path: rejected alternatives, no picker.
+    let fixture = include_str!(
+        "../../fixtures/agent-responses/plan_trivial_refactor/plan_ticket.json"
+    );
+    let body: Value = serde_json::from_str(fixture).expect("fixture json");
+    let summary = body["summary"].as_str().expect("summary");
+    assert!(summary.contains("Rejected alternatives"));
+    assert!(!summary.contains("{{design:"));
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, summary, None, false, false)
+        .await
+        .expect("insert trivial plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+
+    let listed = DesignService::new(
+        &fx.pool,
+        PathBuf::from(&fx.state.config.storage.artifacts_dir),
+    )
+    .list_for_ticket(fx.ticket_id)
+    .await
+    .expect("list");
+    assert!(
+        listed.iter().all(|set| !set.kind.is_technical()),
+        "trivial refactor must not leave a technical set: {listed:?}"
+    );
+
+    let approved = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .expect("approve");
+    assert_eq!(approved.status(), StatusCode::OK, "no design gate");
 }
