@@ -454,42 +454,6 @@ impl<'a> DesignService<'a> {
         Ok(count as usize)
     }
 
-    /// Mark live plan-run technical sets not listed in `keep` as superseded by
-    /// the newest kept set (or leave superseded_by null when keep is empty —
-    /// caller should retire via noVisibleChange instead).
-    pub async fn supersede_technical_not_in(
-        &self,
-        ticket_id: Uuid,
-        keep: &[Uuid],
-    ) -> Result<(), DesignError> {
-        if keep.is_empty() {
-            return Ok(());
-        }
-        let newest = *keep.first().unwrap_or(&Uuid::nil());
-        sqlx::query(
-            r#"
-            UPDATE design_sets
-            SET superseded_by = $2
-            WHERE ticket_id = $1
-              AND published_at IS NOT NULL
-              AND superseded_by IS NULL
-              AND retired_at IS NULL
-              AND kind IN ('architecture', 'module', 'dependency')
-              AND NOT (id = ANY($3))
-              AND EXISTS (
-                  SELECT 1 FROM agent_runs r
-                  WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
-              )
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(newest)
-        .bind(keep)
-        .execute(self.pool)
-        .await?;
-        Ok(())
-    }
-
     pub async fn get(&self, set_id: Uuid) -> Result<DesignSetRecord, DesignError> {
         let row = self.load(set_id).await?;
         Ok(DesignSetRecord {
