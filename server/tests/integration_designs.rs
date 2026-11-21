@@ -3260,6 +3260,7 @@ async fn plan_without_markers_retires_technical_sets() {
         )
         .await
         .expect("plan with marker");
+    set_run_status(&fx, run_id, "succeeded").await;
 
     // Revision drops the technical decision: no markers, list rejected alternatives.
     plans
@@ -3332,6 +3333,7 @@ async fn plan_marker_supersedes_unmarked_technical_set() {
         )
         .await
         .expect("plan with old set");
+    set_run_status(&fx, run_id, "succeeded").await;
 
     plans
         .ask_for_changes(fx.ticket_id, "Republish architecture.")
