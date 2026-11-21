@@ -88,6 +88,8 @@ export const pluginSchema = z.object({
   gitRoot: z.string().nullable().default(null),
   agentAccess: z.enum(['all', 'explicit']).default('explicit'),
   agentIds: z.array(z.string().uuid()).default([]),
+  builderMade: z.boolean().optional().default(false),
+  publishTarget: z.string().nullable().optional().default(null),
 });
 
 export type Plugin = z.infer<typeof pluginSchema>;

@@ -3,7 +3,10 @@ use crate::middleware::admin::AdminUser;
 use crate::services::plugin_build_service::{
     PluginBuild, PluginBuildError, PluginBuildService, PluginBuildUpdate,
 };
+use crate::services::plugin_publish_service::{PluginPublishService, PublishResult};
 use crate::AppState;
+use std::path::PathBuf;
+use std::time::Duration;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -86,6 +89,8 @@ struct BuildResponse {
     last_run_status: Option<String>,
     created_at: String,
     updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publish: Option<PublishResult>,
 }
 
 #[derive(Serialize)]
@@ -129,11 +134,14 @@ struct PlanRunBody {
 #[serde(rename_all = "camelCase")]
 struct AcceptBody {
     enable: Option<bool>,
-    /// Ignored until PB-12; Accept still succeeds when true.
     publish: Option<bool>,
 }
 
 fn build_response(build: PluginBuild) -> BuildResponse {
+    build_response_with_publish(build, None)
+}
+
+fn build_response_with_publish(build: PluginBuild, publish: Option<PublishResult>) -> BuildResponse {
     BuildResponse {
         id: build.id,
         answers: build.answers,
@@ -158,6 +166,7 @@ fn build_response(build: PluginBuild) -> BuildResponse {
             .updated_at
             .format(&Rfc3339)
             .unwrap_or_default(),
+        publish,
     }
 }
 
@@ -276,7 +285,6 @@ async fn accept_build(
     Path(id): Path<Uuid>,
     Json(body): Json<AcceptBody>,
 ) -> Result<Json<BuildResponse>, ApiError> {
-    let _publish = body.publish; // PB-12
     let pool = pool_from_state(&state)?;
     let svc = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
     let plugins = crate::services::plugin_service::PluginService::new(pool);
@@ -289,7 +297,36 @@ async fn accept_build(
             &state.skills,
         )
         .await?;
-    Ok(Json(enrich_response(&svc, build).await?))
+
+    let publish = if body.publish.unwrap_or(false) {
+        match (build.plugin_id, build.publish_target.as_deref()) {
+            (Some(plugin_id), Some(url)) if !url.is_empty() => {
+                let name = build
+                    .plugin_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "plugin".into());
+                let publisher = PluginPublishService::new(
+                    pool,
+                    PathBuf::from(&state.config.agent.worktrees_path),
+                    state.config.plugins.allow_file_git_urls,
+                    Duration::from_secs(state.config.plugins.git_timeout_secs),
+                    state.config.git.push_enabled,
+                );
+                Some(
+                    publisher
+                        .publish_after_accept(plugin_id, &name, url, &plugins)
+                        .await,
+                )
+            }
+            _ => Some(PublishResult::skipped()),
+        }
+    } else {
+        Some(PublishResult::skipped())
+    };
+
+    let build = svc.with_run_meta(build).await?;
+    Ok(Json(build_response_with_publish(build, publish)))
 }
 
 async fn start_plan_run(

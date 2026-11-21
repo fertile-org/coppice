@@ -102,7 +102,12 @@ function renderTry(build: PluginBuild) {
         <ConfirmProvider>
           <PluginBuildTryView
             build={build}
-            onAccepted={vi.fn()}
+            onAccepted={vi.fn() as (
+              pluginId: string | null,
+              name: string,
+              publish: unknown,
+              publishTarget: string | null,
+            ) => void}
             onDiscarded={vi.fn()}
           />
         </ConfirmProvider>
@@ -148,7 +153,12 @@ describe('PluginBuildTryView', () => {
           <ConfirmProvider>
             <PluginBuildTryView
               build={tryBuild({ testResult: { servers: [] } })}
-              onAccepted={vi.fn()}
+              onAccepted={vi.fn() as (
+              pluginId: string | null,
+              name: string,
+              publish: unknown,
+              publishTarget: string | null,
+            ) => void}
               onDiscarded={onDiscarded}
             />
           </ConfirmProvider>

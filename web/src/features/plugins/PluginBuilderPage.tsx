@@ -333,7 +333,7 @@ export function PluginBuilderPage() {
         <PluginBuildTryView
           build={build}
           onDiscarded={() => navigate('/settings/plugins', { replace: true })}
-          onAccepted={(pluginId, name) => {
+          onAccepted={(pluginId, name, publish, publishTarget) => {
             const missing =
               pluginsQuery.data
                 ?.find((p) => p.id === pluginId)
@@ -348,6 +348,14 @@ export function PluginBuilderPage() {
               state: {
                 notice,
                 highlightIds: pluginId ? [pluginId] : [],
+                publish:
+                  publish && publish.status !== 'skipped'
+                    ? {
+                        ...publish,
+                        pluginId,
+                        publishTarget: publish.url ?? publishTarget,
+                      }
+                    : undefined,
               },
             });
           }}

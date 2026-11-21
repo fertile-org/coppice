@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { apiFetch } from '../../lib/api';
+import { ApiError, apiFetch } from '../../lib/api';
 import {
   pluginDirSchema,
   pluginInstallSchema,
@@ -13,6 +13,10 @@ import {
   type PluginInstall,
   type PluginTestResult,
 } from '../../lib/schemas/plugin';
+import {
+  pluginPublishResultSchema,
+  type PluginPublishResult,
+} from '../../lib/schemas/pluginBuild';
 
 export const PLUGIN_DIRS_QUERY_KEY = ['plugin-dirs'] as const;
 export const PLUGINS_QUERY_KEY = ['plugins'] as const;
@@ -136,6 +140,60 @@ async function installPlugin(body: InstallPluginInput): Promise<PluginInstall> {
 async function updatePlugin(id: string): Promise<PluginInstall> {
   const res = await apiFetch(`/api/plugins/${id}/update`, { method: 'POST' });
   return pluginInstallSchema.parse(await res.json());
+}
+
+export type PublishPluginInput = {
+  id: string;
+  url: string;
+  confirmSuffix?: boolean;
+};
+
+export type PublishPluginOutcome =
+  | { kind: 'ok'; result: PluginPublishResult }
+  | { kind: 'conflict'; suggestedBranch: string; error: string }
+  | { kind: 'error'; status: number; error: string };
+
+async function publishPlugin({
+  id,
+  url,
+  confirmSuffix,
+}: PublishPluginInput): Promise<PublishPluginOutcome> {
+  try {
+    const res = await apiFetch(`/api/plugins/${id}/publish`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ url, confirmSuffix: Boolean(confirmSuffix) }),
+    });
+    return { kind: 'ok', result: pluginPublishResultSchema.parse(await res.json()) };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      let raw: Record<string, unknown> = {};
+      try {
+        raw = JSON.parse(err.body) as Record<string, unknown>;
+      } catch {
+        // plain body
+      }
+      if (err.status === 409) {
+        return {
+          kind: 'conflict',
+          suggestedBranch:
+            typeof raw.suggestedBranch === 'string' ? raw.suggestedBranch : '',
+          error:
+            typeof raw.error === 'string' ? raw.error : 'Branch already exists.',
+        };
+      }
+      return {
+        kind: 'error',
+        status: err.status,
+        error: typeof raw.error === 'string' ? raw.error : 'Publish failed.',
+      };
+    }
+    throw err;
+  }
+}
+
+export function usePublishPlugin() {
+  return useMutation({ mutationFn: publishPlugin });
 }
 
 export function usePluginDirs() {
