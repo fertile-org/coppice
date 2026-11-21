@@ -27,4 +27,13 @@ export const DESIGN_COPY = {
   choose: (label: string) => `Choose ${label}`,
   chooseAndUpdate: (label: string) => `Choose ${label} and update plan`,
   saveFailed: 'Unable to save that choice.',
+  fieldChanges: 'Changes',
+  fieldEffort: 'Effort',
+  fieldRisk: 'Risk',
+  fieldReversibility: 'Reversible',
+  fieldRulesOut: 'Rules out',
+  whyRecommended: 'Why',
+  expandDiagram: 'Expand diagram',
+  fullDiagram: 'Full diagram',
+  noSketch: 'No diagram for this option.',
 } as const;
