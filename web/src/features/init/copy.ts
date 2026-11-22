@@ -30,8 +30,11 @@ export const INIT_COPY = {
   teamConnector: 'They run on {connector} with its default model.',
   teamIdle: 'Nothing runs until you click Run agent on a ticket.',
   checking: 'Checking installed CLIs…',
-  noReady:
-    'No agent CLI is ready yet. Install one and sign in, then check it in System → Connectors.',
+  noReady: 'No agent CLI is ready yet. Fix one below, then check again.',
+  agentClis: 'Agent CLIs',
+  checkAgain: 'Check again',
+  checkingAgain: 'Checking…',
+  installGuide: 'How to install an agent CLI',
   loadFailed: "Couldn't load setup.",
   loading: 'Loading setup…',
   duplicateBoard: 'A board with that name already exists.',

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Dialog,
   DialogContent,
@@ -7,16 +8,36 @@ import {
 } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { pickDirectory } from '../../lib/desktop';
+import type { Connector } from '../../lib/schemas/connector';
+import { cn } from '../../lib/utils';
 import { useInspectRepoPath } from '../repos/useRepos';
-import { NO_FREE_SIGN_IN_CHECK, SIGN_IN_UNCHECKED_HINT } from '../tools/connectorCopy';
-import { useConnectors } from '../agents/useAgents';
+import {
+  CONNECTORS_QUERY_KEY,
+  useConnectors,
+} from '../agents/useAgents';
+import {
+  INSTALL_GUIDE_URL,
+  notSignedInHint,
+  readinessLabel,
+  signInUncheckedHint,
+  type ConnectorReadiness,
+} from '../tools/connectorCopy';
+import {
+  recheckConnector,
+  TOOL_CONNECTORS_QUERY_KEY,
+} from '../tools/useConnectorDiagnostics';
 import {
   INIT_COPY,
   joinNames,
   stepLabel,
   teamConnectorLine,
 } from './copy';
-import { initErrorCode, useConfirmInit, useInitPreview } from './useInitWizard';
+import {
+  INIT_PREVIEW_QUERY_KEY,
+  initErrorCode,
+  useConfirmInit,
+  useInitPreview,
+} from './useInitWizard';
 
 type Step = 0 | 1 | 2;
 
@@ -39,6 +60,7 @@ export function InitWizard({
   variant?: 'dialog' | 'page';
 }) {
   const created = useRef(false);
+  const checkingAgainRef = useRef(false);
   const [step, setStep] = useState<Step>(0);
   const [localPath, setLocalPath] = useState('');
   const [name, setName] = useState('');
@@ -48,10 +70,12 @@ export function InitWizard({
   const [boardName, setBoardName] = useState('');
   const [connectorId, setConnectorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkingAgain, setCheckingAgain] = useState(false);
   const inspectPath = useInspectRepoPath();
   const confirm = useConfirmInit();
   const preview = useInitPreview(open);
   const connectors = useConnectors({ enabled: open });
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!open) return;
@@ -65,6 +89,8 @@ export function InitWizard({
     setBoardName('');
     setConnectorId(null);
     setError(null);
+    checkingAgainRef.current = false;
+    setCheckingAgain(false);
   }, [open]);
 
   function handleOpenChange(next: boolean) {
@@ -152,6 +178,25 @@ export function InitWizard({
     }
   }
 
+  async function handleCheckAgain() {
+    if (checkingAgainRef.current) return;
+    const targets = listedConnectors.filter((connector) => connector.readiness !== 'ready');
+    if (targets.length === 0) return;
+    checkingAgainRef.current = true;
+    setCheckingAgain(true);
+    try {
+      await Promise.allSettled(targets.map((connector) => recheckConnector(connector.id)));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: INIT_PREVIEW_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: CONNECTORS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY }),
+      ]);
+    } finally {
+      checkingAgainRef.current = false;
+      setCheckingAgain(false);
+    }
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (step === 0) continueFromRepository();
@@ -165,13 +210,8 @@ export function InitWizard({
   const readyConnectors = preview.data?.status === 'ready' ? preview.data.connectors : [];
   const chosen =
     readyConnectors.find((connector) => connector.id === connectorId) ?? readyConnectors[0] ?? null;
-  const kiloUnchecked =
-    preview.data?.status === 'none' &&
-    connectors.data?.some(
-      (connector) =>
-        (NO_FREE_SIGN_IN_CHECK as readonly string[]).includes(connector.id) &&
-        connector.readiness === 'found',
-    );
+  const listedConnectors =
+    connectors.data?.filter((connector) => connector.id !== 'mock') ?? [];
   const repositoryReady =
     Boolean(localPath.trim()) &&
     Boolean(name.trim()) &&
@@ -307,10 +347,11 @@ export function InitWizard({
                 <p className="font-body text-sm text-text-secondary">{INIT_COPY.checking}</p>
               )}
               {preview.data?.status === 'none' && (
-                <p className="font-body text-sm text-text-secondary">{INIT_COPY.noReady}</p>
-              )}
-              {kiloUnchecked && (
-                <p className="font-body text-sm text-text-secondary">{SIGN_IN_UNCHECKED_HINT}</p>
+                <ConnectorStatusPanel
+                  connectors={listedConnectors}
+                  checkingAgain={checkingAgain}
+                  onCheckAgain={() => void handleCheckAgain()}
+                />
               )}
             </div>
           )}
@@ -436,4 +477,105 @@ function verificationLabel(status: string | null): string | null {
     default:
       return null;
   }
+}
+
+function readinessDotClass(readiness: ConnectorReadiness | null | undefined): string {
+  switch (readiness) {
+    case 'ready':
+      return 'bg-success';
+    case 'found_not_signed_in':
+    case 'found':
+      return 'bg-warning';
+    default:
+      return 'bg-text-muted';
+  }
+}
+
+function readinessStatusClass(readiness: ConnectorReadiness | null | undefined): string {
+  switch (readiness) {
+    case 'ready':
+      return 'text-success';
+    case 'found_not_signed_in':
+    case 'found':
+      return 'text-warning';
+    default:
+      return 'text-text-muted';
+  }
+}
+
+function rowHint(connector: Connector): string | null {
+  if (connector.readiness === 'found_not_signed_in') {
+    return notSignedInHint(connector.displayName);
+  }
+  return signInUncheckedHint(connector.id, connector.readiness);
+}
+
+function ConnectorStatusPanel({
+  connectors,
+  checkingAgain,
+  onCheckAgain,
+}: {
+  connectors: Connector[];
+  checkingAgain: boolean;
+  onCheckAgain: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="font-body text-sm text-text-secondary">{INIT_COPY.noReady}</p>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-body text-sm font-medium text-bark-800">{INIT_COPY.agentClis}</h3>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onCheckAgain}
+          disabled={checkingAgain}
+        >
+          {checkingAgain ? INIT_COPY.checkingAgain : INIT_COPY.checkAgain}
+        </Button>
+      </div>
+      <ul className="divide-y divide-border rounded-md border border-border">
+        {connectors.map((connector) => {
+          const label = readinessLabel(connector.readiness) ?? INIT_COPY.checkingAgain;
+          const hint = rowHint(connector);
+          return (
+            <li key={connector.id} className="px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={cn(
+                    'h-2 w-2 shrink-0 rounded-full',
+                    readinessDotClass(connector.readiness),
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate font-body text-sm text-bark-900">
+                  {connector.displayName}
+                </span>
+                <span
+                  className={cn(
+                    'shrink-0 font-body text-xs',
+                    readinessStatusClass(connector.readiness),
+                  )}
+                >
+                  {label}
+                </span>
+              </div>
+              {hint && (
+                <p className="mt-1 pl-4 font-body text-xs text-text-muted">{hint}</p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="font-body text-xs">
+        <a
+          href={INSTALL_GUIDE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-moss-700 underline-offset-2 hover:underline"
+        >
+          {INIT_COPY.installGuide}
+        </a>
+      </p>
+    </div>
+  );
 }
