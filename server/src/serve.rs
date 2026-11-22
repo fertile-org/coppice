@@ -155,6 +155,7 @@ pub async fn sweep_orphaned_runs(state: &AppState) {
         }
         interrupt_restarted_run(state, run).await;
     }
+    crate::services::job_recovery::recover_orphaned_jobs(state).await;
 }
 
 /// Startup after a crash. One comment, blocked substatus in-column, worktree

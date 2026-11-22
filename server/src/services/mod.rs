@@ -33,6 +33,7 @@ pub mod git_ops;
 pub mod git_state_service;
 pub mod human_review_service;
 pub mod init_wizard;
+pub mod job_recovery;
 pub mod job_service;
 pub mod knowledge_compaction_service;
 pub mod knowledge_service;

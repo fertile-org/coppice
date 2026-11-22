@@ -29,6 +29,8 @@ pub async fn run_watchdog_pass_once(state: &AppState) {
         return;
     };
 
+    crate::services::job_recovery::recover_orphaned_jobs(state).await;
+
     let run_svc = RunService::new(pool);
     let Ok(runs) = run_svc.list_active_runs().await else {
         return;
