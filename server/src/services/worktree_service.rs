@@ -290,21 +290,6 @@ impl WorktreeService {
         branch: &str,
     ) -> Result<(), WorktreeError> {
         if worktree_dir.join(".git").exists() {
-            // Recovered or test-prebuilt worktree: make sure `branch` resolves in
-            // the main repo to this worktree's HEAD (e.g. legacy → title slug).
-            let head = git_head_sha(worktree_dir).await?;
-            let branch_ref = format!("refs/heads/{branch}");
-            let has_branch = run_git_in(git_dir, &["rev-parse", "--verify", "--quiet", &branch_ref])
-                .await
-                .is_ok();
-            if has_branch {
-                // Never `branch -f` a ref checked out here; update-ref is safe.
-                run_git_in(git_dir, &["update-ref", &branch_ref, &head]).await?;
-                let _ = run_git_in(worktree_dir, &["checkout", "--quiet", branch]).await;
-            } else {
-                run_git_in(git_dir, &["branch", branch, &head]).await?;
-                run_git_in(worktree_dir, &["checkout", "-B", branch]).await?;
-            }
             return Ok(());
         }
 

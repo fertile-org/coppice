@@ -123,6 +123,25 @@ pub fn setup_worktree_with_commit(
     paths.worktree_dir
 }
 
+/// Record the legacy branch [`setup_worktree_with_commit`] created on the ticket.
+///
+/// Without this, the first job-worker run calls `ensure_ticket_branch_name` and stores a
+/// title-slug ref that was never created, so `sync_worktree_to_branch_tip` fails with
+/// `unknown revision`.
+pub async fn persist_setup_worktree_branch(pool: &sqlx::PgPool, ticket_id: &str) {
+    use coppice_server::services::worktree_service::legacy_ticket_branch;
+    let ticket_uuid: uuid::Uuid = ticket_id.parse().expect("ticket uuid");
+    let branch = legacy_ticket_branch(ticket_uuid);
+    sqlx::query(
+        "UPDATE tickets SET branch_name = $1, updated_at = now() WHERE id = $2 AND branch_name IS NULL",
+    )
+    .bind(&branch)
+    .bind(ticket_uuid)
+    .execute(pool)
+    .await
+    .expect("persist setup worktree branch");
+}
+
 pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().to_path_buf();

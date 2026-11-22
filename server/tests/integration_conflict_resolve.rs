@@ -103,6 +103,7 @@ async fn finish_ticket(
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path =
         common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    common::persist_setup_worktree_branch(state.db.as_ref().expect("db pool"), &ticket_id).await;
     TicketGit {
         _git_keep: git_dir,
         _worktrees: worktrees,
