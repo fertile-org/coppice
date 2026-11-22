@@ -7,6 +7,7 @@
 //! A usage row's id is its run's id. The row copies what it is grouped by
 //! (connector, agent, ticket, board, ...) from the run on every write, and
 //! keeps it when the run, ticket, agent or board is deleted.
+use crate::domain::Id;
 
 use crate::domain::usage::{
     Granularity, RequestUsage, SubagentUsage, TokenCounts, UsageSnapshot, UsageStatus,
@@ -15,8 +16,6 @@ use crate::sessions::run_registry::RunStreamHandle;
 use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::BTreeMap;
-use uuid::Uuid;
-
 pub struct UsageService<'a> {
     pool: &'a PgPool,
 }
@@ -46,8 +45,8 @@ pub struct RunUsageDetail {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TicketRunUsage {
-    pub run_id: Uuid,
-    pub agent_id: Uuid,
+    pub run_id: Id,
+    pub agent_id: Id,
     pub job_type: String,
     /// The run is no longer queued or running.
     #[serde(skip)]
@@ -140,7 +139,7 @@ impl<'a> UsageService<'a> {
     /// written.
     pub async fn save_snapshot(
         &self,
-        run_id: Uuid,
+        run_id: Id,
         snapshot: &UsageSnapshot,
     ) -> Result<bool, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
@@ -245,7 +244,7 @@ impl<'a> UsageService<'a> {
                     usage_id, model,
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens
                 )
-                SELECT $1::uuid, m.*
+                SELECT $1::varchar, m.*
                 FROM UNNEST($2::text[], $3::int8[], $4::int8[], $5::int8[], $6::int8[], $7::int8[]) AS m
                 "#,
             )
@@ -275,7 +274,7 @@ impl<'a> UsageService<'a> {
                     usage_id, seq, external_id, granularity, model,
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens
                 )
-                SELECT $1::uuid, r.*
+                SELECT $1::varchar, r.*
                 FROM UNNEST(
                     $2::int4[], $3::text[], $4::text[], $5::text[],
                     $6::int8[], $7::int8[], $8::int8[], $9::int8[], $10::int8[]
@@ -315,7 +314,7 @@ impl<'a> UsageService<'a> {
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,
                     total_tokens, tool_uses, duration_ms
                 )
-                SELECT $1::uuid, s.*
+                SELECT $1::varchar, s.*
                 FROM UNNEST(
                     $2::int4[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[],
                     $8::int8[], $9::int8[], $10::int8[], $11::int8[], $12::int8[],
@@ -364,21 +363,21 @@ impl<'a> UsageService<'a> {
         Ok(true)
     }
 
-    pub async fn run_exists(&self, run_id: Uuid) -> Result<bool, sqlx::Error> {
+    pub async fn run_exists(&self, run_id: Id) -> Result<bool, sqlx::Error> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM agent_runs WHERE id = $1)")
             .bind(run_id)
             .fetch_one(self.pool)
             .await
     }
 
-    pub async fn ticket_exists(&self, ticket_id: Uuid) -> Result<bool, sqlx::Error> {
+    pub async fn ticket_exists(&self, ticket_id: Id) -> Result<bool, sqlx::Error> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM tickets WHERE id = $1)")
             .bind(ticket_id)
             .fetch_one(self.pool)
             .await
     }
 
-    pub async fn run_usage(&self, run_id: Uuid) -> Result<RunUsageDetail, sqlx::Error> {
+    pub async fn run_usage(&self, run_id: Id) -> Result<RunUsageDetail, sqlx::Error> {
         let totals = sqlx::query(
             r#"
             SELECT status, input_tokens, cache_read_tokens, cache_write_tokens,
@@ -456,7 +455,7 @@ impl<'a> UsageService<'a> {
     /// Usage for a ticket's own runs, grouped by agent and job type, plus its
     /// split children. Runs without a ticket (knowledge compaction, connector
     /// checks) are never part of a ticket's total.
-    pub async fn ticket_usage(&self, ticket_id: Uuid) -> Result<TicketUsage, sqlx::Error> {
+    pub async fn ticket_usage(&self, ticket_id: Id) -> Result<TicketUsage, sqlx::Error> {
         let rows = sqlx::query(
             r#"
             SELECT ar.id, ar.agent_id, ar.job_type,
@@ -532,7 +531,7 @@ impl<'a> UsageService<'a> {
 impl UsageService<'_> {
     /// Usage for a chat session's turns, counted like a ticket's own runs. Read
     /// from the usage rows, so turns whose runs were deleted still count.
-    pub async fn chat_session_usage(&self, session_id: Uuid) -> Result<UsageGroup, sqlx::Error> {
+    pub async fn chat_session_usage(&self, session_id: Id) -> Result<UsageGroup, sqlx::Error> {
         let rows = sqlx::query(
             r#"
             SELECT u.status AS usage_status, u.input_tokens, u.cache_read_tokens,
@@ -637,7 +636,7 @@ fn run_usage_from_row(
 /// the connector on the run, then writes every usage snapshot the run's stream
 /// publishes. The connector is written first, so a run that reports nothing
 /// still stores it with its usage row.
-pub async fn track_run(pool: &PgPool, run_id: Uuid, connector: &str, stream: &RunStreamHandle) {
+pub async fn track_run(pool: &PgPool, run_id: Id, connector: &str, stream: &RunStreamHandle) {
     let saved = sqlx::query("UPDATE agent_runs SET connector = $2 WHERE id = $1")
         .bind(run_id)
         .bind(connector)
@@ -654,7 +653,7 @@ pub async fn track_run(pool: &PgPool, run_id: Uuid, connector: &str, stream: &Ru
 /// handle is dropped.
 pub fn spawn_usage_writer(
     pool: PgPool,
-    run_id: Uuid,
+    run_id: Id,
     stream: &RunStreamHandle,
 ) -> tokio::task::JoinHandle<()> {
     let mut rx = stream.subscribe_usage();
@@ -671,14 +670,14 @@ pub fn spawn_usage_writer(
 /// Persist the latest usage. Safe to call more than once and alongside the writer.
 /// Returns true only when a snapshot existed and the save succeeded, so callers
 /// can announce it.
-pub async fn record_usage(pool: &PgPool, run_id: Uuid, stream: &RunStreamHandle) -> bool {
+pub async fn record_usage(pool: &PgPool, run_id: Id, stream: &RunStreamHandle) -> bool {
     match stream.usage_snapshot() {
         Some(snapshot) => save_or_warn(pool, run_id, &snapshot).await,
         None => false,
     }
 }
 
-async fn save_or_warn(pool: &PgPool, run_id: Uuid, snapshot: &UsageSnapshot) -> bool {
+async fn save_or_warn(pool: &PgPool, run_id: Id, snapshot: &UsageSnapshot) -> bool {
     match UsageService::new(pool)
         .save_snapshot(run_id, snapshot)
         .await
@@ -696,9 +695,9 @@ mod tests {
     use super::*;
 
     /// A finished run; `usage` `None` means Coppice could not read it.
-    fn run(agent: Uuid, job_type: &str, usage: Option<RunUsage>) -> TicketRunUsage {
+    fn run(agent: Id, job_type: &str, usage: Option<RunUsage>) -> TicketRunUsage {
         TicketRunUsage {
-            run_id: Uuid::new_v4(),
+            run_id: Id::new(),
             agent_id: agent,
             job_type: job_type.into(),
             finished: true,
@@ -729,9 +728,9 @@ mod tests {
 
     #[test]
     fn rollup_groups_by_agent_and_job_type() {
-        let worker = Uuid::new_v4();
-        let planner = Uuid::new_v4();
-        let untracked_agent = Uuid::new_v4();
+        let worker = Id::new();
+        let planner = Id::new();
+        let untracked_agent = Id::new();
         let usage = rollup(
             vec![
                 run(worker, "work_on_ticket", reported(100)),
@@ -773,11 +772,11 @@ mod tests {
 
         async fn insert_ticket(
             pool: &PgPool,
-            board: Uuid,
-            agent: Uuid,
-            parent: Option<Uuid>,
-        ) -> Uuid {
-            let id = Uuid::new_v4();
+            board: Id,
+            agent: Id,
+            parent: Option<Id>,
+        ) -> Id {
+            let id = Id::new();
             sqlx::query(
                 "INSERT INTO tickets (id, board_id, title, status, created_by, assignee_agent_id, parent_ticket_id)
                  VALUES ($1, $2, 'usage test', 'todo', 'test', $3, $4)",
@@ -792,8 +791,8 @@ mod tests {
             id
         }
 
-        async fn insert_run(pool: &PgPool, ticket: Uuid, agent: Uuid) -> Uuid {
-            let id = Uuid::new_v4();
+        async fn insert_run(pool: &PgPool, ticket: Id, agent: Id) -> Id {
+            let id = Id::new();
             sqlx::query(
                 "INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
                  VALUES ($1, $2, $3, 'work_on_ticket', 'succeeded', 'default')",
@@ -808,15 +807,15 @@ mod tests {
         }
 
         /// Board, agent, a parent ticket with a child and a grandchild.
-        async fn tree(pool: &PgPool) -> (Uuid, [Uuid; 3]) {
-            let board = Uuid::new_v4();
+        async fn tree(pool: &PgPool) -> (Id, [Id; 3]) {
+            let board = Id::new();
             sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, 'usage', $2)")
                 .bind(board)
                 .bind(format!("usage-{board}"))
                 .execute(pool)
                 .await
                 .expect("insert board");
-            let agent = Uuid::new_v4();
+            let agent = Id::new();
             sqlx::query(
                 "INSERT INTO agents (id, name, role, responsibilities, system_prompt, connector)
                  VALUES ($1, 'usage agent', 'worker', '{}', 'prompt', 'mock')",
@@ -966,7 +965,7 @@ mod tests {
         async fn usage_outlives_its_run_ticket_agent_and_board() {
             let Some(pool) = pool().await else { return };
             let (agent, [parent, _, grandchild]) = tree(&pool).await;
-            let board: Uuid = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
+            let board: Id = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
                 .bind(parent)
                 .fetch_one(&pool)
                 .await
@@ -1011,14 +1010,14 @@ mod tests {
                 .expect("usage row")
             };
             let row = dims(pool.clone()).await;
-            assert_eq!(row.get::<Option<Uuid>, _>("run_id"), Some(run));
+            assert_eq!(row.get::<Option<Id>, _>("run_id"), Some(run));
             assert_eq!(row.get::<Option<String>, _>("connector").as_deref(), Some("mock"));
-            assert_eq!(row.get::<Option<Uuid>, _>("agent_id"), Some(agent));
+            assert_eq!(row.get::<Option<Id>, _>("agent_id"), Some(agent));
             assert_eq!(row.get::<Option<String>, _>("agent_name").as_deref(), Some("usage agent"));
             assert_eq!(row.get::<Option<String>, _>("job_type").as_deref(), Some("work_on_ticket"));
-            assert_eq!(row.get::<Option<Uuid>, _>("ticket_id"), Some(grandchild));
-            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), Some(parent));
-            assert_eq!(row.get::<Option<Uuid>, _>("board_id"), Some(board));
+            assert_eq!(row.get::<Option<Id>, _>("ticket_id"), Some(grandchild));
+            assert_eq!(row.get::<Option<Id>, _>("root_ticket_id"), Some(parent));
+            assert_eq!(row.get::<Option<Id>, _>("board_id"), Some(board));
             assert_eq!(row.get::<Option<String>, _>("board_name").as_deref(), Some("usage"));
             assert_eq!(row.get::<Option<String>, _>("reported_model").as_deref(), Some("m1"));
 
@@ -1029,9 +1028,9 @@ mod tests {
                 .await
                 .unwrap();
             let row = dims(pool.clone()).await;
-            assert_eq!(row.get::<Option<Uuid>, _>("run_id"), None);
-            assert_eq!(row.get::<Option<Uuid>, _>("ticket_id"), None);
-            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), Some(parent));
+            assert_eq!(row.get::<Option<Id>, _>("run_id"), None);
+            assert_eq!(row.get::<Option<Id>, _>("ticket_id"), None);
+            assert_eq!(row.get::<Option<Id>, _>("root_ticket_id"), Some(parent));
             assert_eq!(row.get::<Option<i64>, _>("output_tokens"), Some(20));
             assert_eq!(row.get::<i64, _>("requests"), 1);
             assert_eq!(row.get::<i64, _>("subagents"), 1);
@@ -1049,11 +1048,11 @@ mod tests {
                 .await
                 .unwrap();
             let row = dims(pool.clone()).await;
-            assert_eq!(row.get::<Option<Uuid>, _>("agent_id"), None);
+            assert_eq!(row.get::<Option<Id>, _>("agent_id"), None);
             assert_eq!(row.get::<Option<String>, _>("agent_name").as_deref(), Some("usage agent"));
-            assert_eq!(row.get::<Option<Uuid>, _>("board_id"), None);
+            assert_eq!(row.get::<Option<Id>, _>("board_id"), None);
             assert_eq!(row.get::<Option<String>, _>("board_name").as_deref(), Some("usage"));
-            assert_eq!(row.get::<Option<Uuid>, _>("root_ticket_id"), None);
+            assert_eq!(row.get::<Option<Id>, _>("root_ticket_id"), None);
             assert_eq!(row.get::<Option<String>, _>("connector").as_deref(), Some("mock"));
             assert_eq!(row.get::<i64, _>("requests"), 1);
         }
@@ -1115,7 +1114,7 @@ mod tests {
 
     #[test]
     fn rollup_leaves_untracked_runs_out() {
-        let usage = rollup(vec![run(Uuid::new_v4(), "work_on_ticket", None)], None);
+        let usage = rollup(vec![run(Id::new(), "work_on_ticket", None)], None);
         assert_eq!(usage.own.runs, 0);
         assert_eq!(usage.own.runs_not_reported, 0);
         assert_eq!(usage.own.tokens.total(), None);
@@ -1125,7 +1124,7 @@ mod tests {
 
     #[test]
     fn rollup_counts_partial_runs_and_skips_active_ones() {
-        let agent = Uuid::new_v4();
+        let agent = Id::new();
         let active = |usage| TicketRunUsage {
             finished: false,
             ..run(agent, "work_on_ticket", usage)
@@ -1163,7 +1162,7 @@ mod tests {
             .connect_lazy("postgres://nobody:secret@127.0.0.1:1/unreachable")
             .unwrap();
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let writers = [
             crate::services::run_service::spawn_reported_model_writer(

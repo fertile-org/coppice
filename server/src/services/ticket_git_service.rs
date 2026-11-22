@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
     fetch_default_refspec, git_head_sha, git_ref_exists, git_rev_parse, git_status_clean,
@@ -86,7 +85,7 @@ pub struct TicketGitContext {
     pub ticket_branch: String,
     pub default_branch: String,
     pub remote_url: Option<String>,
-    pub forge_token_secret_id: Option<Uuid>,
+    pub forge_token_secret_id: Option<Id>,
     pub pr_url: Option<String>,
 }
 
@@ -233,7 +232,7 @@ impl<'a> TicketGitService<'a> {
 
     pub async fn resolve_context(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<TicketGitContext, TicketGitError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         let repo_id = ticket.ticket.repo_id.ok_or(TicketGitError::NoRepo)?;
@@ -260,7 +259,7 @@ impl<'a> TicketGitService<'a> {
         let repo_name: String = row.get("name");
         let default_branch: String = row.get("default_branch");
         let remote_url: Option<String> = row.get("remote_url");
-        let forge_token_secret_id: Option<Uuid> = row.get("forge_token_secret_id");
+        let forge_token_secret_id: Option<Id> = row.get("forge_token_secret_id");
 
         let pr_url: Option<String> = sqlx::query_scalar("SELECT pr_url FROM tickets WHERE id = $1")
             .bind(ticket_id)
@@ -282,7 +281,7 @@ impl<'a> TicketGitService<'a> {
         })
     }
 
-    pub async fn git_info(&self, ticket_id: Uuid) -> Result<TicketGitInfo, TicketGitError> {
+    pub async fn git_info(&self, ticket_id: Id) -> Result<TicketGitInfo, TicketGitError> {
         let ctx = self.resolve_context(ticket_id).await?;
         let branches = list_local_branches(&ctx.git_dir).await?;
         let pr_create_url = build_pr_create_url(
@@ -330,13 +329,13 @@ impl<'a> TicketGitService<'a> {
         })
     }
 
-    async fn ensure_ticket_mutable(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {
+    async fn ensure_ticket_mutable(&self, ticket_id: Id) -> Result<(), TicketGitError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         TicketService::ensure_not_archived(&ticket.ticket)?;
         Ok(())
     }
 
-    pub async fn push_branch(&self, ticket_id: Uuid) -> Result<PushBranchResult, TicketGitError> {
+    pub async fn push_branch(&self, ticket_id: Id) -> Result<PushBranchResult, TicketGitError> {
         self.ensure_ticket_mutable(ticket_id).await?;
         if !self.push_enabled {
             return Err(TicketGitError::PushDisabled);
@@ -400,7 +399,7 @@ impl<'a> TicketGitService<'a> {
 
     pub async fn create_pr(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         title: Option<&str>,
         body: Option<&str>,
     ) -> Result<CreatePrResult, TicketGitError> {
@@ -487,7 +486,7 @@ impl<'a> TicketGitService<'a> {
     /// Head of the ticket branch. `Ok(None)` when the ticket has no repository.
     pub async fn reviewed_head_sha(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<String>, TicketGitError> {
         let ctx = match self.resolve_context(ticket_id).await {
             Ok(ctx) => ctx,
@@ -499,7 +498,7 @@ impl<'a> TicketGitService<'a> {
 
     /// If the live branch tip is not the accepted commit, mark that acceptance
     /// stale and move the ticket back to In Review.
-    pub async fn note_branch_head(&self, ticket_id: Uuid) -> Result<bool, TicketGitError> {
+    pub async fn note_branch_head(&self, ticket_id: Id) -> Result<bool, TicketGitError> {
         let ctx = match self.resolve_context(ticket_id).await {
             Ok(ctx) => ctx,
             Err(TicketGitError::NoRepo) => return Ok(false),
@@ -535,7 +534,7 @@ impl<'a> TicketGitService<'a> {
 
     async fn ensure_merge_matches_review(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         head_sha: &str,
     ) -> Result<(), TicketGitError> {
         let review = HumanReviewService::new(self.pool).get(ticket_id).await?;
@@ -560,7 +559,7 @@ impl<'a> TicketGitService<'a> {
 
     pub async fn merge_ticket_branch(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         base_branch: &str,
     ) -> Result<MergeBranchResult, TicketGitError> {
         self.ensure_ticket_mutable(ticket_id).await?;
@@ -646,7 +645,7 @@ impl<'a> TicketGitService<'a> {
     /// best-effort and never blocks a local rebase.
     pub async fn rebase_ticket_branch(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         base_branch: Option<&str>,
     ) -> Result<RebaseBranchResult, TicketGitError> {
         self.ensure_ticket_mutable(ticket_id).await?;
@@ -757,7 +756,7 @@ impl<'a> TicketGitService<'a> {
         }
     }
 
-    pub async fn remove_worktree(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {
+    pub async fn remove_worktree(&self, ticket_id: Id) -> Result<(), TicketGitError> {
         self.ensure_ticket_mutable(ticket_id).await?;
         let ctx = self.resolve_context(ticket_id).await?;
         if !worktree_exists(&ctx.worktree_dir) {
@@ -799,7 +798,7 @@ impl TicketGitService<'_> {
     /// touches one with an active run.
     pub async fn cleanup_finished_worktree(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<WorktreeCleanup, TicketGitError> {
         let ctx = match self.resolve_context(ticket_id).await {
             Ok(ctx) => ctx,
@@ -840,7 +839,7 @@ impl TicketGitService<'_> {
     }
 }
 
-async fn ticket_has_active_run(pool: &PgPool, ticket_id: Uuid) -> Result<bool, sqlx::Error> {
+async fn ticket_has_active_run(pool: &PgPool, ticket_id: Id) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE ticket_id = $1 AND status IN ('queued', 'running'))",
     )

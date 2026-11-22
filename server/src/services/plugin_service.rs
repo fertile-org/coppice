@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -14,8 +15,6 @@ use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettin
 use crate::services::secret_service::SecretError;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use uuid::Uuid;
-
 const DIR_COLUMNS: &str = "id, path, position, is_default";
 
 const INSTALL_COLUMNS: &str =
@@ -59,7 +58,7 @@ pub enum PluginError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginDir {
-    pub id: Uuid,
+    pub id: Id,
     pub path: String,
     pub position: i32,
     pub is_default: bool,
@@ -67,8 +66,8 @@ pub struct PluginDir {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginRow {
-    pub id: Uuid,
-    pub plugin_dir_id: Uuid,
+    pub id: Id,
+    pub plugin_dir_id: Id,
     pub rel_path: String,
     pub name: String,
     pub version: String,
@@ -90,7 +89,7 @@ pub struct PluginRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginAgentAssignment {
     pub mode: String,
-    pub agent_ids: Vec<Uuid>,
+    pub agent_ids: Vec<Id>,
 }
 
 /// Install default. A local (stdio) MCP server is assigned to nobody until
@@ -137,13 +136,13 @@ pub struct TestedTool {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginInstall {
-    pub id: Uuid,
-    pub plugin_dir_id: Uuid,
+    pub id: Id,
+    pub plugin_dir_id: Id,
     pub kind: String,
     pub git_url: String,
     pub git_ref: Option<String>,
-    pub plugin_id: Option<Uuid>,
-    pub plugin_ids: Vec<Uuid>,
+    pub plugin_id: Option<Id>,
+    pub plugin_ids: Vec<Id>,
     pub status: String,
     pub error: Option<String>,
 }
@@ -176,7 +175,7 @@ impl<'a> PluginService<'a> {
         .fetch_optional(&mut *tx)
         .await?
         .map(|row| row_to_dir(&row));
-        let other = sqlx::query_scalar::<_, Uuid>(
+        let other = sqlx::query_scalar::<_, Id>(
             "SELECT id FROM plugin_dirs WHERE path = $1 AND NOT is_default",
         )
         .bind(&canonical)
@@ -209,7 +208,7 @@ impl<'a> PluginService<'a> {
                 sqlx::query("UPDATE plugin_dirs SET position = position + 1")
                     .execute(&mut *tx)
                     .await?;
-                let id = Uuid::new_v4();
+                let id = Id::new();
                 sqlx::query(
                     "INSERT INTO plugin_dirs (id, path, position, is_default) VALUES ($1, $2, 0, true)",
                 )
@@ -251,7 +250,7 @@ impl<'a> PluginService<'a> {
                 SELECT $1, $2, COALESCE(MAX(position) + 1, 0), false FROM plugin_dirs
                 "#,
             )
-            .bind(Uuid::new_v4())
+            .bind(Id::new())
             .bind(&canonical)
             .execute(&mut *tx)
             .await?;
@@ -319,7 +318,7 @@ impl<'a> PluginService<'a> {
 
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let position: i32 = sqlx::query_scalar(
             r#"
             INSERT INTO plugin_dirs (id, path, position)
@@ -348,7 +347,7 @@ impl<'a> PluginService<'a> {
         })
     }
 
-    pub async fn move_dir(&self, id: Uuid, position: i32) -> Result<Vec<PluginDir>, PluginError> {
+    pub async fn move_dir(&self, id: Id, position: i32) -> Result<Vec<PluginDir>, PluginError> {
         if position < 0 {
             return Err(PluginError::Validation(
                 "position must be zero or greater".into(),
@@ -356,7 +355,7 @@ impl<'a> PluginService<'a> {
         }
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
-        let mut ids: Vec<Uuid> =
+        let mut ids: Vec<Id> =
             sqlx::query_scalar("SELECT id FROM plugin_dirs ORDER BY position, created_at")
                 .fetch_all(&mut *tx)
                 .await?;
@@ -374,7 +373,7 @@ impl<'a> PluginService<'a> {
         self.list_dirs().await
     }
 
-    pub async fn remove_dir(&self, id: Uuid) -> Result<(), PluginError> {
+    pub async fn remove_dir(&self, id: Id) -> Result<(), PluginError> {
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
         let is_default: bool =
@@ -392,7 +391,7 @@ impl<'a> PluginService<'a> {
             .bind(id)
             .execute(&mut *tx)
             .await?;
-        let ids: Vec<Uuid> =
+        let ids: Vec<Id> =
             sqlx::query_scalar("SELECT id FROM plugin_dirs ORDER BY position, created_at")
                 .fetch_all(&mut *tx)
                 .await?;
@@ -415,7 +414,7 @@ impl<'a> PluginService<'a> {
     /// `None`, so a user-added folder of the same name is not.
     pub(crate) async fn rescan_with_builtin(
         &self,
-        builtin_dir_id: Option<Uuid>,
+        builtin_dir_id: Option<Id>,
     ) -> Result<Vec<PluginRow>, PluginError> {
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
@@ -479,14 +478,14 @@ impl<'a> PluginService<'a> {
         Ok(rows.iter().map(row_to_plugin).collect())
     }
 
-    pub async fn ok_plugin_ids(&self) -> Result<HashSet<Uuid>, PluginError> {
-        let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM plugins WHERE status = 'ok'")
+    pub async fn ok_plugin_ids(&self) -> Result<HashSet<Id>, PluginError> {
+        let ids: Vec<Id> = sqlx::query_scalar("SELECT id FROM plugins WHERE status = 'ok'")
             .fetch_all(self.pool)
             .await?;
         Ok(ids.into_iter().collect())
     }
 
-    pub async fn get_plugin(&self, id: Uuid) -> Result<PluginRow, PluginError> {
+    pub async fn get_plugin(&self, id: Id) -> Result<PluginRow, PluginError> {
         let row = sqlx::query(&format!(
             "SELECT {PLUGIN_COLUMNS} FROM plugins p WHERE p.id = $1"
         ))
@@ -498,7 +497,7 @@ impl<'a> PluginService<'a> {
     }
 
     /// Disabling is always allowed; enabling requires status `ok`.
-    pub async fn set_enabled(&self, id: Uuid, enabled: bool) -> Result<PluginRow, PluginError> {
+    pub async fn set_enabled(&self, id: Id, enabled: bool) -> Result<PluginRow, PluginError> {
         let updated = sqlx::query(
             r#"
             UPDATE plugins SET enabled = $2, updated_at = now()
@@ -528,7 +527,7 @@ impl<'a> PluginService<'a> {
     /// Switches one manifest skill on or off by name.
     pub async fn set_skill_enabled(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         skill: &str,
         enabled: bool,
     ) -> Result<PluginRow, PluginError> {
@@ -559,7 +558,7 @@ impl<'a> PluginService<'a> {
         self.get_plugin(plugin_id).await
     }
 
-    pub async fn plugin_path(&self, id: Uuid) -> Result<PathBuf, PluginError> {
+    pub async fn plugin_path(&self, id: Id) -> Result<PathBuf, PluginError> {
         let (dir, rel_path): (String, String) = sqlx::query_as(
             "SELECT d.path, p.rel_path FROM plugins p JOIN plugin_dirs d ON d.id = p.plugin_dir_id WHERE p.id = $1",
         )
@@ -611,7 +610,7 @@ impl<'a> PluginService<'a> {
     /// warning) plugins whose settings cannot be decrypted; otherwise that is an error.
     pub async fn server_specs_for(
         &self,
-        plugin_ids: &[Uuid],
+        plugin_ids: &[Id],
         store: &SecretStore,
         enabled_only: bool,
     ) -> Result<Vec<PoolServerSpec>, PluginError> {
@@ -667,7 +666,7 @@ impl<'a> PluginService<'a> {
     /// with their server names. Settings are not read.
     pub async fn mcp_server_names_for(
         &self,
-        plugin_ids: &[Uuid],
+        plugin_ids: &[Id],
     ) -> Result<Vec<PluginServerNames>, PluginError> {
         if plugin_ids.is_empty() {
             return Ok(Vec::new());
@@ -698,7 +697,7 @@ impl<'a> PluginService<'a> {
     /// Specs for every MCP server of one plugin, whether or not it is enabled.
     pub async fn server_specs(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         store: &SecretStore,
     ) -> Result<Vec<PoolServerSpec>, PluginError> {
         self.server_specs_for(&[plugin_id], store, false).await
@@ -708,7 +707,7 @@ impl<'a> PluginService<'a> {
     /// its tools; results follow manifest order.
     pub async fn test_servers(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         store: &SecretStore,
         mcp: &McpServerPool,
     ) -> Result<Vec<ServerTestResult>, PluginError> {
@@ -743,7 +742,7 @@ impl<'a> PluginService<'a> {
         &self,
         git_url: &str,
         git_ref: Option<&str>,
-        plugin_dir_id: Uuid,
+        plugin_dir_id: Id,
         cfg: &PluginsConfig,
     ) -> Result<(PluginInstall, PathBuf), PluginError> {
         let git_url = git_url.trim();
@@ -790,7 +789,7 @@ impl<'a> PluginService<'a> {
     /// rel path (`git_root`, or the plugin's rel_path for rows predating it).
     pub async fn start_update(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
     ) -> Result<(PluginInstall, PathBuf, String), PluginError> {
         let plugin = self.get_plugin(plugin_id).await?;
         if plugin.status == "external" {
@@ -817,14 +816,14 @@ impl<'a> PluginService<'a> {
 
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
-        let rows: Vec<(Uuid, String)> = sqlx::query_as(&format!(
+        let rows: Vec<(Id, String)> = sqlx::query_as(&format!(
             "SELECT id, status FROM plugins WHERE {CLONE_ROWS} ORDER BY rel_path"
         ))
         .bind(plugin.plugin_dir_id)
         .bind(&root)
         .fetch_all(&mut *tx)
         .await?;
-        let all_ids: Vec<Uuid> = rows.iter().map(|(id, _)| *id).collect();
+        let all_ids: Vec<Id> = rows.iter().map(|(id, _)| *id).collect();
         let running: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM plugin_installs WHERE plugin_ids && $1 AND status = 'running')",
         )
@@ -837,7 +836,7 @@ impl<'a> PluginService<'a> {
                 plugin.name
             )));
         }
-        let ids: Vec<Uuid> = rows
+        let ids: Vec<Id> = rows
             .into_iter()
             .filter(|(_, status)| status != "missing")
             .map(|(id, _)| id)
@@ -864,7 +863,7 @@ impl<'a> PluginService<'a> {
     /// a fresh install leaves them all disabled.
     pub async fn finish_install(
         &self,
-        id: Uuid,
+        id: Id,
         result: Result<String, String>,
         dest_rel: &str,
         catalog: &SkillCatalog,
@@ -878,7 +877,7 @@ impl<'a> PluginService<'a> {
 
         let is_install = install.kind == "install";
         let mut tx = self.pool.begin().await?;
-        let plugin_ids: Vec<Uuid> = sqlx::query_scalar(&format!(
+        let plugin_ids: Vec<Id> = sqlx::query_scalar(&format!(
             r#"
             WITH stamped AS (
                 UPDATE plugins SET
@@ -938,7 +937,7 @@ impl<'a> PluginService<'a> {
     /// stuck `running` row cannot block a reinstall.
     pub async fn complete_git_job(
         &self,
-        id: Uuid,
+        id: Id,
         result: Result<String, String>,
         dest_rel: &str,
         catalog: &SkillCatalog,
@@ -957,7 +956,7 @@ impl<'a> PluginService<'a> {
 
     async fn abandon_install(
         &self,
-        id: Uuid,
+        id: Id,
         error: &str,
         dest_rel: &str,
     ) -> Result<(), PluginError> {
@@ -986,7 +985,7 @@ impl<'a> PluginService<'a> {
         Ok(())
     }
 
-    pub async fn get_install(&self, id: Uuid) -> Result<PluginInstall, PluginError> {
+    pub async fn get_install(&self, id: Id) -> Result<PluginInstall, PluginError> {
         let row = sqlx::query(&format!(
             "SELECT {INSTALL_COLUMNS} FROM plugin_installs WHERE id = $1"
         ))
@@ -1011,7 +1010,7 @@ impl<'a> PluginService<'a> {
         .rows_affected())
     }
 
-    async fn fail_install(&self, id: Uuid, error: &str) -> Result<PluginInstall, PluginError> {
+    async fn fail_install(&self, id: Id, error: &str) -> Result<PluginInstall, PluginError> {
         sqlx::query(
             "UPDATE plugin_installs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1",
         )
@@ -1025,7 +1024,7 @@ impl<'a> PluginService<'a> {
     /// Plugins this agent can use. `all` counts only while the plugin is enabled
     /// and `ok`, so a disabled "all agents" choice is not dropped by saving an
     /// agent. Explicit rows are returned even when the plugin is unavailable.
-    pub async fn agent_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+    pub async fn agent_plugin_ids(&self, agent_id: Id) -> Result<Vec<Id>, PluginError> {
         self.ensure_agent(agent_id).await?;
         Ok(sqlx::query_scalar(
             r#"
@@ -1050,14 +1049,14 @@ impl<'a> PluginService<'a> {
     /// Leaving an "all agents" plugin removes this agent and keeps everyone else.
     pub async fn set_agent_plugins(
         &self,
-        agent_id: Uuid,
-        plugin_ids: &[Uuid],
-    ) -> Result<Vec<Uuid>, PluginError> {
+        agent_id: Id,
+        plugin_ids: &[Id],
+    ) -> Result<Vec<Id>, PluginError> {
         self.ensure_agent(agent_id).await?;
         let mut wanted = plugin_ids.to_vec();
         wanted.sort();
         wanted.dedup();
-        let usable: Vec<Uuid> = sqlx::query_scalar(
+        let usable: Vec<Id> = sqlx::query_scalar(
             "SELECT id FROM plugins WHERE id = ANY($1) AND enabled AND status = 'ok'",
         )
         .bind(&wanted)
@@ -1083,7 +1082,7 @@ impl<'a> PluginService<'a> {
 
     pub async fn plugin_assignment(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
     ) -> Result<PluginAgentAssignment, PluginError> {
         let plugin = self.get_plugin(plugin_id).await?;
         let agent_ids = if plugin.agent_access == "all" {
@@ -1099,9 +1098,9 @@ impl<'a> PluginService<'a> {
 
     pub async fn explicit_members(
         &self,
-        plugin_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, PluginError> {
-        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        plugin_ids: &[Id],
+    ) -> Result<std::collections::HashMap<Id, Vec<Id>>, PluginError> {
+        let rows: Vec<(Id, Id)> = sqlx::query_as(
             r#"
             SELECT plugin_id, agent_id FROM agent_plugins
             WHERE plugin_id = ANY($1)
@@ -1111,7 +1110,7 @@ impl<'a> PluginService<'a> {
         .bind(plugin_ids)
         .fetch_all(self.pool)
         .await?;
-        let mut members: std::collections::HashMap<Uuid, Vec<Uuid>> =
+        let mut members: std::collections::HashMap<Id, Vec<Id>> =
             std::collections::HashMap::new();
         for (plugin_id, agent_id) in rows {
             members.entry(plugin_id).or_default().push(agent_id);
@@ -1122,9 +1121,9 @@ impl<'a> PluginService<'a> {
     /// Replaces this plugin's assignment. `all` drops the explicit list.
     pub async fn set_plugin_agents(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         mode: &str,
-        agent_ids: &[Uuid],
+        agent_ids: &[Id],
     ) -> Result<PluginAgentAssignment, PluginError> {
         self.get_plugin(plugin_id).await?;
         match mode {
@@ -1150,7 +1149,7 @@ impl<'a> PluginService<'a> {
                 let mut ids = agent_ids.to_vec();
                 ids.sort();
                 ids.dedup();
-                let found: Vec<Uuid> =
+                let found: Vec<Id> =
                     sqlx::query_scalar("SELECT id FROM agents WHERE id = ANY($1)")
                         .bind(&ids)
                         .fetch_all(self.pool)
@@ -1171,7 +1170,7 @@ impl<'a> PluginService<'a> {
                     .await?;
                 if !ids.is_empty() {
                     sqlx::query(
-                        "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT UNNEST($1::uuid[]), $2",
+                        "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT UNNEST($1::varchar[]), $2",
                     )
                     .bind(&ids)
                     .bind(plugin_id)
@@ -1192,7 +1191,7 @@ impl<'a> PluginService<'a> {
 
     /// Assigned plugins that are enabled and `ok` — the per-run token snapshot.
     /// Read when the run starts, so a later assignment waits until the next run.
-    pub async fn run_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+    pub async fn run_plugin_ids(&self, agent_id: Id) -> Result<Vec<Id>, PluginError> {
         Ok(sqlx::query_scalar(
             r#"
             SELECT p.id FROM plugins p
@@ -1219,7 +1218,7 @@ impl<'a> PluginService<'a> {
     /// new agent. Names that are not enabled and `ok` are skipped.
     pub async fn apply_preset_defaults(
         &self,
-        agent_id: Uuid,
+        agent_id: Id,
         names: &[String],
     ) -> Result<(), PluginError> {
         if names.is_empty() {
@@ -1240,7 +1239,7 @@ impl<'a> PluginService<'a> {
         Ok(())
     }
 
-    async fn ensure_agent(&self, agent_id: Uuid) -> Result<(), PluginError> {
+    async fn ensure_agent(&self, agent_id: Id) -> Result<(), PluginError> {
         let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1)")
             .bind(agent_id)
             .fetch_one(self.pool)
@@ -1253,7 +1252,7 @@ impl<'a> PluginService<'a> {
     }
 }
 
-async fn explicit_agent_ids(pool: &PgPool, plugin_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+async fn explicit_agent_ids(pool: &PgPool, plugin_id: Id) -> Result<Vec<Id>, PluginError> {
     Ok(sqlx::query_scalar(
         "SELECT agent_id FROM agent_plugins WHERE plugin_id = $1 ORDER BY agent_id",
     )
@@ -1264,8 +1263,8 @@ async fn explicit_agent_ids(pool: &PgPool, plugin_id: Uuid) -> Result<Vec<Uuid>,
 
 async fn detach_agent(
     tx: &mut Transaction<'_, Postgres>,
-    plugin_id: Uuid,
-    agent_id: Uuid,
+    plugin_id: Id,
+    agent_id: Id,
 ) -> Result<(), PluginError> {
     let mode: Option<String> =
         sqlx::query_scalar("SELECT agent_access FROM plugins WHERE id = $1 FOR UPDATE")
@@ -1305,8 +1304,8 @@ async fn detach_agent(
 
 async fn attach_agent(
     tx: &mut Transaction<'_, Postgres>,
-    plugin_id: Uuid,
-    agent_id: Uuid,
+    plugin_id: Id,
+    agent_id: Id,
 ) -> Result<(), PluginError> {
     let mode: String =
         sqlx::query_scalar("SELECT agent_access FROM plugins WHERE id = $1 FOR UPDATE")
@@ -1377,11 +1376,11 @@ pub(crate) async fn lock_plugin_state(
     Ok(())
 }
 
-async fn renumber(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) -> Result<(), sqlx::Error> {
+async fn renumber(tx: &mut Transaction<'_, Postgres>, ids: &[Id]) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         UPDATE plugin_dirs SET position = ordered.idx - 1
-        FROM UNNEST($1::uuid[]) WITH ORDINALITY AS ordered(id, idx)
+        FROM UNNEST($1::varchar[]) WITH ORDINALITY AS ordered(id, idx)
         WHERE plugin_dirs.id = ordered.id
         "#,
     )
@@ -1404,8 +1403,8 @@ fn scan_dir(dir: &Path) -> Vec<Discovered> {
 
 async fn upsert_discovered(
     tx: &mut Transaction<'_, Postgres>,
-    dir_id: Uuid,
-    builtin_dir_id: Option<Uuid>,
+    dir_id: Id,
+    builtin_dir_id: Option<Id>,
     discovered: &Discovered,
 ) -> Result<(), PluginError> {
     let (version, description, manifest, status, error) = match &discovered.result {
@@ -1468,7 +1467,7 @@ async fn upsert_discovered(
             updated_at = now()
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(dir_id)
     .bind(&discovered.rel_path)
     .bind(&discovered.name)
@@ -1487,11 +1486,11 @@ async fn upsert_discovered(
 
 pub(crate) async fn insert_install(
     tx: &mut Transaction<'_, Postgres>,
-    plugin_dir_id: Uuid,
+    plugin_dir_id: Id,
     kind: &str,
     git_url: &str,
     git_ref: Option<&str>,
-    plugin_ids: &[Uuid],
+    plugin_ids: &[Id],
 ) -> Result<PluginInstall, sqlx::Error> {
     let row = sqlx::query(&format!(
         r#"
@@ -1501,7 +1500,7 @@ pub(crate) async fn insert_install(
         RETURNING {INSTALL_COLUMNS}
         "#
     ))
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(plugin_dir_id)
     .bind(kind)
     .bind(git_url)

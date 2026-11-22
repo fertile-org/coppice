@@ -1,13 +1,12 @@
 //! Freshness of a knowledge revision, judged from its code citations against
 //! the default branch head. Never fails: any trouble reads as `unknown`.
+use crate::domain::Id;
 
 use serde::Serialize;
 use sqlx::PgPool;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use uuid::Uuid;
-
 use crate::knowledge::citations::{head_sha, GIT_TIMEOUT};
 use crate::services::git_cmd;
 
@@ -74,13 +73,13 @@ struct RepoHead {
     head: String,
 }
 
-type CitationKey = (Uuid, String, String);
+type CitationKey = (Id, String, String);
 
-pub async fn freshness_for(pool: &PgPool, revision_ids: &[Uuid]) -> HashMap<Uuid, FreshnessReport> {
+pub async fn freshness_for(pool: &PgPool, revision_ids: &[Id]) -> HashMap<Id, FreshnessReport> {
     if revision_ids.is_empty() {
         return HashMap::new();
     }
-    let rows: Vec<(Uuid, Option<Uuid>, String, Option<String>)> = match sqlx::query_as(
+    let rows: Vec<(Id, Option<Id>, String, Option<String>)> = match sqlx::query_as(
         "SELECT revision_id, repo_id, path, commit_sha FROM knowledge_citations \
          WHERE revision_id = ANY($1) ORDER BY revision_id, created_at, path",
     )
@@ -98,9 +97,9 @@ pub async fn freshness_for(pool: &PgPool, revision_ids: &[Uuid]) -> HashMap<Uuid
         }
     };
 
-    let mut heads: HashMap<Uuid, Option<RepoHead>> = HashMap::new();
+    let mut heads: HashMap<Id, Option<RepoHead>> = HashMap::new();
     let mut checked: HashMap<CitationKey, Freshness> = HashMap::new();
-    let mut per_revision: HashMap<Uuid, Vec<(Freshness, String)>> = HashMap::new();
+    let mut per_revision: HashMap<Id, Vec<(Freshness, String)>> = HashMap::new();
     for (index, (revision_id, repo_id, path, sha)) in rows.into_iter().enumerate() {
         let state = match (repo_id, sha) {
             _ if index >= MAX_CHECKED_CITATIONS => Freshness::Unknown,
@@ -144,7 +143,7 @@ pub async fn freshness_for(pool: &PgPool, revision_ids: &[Uuid]) -> HashMap<Uuid
         .collect()
 }
 
-async fn repo_head(pool: &PgPool, repo_id: Uuid) -> Option<RepoHead> {
+async fn repo_head(pool: &PgPool, repo_id: Id) -> Option<RepoHead> {
     let (local_path, branch): (String, String) =
         sqlx::query_as("SELECT local_path, default_branch FROM repos WHERE id = $1")
             .bind(repo_id)

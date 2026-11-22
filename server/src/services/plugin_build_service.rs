@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::crypto::SecretStore;
 use crate::domain::agent::Agent;
 use crate::domain::plugin_build::{
@@ -24,8 +25,6 @@ use sqlx::{PgPool, Row};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use uuid::Uuid;
-
 const COLUMNS: &str = "id, answers, plans, status, plugin_name, workspace_path, publish_target, plan_questions, check_errors, format_retries, plugin_id, test_result, created_at, updated_at";
 
 const MAX_FORMAT_RETRIES: i32 = 2;
@@ -67,7 +66,7 @@ impl From<RunError> for PluginBuildError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginBuild {
-    pub id: Uuid,
+    pub id: Id,
     pub answers: Value,
     pub plans: Value,
     pub status: String,
@@ -78,15 +77,15 @@ pub struct PluginBuild {
     /// Plain-language format-check errors (JSON string array), when the last check failed.
     pub check_errors: Option<Value>,
     pub format_retries: i32,
-    pub plugin_id: Option<Uuid>,
+    pub plugin_id: Option<Id>,
     /// Auto-test payload (`{ "servers": […] }`), set when install+test finishes.
     pub test_result: Option<Value>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     /// Active plan/build run for this build (`queued` / `running`), if any.
-    pub active_run_id: Option<Uuid>,
+    pub active_run_id: Option<Id>,
     /// Most recent run for this build (any status).
-    pub last_run_id: Option<Uuid>,
+    pub last_run_id: Option<Id>,
     pub last_run_status: Option<String>,
 }
 
@@ -113,7 +112,7 @@ impl<'a> PluginBuildService<'a> {
     }
 
     pub async fn create(&self) -> Result<PluginBuild, PluginBuildError> {
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let path = plugin_build_dir(&self.worktrees_root, id);
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -138,7 +137,7 @@ impl<'a> PluginBuildService<'a> {
         }
     }
 
-    pub async fn get(&self, id: Uuid) -> Result<PluginBuild, PluginBuildError> {
+    pub async fn get(&self, id: Id) -> Result<PluginBuild, PluginBuildError> {
         let row = sqlx::query(&format!(
             "SELECT {COLUMNS} FROM plugin_builds WHERE id = $1"
         ))
@@ -167,7 +166,7 @@ impl<'a> PluginBuildService<'a> {
         &self,
         mut build: PluginBuild,
     ) -> Result<PluginBuild, PluginBuildError> {
-        let active: Option<Uuid> = sqlx::query_scalar(
+        let active: Option<Id> = sqlx::query_scalar(
             "SELECT id FROM agent_runs
              WHERE plugin_build_id = $1 AND status IN ('queued', 'running')
              ORDER BY created_at DESC
@@ -195,7 +194,7 @@ impl<'a> PluginBuildService<'a> {
 
     pub async fn update(
         &self,
-        id: Uuid,
+        id: Id,
         update: PluginBuildUpdate,
     ) -> Result<PluginBuild, PluginBuildError> {
         if update.answers.is_none()
@@ -266,18 +265,18 @@ impl<'a> PluginBuildService<'a> {
         Ok(row_to_build(row))
     }
 
-    pub async fn cancel(&self, id: Uuid) -> Result<PluginBuild, PluginBuildError> {
+    pub async fn cancel(&self, id: Id) -> Result<PluginBuild, PluginBuildError> {
         self.set_terminal(id, "cancelled", false).await
     }
 
-    pub async fn discard(&self, id: Uuid) -> Result<PluginBuild, PluginBuildError> {
+    pub async fn discard(&self, id: Id) -> Result<PluginBuild, PluginBuildError> {
         self.set_terminal(id, "discarded", true).await
     }
 
     /// Discard and, when an installed copy exists, remove it and rescan.
     pub async fn discard_and_uninstall(
         &self,
-        id: Uuid,
+        id: Id,
         plugins: &PluginService<'_>,
         plugins_dir: &str,
         plugin_mcp: &McpServerPool,
@@ -323,7 +322,7 @@ impl<'a> PluginBuildService<'a> {
     /// Delete the workspace after Accept (PB-11). Keeps the row; status → accepted.
     pub async fn delete_workspace_on_accept(
         &self,
-        id: Uuid,
+        id: Id,
     ) -> Result<PluginBuild, PluginBuildError> {
         let build = self.get(id).await?;
         if build.status != "ready_to_try" {
@@ -346,7 +345,7 @@ impl<'a> PluginBuildService<'a> {
     /// Publish (if requested) runs in the API layer after this returns.
     pub async fn accept(
         &self,
-        id: Uuid,
+        id: Id,
         enable: bool,
         plugins: &PluginService<'_>,
         plugin_mcp: &McpServerPool,
@@ -376,7 +375,7 @@ impl<'a> PluginBuildService<'a> {
     /// build stays at `planning` / `plan_ready` so the admin can start again.
     pub async fn queue_plan_run(
         &self,
-        id: Uuid,
+        id: Id,
         change_request: Option<String>,
         connector_ready: impl Fn(&str) -> bool,
     ) -> Result<(PluginBuild, AgentRun), PluginBuildError> {
@@ -465,7 +464,7 @@ impl<'a> PluginBuildService<'a> {
     /// cancel/fail the worker reverts status to `plan_ready` so Try again works.
     pub async fn queue_build_run(
         &self,
-        id: Uuid,
+        id: Id,
         connector_ready: impl Fn(&str) -> bool,
     ) -> Result<(PluginBuild, AgentRun), PluginBuildError> {
         let build = self.get(id).await?;
@@ -527,7 +526,7 @@ impl<'a> PluginBuildService<'a> {
     /// appends a revision and moves to `plan_ready`.
     pub async fn apply_plan_result(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         result: &AgentRunResult,
     ) -> Result<PluginBuild, PluginBuildError> {
         let AgentRunResult::Done {
@@ -614,7 +613,7 @@ impl<'a> PluginBuildService<'a> {
     /// [`Self::finalize_after_build`] runs the checker / install / auto-test.
     pub async fn apply_build_result(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         result: &AgentRunResult,
     ) -> Result<PluginBuild, PluginBuildError> {
         let AgentRunResult::Done { summary, .. } = result else {
@@ -635,7 +634,7 @@ impl<'a> PluginBuildService<'a> {
     #[allow(clippy::too_many_arguments)] // install path needs plugins + secret + MCP + skills + readiness
     pub async fn finalize_after_build(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         plugins: &PluginService<'_>,
         plugins_dir: &str,
         marketplaces_dir: &Path,
@@ -680,7 +679,7 @@ impl<'a> PluginBuildService<'a> {
 
     async fn on_format_check_failed(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         errors: &[String],
         connector_ready: impl Fn(&str) -> bool,
     ) -> Result<PluginBuild, PluginBuildError> {
@@ -713,7 +712,7 @@ impl<'a> PluginBuildService<'a> {
     /// Queue a follow-up build run while keeping `check_errors` / `format_retries`.
     async fn queue_format_retry(
         &self,
-        id: Uuid,
+        id: Id,
         connector_ready: impl Fn(&str) -> bool,
     ) -> Result<AgentRun, PluginBuildError> {
         let agents = AgentService::new(self.pool)
@@ -751,7 +750,7 @@ impl<'a> PluginBuildService<'a> {
     #[allow(clippy::too_many_arguments)] // same install/test deps as finalize_after_build
     async fn install_disabled_and_test(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         plugins: &PluginService<'_>,
         plugins_dir: &str,
         marketplaces_dir: &Path,
@@ -860,7 +859,7 @@ impl<'a> PluginBuildService<'a> {
 
     async fn store_install_failure(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         reason: &str,
     ) -> Result<PluginBuild, PluginBuildError> {
         let check_errors = json!([reason]);
@@ -881,7 +880,7 @@ impl<'a> PluginBuildService<'a> {
     /// so Try again works; plan runs stay `planning`. Never calls cancel/discard.
     pub async fn on_run_terminal(
         &self,
-        build_id: Uuid,
+        build_id: Id,
         job_type: &str,
         succeeded: bool,
     ) -> Result<(), PluginBuildError> {
@@ -907,7 +906,7 @@ impl<'a> PluginBuildService<'a> {
     }
 
     /// Load `plugin_build_id` for a run (workers; not on `AgentRun`).
-    pub async fn build_id_for_run(&self, run_id: Uuid) -> Result<Uuid, PluginBuildError> {
+    pub async fn build_id_for_run(&self, run_id: Id) -> Result<Id, PluginBuildError> {
         sqlx::query_scalar("SELECT plugin_build_id FROM agent_runs WHERE id = $1")
             .bind(run_id)
             .fetch_optional(self.pool)
@@ -918,7 +917,7 @@ impl<'a> PluginBuildService<'a> {
 
     async fn set_terminal(
         &self,
-        id: Uuid,
+        id: Id,
         status: &str,
         delete_workspace: bool,
     ) -> Result<PluginBuild, PluginBuildError> {
@@ -1145,7 +1144,7 @@ mod tests {
     #[test]
     fn plugin_build_dir_nests_under_plugin_builds() {
         let root = PathBuf::from("/tmp/worktrees");
-        let id = Uuid::from_u128(1);
+        let id = Id::from_u128(1);
         assert_eq!(
             plugin_build_dir(&root, id),
             root.join("plugin-builds").join(id.to_string())
@@ -1154,7 +1153,7 @@ mod tests {
 
     fn agent(id: u128, role: &str, key: &str, enabled: bool, created_secs: i64) -> Agent {
         Agent {
-            id: Uuid::from_u128(id),
+            id: Id::from_u128(id),
             name: role.into(),
             role: role.into(),
             responsibilities: vec![],

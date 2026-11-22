@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     Pending,
@@ -12,8 +11,8 @@ pub enum JobStatus {
 
 #[derive(Debug, Clone)]
 pub struct AgentJob {
-    pub id: Uuid,
-    pub run_id: Uuid,
+    pub id: Id,
+    pub run_id: Id,
     pub job_type: String,
     pub status: JobStatus,
     pub attempts: i32,

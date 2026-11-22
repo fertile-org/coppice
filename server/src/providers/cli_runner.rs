@@ -675,6 +675,8 @@ async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamHandle;
 
@@ -807,7 +809,7 @@ mod tests {
             .join("../fixtures/claude-code")
             .join(fixture);
         let stream = crate::sessions::run_registry::RunStreamRegistry::new()
-            .register(uuid::Uuid::new_v4());
+            .register(Id::new());
         let usage = super::super::usage::UsageHook::new(
             stream.clone(),
             format,

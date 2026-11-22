@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -438,7 +439,7 @@ async fn run_agent_waits_for_the_startup_connector_check() {
     assert_eq!(create_res.status(), StatusCode::CREATED);
     let agent: serde_json::Value = common::json_body(create_res).await;
     let agent_id = agent["id"].as_str().unwrap();
-    let agent_uuid = uuid::Uuid::parse_str(agent_id).unwrap();
+    let agent_uuid = Id::parse_str(agent_id).unwrap();
     // Saving an agent turns its connector on; an older agent can still be
     // on an Automatic one.
     sqlx::query("UPDATE agents SET connector = 'claude-code' WHERE id = $1")
@@ -512,7 +513,7 @@ fn process_rss_kb() -> u64 {
     panic!("VmRSS missing from /proc/self/status");
 }
 
-async fn wait_stream_gone(state: &std::sync::Arc<coppice_server::AppState>, run_id: uuid::Uuid) {
+async fn wait_stream_gone(state: &std::sync::Arc<coppice_server::AppState>, run_id: Id) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if state.run_streams.get(run_id).is_none() {
@@ -552,7 +553,7 @@ async fn ten_mock_runs_do_not_grow_server_rss_or_leave_streams() {
         let run_id = body.as_ref().unwrap()["run"]["id"]
             .as_str()
             .unwrap()
-            .parse::<uuid::Uuid>()
+            .parse::<Id>()
             .expect("run id");
         run_ids.push(run_id);
 
@@ -639,7 +640,7 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
     .await;
 
     // The connector is recorded on the run and copied onto its usage.
-    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+    let run_uuid = Id::parse_str(&run_id).unwrap();
     let (run_connector, usage_connector, agent_name): (
         Option<String>,
         Option<String>,
@@ -719,7 +720,7 @@ async fn run_usage_is_stored_and_rolled_up_for_the_ticket() {
     assert_eq!(ticket["byAgent"][0]["key"], agent_id.as_str());
     assert_eq!(ticket["byJobType"][0]["key"], "work_on_ticket");
 
-    let missing = uuid::Uuid::new_v4();
+    let missing = Id::new();
     let (status, _) = get_json(
         &app,
         &format!("/api/agent-runs/{missing}/usage"),
@@ -829,13 +830,13 @@ async fn stopped_run_publishes_usage_updated_after_final_save() {
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
 
     let mut events = state.event_bus.subscribe();
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
     let run_id = body.unwrap()["run"]["id"].as_str().unwrap().to_string();
-    let run_uuid = uuid::Uuid::parse_str(&run_id).unwrap();
+    let run_uuid = Id::parse_str(&run_id).unwrap();
 
     // The mock replays usage before it holds, and the live writer saves it.
     // Stopping earlier could cancel the run before any usage exists.
@@ -1018,11 +1019,11 @@ async fn usage_counts_follow_stored_rows_not_connectors() {
         &csrf,
     )
     .await;
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
-    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    let ticket_uuid = Id::parse_str(&ticket_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
 
     let insert_run = |session_connector: Option<&'static str>, usage: Option<&'static str>| async move {
-        let run_id = uuid::Uuid::new_v4();
+        let run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs

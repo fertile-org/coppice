@@ -2,6 +2,7 @@
 //! view. Slices add up to each run's total whatever a connector reports (per
 //! request, per turn or only a total), so every grouping adds up to the same
 //! headline.
+use crate::domain::Id;
 
 use crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
 use crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE;
@@ -9,8 +10,6 @@ use crate::domain::usage::TokenCounts;
 use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::BTreeMap;
-use uuid::Uuid;
-
 /// What the table groups slices by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupBy {
@@ -83,7 +82,7 @@ pub struct SummaryQuery {
     /// An IANA time zone Postgres knows (checked by [`timezone_exists`]).
     pub tz: String,
     pub group_by: GroupBy,
-    pub board: Option<Uuid>,
+    pub board: Option<Id>,
     pub connector: Option<String>,
 }
 
@@ -201,7 +200,7 @@ pub async fn resolve_timezone(pool: &PgPool, tz: &str) -> Result<Option<String>,
 const SLICE_FILTER: &str = "
     ($1::date IS NULL OR s.at >= ($1::date::timestamp AT TIME ZONE $3))
     AND ($2::date IS NULL OR s.at < (($2::date + 1)::timestamp AT TIME ZONE $3))
-    AND ($4::uuid IS NULL OR s.board_id = $4)
+    AND ($4::varchar IS NULL OR s.board_id = $4)
     AND ($5::text IS NULL OR s.connector = $5)";
 
 fn tokens_from_row(row: &sqlx::postgres::PgRow) -> Result<TokenCounts, sqlx::Error> {
@@ -325,7 +324,7 @@ async fn coverage(pool: &PgPool, q: &SummaryQuery) -> Result<SummaryCoverage, sq
     let tracked_sql = format!(
         "SELECT count(*) FROM run_usage u
          WHERE {}
-           AND ($4::uuid IS NULL OR u.board_id = $4)
+           AND ($4::varchar IS NULL OR u.board_id = $4)
            AND ($5::text IS NULL OR u.connector = $5)",
         in_range("u.run_created_at")
     );
@@ -337,7 +336,7 @@ async fn coverage(pool: &PgPool, q: &SummaryQuery) -> Result<SummaryCoverage, sq
          WHERE ar.connector IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM run_usage u WHERE u.run_id = ar.id)
            AND {}
-           AND ($4::uuid IS NULL OR t.board_id = $4)
+           AND ($4::varchar IS NULL OR t.board_id = $4)
            AND ($5::text IS NULL OR ar.connector = $5)
          GROUP BY ar.connector
          ORDER BY runs DESC, ar.connector",
@@ -367,7 +366,7 @@ async fn per_done_ticket(
              WHERE t.parent_ticket_id IS NULL AND t.status = 'done' AND t.done_at IS NOT NULL
                AND ($1::date IS NULL OR t.done_at >= ($1::date::timestamp AT TIME ZONE $3))
                AND ($2::date IS NULL OR t.done_at < (($2::date + 1)::timestamp AT TIME ZONE $3))
-               AND ($4::uuid IS NULL OR t.board_id = $4)
+               AND ($4::varchar IS NULL OR t.board_id = $4)
          ),
          totals AS (
              SELECT s.root_ticket_id, sum(s.total_tokens)::float8 AS total
@@ -412,21 +411,21 @@ mod tests {
     /// test uses, so filters keep parallel tests apart.
     struct World {
         pool: PgPool,
-        board: Uuid,
-        agent: Uuid,
+        board: Id,
+        agent: Id,
         connector: String,
     }
 
     impl World {
         async fn new(pool: PgPool) -> Self {
-            let board = Uuid::new_v4();
+            let board = Id::new();
             sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, 'summary', $2)")
                 .bind(board)
                 .bind(format!("summary-{board}"))
                 .execute(&pool)
                 .await
                 .unwrap();
-            let agent = Uuid::new_v4();
+            let agent = Id::new();
             sqlx::query(
                 "INSERT INTO agents (id, name, role, responsibilities, system_prompt, connector)
                  VALUES ($1, 'summary agent', 'worker', '{}', 'prompt', 'mock')",
@@ -439,12 +438,12 @@ mod tests {
                 pool,
                 board,
                 agent,
-                connector: format!("test-{}", Uuid::new_v4()),
+                connector: format!("test-{}", Id::new()),
             }
         }
 
-        async fn ticket(&self, parent: Option<Uuid>) -> Uuid {
-            let id = Uuid::new_v4();
+        async fn ticket(&self, parent: Option<Id>) -> Id {
+            let id = Id::new();
             sqlx::query(
                 "INSERT INTO tickets (id, board_id, title, status, created_by, parent_ticket_id)
                  VALUES ($1, $2, 'summary', 'todo', 'test', $3)",
@@ -459,8 +458,8 @@ mod tests {
         }
 
         /// A chat session to own a run without a ticket (no board: Workspace).
-        async fn chat_session(&self) -> Uuid {
-            let user = Uuid::new_v4();
+        async fn chat_session(&self) -> Id {
+            let user = Id::new();
             sqlx::query(
                 "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
             )
@@ -469,7 +468,7 @@ mod tests {
             .execute(&self.pool)
             .await
             .unwrap();
-            let session = Uuid::new_v4();
+            let session = Id::new();
             sqlx::query(
                 "INSERT INTO chat_sessions (id, owner_user_id, agent_id) VALUES ($1, $2, $3)",
             )
@@ -484,12 +483,12 @@ mod tests {
 
         /// A run that started on `connector` (this world's when `None`). Without
         /// a ticket, a chat session owns it.
-        async fn run(&self, ticket: Option<Uuid>, job_type: &str, connector: Option<&str>) -> Uuid {
+        async fn run(&self, ticket: Option<Id>, job_type: &str, connector: Option<&str>) -> Id {
             let chat = match ticket {
                 Some(_) => None,
                 None => Some(self.chat_session().await),
             };
-            let id = Uuid::new_v4();
+            let id = Id::new();
             sqlx::query(
                 "INSERT INTO agent_runs
                      (id, ticket_id, chat_session_id, agent_id, job_type, status,
@@ -508,7 +507,7 @@ mod tests {
             id
         }
 
-        async fn save(&self, run: Uuid, events: Vec<UsageEvent>) -> UsageSnapshot {
+        async fn save(&self, run: Id, events: Vec<UsageEvent>) -> UsageSnapshot {
             let mut tracker = UsageTracker::new();
             for event in events {
                 tracker.apply(event);
@@ -532,7 +531,7 @@ mod tests {
             }
         }
 
-        async fn slice_total(&self, run: Uuid) -> i64 {
+        async fn slice_total(&self, run: Id) -> i64 {
             sqlx::query_scalar(
                 "SELECT COALESCE(sum(total_tokens), 0)::int8 FROM usage_slices WHERE usage_id = $1",
             )
@@ -579,7 +578,7 @@ mod tests {
     }
 
     /// Four runs, one per level of detail a connector may report at.
-    async fn four_runs(w: &World, ticket: Option<Uuid>) -> Vec<(Uuid, UsageSnapshot)> {
+    async fn four_runs(w: &World, ticket: Option<Id>) -> Vec<(Id, UsageSnapshot)> {
         let mut runs = Vec::new();
         // Per request, a total-only subagent, and a reported total split by model.
         let run = w.run(ticket, "work_on_ticket", None).await;

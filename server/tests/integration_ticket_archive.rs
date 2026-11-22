@@ -1,9 +1,8 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn create_ticket(
     app: &axum::Router,
     board_id: &str,
@@ -289,7 +288,7 @@ async fn archive_parent_does_not_archive_children() {
     let pool = state.db.as_ref().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let parent = create_ticket(&app, &board_id, &cookie, &csrf).await;
-    let parent_id = Uuid::parse_str(parent["id"].as_str().unwrap()).unwrap();
+    let parent_id = Id::parse_str(parent["id"].as_str().unwrap()).unwrap();
 
     let parent_ticket = coppice_server::services::ticket_service::TicketService::new(pool)
         .get(parent_id)
@@ -358,12 +357,12 @@ async fn archive_parent_does_not_archive_children() {
 
 async fn insert_run(
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
-    agent_id: Uuid,
+    ticket_id: Id,
+    agent_id: Id,
     status: &str,
     age_days: i32,
-) -> Uuid {
-    let run_id = Uuid::new_v4();
+) -> Id {
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -389,7 +388,7 @@ async fn insert_run(
     run_id
 }
 
-fn write_run_dir(artifacts: &std::path::Path, run_id: Uuid) -> std::path::PathBuf {
+fn write_run_dir(artifacts: &std::path::Path, run_id: Id) -> std::path::PathBuf {
     let dir = artifacts.join("runs").join(run_id.to_string());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("console.events.jsonl"), "{}\n").unwrap();
@@ -408,7 +407,7 @@ async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
     .await;
     let pool = state.db.clone().unwrap();
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let agent_id = Uuid::parse_str(
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &app,
             "backend_engineer",
@@ -422,7 +421,7 @@ async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
 
     // 100 finished runs on a ticket that gets archived.
     let archived = create_ticket(&app, &board_id, &cookie, &csrf).await;
-    let archived_id = Uuid::parse_str(archived["id"].as_str().unwrap()).unwrap();
+    let archived_id = Id::parse_str(archived["id"].as_str().unwrap()).unwrap();
     let mut archived_dirs = Vec::new();
     for _ in 0..100 {
         let run_id = insert_run(&pool, archived_id, agent_id, "succeeded", 0).await;
@@ -432,7 +431,7 @@ async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
     // A live ticket: one old finished run, one fresh finished run, and one
     // old run that is still running.
     let live = create_ticket(&app, &board_id, &cookie, &csrf).await;
-    let live_id = Uuid::parse_str(live["id"].as_str().unwrap()).unwrap();
+    let live_id = Id::parse_str(live["id"].as_str().unwrap()).unwrap();
     let old_run = write_run_dir(
         artifacts.path(),
         insert_run(&pool, live_id, agent_id, "succeeded", 45).await,
@@ -446,7 +445,7 @@ async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
         insert_run(&pool, live_id, agent_id, "running", 90).await,
     );
     // A folder with no run row, written just now.
-    let fresh_orphan = write_run_dir(artifacts.path(), Uuid::new_v4());
+    let fresh_orphan = write_run_dir(artifacts.path(), Id::new());
 
     let archive = app
         .clone()

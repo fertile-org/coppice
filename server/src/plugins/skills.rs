@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::status_to_str;
@@ -10,8 +11,6 @@ use anyhow::Context;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillInfo {
     pub id: String,
@@ -23,7 +22,7 @@ pub struct SkillInfo {
 /// Served skills of one enabled plugin. `SkillInfo.id` is `<plugin>:<skill>`.
 #[derive(Debug, Clone)]
 pub struct PluginSkillSet {
-    pub plugin_id: Uuid,
+    pub plugin_id: Id,
     pub plugin_name: String,
     /// Canonical plugin root; skill bodies must resolve inside it.
     pub root: PathBuf,
@@ -34,7 +33,7 @@ impl PluginSkillSet {
     /// Valid skills not named in `disabled`; for duplicate names the first by
     /// `rel_path` wins.
     pub fn from_manifest(
-        plugin_id: Uuid,
+        plugin_id: Id,
         root: &Path,
         manifest: &PluginManifest,
         disabled: &[String],
@@ -68,7 +67,7 @@ impl PluginSkillSet {
 #[derive(Debug, Default)]
 pub struct SkillCatalog {
     builtin: Vec<(SkillInfo, String)>,
-    plugins: RwLock<HashMap<Uuid, PluginSkillSet>>,
+    plugins: RwLock<HashMap<Id, PluginSkillSet>>,
     refresh: tokio::sync::Mutex<()>,
 }
 
@@ -172,7 +171,7 @@ impl SkillCatalog {
 
     /// Stops serving one plugin's skills; waits for any in-flight refresh so a
     /// stale snapshot cannot re-add it afterwards.
-    pub async fn remove_plugin(&self, plugin_id: Uuid) {
+    pub async fn remove_plugin(&self, plugin_id: Id) {
         let _refresh = self.lock_refresh().await;
         self.plugins
             .write()
@@ -186,7 +185,7 @@ impl SkillCatalog {
     }
 
     /// Built-ins first, then skills of the snapshot's plugins sorted by id.
-    pub fn skills_for(&self, plugin_ids: &[Uuid]) -> Vec<SkillInfo> {
+    pub fn skills_for(&self, plugin_ids: &[Id]) -> Vec<SkillInfo> {
         let mut skills: Vec<SkillInfo> = self.builtin.iter().map(|(i, _)| i.clone()).collect();
         let mut from_plugins: Vec<SkillInfo> = {
             let plugins = self.plugins.read().unwrap_or_else(|e| e.into_inner());
@@ -202,7 +201,7 @@ impl SkillCatalog {
     }
 
     /// Plugin skill bodies are read from disk on every call.
-    pub fn get(&self, plugin_ids: &[Uuid], id: &str) -> Option<(SkillInfo, String)> {
+    pub fn get(&self, plugin_ids: &[Id], id: &str) -> Option<(SkillInfo, String)> {
         let builtin_id = id
             .strip_prefix(BUILTIN_PLUGIN)
             .and_then(|rest| rest.strip_prefix(':'))
@@ -343,7 +342,7 @@ mod tests {
         );
         let root = std::fs::canonicalize(root).unwrap();
         let manifest = crate::plugins::manifest::parse_plugin(&root).unwrap();
-        PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &[])
+        PluginSkillSet::from_manifest(Id::new(), &root, &manifest, &[])
     }
 
     fn copy_tree(src: &Path, dst: &Path) {
@@ -421,7 +420,7 @@ mod tests {
         catalog.set_plugin_skills(vec![set]);
         assert!(catalog.get(&[], "sample-plugin:hello").is_none());
         assert!(catalog
-            .get(&[Uuid::new_v4()], "sample-plugin:hello")
+            .get(&[Id::new()], "sample-plugin:hello")
             .is_none());
     }
 
@@ -480,7 +479,7 @@ mod tests {
             ],
             ..sample_manifest()
         };
-        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &[]);
+        let set = PluginSkillSet::from_manifest(Id::new(), &root, &manifest, &[]);
         assert_eq!(set.skills.len(), 1);
         assert_eq!(set.skills[0].id, "p:dup");
         assert_eq!(set.skills[0].description, "first");
@@ -501,7 +500,7 @@ mod tests {
             skills: vec![skill("a"), skill("b")],
             ..sample_manifest()
         };
-        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &["b".into()]);
+        let set = PluginSkillSet::from_manifest(Id::new(), &root, &manifest, &["b".into()]);
         let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["p:a"]);
     }

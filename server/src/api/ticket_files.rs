@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::services::ticket_file_service::{TicketFileError, TicketFileService};
 use crate::AppState;
@@ -11,8 +12,6 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uuid::Uuid;
-
 /// Tells the SPA whether the file came from the ticket worktree or the repo checkout.
 const FILE_SOURCE_HEADER: HeaderName = HeaderName::from_static("x-coppice-file-source");
 /// Percent-encoded repo-relative path that was served (ASCII-safe for headers).
@@ -57,7 +56,7 @@ fn map_error(err: TicketFileError) -> StatusCode {
 async fn get_file_content(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Query(query): Query<FileQuery>,
 ) -> Result<Response, StatusCode> {
     let pool = pool_from_state(&state)?;

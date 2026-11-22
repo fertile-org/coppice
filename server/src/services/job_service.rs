@@ -1,8 +1,7 @@
+use crate::domain::Id;
 use crate::domain::job::{job_status_from_str, job_status_to_str, AgentJob, JobStatus};
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 pub struct JobService<'a> {
     pool: &'a PgPool,
 }
@@ -20,8 +19,8 @@ impl<'a> JobService<'a> {
         Self { pool }
     }
 
-    pub async fn enqueue(&self, run_id: Uuid, job_type: &str) -> Result<AgentJob, JobError> {
-        let id = Uuid::new_v4();
+    pub async fn enqueue(&self, run_id: Id, job_type: &str) -> Result<AgentJob, JobError> {
+        let id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO agent_jobs (id, run_id, job_type, status)
@@ -79,7 +78,7 @@ impl<'a> JobService<'a> {
         Ok(row.map(|r| row_to_job(&r)))
     }
 
-    pub async fn mark_done(&self, job_id: Uuid) -> Result<(), JobError> {
+    pub async fn mark_done(&self, job_id: Id) -> Result<(), JobError> {
         let result = sqlx::query(
             r#"
             UPDATE agent_jobs
@@ -98,7 +97,7 @@ impl<'a> JobService<'a> {
         Ok(())
     }
 
-    pub async fn mark_cancelled(&self, job_id: Uuid) -> Result<(), JobError> {
+    pub async fn mark_cancelled(&self, job_id: Id) -> Result<(), JobError> {
         let result = sqlx::query(
             r#"
             UPDATE agent_jobs
@@ -117,7 +116,7 @@ impl<'a> JobService<'a> {
         Ok(())
     }
 
-    pub async fn mark_failed(&self, job_id: Uuid, _message: &str) -> Result<(), JobError> {
+    pub async fn mark_failed(&self, job_id: Id, _message: &str) -> Result<(), JobError> {
         let result = sqlx::query(
             r#"
             UPDATE agent_jobs
@@ -145,7 +144,7 @@ impl<'a> JobService<'a> {
 
     /// Fail pending and in-flight jobs for a run whose terminal state was set elsewhere
     /// (e.g. server restart sweep, watchdog interrupt).
-    pub async fn fail_active_jobs_for_run(&self, run_id: Uuid) -> Result<(), JobError> {
+    pub async fn fail_active_jobs_for_run(&self, run_id: Id) -> Result<(), JobError> {
         sqlx::query(
             r#"
             UPDATE agent_jobs
@@ -176,7 +175,7 @@ impl<'a> JobService<'a> {
         Ok(rows.iter().map(row_to_job).collect())
     }
 
-    pub async fn cancel_for_run(&self, run_id: Uuid) -> Result<(), JobError> {
+    pub async fn cancel_for_run(&self, run_id: Id) -> Result<(), JobError> {
         sqlx::query(
             r#"
             UPDATE agent_jobs
@@ -207,8 +206,8 @@ mod tests {
         Some(pool)
     }
 
-    async fn insert_agent(pool: &PgPool, connector: &str) -> Uuid {
-        let id = Uuid::new_v4();
+    async fn insert_agent(pool: &PgPool, connector: &str) -> Id {
+        let id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -230,10 +229,10 @@ mod tests {
 
     async fn insert_pending_job(
         pool: &PgPool,
-        agent_id: Uuid,
+        agent_id: Id,
         available_at: OffsetDateTime,
-    ) -> (Uuid, Uuid) {
-        let board_id = Uuid::new_v4();
+    ) -> (Id, Id) {
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("claim board")
@@ -242,7 +241,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let ticket_id = Uuid::new_v4();
+        let ticket_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -261,7 +260,7 @@ mod tests {
         .await
         .expect("insert ticket");
 
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -280,7 +279,7 @@ mod tests {
         .await
         .expect("insert run");
 
-        let job_id = Uuid::new_v4();
+        let job_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_jobs (

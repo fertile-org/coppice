@@ -1,4 +1,5 @@
 #![cfg(feature = "embedded-test-db")]
+use uuid::Uuid;
 
 mod common;
 
@@ -121,7 +122,7 @@ async fn migration_appends_skill_labels_and_skips_exact_duplicates() {
     let db = MigrationDb::create().await.expect("fresh database");
     db.apply_before(37).await.expect("migrations before 037");
 
-    let agent_id = uuid::Uuid::new_v4();
+    let agent_id = Uuid::new_v4();
     sqlx::query(
         r#"
         INSERT INTO agents (
@@ -206,10 +207,10 @@ async fn migration_keeps_per_agent_plugin_enables_as_an_explicit_list() {
     let db = MigrationDb::create().await.expect("fresh database");
     db.apply_before(38).await.expect("migrations before 038");
 
-    let dir_id = uuid::Uuid::new_v4();
-    let plugin_id = uuid::Uuid::new_v4();
-    let kept = uuid::Uuid::new_v4();
-    let other = uuid::Uuid::new_v4();
+    let dir_id = Uuid::new_v4();
+    let plugin_id = Uuid::new_v4();
+    let kept = Uuid::new_v4();
+    let other = Uuid::new_v4();
     sqlx::query("INSERT INTO plugin_dirs (id, path, position) VALUES ($1, $2, 0)")
         .bind(dir_id)
         .bind(format!("/tmp/{dir_id}"))
@@ -256,7 +257,7 @@ async fn migration_keeps_per_agent_plugin_enables_as_an_explicit_list() {
         .expect("agent access");
     assert_eq!(access, "explicit");
 
-    let assigned: Vec<uuid::Uuid> = sqlx::query_scalar(
+    let assigned: Vec<Uuid> = sqlx::query_scalar(
         "SELECT agent_id FROM agent_plugins WHERE plugin_id = $1 ORDER BY agent_id",
     )
     .bind(plugin_id)
@@ -300,9 +301,9 @@ async fn migration_deletes_stale_invalid_coppice_plugin_row() {
     let db = MigrationDb::create().await.expect("fresh database");
     db.apply_before(66).await.expect("migrations before 066");
 
-    let dir_id = uuid::Uuid::new_v4();
-    let invalid = uuid::Uuid::new_v4();
-    let keep = uuid::Uuid::new_v4();
+    let dir_id = Uuid::new_v4();
+    let invalid = Uuid::new_v4();
+    let keep = Uuid::new_v4();
     sqlx::query("INSERT INTO plugin_dirs (id, path, position) VALUES ($1, $2, 0)")
         .bind(dir_id)
         .bind(format!("/tmp/{dir_id}"))
@@ -326,7 +327,7 @@ async fn migration_deletes_stale_invalid_coppice_plugin_row() {
 
     db.apply_version(66).await.expect("migration 066");
 
-    let remaining: Vec<(uuid::Uuid, String)> =
+    let remaining: Vec<(Uuid, String)> =
         sqlx::query_as("SELECT id, name FROM plugins ORDER BY name")
             .fetch_all(&db.pool)
             .await

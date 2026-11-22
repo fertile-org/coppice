@@ -101,7 +101,7 @@ async fn other_connector_starts_when_mock_is_at_its_limit() {
             .await;
     let other_id =
         common::create_agent_with_preset_key(&app, "pm", "Cursor B", &cookie, &csrf).await;
-    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::varchar")
         .bind(&other_id)
         .execute(pool)
         .await
@@ -177,7 +177,7 @@ async fn worker_count_caps_total_across_connectors() {
             .await;
     let other_id =
         common::create_agent_with_preset_key(&app, "pm", "Cursor B", &cookie, &csrf).await;
-    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::varchar")
         .bind(&other_id)
         .execute(pool)
         .await

@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct Board {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     pub slug: String,
     pub created_at: OffsetDateTime,

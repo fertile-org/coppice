@@ -196,7 +196,7 @@ fn keepalive_is_stale(last_pong: Instant, now: Instant) -> bool {
 mod tests {
     use super::*;
     use crate::events::bus::{AppEvent, EventBus};
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     #[test]
     fn resync_message_is_valid_json_with_resync_type() {
@@ -208,9 +208,9 @@ mod tests {
     #[test]
     fn classify_ok_event_serializes_to_send() {
         let event = AppEvent::AgentRunStarted {
-            run_id: Uuid::nil(),
-            ticket_id: Uuid::nil(),
-            agent_id: Uuid::nil(),
+            run_id: Id::nil(),
+            ticket_id: Id::nil(),
+            agent_id: Id::nil(),
             status: "running".into(),
         };
         match classify_event_recv(Ok(event)) {
@@ -248,7 +248,7 @@ mod tests {
 
         for _ in 0..crate::events::bus::EVENT_BUS_CAPACITY + 50 {
             bus.publish(AppEvent::TicketUpdated {
-                ticket_id: Uuid::nil(),
+                ticket_id: Id::nil(),
                 status: "in_progress".into(),
                 substatus: None,
                 updated_at: "2026-01-01T00:00:00Z".into(),

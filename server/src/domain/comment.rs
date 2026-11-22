@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorType {
@@ -28,14 +27,14 @@ pub enum CommentIntent {
 
 #[derive(Debug, Clone)]
 pub struct Comment {
-    pub id: Uuid,
-    pub ticket_id: Uuid,
+    pub id: Id,
+    pub ticket_id: Id,
     pub author_type: AuthorType,
-    pub author_id: Option<Uuid>,
+    pub author_id: Option<Id>,
     pub body: String,
     pub intent: CommentIntent,
     pub mentions: serde_json::Value,
-    pub attachment_ids: Vec<Uuid>,
+    pub attachment_ids: Vec<Id>,
     pub created_at: OffsetDateTime,
     /// Set on plan comments: the ticket content version this plan was written for.
     pub plan_content_version: Option<i32>,

@@ -499,6 +499,8 @@ fn tool_output(payload: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
     use std::path::PathBuf;
@@ -514,7 +516,7 @@ mod tests {
     #[test]
     fn cursor_console_titles_gateway_tool() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         console.handle_stream_json(
             &handle,
@@ -549,7 +551,7 @@ mod tests {
     fn publishes_done_fixture() {
         let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl")).unwrap();
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         for line in raw.lines() {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
@@ -570,7 +572,7 @@ mod tests {
     fn publishes_tool_lifecycle_from_agentic_fixture() {
         let raw = std::fs::read_to_string(fixtures_root().join("agentic.jsonl")).unwrap();
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         for line in raw.lines() {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
@@ -596,7 +598,7 @@ mod tests {
     #[test]
     fn ignores_thinking_and_user_events() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         console.handle_stream_json(
             &handle,
@@ -616,7 +618,7 @@ mod tests {
     #[test]
     fn duplicate_result_contract_is_skipped() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         let contract =
             r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
@@ -671,7 +673,7 @@ mod tests {
     #[test]
     fn nonzero_exit_with_stdout_publishes_output() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -689,7 +691,7 @@ mod tests {
     #[test]
     fn nonzero_exit_with_stderr_and_stdout_publishes_stderr_first() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -713,7 +715,7 @@ mod tests {
     #[test]
     fn nonzero_exit_with_empty_streams_publishes_exit_code_fallback() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -731,7 +733,7 @@ mod tests {
     #[test]
     fn result_error_message_and_string_error_are_published() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         console.handle_stream_json(
@@ -778,7 +780,7 @@ mod tests {
     #[test]
     fn result_failure_string_and_object_message_are_published() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -807,7 +809,7 @@ mod tests {
     #[test]
     fn successful_tool_still_publishes_stdout_as_completed() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -825,7 +827,7 @@ mod tests {
     #[test]
     fn generic_tool_call_failed_merges_stderr_and_exit_code() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -861,7 +863,7 @@ mod tests {
     #[test]
     fn generic_failure_phrase_with_exit_code_only_publishes_exit_code() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -890,7 +892,7 @@ mod tests {
     #[test]
     fn generic_error_without_streams_falls_back_to_args_summary() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         console.handle_stream_json(
@@ -921,7 +923,7 @@ mod tests {
     #[test]
     fn nested_error_object_and_object_stream_text_are_extracted() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -950,7 +952,7 @@ mod tests {
     #[test]
     fn specific_error_message_is_not_diluted_by_args_summary() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         console.handle_stream_json(
@@ -977,7 +979,7 @@ mod tests {
     #[test]
     fn failure_nonzero_exit_publishes_stderr() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -1002,7 +1004,7 @@ mod tests {
     #[test]
     fn failure_exit_zero_is_completed_and_shows_stdout() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -1027,7 +1029,7 @@ mod tests {
     #[test]
     fn failure_aborted_is_error_even_with_exit_zero() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -1052,7 +1054,7 @@ mod tests {
     #[test]
     fn failure_without_exit_code_is_error_and_shows_streams() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -1075,7 +1077,7 @@ mod tests {
     #[test]
     fn timeout_rejected_spawn_and_permission_denied_are_error_with_reason() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
 
         publish_completed_shell(
@@ -1149,7 +1151,7 @@ mod tests {
     fn replays_captured_cursor_shell_failure_fixture() {
         let raw = std::fs::read_to_string(fixtures_root().join("shell_failure.jsonl")).unwrap();
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut console = console();
         for line in raw.lines() {
             if line.trim().is_empty() {

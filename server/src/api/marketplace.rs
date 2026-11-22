@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::plugins::{install_response, single_response, stop_unusable_servers, ApiError};
 use crate::middleware::admin::AdminUser;
@@ -21,8 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -48,7 +47,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SourceResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     kind: String,
     git_url: Option<String>,
@@ -62,7 +61,7 @@ struct SourceResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EntryResponse {
-    source_id: Uuid,
+    source_id: Id,
     source_name: String,
     name: String,
     description: String,
@@ -73,7 +72,7 @@ struct EntryResponse {
     reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     category: Option<String>,
-    installed_plugin_id: Option<Uuid>,
+    installed_plugin_id: Option<Id>,
     update_available: bool,
 }
 
@@ -89,7 +88,7 @@ struct AddSourceBody {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstallBody {
-    source_id: Uuid,
+    source_id: Id,
     entry: String,
 }
 
@@ -97,7 +96,7 @@ struct InstallBody {
 #[serde(rename_all = "camelCase")]
 struct EntriesQuery {
     q: Option<String>,
-    source: Option<Uuid>,
+    source: Option<Id>,
     category: Option<String>,
 }
 
@@ -132,7 +131,7 @@ async fn add_source(
 async fn remove_source(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(source_id): Path<Uuid>,
+    Path(source_id): Path<Id>,
 ) -> Result<StatusCode, ApiError> {
     let pool = pool_from_state(&state)?;
     MarketplaceService::with_catalog(pool, &state.marketplace)
@@ -144,7 +143,7 @@ async fn remove_source(
 async fn refresh_source(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(source_id): Path<Uuid>,
+    Path(source_id): Path<Id>,
 ) -> Result<Json<SourceResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let timeout = Duration::from_secs(state.config.plugins.git_timeout_secs);
@@ -205,7 +204,7 @@ async fn install_entry(
 async fn update_plugin(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(plugin_id): Path<Uuid>,
+    Path(plugin_id): Path<Id>,
 ) -> Result<Response, ApiError> {
     let pool = pool_from_state(&state)?;
     let outcome = MarketplaceService::with_catalog(pool, &state.marketplace)
@@ -224,7 +223,7 @@ async fn outcome_response(
     pool: &PgPool,
     outcome: EntryOutcome,
     status: StatusCode,
-    updated: Option<Uuid>,
+    updated: Option<Id>,
 ) -> Result<Response, ApiError> {
     match outcome {
         EntryOutcome::Plugin(plugin) => {

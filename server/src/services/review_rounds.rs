@@ -3,13 +3,12 @@
 //! A reviewer may send work back a limited number of times. From round 2 the
 //! prompt is only the diff since the previous round plus earlier findings.
 //! At the cap the reviewer posts one comment and the ticket waits for a person.
+use crate::domain::Id;
 
 use std::path::Path;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::copy::review::{
     review_didnt_pass, round_cap_comment, REVIEW_ROUND_EARLIER_FINDINGS, REVIEW_ROUND_INTRO,
     REVIEW_ROUND_NEW_DIFF, REVIEW_ROUND_NO_DIFF, REVIEW_ROUND_NO_FINDINGS,
@@ -228,7 +227,7 @@ pub fn silence_collaboration(contract: &mut AgentRunResult) {
 }
 
 pub struct FinishedReview<'a> {
-    pub ticket_id: Uuid,
+    pub ticket_id: Id,
     pub status: TicketStatus,
     pub agent_key: &'a str,
     pub agent_role: &'a str,
@@ -245,7 +244,7 @@ impl<'a> ReviewRoundService<'a> {
         Self { pool }
     }
 
-    pub async fn load(&self, ticket_id: Uuid) -> Result<ReviewRoundState, ReviewRoundError> {
+    pub async fn load(&self, ticket_id: Id) -> Result<ReviewRoundState, ReviewRoundError> {
         let row = sqlx::query(
             r#"
             SELECT review_round, review_anchor_sha, review_findings, review_escalated
@@ -268,7 +267,7 @@ impl<'a> ReviewRoundService<'a> {
     /// Extra context for a reviewer on round 2 or later.
     pub async fn context_section(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: TicketStatus,
         job_type: &str,
         agent_key: &str,
@@ -351,9 +350,9 @@ impl<'a> ReviewRoundService<'a> {
     /// Posts the reconsider comment once, then moves the ticket.
     pub async fn stop_capped_review(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: TicketStatus,
-        agent_id: Uuid,
+        agent_id: Id,
         agent_key: &str,
         agent_role: &str,
         job_type: &str,
@@ -398,7 +397,7 @@ impl<'a> ReviewRoundService<'a> {
 
     pub async fn on_status_change(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         from: TicketStatus,
         to: TicketStatus,
     ) -> Result<(), ReviewRoundError> {
@@ -411,7 +410,7 @@ impl<'a> ReviewRoundService<'a> {
         Ok(())
     }
 
-    async fn save(&self, ticket_id: Uuid, state: ReviewRoundState) -> Result<(), ReviewRoundError> {
+    async fn save(&self, ticket_id: Id, state: ReviewRoundState) -> Result<(), ReviewRoundError> {
         sqlx::query(
             r#"
             UPDATE tickets
@@ -432,7 +431,7 @@ impl<'a> ReviewRoundService<'a> {
         Ok(())
     }
 
-    async fn clear(&self, ticket_id: Uuid) -> Result<(), ReviewRoundError> {
+    async fn clear(&self, ticket_id: Id) -> Result<(), ReviewRoundError> {
         self.save(
             ticket_id,
             ReviewRoundState {
@@ -447,8 +446,8 @@ impl<'a> ReviewRoundService<'a> {
 
     async fn post_reconsider(
         &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        ticket_id: Id,
+        agent_id: Id,
         findings: &[String],
     ) -> Result<(), ReviewRoundError> {
         let body = round_cap_comment(DEFAULT_REVIEW_ROUND_CAP, findings);
@@ -504,7 +503,7 @@ mod tests {
             new_status: Some(TicketStatus::InProgress),
             enqueue_jobs: vec![JobRequest {
                 job_type: WORK_ON_TICKET.into(),
-                agent_id: Uuid::nil(),
+                agent_id: Id::nil(),
                 resume_agent_id: None,
             }],
             system_comments: vec!["extra".into()],

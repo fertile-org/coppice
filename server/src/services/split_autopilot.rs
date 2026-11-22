@@ -5,13 +5,12 @@
 //! child, and the last merge starts parent verification. Pause, a blocked
 //! child, or an archived child change that: pause and blocked stop the
 //! automatic step, archive is skipped, and Resume or Start next continues.
+use crate::domain::Id;
 
 use std::collections::HashMap;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::domain::ticket::{status_from_str, status_to_str, substatus_from_str};
 use crate::domain::workflow::JOB_TYPE_VERIFY_PARENT;
@@ -33,14 +32,14 @@ pub const ACTOR_NONE: &str = "none";
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitProgress {
-    pub parent_ticket_id: Uuid,
+    pub parent_ticket_id: Id,
     pub parent_title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<i32>,
     pub count: i32,
     pub merged_count: i32,
     pub auto_start: bool,
-    pub active_child_id: Option<Uuid>,
+    pub active_child_id: Option<Id>,
     pub next_actor: String,
     pub children: Vec<SplitChildProgress>,
 }
@@ -48,7 +47,7 @@ pub struct SplitProgress {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitChildProgress {
-    pub id: Uuid,
+    pub id: Id,
     pub title: String,
     pub status: String,
     pub position: i32,
@@ -65,7 +64,7 @@ enum AdvanceMode {
 }
 
 struct ChildSnap {
-    id: Uuid,
+    id: Id,
     title: String,
     status: TicketStatus,
     substatus: Option<Substatus>,
@@ -75,7 +74,7 @@ struct ChildSnap {
 }
 
 struct Family {
-    parent_id: Uuid,
+    parent_id: Id,
     parent_title: String,
     parent_status: TicketStatus,
     auto_start: bool,
@@ -94,14 +93,14 @@ impl<'a> SplitAutopilot<'a> {
 
     /// The plan was approved and the children exist, still in Backlog.
     /// The parent becomes the running tracker and child 1 leaves Backlog.
-    pub async fn on_split_approved(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    pub async fn on_split_approved(&self, parent_id: Id) -> Result<(), PlanError> {
         self.move_parent_to_running(parent_id).await?;
         self.advance(parent_id, AdvanceMode::Auto).await
     }
 
     /// A merge was just recorded on `ticket_id`. No-op unless it is a split child.
-    pub async fn on_child_merged(&self, ticket_id: Uuid) -> Result<(), PlanError> {
-        let parent_id: Option<Uuid> = sqlx::query_scalar(
+    pub async fn on_child_merged(&self, ticket_id: Id) -> Result<(), PlanError> {
+        let parent_id: Option<Id> = sqlx::query_scalar(
             r#"
             SELECT split.parent_ticket_id
             FROM tickets child
@@ -118,22 +117,22 @@ impl<'a> SplitAutopilot<'a> {
         self.advance(parent_id, AdvanceMode::Auto).await
     }
 
-    pub async fn pause(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    pub async fn pause(&self, parent_id: Id) -> Result<(), PlanError> {
         self.set_auto_start(parent_id, false).await
     }
 
-    pub async fn resume(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    pub async fn resume(&self, parent_id: Id) -> Result<(), PlanError> {
         self.set_auto_start(parent_id, true).await?;
         self.advance(parent_id, AdvanceMode::Auto).await
     }
 
-    pub async fn start_next(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    pub async fn start_next(&self, parent_id: Id) -> Result<(), PlanError> {
         self.advance(parent_id, AdvanceMode::Manual).await
     }
 
     /// The active accepted child merged on a forge the sweep cannot see.
     /// Records that merge, which starts the next child when auto-start is on.
-    pub async fn merged_elsewhere(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    pub async fn merged_elsewhere(&self, parent_id: Id) -> Result<(), PlanError> {
         let family = self
             .load_family(parent_id)
             .await?
@@ -170,8 +169,8 @@ impl<'a> SplitAutopilot<'a> {
     /// that ticket. Parent and children share one family; `position` differs.
     pub async fn progress_for(
         &self,
-        ticket_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, SplitProgress>, PlanError> {
+        ticket_ids: &[Id],
+    ) -> Result<HashMap<Id, SplitProgress>, PlanError> {
         if ticket_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -189,7 +188,7 @@ impl<'a> SplitAutopilot<'a> {
         Ok(out)
     }
 
-    async fn advance(&self, parent_id: Uuid, mode: AdvanceMode) -> Result<(), PlanError> {
+    async fn advance(&self, parent_id: Id, mode: AdvanceMode) -> Result<(), PlanError> {
         let Some(family) = self.load_family(parent_id).await? else {
             return Err(PlanError::Validation(NOT_A_SPLIT.into()));
         };
@@ -212,7 +211,7 @@ impl<'a> SplitAutopilot<'a> {
         Ok(())
     }
 
-    async fn move_parent_to_running(&self, parent_id: Uuid) -> Result<(), PlanError> {
+    async fn move_parent_to_running(&self, parent_id: Id) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(parent_id).await?;
         if ticket.ticket.status != TicketStatus::Ready {
             return Ok(());
@@ -225,7 +224,7 @@ impl<'a> SplitAutopilot<'a> {
         Ok(())
     }
 
-    async fn start_child(&self, child_id: Uuid) -> Result<(), PlanError> {
+    async fn start_child(&self, child_id: Id) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(child_id).await?;
         if ticket.ticket.archived_at.is_some() || ticket.ticket.status != TicketStatus::Backlog {
             return Ok(());
@@ -241,7 +240,7 @@ impl<'a> SplitAutopilot<'a> {
 
     async fn start_parent_verification(
         &self,
-        parent_id: Uuid,
+        parent_id: Id,
         mode: AdvanceMode,
     ) -> Result<(), PlanError> {
         match PlanningService::new(self.pool)
@@ -257,7 +256,7 @@ impl<'a> SplitAutopilot<'a> {
         }
     }
 
-    async fn set_auto_start(&self, parent_id: Uuid, auto_start: bool) -> Result<(), PlanError> {
+    async fn set_auto_start(&self, parent_id: Id, auto_start: bool) -> Result<(), PlanError> {
         let updated = sqlx::query(
             "UPDATE ticket_plan_splits SET auto_start = $2 WHERE parent_ticket_id = $1",
         )
@@ -271,14 +270,14 @@ impl<'a> SplitAutopilot<'a> {
         Ok(())
     }
 
-    async fn load_family(&self, parent_id: Uuid) -> Result<Option<Family>, PlanError> {
+    async fn load_family(&self, parent_id: Id) -> Result<Option<Family>, PlanError> {
         let mut families = self.load_families(&[parent_id]).await?;
         Ok(families.pop())
     }
 
     /// Every family that contains a requested id. A match on one child still
     /// returns its siblings; dropping them would renumber that child as 1 of 1.
-    async fn load_families(&self, ticket_ids: &[Uuid]) -> Result<Vec<Family>, PlanError> {
+    async fn load_families(&self, ticket_ids: &[Id]) -> Result<Vec<Family>, PlanError> {
         let rows = sqlx::query(
             r#"
             SELECT
@@ -324,7 +323,7 @@ impl<'a> SplitAutopilot<'a> {
 
         let mut families: Vec<Family> = Vec::new();
         for row in rows {
-            let parent_id: Uuid = row.get("parent_id");
+            let parent_id: Id = row.get("parent_id");
             if families.last().map(|family| family.parent_id) != Some(parent_id) {
                 let status: String = row.get("parent_status");
                 families.push(Family {
@@ -480,7 +479,7 @@ mod tests {
 
     fn child(status: TicketStatus, archived: bool, merged: bool) -> ChildSnap {
         ChildSnap {
-            id: Uuid::nil(),
+            id: Id::nil(),
             title: String::new(),
             status,
             substatus: None,
@@ -547,7 +546,7 @@ mod tests {
     #[test]
     fn paused_queue_is_the_humans_turn() {
         let family = Family {
-            parent_id: Uuid::nil(),
+            parent_id: Id::nil(),
             parent_title: String::new(),
             parent_status: TicketStatus::InProgress,
             auto_start: false,

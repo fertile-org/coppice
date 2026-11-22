@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::connectors_runtime::ConnectorConfigError;
 use crate::domain::agent::{Agent, AgentPreset, ThinkingLevel};
@@ -14,8 +15,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agent-presets", get(list_presets))
@@ -29,7 +28,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PresetResponse {
-    id: Uuid,
+    id: Id,
     key: String,
     role: String,
     responsibilities: Vec<String>,
@@ -39,7 +38,7 @@ struct PresetResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     role: String,
     responsibilities: Vec<String>,
@@ -81,7 +80,7 @@ struct AgentListResponse {
 #[serde(rename_all = "camelCase")]
 struct CreateAgentBody {
     name: String,
-    preset_id: Option<Uuid>,
+    preset_id: Option<Id>,
     role: Option<String>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
@@ -296,7 +295,7 @@ async fn create_agent(
 async fn get_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(agent_id): Path<Uuid>,
+    Path(agent_id): Path<Id>,
 ) -> Result<Json<AgentResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = AgentService::new(pool);
@@ -307,7 +306,7 @@ async fn get_agent(
 async fn update_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(agent_id): Path<Uuid>,
+    Path(agent_id): Path<Id>,
     Json(body): Json<UpdateAgentBody>,
 ) -> Result<Json<AgentResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -342,7 +341,7 @@ async fn update_agent(
 async fn delete_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(agent_id): Path<Uuid>,
+    Path(agent_id): Path<Id>,
 ) -> Result<StatusCode, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = AgentService::new(pool);

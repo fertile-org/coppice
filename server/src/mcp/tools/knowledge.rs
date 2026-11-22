@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::chat_action::KNOWLEDGE_TYPES;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::knowledge::{
@@ -17,8 +18,6 @@ use crate::services::knowledge_service::{
     find_close_item, KnowledgeError, KnowledgeService, RunProposal,
 };
 use serde_json::{json, Value};
-use uuid::Uuid;
-
 const DEFAULT_LIMIT: usize = 5;
 const MAX_LIMIT: usize = 20;
 const MAX_QUERY_CHARS: usize = 2_000;
@@ -87,7 +86,7 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
     // Rows carry a snippet and the token cost of reading the whole entry with
     // `knowledge_get`; usage is logged there, not here.
     let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
-    let revision_ids: Vec<Uuid> = found.iter().map(|k| k.revision_id).collect();
+    let revision_ids: Vec<Id> = found.iter().map(|k| k.revision_id).collect();
     let freshness = freshness_for(ctx.pool, &revision_ids).await;
     let items: Vec<Value> = found
         .iter()
@@ -136,7 +135,7 @@ pub async fn call_knowledge_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
     log_usage(ctx, &section.entries).await?;
     let workspace = ctx.scope.workspace_chat();
-    let revision_ids: Vec<Uuid> = found.iter().map(|k| k.revision_id).collect();
+    let revision_ids: Vec<Id> = found.iter().map(|k| k.revision_id).collect();
     let freshness = freshness_for(ctx.pool, &revision_ids).await;
     let items: Vec<Value> = found
         .iter()
@@ -174,7 +173,7 @@ pub async fn call_knowledge_flag(ctx: &ToolCtx<'_>, args: Value) -> Result<Value
     let item_id = args
         .get("itemId")
         .and_then(Value::as_str)
-        .and_then(|s| Uuid::parse_str(s).ok())
+        .and_then(|s| Id::parse_str(s).ok())
         .ok_or_else(|| ToolError::InvalidArgs("itemId must be a knowledge item id".into()))?;
     let verdict = args
         .get("verdict")
@@ -228,7 +227,7 @@ pub async fn call_knowledge_flag(ctx: &ToolCtx<'_>, args: Value) -> Result<Value
                       created_at = now(), dismissed_at = NULL
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(item_id)
     .bind(revision_id)
     .bind(ctx.scope.run_id)
@@ -306,7 +305,7 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
             Err(reason) => dropped.push(json!({ "path": raw, "reason": reason })),
         }
     }
-    let repo_id: Option<Uuid> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
+    let repo_id: Option<Id> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_optional(ctx.pool)
         .await?
@@ -376,14 +375,14 @@ pub async fn call_knowledge_propose(ctx: &ToolCtx<'_>, args: Value) -> Result<Va
 
 /// Moves each citation of the revision to its repo's current head. A path that
 /// no longer exists there keeps its old anchor and so keeps reading as missing.
-async fn reanchor_citations(pool: &sqlx::PgPool, revision_id: Uuid) -> Result<(), ToolError> {
-    let rows: Vec<(Option<Uuid>, String)> = sqlx::query_as(
+async fn reanchor_citations(pool: &sqlx::PgPool, revision_id: Id) -> Result<(), ToolError> {
+    let rows: Vec<(Option<Id>, String)> = sqlx::query_as(
         "SELECT repo_id, path FROM knowledge_citations WHERE revision_id = $1 ORDER BY path",
     )
     .bind(revision_id)
     .fetch_all(pool)
     .await?;
-    let mut by_repo: Vec<(Uuid, Vec<String>)> = Vec::new();
+    let mut by_repo: Vec<(Id, Vec<String>)> = Vec::new();
     for (repo_id, path) in rows {
         let Some(repo_id) = repo_id else { continue };
         match by_repo.iter_mut().find(|(id, _)| *id == repo_id) {
@@ -411,7 +410,7 @@ async fn reanchor_citations(pool: &sqlx::PgPool, revision_id: Uuid) -> Result<()
     Ok(())
 }
 
-fn parse_ids(args: &Value) -> Result<Vec<Uuid>, ToolError> {
+fn parse_ids(args: &Value) -> Result<Vec<Id>, ToolError> {
     let raw = args
         .get("ids")
         .and_then(Value::as_array)
@@ -422,11 +421,11 @@ fn parse_ids(args: &Value) -> Result<Vec<Uuid>, ToolError> {
             "ids takes at most {MAX_GET_IDS} entries"
         )));
     }
-    let mut ids: Vec<Uuid> = Vec::with_capacity(raw.len());
+    let mut ids: Vec<Id> = Vec::with_capacity(raw.len());
     for value in raw {
         let id = value
             .as_str()
-            .and_then(|s| Uuid::parse_str(s).ok())
+            .and_then(|s| Id::parse_str(s).ok())
             .ok_or_else(|| ToolError::InvalidArgs("ids must be knowledge item ids".into()))?;
         if !ids.contains(&id) {
             ids.push(id);
@@ -441,7 +440,7 @@ pub(crate) async fn tool_scope(ctx: &ToolCtx<'_>) -> Result<Option<RetrievalScop
         return Ok(Some(RetrievalScope::AllBoards));
     }
     if ctx.scope.profile == ContextProfile::KnowledgeCompaction {
-        let boards: Vec<Uuid> = sqlx::query_scalar(
+        let boards: Vec<Id> = sqlx::query_scalar(
             "SELECT DISTINCT board_id FROM tickets WHERE id = ANY($1) AND board_id IS NOT NULL",
         )
         .bind(&ctx.scope.compaction_ticket_ids)
@@ -465,7 +464,7 @@ async fn log_usage(ctx: &ToolCtx<'_>, entries: &[RenderedKnowledge]) -> Result<(
     if entries.is_empty() {
         return Ok(());
     }
-    let logged: Vec<Uuid> =
+    let logged: Vec<Id> =
         sqlx::query_scalar("SELECT revision_id FROM knowledge_usage_logs WHERE run_id = $1")
             .bind(ctx.scope.run_id)
             .fetch_all(ctx.pool)

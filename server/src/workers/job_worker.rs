@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::sessions::run_registry::is_console_event_type;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -270,7 +271,7 @@ const FAILED_CHAT_TURN_DETAIL_CHARS: usize = 500;
 
 /// Without this line the streamed text vanishes when a turn fails and the chat
 /// shows nothing.
-async fn note_failed_chat_turn(pool: &PgPool, session_id: uuid::Uuid, failure: &str) {
+async fn note_failed_chat_turn(pool: &PgPool, session_id: Id, failure: &str) {
     let body = failed_chat_turn_note(failure);
     if let Err(err) = crate::services::chat_service::ChatService::new(pool)
         .append_system_note(session_id, &body)
@@ -288,7 +289,7 @@ fn failed_chat_turn_note(failure: &str) -> String {
 }
 
 /// Finish a check left active by an error raised before the check executor ran.
-async fn fail_check_for_run(pool: &PgPool, run_id: uuid::Uuid, failure: &str) {
+async fn fail_check_for_run(pool: &PgPool, run_id: Id, failure: &str) {
     if let Err(err) = ConnectorCheckService::new(pool)
         .fail_for_run(run_id, failure)
         .await
@@ -301,7 +302,7 @@ async fn fail_check_for_run(pool: &PgPool, run_id: uuid::Uuid, failure: &str) {
 async fn revert_plugin_build_on_fail(
     pool: &PgPool,
     state: &AppState,
-    run_id: uuid::Uuid,
+    run_id: Id,
     job_type: &str,
 ) {
     let builds =
@@ -955,7 +956,7 @@ async fn execute_job(
 
 fn spawn_chat_session_created_tx(
     pool: PgPool,
-    run_id: uuid::Uuid,
+    run_id: Id,
     connector_name: &str,
 ) -> Option<(watch::Sender<String>, oneshot::Receiver<()>)> {
     if !connector_supports_chat_resume(connector_name) {
@@ -979,7 +980,7 @@ fn spawn_chat_session_created_tx(
 }
 
 /// A failed lookup runs without plugin skills rather than failing the run.
-pub(super) async fn run_plugin_snapshot(pool: &PgPool, run: &AgentRun) -> Vec<uuid::Uuid> {
+pub(super) async fn run_plugin_snapshot(pool: &PgPool, run: &AgentRun) -> Vec<Id> {
     PluginService::new(pool)
         .run_plugin_ids(run.agent_id)
         .await
@@ -1028,7 +1029,7 @@ fn chat_context_input_base<'a>(
 #[allow(clippy::too_many_arguments)]
 fn write_chat_context(
     state: &AppState,
-    plugin_ids: &[uuid::Uuid],
+    plugin_ids: &[Id],
     agent: &crate::domain::agent::Agent,
     agent_key: &str,
     cwd: &std::path::Path,
@@ -1457,10 +1458,10 @@ const SNAPSHOT_IDLE: Duration = Duration::from_secs(3);
 fn spawn_snapshot_checkpoints(
     stream: &Arc<crate::sessions::run_registry::RunStreamHandle>,
     artifacts_dir: &str,
-    run_id: uuid::Uuid,
+    run_id: Id,
 ) {
     let handle = stream.clone();
-    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
+    let paths = RunArtifactPaths::new(artifacts_dir, run_id.as_ref());
     let mut changes = stream.subscribe_snapshot_changes();
     let mut cancelled = stream.cancelled_rx();
     tokio::spawn(async move {
@@ -1495,7 +1496,7 @@ fn spawn_snapshot_checkpoints(
 fn persist_artifacts(
     state: &AppState,
     stream: &crate::sessions::run_registry::RunStreamHandle,
-    run_id: uuid::Uuid,
+    run_id: Id,
     connector_name: &str,
     session_id: Option<String>,
 ) -> anyhow::Result<()> {
@@ -1513,7 +1514,7 @@ fn persist_artifacts(
 fn best_effort_persist_artifacts(
     state: &AppState,
     stream: &crate::sessions::run_registry::RunStreamHandle,
-    run_id: uuid::Uuid,
+    run_id: Id,
     connector_name: &str,
     session_id: Option<String>,
     when: &str,
@@ -1532,11 +1533,11 @@ fn best_effort_persist_artifacts(
 fn persist_artifacts_to_dir(
     artifacts_dir: &str,
     stream: &crate::sessions::run_registry::RunStreamHandle,
-    run_id: uuid::Uuid,
+    run_id: Id,
     connector_name: &str,
     session_id: Option<String>,
 ) -> anyhow::Result<()> {
-    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
+    let paths = RunArtifactPaths::new(artifacts_dir, run_id.as_ref());
     if let Some(snap) = stream.snapshot() {
         let _ = ArtifactService::write_session_snapshot(&paths, &snap);
     }
@@ -1690,7 +1691,7 @@ fn should_finalize_run_git(
 fn consultation_request_from_trigger(
     body: &str,
     mention: &crate::domain::mention::TicketMention,
-    target_agent_id: uuid::Uuid,
+    target_agent_id: Id,
 ) -> anyhow::Result<String> {
     if mention.mentioned_agent_id != target_agent_id {
         anyhow::bail!("consultation trigger mention targets a different agent");
@@ -1707,7 +1708,7 @@ fn consultation_request_from_trigger(
         .context("structured consultation trigger lacks stable target metadata")
 }
 
-async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
+async fn run_session_id(pool: &PgPool, run_id: Id) -> Option<String> {
     RunService::new(pool)
         .get(run_id)
         .await
@@ -1744,8 +1745,8 @@ async fn load_resume_session_id(
 
 async fn fail_job(
     pool: &PgPool,
-    run_id: uuid::Uuid,
-    job_id: uuid::Uuid,
+    run_id: Id,
+    job_id: Id,
     message: &str,
 ) -> anyhow::Result<AgentRun> {
     let run = RunService::new(pool)
@@ -1814,7 +1815,7 @@ mod tests {
 
     fn test_agent(role: &str, preset_source: Option<&str>) -> Agent {
         Agent {
-            id: uuid::Uuid::new_v4(),
+            id: Id::new(),
             name: format!("{role} Agent"),
             role: role.into(),
             responsibilities: vec![],
@@ -1832,11 +1833,11 @@ mod tests {
 
     fn test_run(job_type: &str) -> AgentRun {
         AgentRun {
-            id: uuid::Uuid::new_v4(),
-            ticket_id: Some(uuid::Uuid::new_v4()),
+            id: Id::new(),
+            ticket_id: Some(Id::new()),
             chat_session_id: None,
             chat_message_id: None,
-            agent_id: uuid::Uuid::new_v4(),
+            agent_id: Id::new(),
             job_type: job_type.into(),
             status: RunStatus::Running,
             sandbox_profile_id: "permissive-default".into(),
@@ -1957,7 +1958,7 @@ mod tests {
 
     #[test]
     fn structured_consultation_uses_stable_target_metadata() {
-        let target_agent_id = uuid::Uuid::new_v4();
+        let target_agent_id = Id::new();
         let exact_request = "Review this boundary, and only this boundary.";
         let request = AgentRequest {
             agent_key: "old_agent_key".into(),
@@ -1975,9 +1976,9 @@ mod tests {
             }],
         );
         let mention = TicketMention {
-            id: uuid::Uuid::new_v4(),
-            ticket_id: uuid::Uuid::new_v4(),
-            comment_id: uuid::Uuid::new_v4(),
+            id: Id::new(),
+            ticket_id: Id::new(),
+            comment_id: Id::new(),
             mentioned_agent_id: target_agent_id,
             resume_agent_id: None,
             status: MentionStatus::Pending,
@@ -1992,7 +1993,7 @@ mod tests {
 
     #[test]
     fn structured_consultation_without_stable_metadata_fails_closed() {
-        let target_agent_id = uuid::Uuid::new_v4();
+        let target_agent_id = Id::new();
         let mut body = "Source summary".to_string();
         append_agent_requests_to_comment(
             &mut body,
@@ -2003,9 +2004,9 @@ mod tests {
             }],
         );
         let mention = TicketMention {
-            id: uuid::Uuid::new_v4(),
-            ticket_id: uuid::Uuid::new_v4(),
-            comment_id: uuid::Uuid::new_v4(),
+            id: Id::new(),
+            ticket_id: Id::new(),
+            comment_id: Id::new(),
             mentioned_agent_id: target_agent_id,
             resume_agent_id: None,
             status: MentionStatus::Pending,
@@ -2018,14 +2019,14 @@ mod tests {
 
     #[test]
     fn legacy_clarification_uses_source_comment_with_resume_link() {
-        let target_agent_id = uuid::Uuid::new_v4();
+        let target_agent_id = Id::new();
         let body = "Which API option should I implement?";
         let mention = TicketMention {
-            id: uuid::Uuid::new_v4(),
-            ticket_id: uuid::Uuid::new_v4(),
-            comment_id: uuid::Uuid::new_v4(),
+            id: Id::new(),
+            ticket_id: Id::new(),
+            comment_id: Id::new(),
             mentioned_agent_id: target_agent_id,
-            resume_agent_id: Some(uuid::Uuid::new_v4()),
+            resume_agent_id: Some(Id::new()),
             status: MentionStatus::Pending,
         };
 
@@ -2098,7 +2099,7 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex/done.jsonl");
         let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher =
             CodexConsolePublisher::new(crate::providers::ToolNameStyle::ServerToolFields);
 
@@ -2123,7 +2124,7 @@ mod tests {
         });
 
         let temp = tempfile::tempdir().expect("temp artifact directory");
-        let run_id = uuid::Uuid::new_v4();
+        let run_id = Id::new();
         persist_artifacts_to_dir(
             temp.path().to_str().expect("UTF-8 temp path"),
             &handle,
@@ -2135,7 +2136,7 @@ mod tests {
 
         let paths = RunArtifactPaths::new(
             temp.path().to_str().expect("UTF-8 temp path"),
-            &run_id.to_string(),
+            run_id.as_ref(),
         );
         assert_eq!(
             ArtifactService::read_console_events(&paths),
@@ -2149,7 +2150,7 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/cursor/done.jsonl");
         let raw = std::fs::read_to_string(fixture_path).expect("read Cursor fixture");
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = CursorConsolePublisher::new(crate::providers::ToolNameStyle::Dash);
 
         for line in raw.lines() {
@@ -2173,7 +2174,7 @@ mod tests {
         });
 
         let temp = tempfile::tempdir().expect("temp artifact directory");
-        let run_id = uuid::Uuid::new_v4();
+        let run_id = Id::new();
         persist_artifacts_to_dir(
             temp.path().to_str().expect("UTF-8 temp path"),
             &handle,
@@ -2185,7 +2186,7 @@ mod tests {
 
         let paths = RunArtifactPaths::new(
             temp.path().to_str().expect("UTF-8 temp path"),
-            &run_id.to_string(),
+            run_id.as_ref(),
         );
         assert_eq!(
             ArtifactService::read_console_events(&paths),
@@ -2197,8 +2198,8 @@ mod tests {
     fn persist_artifacts_with_empty_stream_creates_meta() {
         let temp = tempfile::tempdir().expect("temp artifact directory");
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
-        let run_id = uuid::Uuid::new_v4();
+        let handle = registry.register(Id::new());
+        let run_id = Id::new();
 
         persist_artifacts_to_dir(
             temp.path().to_str().expect("UTF-8 temp path"),
@@ -2211,7 +2212,7 @@ mod tests {
 
         let paths = RunArtifactPaths::new(
             temp.path().to_str().expect("UTF-8 temp path"),
-            &run_id.to_string(),
+            run_id.as_ref(),
         );
         assert!(
             paths.meta_json.is_file(),

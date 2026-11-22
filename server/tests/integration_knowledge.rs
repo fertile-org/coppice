@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::{http::StatusCode, Router};
@@ -17,8 +18,6 @@ use sqlx::migrate::Migrator;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn create_candidate(
     app: &Router,
     board_id: &str,
@@ -117,16 +116,16 @@ struct RetrievalSeed<'a> {
     label: &'a str,
     status: &'a str,
     scope: &'a str,
-    board_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
+    board_id: Option<Id>,
+    agent_id: Option<Id>,
     confidence: &'a str,
     expired: bool,
     activate: bool,
 }
 
-async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, Uuid) {
-    let item_id = Uuid::new_v4();
-    let revision_id = Uuid::new_v4();
+async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Id, Id) {
+    let item_id = Id::new();
+    let revision_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO knowledge_items (id, status, version, expires_at)
@@ -177,8 +176,8 @@ async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, U
 
 async fn seed_retrieval_cardinality(
     tx: &mut Transaction<'_, Postgres>,
-    target_board_id: Uuid,
-    other_board_id: Uuid,
+    target_board_id: Id,
+    other_board_id: Id,
     target_approved: i32,
     other_approved: i32,
     rejected: i32,
@@ -187,10 +186,10 @@ async fn seed_retrieval_cardinality(
         r#"
         CREATE TEMP TABLE knowledge_plan_seed (
             ordinal INT PRIMARY KEY,
-            item_id UUID NOT NULL,
-            revision_id UUID NOT NULL,
+            item_id VARCHAR(36) NOT NULL,
+            revision_id VARCHAR(36) NOT NULL,
             status TEXT NOT NULL,
-            board_id UUID NOT NULL
+            board_id VARCHAR(36) NOT NULL
         ) ON COMMIT DROP
         "#,
     )
@@ -206,8 +205,8 @@ async fn seed_retrieval_cardinality(
             ordinal, item_id, revision_id, status, board_id
         )
         SELECT ordinal,
-               gen_random_uuid(),
-               gen_random_uuid(),
+               (gen_random_uuid())::text,
+               (gen_random_uuid())::text,
                CASE WHEN ordinal <= $4 THEN 'approved' ELSE 'rejected' END,
                CASE WHEN ordinal <= $3 THEN $1 ELSE $2 END
         FROM generate_series(1, $5) AS ordinal
@@ -269,7 +268,7 @@ async fn seed_retrieval_cardinality(
 
 async fn explain_production_retrieval(
     tx: &mut Transaction<'_, Postgres>,
-    board_id: Uuid,
+    board_id: Id,
     analyze: bool,
 ) -> Value {
     let options = if analyze {
@@ -280,7 +279,7 @@ async fn explain_production_retrieval(
     let sql = format!("EXPLAIN ({options}) {RETRIEVAL_QUERY_SQL}");
     sqlx::query_scalar(&sql)
         .bind(vec![board_id])
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind("low")
         .bind(vec!["retrieval".to_string(), "plan".to_string()])
         .bind(Vec::<String>::new())
@@ -616,14 +615,14 @@ async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
     assert_eq!(rejected["status"], "rejected");
 
     let pool = state.db.as_ref().unwrap();
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at, id LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at, id LIMIT 1")
         .fetch_one(pool)
         .await
         .unwrap();
     let mut limited_config = state.config.knowledge.clone();
     limited_config.retrieval.max_active_per_board = 1;
     let service = KnowledgeService::new(pool, &limited_config);
-    let terminal_uuid = Uuid::parse_str(terminal_id).unwrap();
+    let terminal_uuid = Id::parse_str(terminal_id).unwrap();
     let edited = service
         .edit(
             terminal_uuid,
@@ -654,7 +653,7 @@ async fn cross_scope_edit_moves_active_capacity_to_the_new_board() {
     let board_a = common::create_test_board(&app, &cookie, &csrf).await;
     let board_b = create_board_named(&app, "Capacity Board B", &cookie, &csrf).await;
     let item = create_candidate(&app, &board_a, &cookie, &csrf, "Cross-scope capacity").await;
-    let item_id = Uuid::parse_str(item["id"].as_str().unwrap()).unwrap();
+    let item_id = Id::parse_str(item["id"].as_str().unwrap()).unwrap();
     let (status, _) = mutate(
         &app,
         "POST",
@@ -667,7 +666,7 @@ async fn cross_scope_edit_moves_active_capacity_to_the_new_board() {
     assert_eq!(status, StatusCode::OK);
 
     let pool = state.db.as_ref().unwrap();
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
+    let admin_id: Id = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
         .fetch_one(pool)
         .await
         .unwrap();
@@ -681,7 +680,7 @@ async fn cross_scope_edit_moves_active_capacity_to_the_new_board() {
             admin_id,
             KnowledgeRevisionPatch {
                 scope: Some(KnowledgeScope::Board),
-                board_id: Some(Some(Uuid::parse_str(&board_b).unwrap())),
+                board_id: Some(Some(Id::parse_str(&board_b).unwrap())),
                 content: Some("Moved to board B.".into()),
                 ..KnowledgeRevisionPatch::default()
             },
@@ -692,7 +691,7 @@ async fn cross_scope_edit_moves_active_capacity_to_the_new_board() {
 
     let overflow = |board_id: &str| KnowledgeRevisionInput {
         scope: KnowledgeScope::Board,
-        board_id: Some(Uuid::parse_str(board_id).unwrap()),
+        board_id: Some(Id::parse_str(board_id).unwrap()),
         agent_id: None,
         knowledge_type: KnowledgeType::TestCommand,
         title: format!("Overflow {board_id}"),
@@ -739,8 +738,8 @@ async fn activation_revalidates_capacity_before_replacing_the_active_revision() 
 
     let mut config = state.config.knowledge.clone();
     config.retrieval.max_active_per_board = 1;
-    let second_item_id = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
-    let second_revision_id = Uuid::parse_str(second["revisionId"].as_str().unwrap()).unwrap();
+    let second_item_id = Id::parse_str(second["id"].as_str().unwrap()).unwrap();
+    let second_revision_id = Id::parse_str(second["revisionId"].as_str().unwrap()).unwrap();
     let mut tx = state.db.as_ref().unwrap().begin().await.unwrap();
     let error = activate_revision(&mut tx, second_item_id, second_revision_id, &config)
         .await
@@ -817,9 +816,9 @@ async fn supersession_completes_when_the_replacement_is_approved() {
         .unwrap()
         .contains("current version is 3"));
 
-    let original_before: Option<Uuid> =
+    let original_before: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
-            .bind(Uuid::parse_str(original_id).unwrap())
+            .bind(Id::parse_str(original_id).unwrap())
             .fetch_one(state.db.as_ref().unwrap())
             .await
             .unwrap();
@@ -835,15 +834,15 @@ async fn supersession_completes_when_the_replacement_is_approved() {
     )
     .await;
 
-    let original_after: Option<Uuid> =
+    let original_after: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
-            .bind(Uuid::parse_str(original_id).unwrap())
+            .bind(Id::parse_str(original_id).unwrap())
             .fetch_one(state.db.as_ref().unwrap())
             .await
             .unwrap();
     assert_eq!(
         original_after,
-        Some(Uuid::parse_str(replacement_id).unwrap())
+        Some(Id::parse_str(replacement_id).unwrap())
     );
 }
 
@@ -852,11 +851,11 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let board_uuid = Uuid::parse_str(&board_id).unwrap();
+    let board_uuid = Id::parse_str(&board_id).unwrap();
     let original =
         create_candidate(&app, &board_id, &cookie, &csrf, "Original superseded rule").await;
     let original_id = original["id"].as_str().unwrap();
-    let original_uuid = Uuid::parse_str(original_id).unwrap();
+    let original_uuid = Id::parse_str(original_id).unwrap();
     let (status, _) = mutate(
         &app,
         "POST",
@@ -884,7 +883,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let replacement_id = replacement["id"].as_str().unwrap();
-    let replacement_uuid = Uuid::parse_str(replacement_id).unwrap();
+    let replacement_uuid = Id::parse_str(replacement_id).unwrap();
 
     let pool = state.db.as_ref().unwrap();
     let mut retrieval_config = state.config.knowledge.retrieval.clone();
@@ -893,7 +892,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     let before = retrieve(
         pool,
         &RetrievalScope::Boards(vec![board_uuid]),
-        Uuid::new_v4(),
+        Id::new(),
         query.0,
         query.1,
         &retrieval_config,
@@ -915,7 +914,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(approved["activeRevisionId"], approved["revisionId"]);
 
-    let original_link: Option<Uuid> =
+    let original_link: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original_uuid)
             .fetch_one(pool)
@@ -926,7 +925,7 @@ async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     let after = retrieve(
         pool,
         &RetrievalScope::Boards(vec![board_uuid]),
-        Uuid::new_v4(),
+        Id::new(),
         query.0,
         query.1,
         &retrieval_config,
@@ -952,7 +951,7 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
     )
     .await;
     let original_id = original["id"].as_str().unwrap();
-    let original_uuid = Uuid::parse_str(original_id).unwrap();
+    let original_uuid = Id::parse_str(original_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -990,7 +989,7 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let first_id = first["id"].as_str().unwrap();
-    let first_uuid = Uuid::parse_str(first_id).unwrap();
+    let first_uuid = Id::parse_str(first_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -1015,7 +1014,7 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
     assert_eq!(status, StatusCode::OK);
 
     let pool = state.db.as_ref().unwrap();
-    let original_state: (i32, Option<Uuid>) =
+    let original_state: (i32, Option<Id>) =
         sqlx::query_as("SELECT version, superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original_uuid)
             .fetch_one(pool)
@@ -1038,7 +1037,7 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
         .unwrap()
         .contains("already been superseded"));
 
-    let children: Vec<Uuid> =
+    let children: Vec<Id> =
         sqlx::query_scalar("SELECT id FROM knowledge_items WHERE supersedes_item_id = $1")
             .bind(original_uuid)
             .fetch_all(pool)
@@ -1055,7 +1054,7 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
     let original =
         create_candidate(&app, &board_id, &cookie, &csrf, "Singular replacement rule").await;
     let original_id = original["id"].as_str().unwrap();
-    let original_uuid = Uuid::parse_str(original_id).unwrap();
+    let original_uuid = Id::parse_str(original_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -1177,7 +1176,7 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
 
     let direct_insert_error =
         sqlx::query("INSERT INTO knowledge_items (id, supersedes_item_id) VALUES ($1, $2)")
-            .bind(Uuid::new_v4())
+            .bind(Id::new())
             .bind(original_uuid)
             .execute(pool)
             .await
@@ -1219,7 +1218,7 @@ async fn supersession_stale_never_activated_candidate_allows_a_successor() {
     )
     .await;
     let original_id = original["id"].as_str().unwrap();
-    let original_uuid = Uuid::parse_str(original_id).unwrap();
+    let original_uuid = Id::parse_str(original_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -1294,7 +1293,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let board_uuid = Uuid::parse_str(&board_id).unwrap();
+    let board_uuid = Id::parse_str(&board_id).unwrap();
     let original = create_candidate(
         &app,
         &board_id,
@@ -1304,7 +1303,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     )
     .await;
     let original_id = original["id"].as_str().unwrap();
-    let original_uuid = Uuid::parse_str(original_id).unwrap();
+    let original_uuid = Id::parse_str(original_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -1333,7 +1332,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let abandoned_id = abandoned["id"].as_str().unwrap().to_string();
-    let abandoned_uuid = Uuid::parse_str(&abandoned_id).unwrap();
+    let abandoned_uuid = Id::parse_str(&abandoned_id).unwrap();
 
     let (status, _) = mutate(
         &app,
@@ -1398,13 +1397,13 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     .unwrap();
     assert_eq!(live_children, 1);
 
-    let original_link: Option<Uuid> =
+    let original_link: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original_uuid)
             .fetch_one(pool)
             .await
             .unwrap();
-    let abandoned_state: (String, Option<Uuid>) =
+    let abandoned_state: (String, Option<Id>) =
         sqlx::query_as("SELECT status, active_revision_id FROM knowledge_items WHERE id = $1")
             .bind(abandoned_uuid)
             .fetch_one(pool)
@@ -1414,7 +1413,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     let retrieved = retrieve(
         pool,
         &RetrievalScope::Boards(vec![board_uuid]),
-        Uuid::new_v4(),
+        Id::new(),
         "supersession race",
         "",
         &state.config.knowledge.retrieval,
@@ -1487,7 +1486,7 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
     .await
     .unwrap();
 
-    let original_one: (Option<Uuid>, i32) = sqlx::query_as(
+    let original_one: (Option<Id>, i32) = sqlx::query_as(
         "SELECT superseded_by, version FROM knowledge_items WHERE id = '10000000-0000-0000-0000-000000000001'",
     )
     .fetch_one(&mut *tx)
@@ -1496,12 +1495,12 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
     assert_eq!(
         original_one,
         (
-            Some(Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap()),
+            Some(Id::parse_str("20000000-0000-0000-0000-000000000001").unwrap()),
             6,
         )
     );
 
-    type ItemRow = (Uuid, String, i32, Option<Uuid>, Option<String>);
+    type ItemRow = (Id, String, i32, Option<Id>, Option<String>);
     let group_one: Vec<ItemRow> = sqlx::query_as(
         r#"
         SELECT id, status, version, active_revision_id, rejection_reason
@@ -1526,7 +1525,7 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
         );
     }
 
-    let group_two: Vec<(Uuid, String)> = sqlx::query_as(
+    let group_two: Vec<(Id, String)> = sqlx::query_as(
         r#"
         SELECT id, status FROM knowledge_items
         WHERE supersedes_item_id = '10000000-0000-0000-0000-000000000002'
@@ -1540,7 +1539,7 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
     assert_eq!(group_two[1].1, "rejected");
     assert_eq!(group_two[2].1, "rejected");
 
-    let group_three: Vec<(Uuid, String)> = sqlx::query_as(
+    let group_three: Vec<(Id, String)> = sqlx::query_as(
         r#"
         SELECT id, status FROM knowledge_items
         WHERE supersedes_item_id = '10000000-0000-0000-0000-000000000003'
@@ -1601,8 +1600,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 
     let found = retrieve(
         state.db.as_ref().unwrap(),
-        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
-        Uuid::parse_str(&agent_id).unwrap(),
+        &RetrievalScope::Boards(vec![Id::parse_str(&board_id).unwrap()]),
+        Id::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
         &state.config.knowledge.retrieval,
@@ -1613,8 +1612,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     assert!(found[0].score > 0.0, "\"run\" matches the item content");
     let wrong_board = retrieve(
         state.db.as_ref().unwrap(),
-        &RetrievalScope::Boards(vec![Uuid::parse_str(&other_board_id).unwrap()]),
-        Uuid::parse_str(&agent_id).unwrap(),
+        &RetrievalScope::Boards(vec![Id::parse_str(&other_board_id).unwrap()]),
+        Id::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
         &state.config.knowledge.retrieval,
@@ -1627,8 +1626,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     type_filtered.allowed_types = vec!["bug_pattern".into()];
     let excluded_by_type = retrieve(
         state.db.as_ref().unwrap(),
-        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
-        Uuid::parse_str(&agent_id).unwrap(),
+        &RetrievalScope::Boards(vec![Id::parse_str(&board_id).unwrap()]),
+        Id::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
         &type_filtered,
@@ -1640,8 +1639,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     type_filtered.allowed_types = vec!["test_command".into()];
     let included_by_type = retrieve(
         state.db.as_ref().unwrap(),
-        &RetrievalScope::Boards(vec![Uuid::parse_str(&board_id).unwrap()]),
-        Uuid::parse_str(&agent_id).unwrap(),
+        &RetrievalScope::Boards(vec![Id::parse_str(&board_id).unwrap()]),
+        Id::parse_str(&agent_id).unwrap(),
         "Run tests",
         "",
         &type_filtered,
@@ -1650,7 +1649,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     .unwrap();
     assert_eq!(included_by_type.len(), 1);
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -1659,8 +1658,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
         "#,
     )
     .bind(run_id)
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
-    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(state.db.as_ref().unwrap())
     .await
     .unwrap();
@@ -1698,11 +1697,11 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board_id = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let other_board_id =
-        Uuid::parse_str(&create_board_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await)
+        Id::parse_str(&create_board_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await)
             .unwrap();
-    let agent_id = Uuid::parse_str(
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &app,
             "backend_engineer",
@@ -1713,7 +1712,7 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         .await,
     )
     .unwrap();
-    let other_agent_id = Uuid::parse_str(
+    let other_agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &app,
             "frontend_engineer",
@@ -1809,7 +1808,7 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         },
     )
     .await;
-    let replacement_id = Uuid::new_v4();
+    let replacement_id = Id::new();
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'pending', 1)")
         .bind(replacement_id)
         .execute(pool)
@@ -1849,10 +1848,10 @@ async fn knowledge_query_plan_has_relational_indexes() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let target_board_id =
-        Uuid::parse_str(&create_board_named(&app, "Retrieval target", &cookie, &csrf).await)
+        Id::parse_str(&create_board_named(&app, "Retrieval target", &cookie, &csrf).await)
             .unwrap();
     let other_board_id =
-        Uuid::parse_str(&create_board_named(&app, "Retrieval noise", &cookie, &csrf).await)
+        Id::parse_str(&create_board_named(&app, "Retrieval noise", &cookie, &csrf).await)
             .unwrap();
     let pool = state.db.as_ref().unwrap();
     let mut tx = pool.begin().await.unwrap();
@@ -1903,7 +1902,7 @@ async fn knowledge_retrieval_capacity_p95_benchmark() {
         .await
         .unwrap();
     let mut tx = pool.begin().await.unwrap();
-    let board_id = Uuid::new_v4();
+    let board_id = Id::new();
     sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
         .bind(board_id)
         .bind("M06 retrieval capacity benchmark")
@@ -2139,7 +2138,7 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let board_uuid = Uuid::parse_str(&board_id).unwrap();
+    let board_uuid = Id::parse_str(&board_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     let title = "Eligibility matrix title";
     let content = "Shared eligibility content for inbox assist.";
@@ -2152,16 +2151,16 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     #[allow(clippy::too_many_arguments)]
     async fn seed_variant(
         pool: &PgPool,
-        board_id: Uuid,
+        board_id: Id,
         title: &str,
         content: &str,
         status: &str,
         activate: bool,
         expired: bool,
-        superseded_by: Option<Uuid>,
-    ) -> Uuid {
-        let item_id = Uuid::new_v4();
-        let revision_id = Uuid::new_v4();
+        superseded_by: Option<Id>,
+    ) -> Id {
+        let item_id = Id::new();
+        let revision_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO knowledge_items (id, status, version, expires_at, superseded_by)
@@ -2221,7 +2220,7 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
         pool, board_uuid, title, content, "approved", true, true, None,
     )
     .await;
-    let eligible_uuid = Uuid::parse_str(&eligible_id).unwrap();
+    let eligible_uuid = Id::parse_str(&eligible_id).unwrap();
     seed_variant(
         pool,
         board_uuid,
@@ -2305,15 +2304,15 @@ async fn similar_rejects_non_pending_and_missing_items() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["message"].as_str().unwrap().contains("pending"));
 
-    let missing = Uuid::new_v4();
+    let missing = Id::new();
     let (status, _) = get_similar(&app, &missing.to_string(), "", &cookie, &csrf).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// An approved, active board note with exactly this text.
-async fn seed_note(pool: &PgPool, board_id: Uuid, title: &str, content: &str) -> Uuid {
-    let item_id = Uuid::new_v4();
-    let revision_id = Uuid::new_v4();
+async fn seed_note(pool: &PgPool, board_id: Id, title: &str, content: &str) -> Id {
+    let item_id = Id::new();
+    let revision_id = Id::new();
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'approved', 1)")
         .bind(item_id)
         .execute(pool)
@@ -2347,11 +2346,11 @@ async fn seed_note(pool: &PgPool, board_id: Uuid, title: &str, content: &str) ->
 }
 
 /// Matching notes for `query`, best first, as `(title, score)`.
-async fn search(state: &AppState, board_id: Uuid, query: &str) -> Vec<(String, f64)> {
+async fn search(state: &AppState, board_id: Id, query: &str) -> Vec<(String, f64)> {
     let mut found = retrieve(
         state.db.as_ref().unwrap(),
         &RetrievalScope::Boards(vec![board_id]),
-        Uuid::new_v4(),
+        Id::new(),
         query,
         "",
         &state.config.knowledge.retrieval,
@@ -2362,7 +2361,7 @@ async fn search(state: &AppState, board_id: Uuid, query: &str) -> Vec<(String, f
     found.into_iter().map(|k| (k.title, k.score)).collect()
 }
 
-async fn search_titles(state: &AppState, board_id: Uuid, query: &str) -> Vec<String> {
+async fn search_titles(state: &AppState, board_id: Id, query: &str) -> Vec<String> {
     let found = search(state, board_id, query).await;
     found.into_iter().map(|(title, _)| title).collect()
 }
@@ -2371,7 +2370,7 @@ async fn search_titles(state: &AppState, board_id: Uuid, query: &str) -> Vec<Str
 async fn search_matches_other_forms_of_a_word() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     seed_note(pool, board, "Run test suite", "Keep this in mind.").await;
     seed_note(pool, board, "Merge after review", "Keep this in mind.").await;
@@ -2391,7 +2390,7 @@ async fn search_matches_other_forms_of_a_word() {
 async fn search_matches_parts_of_dotted_names_and_paths() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     seed_note(pool, board, "Edit config.toml first", "Keep this in mind.").await;
     seed_note(
@@ -2417,7 +2416,7 @@ async fn search_matches_parts_of_dotted_names_and_paths() {
 async fn search_ranks_a_rare_word_above_many_common_words() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     let csrf_title = "CSRF token must be sent on mutations";
     seed_note(pool, board, csrf_title, "Send the header every time.").await;
@@ -2441,7 +2440,7 @@ async fn search_ranks_a_rare_word_above_many_common_words() {
 async fn search_counts_a_title_match_double() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     seed_note(pool, board, "Paint storage", "Keep the cans dry.").await;
     seed_note(
@@ -2462,7 +2461,7 @@ async fn search_counts_a_title_match_double() {
 async fn search_keeps_a_term_that_is_an_english_stopword() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     seed_note(pool, board, "A very careful deploy", "Keep this in mind.").await;
     seed_note(pool, board, "Paint storage", "Keep this in mind.").await;
@@ -2478,14 +2477,14 @@ async fn search_keeps_a_term_that_is_an_english_stopword() {
 async fn search_with_no_usable_terms_scores_every_note_zero() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let board = Id::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
     let pool = state.db.as_ref().unwrap();
     seed_note(pool, board, "Paint storage", "Keep dry.").await;
 
     let found = retrieve(
         pool,
         &RetrievalScope::Boards(vec![board]),
-        Uuid::new_v4(),
+        Id::new(),
         "the and of",
         "",
         &state.config.knowledge.retrieval,
@@ -2501,7 +2500,7 @@ async fn existing_revisions_are_searchable_after_upgrade() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
     let admin = state.db.as_ref().unwrap();
-    let database = format!("coppice_upgrade_{}", Uuid::new_v4().simple());
+    let database = format!("coppice_upgrade_{}", Id::new().simple());
     sqlx::query(&format!("CREATE DATABASE {database}"))
         .execute(admin)
         .await
@@ -2523,8 +2522,9 @@ async fn existing_revisions_are_searchable_after_upgrade() {
     };
     before_search_quality.run(&pool).await.unwrap();
 
-    let item_id = Uuid::new_v4();
-    let revision_id = Uuid::new_v4();
+    // Pre-081 schema still uses uuid columns; bind Uuid until MIGRATOR catches up.
+    let item_id = uuid::Uuid::new_v4();
+    let revision_id = uuid::Uuid::new_v4();
     let content = "Set it in config.toml, then restart.";
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'approved', 1)")
         .bind(item_id)
@@ -2572,7 +2572,7 @@ async fn existing_revisions_are_searchable_after_upgrade() {
         WHERE id = $1 AND search_vector IS NOT NULL
         "#,
     )
-    .bind(revision_id)
+    .bind(revision_id.to_string())
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -2582,7 +2582,7 @@ async fn existing_revisions_are_searchable_after_upgrade() {
     let found = retrieve(
         &pool,
         &RetrievalScope::Boards(Vec::new()),
-        Uuid::new_v4(),
+        Id::new(),
         "toml",
         "",
         &state.config.knowledge.retrieval,
@@ -2601,13 +2601,13 @@ async fn existing_revisions_are_searchable_after_upgrade() {
 
 /// Seed 1,000 notes on `board`. Each holds the term `word{n % 32}` in its title
 /// and `words` more in its content, plus `paths` file paths that match nothing.
-async fn seed_latency_notes(pool: &PgPool, board: Uuid, stride: i32, words: i32, paths: i32) {
+async fn seed_latency_notes(pool: &PgPool, board: Id, stride: i32, words: i32, paths: i32) {
     sqlx::query(
         r#"
         WITH seed AS (
             SELECT n,
-                   md5($1::text || 'item' || n)::uuid AS item_id,
-                   md5($1::text || 'rev' || n)::uuid AS revision_id
+                   (md5($1::text || 'item' || n)::uuid)::text AS item_id,
+                   (md5($1::text || 'rev' || n)::uuid)::text AS revision_id
             FROM generate_series(1, 1000) AS n
         ), items AS (
             INSERT INTO knowledge_items (id, status, version)
@@ -2650,7 +2650,7 @@ async fn seed_latency_notes(pool: &PgPool, board: Uuid, stride: i32, words: i32,
 }
 
 /// Prints sizes and sorted timings for a 32-term query; returns the slowest.
-async fn report_latency(state: &AppState, board: Uuid, label: &str) -> f64 {
+async fn report_latency(state: &AppState, board: Id, label: &str) -> f64 {
     let pool = state.db.as_ref().unwrap();
     let (bytes, matching): (f64, f64) = sqlx::query_as(
         r#"
@@ -2692,9 +2692,9 @@ async fn retrieval_latency_at_board_capacity() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().unwrap();
     let realistic = create_board_named(&app, "Latency realistic", &cookie, &csrf).await;
-    let realistic = Uuid::parse_str(&realistic).unwrap();
+    let realistic = Id::parse_str(&realistic).unwrap();
     let pessimistic = create_board_named(&app, "Latency pessimistic", &cookie, &csrf).await;
-    let pessimistic = Uuid::parse_str(&pessimistic).unwrap();
+    let pessimistic = Id::parse_str(&pessimistic).unwrap();
     seed_latency_notes(pool, realistic, 11, 2, 22).await;
     seed_latency_notes(pool, pessimistic, 10, 50, 50).await;
 
@@ -2733,8 +2733,8 @@ async fn full_run_context_lists_matching_titles_only() {
         assert_eq!(status, StatusCode::OK);
         ids.push(item_id);
     }
-    let board_uuid = Uuid::parse_str(&board_id).unwrap();
-    let agent_uuid = Uuid::parse_str(&agent_id).unwrap();
+    let board_uuid = Id::parse_str(&board_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
 
     let index = coppice_server::knowledge::index::build_run_index(
         pool,
@@ -2797,19 +2797,19 @@ async fn editing_an_item_resets_its_open_flag_count() {
     let created = create_candidate(&app, &board_id, &cookie, &csrf, "Flag me").await;
     let item_id = created["id"].as_str().unwrap();
     let approved = approve_item(&app, item_id, 1, &cookie, &csrf).await;
-    let revision_id: Uuid = approved["activeRevisionId"]
+    let revision_id: Id = approved["activeRevisionId"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
     // A confirmed closes only older flags, so this flag comes after it.
-    for (verdict, run) in [("confirmed", Uuid::new_v4()), ("outdated", Uuid::new_v4())] {
+    for (verdict, run) in [("confirmed", Id::new()), ("outdated", Id::new())] {
         sqlx::query(
             "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, verdict) \
              VALUES ($1, $2, $3, $4, $5)",
         )
-        .bind(Uuid::new_v4())
-        .bind(item_id.parse::<Uuid>().unwrap())
+        .bind(Id::new())
+        .bind(item_id.parse::<Id>().unwrap())
         .bind(revision_id)
         .bind(run)
         .bind(verdict)
@@ -2842,13 +2842,13 @@ async fn editing_an_item_resets_its_open_flag_count() {
     assert_eq!(edited["openFlagCount"], 0);
 }
 
-async fn add_citation(pool: &PgPool, revision_id: &str, repo_id: Uuid, path: &str, sha: &str) {
+async fn add_citation(pool: &PgPool, revision_id: &str, repo_id: Id, path: &str, sha: &str) {
     sqlx::query(
         "INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind(Uuid::new_v4())
-    .bind(revision_id.parse::<Uuid>().unwrap())
+    .bind(Id::new())
+    .bind(revision_id.parse::<Id>().unwrap())
     .bind(repo_id)
     .bind(path)
     .bind(sha)
@@ -2857,12 +2857,12 @@ async fn add_citation(pool: &PgPool, revision_id: &str, repo_id: Uuid, path: &st
     .unwrap();
 }
 
-async fn citations_of(pool: &PgPool, revision_id: &str) -> Vec<(Uuid, String, String)> {
+async fn citations_of(pool: &PgPool, revision_id: &str) -> Vec<(Id, String, String)> {
     sqlx::query_as(
         "SELECT repo_id, path, commit_sha FROM knowledge_citations \
          WHERE revision_id = $1 ORDER BY path",
     )
-    .bind(revision_id.parse::<Uuid>().unwrap())
+    .bind(revision_id.parse::<Id>().unwrap())
     .fetch_all(pool)
     .await
     .unwrap()
@@ -2875,7 +2875,7 @@ async fn editing_an_item_keeps_its_citations() {
     let pool = state.db.clone().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_dir, local_path) = common::create_temp_git_checkout();
-    let repo_id: Uuid =
+    let repo_id: Id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf)
             .await
             .parse()
@@ -2918,7 +2918,7 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
     let pool = state.db.clone().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_dir, local_path) = common::create_temp_git_checkout();
-    let repo_id: Uuid =
+    let repo_id: Id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf)
             .await
             .parse()
@@ -2954,7 +2954,7 @@ async fn supersede_carries_citations_from_the_item_it_copies() {
         "Pending copy",
         "Run make test-unit before review.",
     );
-    body["citationsFromItemId"] = serde_json::json!(Uuid::new_v4());
+    body["citationsFromItemId"] = serde_json::json!(Id::new());
     let (status, _) = mutate(
         &app,
         "POST",
@@ -3022,7 +3022,7 @@ async fn approved_item(
     title: &str,
     cookie: &str,
     csrf: &str,
-) -> (String, Uuid) {
+) -> (String, Id) {
     let created = create_candidate(app, board_id, cookie, csrf, title).await;
     let id = created["id"].as_str().unwrap().to_string();
     let approved = approve_item(app, &id, 1, cookie, csrf).await;
@@ -3040,20 +3040,20 @@ async fn approved_item(
 async fn add_feedback(
     pool: &PgPool,
     item_id: &str,
-    revision_id: Uuid,
+    revision_id: Id,
     verdict: &str,
     reason: &str,
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
     age_secs: i32,
 ) {
     sqlx::query(
         "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, agent_id, verdict, reason, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, now() - make_interval(secs => $8))",
     )
-    .bind(Uuid::new_v4())
-    .bind(item_id.parse::<Uuid>().unwrap())
+    .bind(Id::new())
+    .bind(item_id.parse::<Id>().unwrap())
     .bind(revision_id)
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(agent_id)
     .bind(verdict)
     .bind(reason)
@@ -3104,14 +3104,14 @@ async fn flagged_filter_lists_approved_items_with_open_flags_most_recent_first()
         10,
     )
     .await;
-    let replacement = Uuid::new_v4();
+    let replacement = Id::new();
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'pending', 1)")
         .bind(replacement)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query("UPDATE knowledge_items SET superseded_by = $2 WHERE id = $1")
-        .bind(superseded.parse::<Uuid>().unwrap())
+        .bind(superseded.parse::<Id>().unwrap())
         .bind(replacement)
         .execute(&pool)
         .await
@@ -3155,7 +3155,7 @@ async fn feedback_endpoint_returns_open_flags_with_reason_and_agent() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().expect("db pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let agent: Uuid = common::create_test_agent_from_preset(&app, "Flagger", &cookie, &csrf)
+    let agent: Id = common::create_test_agent_from_preset(&app, "Flagger", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -3234,7 +3234,7 @@ async fn dismissing_closes_open_flags_and_later_flags_reopen() {
     assert!(body["items"].as_array().unwrap().is_empty(), "{body}");
     let kept: i64 =
         sqlx::query_scalar("SELECT count(*) FROM knowledge_feedback WHERE item_id = $1")
-            .bind(item.parse::<Uuid>().unwrap())
+            .bind(item.parse::<Id>().unwrap())
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -3304,7 +3304,7 @@ async fn flag_endpoints_check_auth_and_unknown_ids() {
         .unwrap();
     assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
 
-    let unknown = Uuid::new_v4();
+    let unknown = Id::new();
     for path in [
         format!("/api/knowledge/{unknown}/feedback"),
         format!("/api/knowledge/{unknown}/freshness"),

@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::attachment::Attachment;
 use crate::domain::chat_action::{
     compact_transcript, draft_ticket_title, proposal_mut, ChatActionResultMeta,
@@ -24,8 +25,6 @@ use sqlx::Row;
 use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
-use uuid::Uuid;
-
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
 pub const CHAT_MESSAGE_PREVIEW_MAX_LEN: usize = 120;
 
@@ -180,10 +179,10 @@ pub struct CreateKnowledgeFromChatResult {
 }
 
 pub struct CreateTicketFromChatInput<'a> {
-    pub board_id: Uuid,
+    pub board_id: Id,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
-    pub repo_id: Option<Uuid>,
+    pub repo_id: Option<Id>,
     pub created_by: &'a str,
 }
 
@@ -192,7 +191,7 @@ pub struct CreateKnowledgeFromChatInput<'a> {
     pub content: Option<&'a str>,
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
 }
 
 /// Optional overrides for an accepted proposal. Unset fields use the proposal.
@@ -200,7 +199,7 @@ pub struct AcceptProposalInput<'a> {
     pub title: Option<&'a str>,
     /// Ticket description, or knowledge content.
     pub description: Option<&'a str>,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
     pub created_by: &'a str,
@@ -229,10 +228,10 @@ impl<'a> ChatService<'a> {
 
     pub async fn create_session(
         &self,
-        owner_user_id: Uuid,
-        agent_id: Uuid,
-        board_id: Option<Uuid>,
-        repo_id: Option<Uuid>,
+        owner_user_id: Id,
+        agent_id: Id,
+        board_id: Option<Id>,
+        repo_id: Option<Id>,
     ) -> Result<ChatSession, ChatError> {
         self.create_session_inner(owner_user_id, agent_id, board_id, repo_id, None)
             .await
@@ -240,11 +239,11 @@ impl<'a> ChatService<'a> {
 
     async fn create_session_inner(
         &self,
-        owner_user_id: Uuid,
-        agent_id: Uuid,
-        board_id: Option<Uuid>,
-        repo_id: Option<Uuid>,
-        parent_session_id: Option<Uuid>,
+        owner_user_id: Id,
+        agent_id: Id,
+        board_id: Option<Id>,
+        repo_id: Option<Id>,
+        parent_session_id: Option<Id>,
     ) -> Result<ChatSession, ChatError> {
         let agent = AgentService::new(self.pool).get(agent_id).await?;
         if !agent.enabled {
@@ -258,7 +257,7 @@ impl<'a> ChatService<'a> {
             RepoService::new(self.pool).get(repo_id).await?;
         }
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO chat_sessions (
@@ -286,8 +285,8 @@ impl<'a> ChatService<'a> {
 
     pub async fn list_sessions(
         &self,
-        owner_user_id: Uuid,
-        board_id: Option<Uuid>,
+        owner_user_id: Id,
+        board_id: Option<Id>,
     ) -> Result<Vec<ChatSession>, ChatError> {
         let rows = if let Some(board_id) = board_id {
             sqlx::query(&format!(
@@ -353,8 +352,8 @@ impl<'a> ChatService<'a> {
 
     pub async fn get_session(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
     ) -> Result<ChatSession, ChatError> {
         let row = sqlx::query(&format!(
             r#"
@@ -387,7 +386,7 @@ impl<'a> ChatService<'a> {
         Ok(row_to_session(&row))
     }
 
-    pub async fn get_session_by_id(&self, session_id: Uuid) -> Result<ChatSession, ChatError> {
+    pub async fn get_session_by_id(&self, session_id: Id) -> Result<ChatSession, ChatError> {
         let row = sqlx::query(&format!(
             r#"
             SELECT {CHAT_SESSION_LIST_SELECT}
@@ -420,7 +419,7 @@ impl<'a> ChatService<'a> {
 
     pub async fn set_provider_session(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         connector: &str,
         provider_session_id: &str,
     ) -> Result<(), ChatError> {
@@ -441,7 +440,7 @@ impl<'a> ChatService<'a> {
         Ok(())
     }
 
-    pub async fn clear_provider_session(&self, session_id: Uuid) -> Result<(), ChatError> {
+    pub async fn clear_provider_session(&self, session_id: Id) -> Result<(), ChatError> {
         sqlx::query(
             r#"
             UPDATE chat_sessions
@@ -460,14 +459,14 @@ impl<'a> ChatService<'a> {
     /// The message as a resumed chat context shows it: body plus the same
     /// `Attachments:` list the transcript renders. The bool is whether the
     /// message has attachments.
-    pub async fn render_message(&self, message_id: Uuid) -> Result<(String, bool), ChatError> {
+    pub async fn render_message(&self, message_id: Id) -> Result<(String, bool), ChatError> {
         let row = sqlx::query(r#"SELECT body, attachment_ids FROM chat_messages WHERE id = $1"#)
             .bind(message_id)
             .fetch_optional(self.pool)
             .await?
             .ok_or(ChatError::NotFound)?;
         let body: String = row.get("body");
-        let attachment_ids: Vec<Uuid> = row.get("attachment_ids");
+        let attachment_ids: Vec<Id> = row.get("attachment_ids");
         let by_id = self.attachments_by_id(&attachment_ids).await?;
         let has_attachments = !attachment_ids.is_empty();
         Ok((
@@ -478,8 +477,8 @@ impl<'a> ChatService<'a> {
 
     async fn attachments_by_id(
         &self,
-        attachment_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, Attachment>, ChatError> {
+        attachment_ids: &[Id],
+    ) -> Result<std::collections::HashMap<Id, Attachment>, ChatError> {
         let attachments = CommentService::new(self.pool)
             .list_attachments_by_ids(attachment_ids)
             .await
@@ -494,8 +493,8 @@ impl<'a> ChatService<'a> {
 
     pub async fn patch_session(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
         status: ChatSessionStatus,
     ) -> Result<ChatSession, ChatError> {
         let _ = self.get_session(session_id, owner_user_id).await?;
@@ -526,8 +525,8 @@ impl<'a> ChatService<'a> {
 
     pub async fn list_messages(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
     ) -> Result<Vec<ChatMessage>, ChatError> {
         let _ = self.get_session(session_id, owner_user_id).await?;
         let rows = sqlx::query(
@@ -550,8 +549,8 @@ impl<'a> ChatService<'a> {
     /// first, and the seq to pass for the next older page when any remain.
     pub async fn list_messages_page(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
         before_seq: Option<i64>,
         limit: i64,
     ) -> Result<(Vec<ChatMessage>, Option<i64>), ChatError> {
@@ -586,10 +585,10 @@ impl<'a> ChatService<'a> {
 
     pub async fn post_message(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
         body: &str,
-        attachment_ids: &[Uuid],
+        attachment_ids: &[Id],
     ) -> Result<PostMessageResult, ChatError> {
         let body = body.trim();
         if body.is_empty() && attachment_ids.is_empty() {
@@ -620,7 +619,7 @@ impl<'a> ChatService<'a> {
         .fetch_one(&mut *tx)
         .await?;
 
-        let message_id = Uuid::new_v4();
+        let message_id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO chat_messages (
@@ -678,8 +677,8 @@ impl<'a> ChatService<'a> {
     /// Agent reply that carries pending proposals (see `proposals_metadata`).
     pub async fn append_agent_message_with_proposals(
         &self,
-        session_id: Uuid,
-        run_id: Uuid,
+        session_id: Id,
+        run_id: Id,
         body: &str,
         proposals: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
@@ -695,7 +694,7 @@ impl<'a> ChatService<'a> {
 
     pub async fn append_system_note(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         body: &str,
     ) -> Result<ChatMessage, ChatError> {
         self.append_message(session_id, ChatMessageRole::System, body, None, None)
@@ -704,10 +703,10 @@ impl<'a> ChatService<'a> {
 
     async fn append_message(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         role: ChatMessageRole,
         body: &str,
-        agent_run_id: Option<Uuid>,
+        agent_run_id: Option<Id>,
         action_metadata: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
         let mut tx = self.pool.begin().await?;
@@ -721,7 +720,7 @@ impl<'a> ChatService<'a> {
         .fetch_one(&mut *tx)
         .await?;
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO chat_messages (
@@ -756,7 +755,7 @@ impl<'a> ChatService<'a> {
         Ok(row_to_message(&row))
     }
 
-    pub async fn format_transcript(&self, session_id: Uuid) -> Result<String, ChatError> {
+    pub async fn format_transcript(&self, session_id: Id) -> Result<String, ChatError> {
         let blocks = self.transcript_blocks(session_id).await?;
         if blocks.is_empty() {
             return Ok("(No previous messages)".into());
@@ -768,7 +767,7 @@ impl<'a> ChatService<'a> {
     /// rendered text would pass `max_tokens`.
     pub async fn format_model_transcript(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         max_tokens: usize,
     ) -> Result<String, ChatError> {
         Ok(self
@@ -781,12 +780,12 @@ impl<'a> ChatService<'a> {
     /// attachments.
     pub async fn format_model_transcript_with_attachments(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         max_tokens: usize,
     ) -> Result<(String, bool), ChatError> {
         let rows = self.recent_transcript_rows(session_id, max_tokens).await?;
         let has_attachments = rows.iter().any(|row| {
-            let ids: Vec<Uuid> = row.get("attachment_ids");
+            let ids: Vec<Id> = row.get("attachment_ids");
             !ids.is_empty()
         });
         let blocks = self.render_blocks(rows).await?;
@@ -802,7 +801,7 @@ impl<'a> ChatService<'a> {
     /// could fit, so a long chat is not loaded whole.
     async fn recent_transcript_rows(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         max_tokens: usize,
     ) -> Result<Vec<sqlx::postgres::PgRow>, ChatError> {
         const PAGE: i64 = 200;
@@ -851,7 +850,7 @@ impl<'a> ChatService<'a> {
         Ok(newest_first)
     }
 
-    async fn transcript_blocks(&self, session_id: Uuid) -> Result<Vec<String>, ChatError> {
+    async fn transcript_blocks(&self, session_id: Id) -> Result<Vec<String>, ChatError> {
         let rows = sqlx::query(TRANSCRIPT_ROWS_ASC)
             .bind(session_id)
             .fetch_all(self.pool)
@@ -867,10 +866,10 @@ impl<'a> ChatService<'a> {
             return Ok(Vec::new());
         }
 
-        let mut all_ids: Vec<Uuid> = rows
+        let mut all_ids: Vec<Id> = rows
             .iter()
             .flat_map(|row| {
-                let ids: Vec<Uuid> = row.get("attachment_ids");
+                let ids: Vec<Id> = row.get("attachment_ids");
                 ids
             })
             .collect();
@@ -883,7 +882,7 @@ impl<'a> ChatService<'a> {
         for row in rows {
             let role: String = row.get("role");
             let body: String = row.get("body");
-            let attachment_ids: Vec<Uuid> = row.get("attachment_ids");
+            let attachment_ids: Vec<Id> = row.get("attachment_ids");
             let label = match role.as_str() {
                 "human" => "Human",
                 "agent" => "Agent",
@@ -900,7 +899,7 @@ impl<'a> ChatService<'a> {
     /// Copy session attachment bytes into `{chat_cwd}/attachments/{id}/{filename}` for agent Read.
     pub async fn stage_attachments_into_cwd(
         &self,
-        session_id: Uuid,
+        session_id: Id,
         chat_cwd: &Path,
     ) -> Result<(), ChatError> {
         let rows = sqlx::query(
@@ -913,10 +912,10 @@ impl<'a> ChatService<'a> {
         .fetch_all(self.pool)
         .await?;
 
-        let mut ids: Vec<Uuid> = rows
+        let mut ids: Vec<Id> = rows
             .iter()
             .flat_map(|row| {
-                let ids: Vec<Uuid> = row.get("attachment_ids");
+                let ids: Vec<Id> = row.get("attachment_ids");
                 ids
             })
             .collect();
@@ -954,8 +953,8 @@ impl<'a> ChatService<'a> {
 
     async fn validate_chat_attachments(
         &self,
-        owner_user_id: Uuid,
-        attachment_ids: &[Uuid],
+        owner_user_id: Id,
+        attachment_ids: &[Id],
     ) -> Result<(), ChatError> {
         if attachment_ids.is_empty() {
             return Ok(());
@@ -1013,8 +1012,8 @@ impl<'a> ChatService<'a> {
     /// Human-confirmed create ticket from chat context. Requires an explicit board.
     pub async fn create_ticket_from_chat(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
         input: CreateTicketFromChatInput<'_>,
     ) -> Result<CreateTicketFromChatResult, ChatError> {
         let session = self.get_session(session_id, owner_user_id).await?;
@@ -1088,8 +1087,8 @@ impl<'a> ChatService<'a> {
     /// Human-confirmed knowledge candidate from compacted chat transcript (M06 pending).
     pub async fn create_knowledge_from_chat(
         &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        owner_user_id: Id,
         knowledge_config: &KnowledgeConfig,
         input: CreateKnowledgeFromChatInput<'_>,
     ) -> Result<CreateKnowledgeFromChatResult, ChatError> {
@@ -1182,10 +1181,10 @@ impl<'a> ChatService<'a> {
     /// concurrent accept/reject calls, so a proposal creates at most one item.
     pub async fn accept_proposal(
         &self,
-        session_id: Uuid,
-        message_id: Uuid,
-        proposal_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        message_id: Id,
+        proposal_id: Id,
+        owner_user_id: Id,
         knowledge_config: &KnowledgeConfig,
         input: AcceptProposalInput<'_>,
     ) -> Result<AcceptedProposal, ChatError> {
@@ -1199,7 +1198,7 @@ impl<'a> ChatService<'a> {
         ensure_proposal_pending(&proposal)?;
 
         let str_field = |key: &str| proposal.get(key).and_then(serde_json::Value::as_str);
-        let uuid_field = |key: &str| str_field(key).and_then(|s| Uuid::parse_str(s).ok());
+        let uuid_field = |key: &str| str_field(key).and_then(|s| Id::parse_str(s).ok());
         let override_or = |value: Option<&str>, key: &str| {
             value
                 .map(str::to_string)
@@ -1283,10 +1282,10 @@ impl<'a> ChatService<'a> {
     /// Reject a pending proposal. Creates nothing.
     pub async fn reject_proposal(
         &self,
-        session_id: Uuid,
-        message_id: Uuid,
-        proposal_id: Uuid,
-        owner_user_id: Uuid,
+        session_id: Id,
+        message_id: Id,
+        proposal_id: Id,
+        owner_user_id: Id,
     ) -> Result<ChatMessage, ChatError> {
         self.get_session(session_id, owner_user_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -1304,8 +1303,8 @@ impl<'a> ChatService<'a> {
 /// Lock one agent message's proposal metadata for the rest of `tx`.
 async fn lock_proposal_message(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: Uuid,
-    message_id: Uuid,
+    session_id: Id,
+    message_id: Id,
 ) -> Result<serde_json::Value, ChatError> {
     let row: Option<Option<serde_json::Value>> = sqlx::query_scalar(
         r#"
@@ -1330,7 +1329,7 @@ fn ensure_proposal_pending(proposal: &serde_json::Value) -> Result<(), ChatError
 
 async fn update_message_metadata(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    message_id: Uuid,
+    message_id: Id,
     metadata: &serde_json::Value,
 ) -> Result<ChatMessage, ChatError> {
     let row = sqlx::query(
@@ -1352,7 +1351,7 @@ async fn update_message_metadata(
 /// a repository-copy note can land while the person is posting.
 async fn lock_chat_session(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: Uuid,
+    session_id: Id,
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT id FROM chat_sessions WHERE id = $1 FOR UPDATE")
         .bind(session_id)
@@ -1365,8 +1364,8 @@ async fn lock_chat_session(
 /// with the path each file is staged at.
 fn render_message_text(
     body: &str,
-    attachment_ids: &[Uuid],
-    by_id: &std::collections::HashMap<Uuid, Attachment>,
+    attachment_ids: &[Id],
+    by_id: &std::collections::HashMap<Id, Attachment>,
 ) -> String {
     let mut text = String::new();
     if !body.is_empty() {
@@ -1538,7 +1537,7 @@ mod tests {
     #[tokio::test]
     async fn create_ticket_from_chat_defaults_priority_to_medium() {
         let pool = crate::db::shared_test_pool().await.expect("pool");
-        let user_id = Uuid::new_v4();
+        let user_id = Id::new();
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
         )
@@ -1548,7 +1547,7 @@ mod tests {
         .await
         .expect("user");
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("chat priority board")
@@ -1557,7 +1556,7 @@ mod tests {
             .await
             .expect("board");
 
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -1576,7 +1575,7 @@ mod tests {
         .await
         .expect("agent");
 
-        let session_id = Uuid::new_v4();
+        let session_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO chat_sessions (id, board_id, owner_user_id, agent_id, status)

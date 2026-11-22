@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::{header, StatusCode};
@@ -195,7 +196,7 @@ async fn completed_codex_run_replays_structured_fixture_events_in_order() {
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let (ticket_id, agent_id, _) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
-    let parsed_agent_id = uuid::Uuid::parse_str(&agent_id).expect("valid agent id");
+    let parsed_agent_id = Id::parse_str(&agent_id).expect("valid agent id");
     sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
         .bind(parsed_agent_id)
         .execute(&pool)
@@ -207,7 +208,7 @@ async fn completed_codex_run_replays_structured_fixture_events_in_order() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex/done.jsonl");
     let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
     let registry = RunStreamRegistry::new();
-    let handle = registry.register(uuid::Uuid::new_v4());
+    let handle = registry.register(Id::new());
     let mut publisher = CodexConsolePublisher::new(ToolNameStyle::ServerToolFields);
     for line in raw.lines() {
         let value = serde_json::from_str(line).expect("valid Codex fixture event");
@@ -334,9 +335,9 @@ async fn insert_run_row(
     agent_id: &str,
     status: &str,
 ) -> String {
-    let run_id = uuid::Uuid::new_v4();
-    let ticket_id = uuid::Uuid::parse_str(ticket_id).expect("valid ticket id");
-    let agent_id = uuid::Uuid::parse_str(agent_id).expect("valid agent id");
+    let run_id = Id::new();
+    let ticket_id = Id::parse_str(ticket_id).expect("valid ticket id");
+    let agent_id = Id::parse_str(agent_id).expect("valid agent id");
     sqlx::query(
         r#"
         INSERT INTO agent_runs (

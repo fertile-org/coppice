@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,21 +23,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub struct MarketplaceService<'a> {
     pool: &'a PgPool,
     catalog: Option<&'a MarketplaceCatalog>,
 }
 
-type CatalogMap = HashMap<(Uuid, Option<String>), Arc<Vec<CachedCatalogEntry>>>;
+type CatalogMap = HashMap<(Id, Option<String>), Arc<Vec<CachedCatalogEntry>>>;
 
 /// In-memory parsed catalogs, keyed by source id and commit. Shared on `AppState`.
 #[derive(Default)]
 pub struct MarketplaceCatalog {
     entries: Mutex<CatalogMap>,
-    refresh_locks: tokio::sync::Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
-    last_refresh: Mutex<HashMap<Uuid, Instant>>,
+    refresh_locks: tokio::sync::Mutex<HashMap<Id, Arc<tokio::sync::Mutex<()>>>>,
+    last_refresh: Mutex<HashMap<Id, Instant>>,
     refresh_clones: AtomicU64,
 }
 
@@ -60,29 +59,29 @@ impl MarketplaceCatalog {
         self.refresh_clones.load(Ordering::SeqCst)
     }
 
-    fn get(&self, id: Uuid, commit: Option<&str>) -> Option<Arc<Vec<CachedCatalogEntry>>> {
+    fn get(&self, id: Id, commit: Option<&str>) -> Option<Arc<Vec<CachedCatalogEntry>>> {
         let map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
         map.get(&(id, commit.map(str::to_string))).cloned()
     }
 
-    fn insert(&self, id: Uuid, commit: Option<String>, rows: Vec<CachedCatalogEntry>) {
+    fn insert(&self, id: Id, commit: Option<String>, rows: Vec<CachedCatalogEntry>) {
         let mut map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
         map.insert((id, commit), Arc::new(rows));
     }
 
-    fn clear(&self, id: Uuid) {
+    fn clear(&self, id: Id) {
         let mut map = self.entries.lock().unwrap_or_else(|err| err.into_inner());
         map.retain(|(source_id, _), _| *source_id != id);
     }
 
-    async fn refresh_lock(&self, id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
+    async fn refresh_lock(&self, id: Id) -> Arc<tokio::sync::Mutex<()>> {
         let mut map = self.refresh_locks.lock().await;
         map.entry(id)
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
     }
 
-    fn mark_refresh_finished(&self, id: Uuid) {
+    fn mark_refresh_finished(&self, id: Id) {
         let mut map = self
             .last_refresh
             .lock()
@@ -90,7 +89,7 @@ impl MarketplaceCatalog {
         map.insert(id, Instant::now());
     }
 
-    fn finished_after(&self, id: Uuid, started: Instant) -> bool {
+    fn finished_after(&self, id: Id, started: Instant) -> bool {
         let map = self
             .last_refresh
             .lock()
@@ -101,7 +100,7 @@ impl MarketplaceCatalog {
 
 /// One `path`-sourced entry of a marketplace folder, already on disk.
 pub struct PathEntry<'a> {
-    pub source_id: Uuid,
+    pub source_id: Id,
     /// The marketplace folder that holds `.claude-plugin/marketplace.json`.
     pub root: &'a Path,
     /// The entry's `source` value, relative to `root`.
@@ -113,7 +112,7 @@ pub struct PathEntry<'a> {
 
 /// Where a plugin folder came from. Stamped on the plugin row after placement.
 struct Origin<'a> {
-    source_id: Uuid,
+    source_id: Id,
     entry: &'a str,
     commit: Option<&'a str>,
 }
@@ -132,7 +131,7 @@ enum EntrySource {
 }
 
 struct ResolvedEntry {
-    source_id: Uuid,
+    source_id: Id,
     /// The marketplace's commit; the origin of `path` entries.
     commit: Option<String>,
     from: EntrySource,
@@ -142,7 +141,7 @@ struct ResolvedEntry {
 struct Target {
     dir: PluginDir,
     name: String,
-    update_of: Option<Uuid>,
+    update_of: Option<Id>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -166,9 +165,9 @@ pub enum EntryOutcome {
 pub struct MarketplaceJob {
     pub install: PluginInstall,
     /// Set for updates: the plugin whose row id is kept.
-    pub update_of: Option<Uuid>,
+    pub update_of: Option<Id>,
     clone_dir: PathBuf,
-    source_id: Uuid,
+    source_id: Id,
     entry: String,
     subpath: Option<String>,
     dir: PluginDir,
@@ -225,7 +224,7 @@ impl<'a> MarketplaceService<'a> {
     /// plugin dir. Object entries (`github`, `url`, `git-subdir`) return a job.
     pub async fn install_entry(
         &self,
-        source_id: Uuid,
+        source_id: Id,
         cache: &Path,
         name: &str,
         allow_file: bool,
@@ -251,7 +250,7 @@ impl<'a> MarketplaceService<'a> {
     /// folder, keeping the row id, enabled state, settings and agent access.
     pub async fn update_entry(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         cache: &Path,
         allow_file: bool,
         catalog: &SkillCatalog,
@@ -269,7 +268,7 @@ impl<'a> MarketplaceService<'a> {
         .await?
         .ok_or(PluginError::NotFound)?;
         let (Some(source_id), Some(entry)) = (
-            row.get::<Option<Uuid>, _>("origin_source_id"),
+            row.get::<Option<Id>, _>("origin_source_id"),
             row.get::<Option<String>, _>("origin_entry"),
         ) else {
             return Err(PluginError::Validation(
@@ -330,7 +329,7 @@ impl<'a> MarketplaceService<'a> {
         allow_file: bool,
         timeout: Duration,
         catalog: &SkillCatalog,
-    ) -> Result<Uuid, PluginError> {
+    ) -> Result<Id, PluginError> {
         let commit = clone(
             &job.install.git_url,
             job.install.git_ref.as_deref(),
@@ -369,8 +368,8 @@ impl<'a> MarketplaceService<'a> {
 
     async fn finish_job(
         &self,
-        id: Uuid,
-        outcome: Result<Vec<Uuid>, String>,
+        id: Id,
+        outcome: Result<Vec<Id>, String>,
     ) -> Result<PluginInstall, PluginError> {
         match outcome {
             Ok(ids) => {
@@ -453,7 +452,7 @@ impl<'a> MarketplaceService<'a> {
     /// clone itself happens in `run_job`.
     async fn start_job(
         &self,
-        source_id: Uuid,
+        source_id: Id,
         entry: &str,
         (url, git_ref, subpath): (String, Option<String>, Option<String>),
         target: Target,
@@ -501,7 +500,7 @@ impl<'a> MarketplaceService<'a> {
         } else {
             "install"
         };
-        let ids: Vec<Uuid> = target.update_of.into_iter().collect();
+        let ids: Vec<Id> = target.update_of.into_iter().collect();
         let install =
             insert_install(&mut tx, target.dir.id, kind, &url, git_ref.as_deref(), &ids).await?;
         tx.commit().await?;
@@ -534,8 +533,8 @@ impl<'a> MarketplaceService<'a> {
     ) -> Result<PluginRow, PluginError> {
         let base = PathBuf::from(&dir.path);
         let dest = base.join(name);
-        let staging = base.join(format!(".{name}.staging-{}", Uuid::new_v4()));
-        let previous = base.join(format!(".{name}.previous-{}", Uuid::new_v4()));
+        let staging = base.join(format!(".{name}.staging-{}", Id::new()));
+        let previous = base.join(format!(".{name}.previous-{}", Id::new()));
         let src_owned = src.to_path_buf();
         let staging_owned = staging.clone();
         run_blocking(move || copy_entry_tree(&src_owned, &staging_owned))
@@ -646,7 +645,7 @@ impl<'a> MarketplaceService<'a> {
 
     async fn stamp_origin(
         &self,
-        dir_id: &Uuid,
+        dir_id: &Id,
         name: &str,
         origin: &Origin<'_>,
     ) -> Result<Option<PluginRow>, PluginError> {
@@ -677,7 +676,7 @@ impl<'a> MarketplaceService<'a> {
 
     async fn resolve_entry(
         &self,
-        source_id: Uuid,
+        source_id: Id,
         cache: &Path,
         entry: &str,
         allow_file: bool,
@@ -808,7 +807,7 @@ fn resolve_inside(root: &Path, source: &str) -> Result<PathBuf, PluginError> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketplaceSource {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     /// `builtin` (embedded Coppice catalog) or `git`.
     pub kind: String,
@@ -822,7 +821,7 @@ pub struct MarketplaceSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketplaceEntry {
-    pub source_id: Uuid,
+    pub source_id: Id,
     pub source_name: String,
     pub name: String,
     pub description: String,
@@ -834,7 +833,7 @@ pub struct MarketplaceEntry {
     pub reason: Option<String>,
     /// `category` from the source's `marketplace.json`, when set.
     pub category: Option<String>,
-    pub installed_plugin_id: Option<Uuid>,
+    pub installed_plugin_id: Option<Id>,
     /// Only computed for `path` entries; object entries need a remote check.
     pub update_available: bool,
 }
@@ -843,7 +842,7 @@ pub struct MarketplaceEntry {
 pub struct EntryFilter<'a> {
     /// Case-insensitive match on entry name or description.
     pub query: Option<&'a str>,
-    pub source_id: Option<Uuid>,
+    pub source_id: Option<Id>,
     /// Exact match on the entry's `category`.
     pub category: Option<&'a str>,
 }
@@ -871,7 +870,7 @@ impl<'a> MarketplaceService<'a> {
             ON CONFLICT (name) DO NOTHING
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(BUILTIN_SOURCE_NAME)
         .execute(self.pool)
         .await?;
@@ -911,7 +910,7 @@ impl<'a> MarketplaceService<'a> {
         Ok(rows.iter().map(row_to_source).collect())
     }
 
-    pub async fn get_source(&self, id: Uuid) -> Result<MarketplaceSource, PluginError> {
+    pub async fn get_source(&self, id: Id) -> Result<MarketplaceSource, PluginError> {
         let row = sqlx::query(&format!(
             "SELECT {SOURCE_COLUMNS} FROM marketplace_sources WHERE id = $1"
         ))
@@ -959,7 +958,7 @@ impl<'a> MarketplaceService<'a> {
             RETURNING {SOURCE_COLUMNS}
             "#
         ))
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(name)
         .bind(git_url)
         .bind(git_ref)
@@ -970,7 +969,7 @@ impl<'a> MarketplaceService<'a> {
 
     /// Removes a git source and its cache folder. Plugins installed from it
     /// stay installed; their origin is cleared by the foreign key.
-    pub async fn remove_source(&self, id: Uuid, cache: &Path) -> Result<(), PluginError> {
+    pub async fn remove_source(&self, id: Id, cache: &Path) -> Result<(), PluginError> {
         let source = self.get_source(id).await?;
         if source.kind == "builtin" {
             return Err(PluginError::Conflict(
@@ -993,7 +992,7 @@ impl<'a> MarketplaceService<'a> {
     /// Runs without holding the plugin state lock.
     pub async fn refresh_source(
         &self,
-        id: Uuid,
+        id: Id,
         cache: &Path,
         allow_file: bool,
         timeout: Duration,
@@ -1023,7 +1022,7 @@ impl<'a> MarketplaceService<'a> {
 
     async fn refresh_source_inner(
         &self,
-        id: Uuid,
+        id: Id,
         cache: &Path,
         allow_file: bool,
         timeout: Duration,
@@ -1040,7 +1039,7 @@ impl<'a> MarketplaceService<'a> {
             .git_url
             .clone()
             .ok_or_else(|| PluginError::Validation("marketplace has no git URL".into()))?;
-        let staging = cache.join(format!(".{id}.refresh-{}", Uuid::new_v4()));
+        let staging = cache.join(format!(".{id}.refresh-{}", Id::new()));
         let fetched = clone(
             &url,
             source.git_ref.as_deref(),
@@ -1076,7 +1075,7 @@ impl<'a> MarketplaceService<'a> {
             }
         };
         let root = cache.join(id.to_string());
-        let aside = cache.join(format!(".{id}.previous-{}", Uuid::new_v4()));
+        let aside = cache.join(format!(".{id}.previous-{}", Id::new()));
         let had_root = root.symlink_metadata().is_ok();
         if had_root {
             if let Err(err) = std::fs::rename(&root, &aside) {
@@ -1100,7 +1099,7 @@ impl<'a> MarketplaceService<'a> {
 
     async fn mark_refreshed(
         &self,
-        id: Uuid,
+        id: Id,
         commit: Option<&str>,
     ) -> Result<MarketplaceSource, PluginError> {
         let row = sqlx::query(&format!(
@@ -1119,7 +1118,7 @@ impl<'a> MarketplaceService<'a> {
         Ok(row_to_source(&row))
     }
 
-    async fn record_error(&self, id: Uuid, reason: &str) -> Result<(), PluginError> {
+    async fn record_error(&self, id: Id, reason: &str) -> Result<(), PluginError> {
         sqlx::query("UPDATE marketplace_sources SET last_error = $2 WHERE id = $1")
             .bind(id)
             .bind(reason)
@@ -1229,7 +1228,7 @@ impl<'a> MarketplaceService<'a> {
         &self,
     ) -> Result<
         (
-            HashMap<(Uuid, String), InstalledOrigin>,
+            HashMap<(Id, String), InstalledOrigin>,
             HashMap<String, LivePlugin>,
         ),
         PluginError,
@@ -1246,7 +1245,7 @@ impl<'a> MarketplaceService<'a> {
         let mut live_by_name = HashMap::new();
         for row in &rows {
             let name: String = row.get("name");
-            let origin_source_id: Option<Uuid> = row.get("origin_source_id");
+            let origin_source_id: Option<Id> = row.get("origin_source_id");
             let origin_entry: Option<String> = row.get("origin_entry");
             live_by_name.insert(
                 name.clone(),
@@ -1272,14 +1271,14 @@ impl<'a> MarketplaceService<'a> {
 }
 
 struct InstalledOrigin {
-    id: Uuid,
+    id: Id,
     commit: Option<String>,
     version: String,
 }
 
 struct LivePlugin {
     name: String,
-    origin_source_id: Option<Uuid>,
+    origin_source_id: Option<Id>,
     origin_entry: Option<String>,
 }
 

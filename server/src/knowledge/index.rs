@@ -1,12 +1,11 @@
 //! Start-of-run index: titles of knowledge that matches the ticket, so the
 //! agent knows what to fetch with `knowledge_get`.
+use crate::domain::Id;
 
 use crate::config::KnowledgeConfig;
 use crate::knowledge::retrieval::{retrieve, RetrievalScope, RetrievedKnowledge};
 use crate::services::context_budget::{render_knowledge, ByteTokenCounter, KNOWLEDGE_DATA_NOTE};
 use sqlx::PgPool;
-use uuid::Uuid;
-
 /// Upper bound for the whole index section, heading included.
 pub const INDEX_MAX_BYTES: usize = 3_200;
 const TITLE_MAX_CHARS: usize = 160;
@@ -58,8 +57,8 @@ pub fn render_index(
 /// Retrieves for the ticket and renders the index. Writes no usage log.
 pub async fn build_run_index(
     pool: &PgPool,
-    board_id: Uuid,
-    agent_id: Uuid,
+    board_id: Id,
+    agent_id: Id,
     ticket_title: &str,
     ticket_description: &str,
     config: &KnowledgeConfig,
@@ -90,8 +89,8 @@ mod tests {
 
     fn row(title: &str, score: f64) -> RetrievedKnowledge {
         RetrievedKnowledge {
-            item_id: Uuid::new_v4(),
-            revision_id: Uuid::new_v4(),
+            item_id: Id::new(),
+            revision_id: Id::new(),
             scope: "board".into(),
             knowledge_type: "test_command".into(),
             title: title.into(),

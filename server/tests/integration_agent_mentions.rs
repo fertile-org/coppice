@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -13,8 +14,6 @@ use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 #[tokio::test]
 async fn successful_attention_mention_persists_without_starting_response_run() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -64,8 +63,8 @@ async fn successful_attention_mention_persists_without_starting_response_run() {
             .count(),
         0
     );
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
-    let mentions = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid)>(
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket UUID");
+    let mentions = sqlx::query_as::<_, (Id, Id)>(
         r#"
         SELECT tm.comment_id, tm.mentioned_agent_id
         FROM ticket_mentions tm
@@ -87,7 +86,7 @@ async fn successful_attention_mention_persists_without_starting_response_run() {
         "#,
     )
     .bind(ticket_uuid)
-    .bind(Uuid::parse_str(&pm_id).expect("PM UUID"))
+    .bind(Id::parse_str(&pm_id).expect("PM UUID"))
     .fetch_one(pool)
     .await
     .expect("count attention notifications");
@@ -143,7 +142,7 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
             IF EXISTS (
                 SELECT 1 FROM agent_runs
                 WHERE ticket_id = NEW.ticket_id
-                  AND agent_id = TG_ARGV[0]::uuid
+                  AND agent_id = TG_ARGV[0]::varchar
                   AND status IN ('queued', 'running')
             ) THEN
                 RAISE EXCEPTION 'follow-up exposed before source run became terminal';
@@ -162,7 +161,7 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
         BEFORE INSERT ON agent_runs
         FOR EACH ROW
         WHEN (
-            NEW.agent_id = '{dba_id}'::uuid
+            NEW.agent_id = '{dba_id}'::varchar
             AND NEW.job_type = 'respond_to_mention'
         )
         EXECUTE FUNCTION test_followup_after_source_terminal('{frontend_id}')
@@ -277,7 +276,7 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     assert!(context.contains("Do not take assignment"));
     assert!(context.contains("Read-only run"));
 
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket UUID");
     let handled_mentions = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1 AND status = 'handled'",
     )
@@ -360,7 +359,7 @@ async fn assert_queued_consultation_survives_target_change(
         AFTER INSERT ON agent_runs
         FOR EACH ROW
         WHEN (
-            NEW.agent_id = '{dba_id}'::uuid
+            NEW.agent_id = '{dba_id}'::varchar
             AND NEW.job_type = 'respond_to_mention'
         )
         EXECUTE FUNCTION test_mutate_consultation_target()
@@ -403,7 +402,7 @@ async fn assert_queued_consultation_survives_target_change(
     let target_state = sqlx::query_as::<_, (bool, String, Option<String>)>(
         "SELECT enabled, name, preset_source FROM agents WHERE id = $1",
     )
-    .bind(Uuid::parse_str(&dba_id).expect("DBA UUID"))
+    .bind(Id::parse_str(&dba_id).expect("DBA UUID"))
     .fetch_one(pool)
     .await
     .expect("load mutated target");
@@ -421,8 +420,8 @@ async fn assert_queued_consultation_survives_target_change(
         LIMIT 1
         "#,
     )
-    .bind(Uuid::parse_str(&ticket_id).expect("ticket UUID"))
-    .bind(Uuid::parse_str(&dba_id).expect("DBA UUID"))
+    .bind(Id::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Id::parse_str(&dba_id).expect("DBA UUID"))
     .fetch_one(pool)
     .await
     .expect("load consultation source comment");
@@ -483,7 +482,7 @@ async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
     .await;
 
     sqlx::query("UPDATE agents SET preset_source = 'pm_consult_tech_lead' WHERE id = $1")
-        .bind(Uuid::parse_str(&pm_id).expect("PM UUID"))
+        .bind(Id::parse_str(&pm_id).expect("PM UUID"))
         .execute(pool)
         .await
         .expect("select PM regression fixture");
@@ -525,8 +524,8 @@ async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
     )
     .await;
 
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket UUID");
-    let tech_lead_uuid = Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket UUID");
+    let tech_lead_uuid = Id::parse_str(&tech_lead_id).expect("Tech Lead UUID");
     let mention_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1 AND mentioned_agent_id = $2",
     )
@@ -592,9 +591,9 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let ticket_id = Uuid::parse_str(&ticket_id).expect("ticket UUID");
-    let source_id = Uuid::parse_str(&source_id).expect("source agent UUID");
-    let target_id = Uuid::parse_str(&target_id).expect("target agent UUID");
+    let ticket_id = Id::parse_str(&ticket_id).expect("ticket UUID");
+    let source_id = Id::parse_str(&source_id).expect("source agent UUID");
+    let target_id = Id::parse_str(&target_id).expect("target agent UUID");
 
     let mut comment_body = "Please respond".to_string();
     let request = AgentRequest {
@@ -629,14 +628,14 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
             comment.id,
             &["backend_engineer".to_string()],
             None,
-            Uuid::parse_str(&board_id).expect("board UUID"),
+            Id::parse_str(&board_id).expect("board UUID"),
         )
         .await
         .expect("create pending mention");
     assert_eq!(mentions.len(), 1);
     assert_eq!(mentions[0].mentioned_agent_id, target_id);
 
-    let active_run_id = Uuid::new_v4();
+    let active_run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (

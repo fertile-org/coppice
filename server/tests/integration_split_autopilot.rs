@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use std::path::{Path, PathBuf};
@@ -11,16 +12,14 @@ use coppice_server::AppState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 struct Split {
     state: Arc<AppState>,
     app: Router,
     cookie: String,
     csrf: String,
     board_id: String,
-    parent_id: Uuid,
-    children: Vec<Uuid>,
+    parent_id: Id,
+    children: Vec<Id>,
 }
 
 async fn post(
@@ -43,8 +42,8 @@ async fn approved_split(titles: &[&str]) -> Split {
         common::create_agent_with_preset_key(&app, "backend_engineer", "Planner", &cookie, &csrf)
             .await;
     let parent = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let parent_id = Uuid::parse_str(&parent).unwrap();
-    let agent = Uuid::parse_str(&agent_id).unwrap();
+    let parent_id = Id::parse_str(&parent).unwrap();
+    let agent = Id::parse_str(&agent_id).unwrap();
     let pool = state.db.clone().unwrap();
     let status = app
         .clone()
@@ -59,7 +58,7 @@ async fn approved_split(titles: &[&str]) -> Split {
         .unwrap();
     assert_eq!(status.status(), StatusCode::OK, "plan review");
 
-    let plan_id = Uuid::new_v4();
+    let plan_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO ticket_plans (id, ticket_id, revision, body, content_version)
@@ -99,7 +98,7 @@ async fn approved_split(titles: &[&str]) -> Split {
     .await;
     assert_eq!(approved.status(), StatusCode::OK, "approve plan");
 
-    let children: Vec<Uuid> = sqlx::query_scalar(
+    let children: Vec<Id> = sqlx::query_scalar(
         r#"
         SELECT id FROM tickets
         WHERE parent_ticket_id = $1
@@ -125,7 +124,7 @@ async fn approved_split(titles: &[&str]) -> Split {
     }
 }
 
-fn status_of(ticket: &Value, id: Uuid) -> String {
+fn status_of(ticket: &Value, id: Id) -> String {
     ticket["splitProgress"]["children"]
         .as_array()
         .unwrap()
@@ -137,7 +136,7 @@ fn status_of(ticket: &Value, id: Uuid) -> String {
         .to_string()
 }
 
-async fn child_status(split: &Split, id: Uuid) -> String {
+async fn child_status(split: &Split, id: Id) -> String {
     let ticket = common::get_ticket(
         &split.app,
         &split.parent_id.to_string(),
@@ -148,7 +147,7 @@ async fn child_status(split: &Split, id: Uuid) -> String {
     status_of(&ticket, id)
 }
 
-async fn mark_accepted(split: &Split, child: Uuid) {
+async fn mark_accepted(split: &Split, child: Id) {
     let pool = split.state.db.clone().unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
         .bind(child)
@@ -387,7 +386,7 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Planner", &cookie, &csrf)
             .await;
-    let agent = Uuid::parse_str(&agent_id).unwrap();
+    let agent = Id::parse_str(&agent_id).unwrap();
     let pool = state.db.clone().unwrap();
     sqlx::query("UPDATE agents SET role = 'PM', preset_source = 'pm' WHERE id = $1")
         .bind(agent)
@@ -397,7 +396,7 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
 
     let parent = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &parent, &repo_id, &cookie, &csrf).await;
-    let parent_id = Uuid::parse_str(&parent).unwrap();
+    let parent_id = Id::parse_str(&parent).unwrap();
     let status = app
         .clone()
         .oneshot(common::json_request(
@@ -417,7 +416,7 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
         VALUES ($1, $2, 1, '## Plan', 1)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(parent_id)
     .execute(&pool)
     .await
@@ -446,7 +445,7 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
     )
     .await;
     assert_eq!(approved.status(), StatusCode::OK, "approve");
-    let children: Vec<Uuid> = sqlx::query_scalar(
+    let children: Vec<Id> = sqlx::query_scalar(
         r#"
         SELECT id FROM tickets WHERE parent_ticket_id = $1
         ORDER BY created_at, id
@@ -472,7 +471,7 @@ async fn approved_split_with_repo(titles: &[&str]) -> GitSplit {
     }
 }
 
-fn worktree_with_file(git_dir: &Path, worktrees: &Path, ticket_id: Uuid, file: &str) -> PathBuf {
+fn worktree_with_file(git_dir: &Path, worktrees: &Path, ticket_id: Id, file: &str) -> PathBuf {
     let paths = compute_paths(worktrees, "test-repo", ticket_id);
     let branch = legacy_ticket_branch(ticket_id);
     std::fs::create_dir_all(&paths.worktree_dir).unwrap();
@@ -517,7 +516,7 @@ fn worktree_with_file(git_dir: &Path, worktrees: &Path, ticket_id: Uuid, file: &
     paths.worktree_dir
 }
 
-async fn accept_and_merge(git: &GitSplit, child: Uuid) {
+async fn accept_and_merge(git: &GitSplit, child: Id) {
     let id = child.to_string();
     let moved = git
         .split

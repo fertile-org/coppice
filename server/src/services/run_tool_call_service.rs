@@ -1,14 +1,13 @@
+use crate::domain::Id;
 use serde_json::Value;
 use sqlx::PgPool;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct RunToolCallRow {
-    pub id: Uuid,
+    pub id: Id,
     pub tool: String,
     pub source: String,
-    pub plugin_id: Option<Uuid>,
+    pub plugin_id: Option<Id>,
     pub plugin_name: Option<String>,
     pub status: String,
     pub error: Option<String>,
@@ -33,14 +32,14 @@ impl<'a> RunToolCallService<'a> {
         Self { pool }
     }
 
-    pub async fn run_exists(&self, run_id: Uuid) -> Result<bool, sqlx::Error> {
+    pub async fn run_exists(&self, run_id: Id) -> Result<bool, sqlx::Error> {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_runs WHERE id = $1)")
             .bind(run_id)
             .fetch_one(self.pool)
             .await
     }
 
-    pub async fn list_for_run(&self, run_id: Uuid) -> Result<RunToolCalls, sqlx::Error> {
+    pub async fn list_for_run(&self, run_id: Id) -> Result<RunToolCalls, sqlx::Error> {
         let items: Vec<RunToolCallRow> = sqlx::query_as(
             r#"
             SELECT c.id, c.tool, c.source, c.plugin_id, p.name AS plugin_name,
@@ -85,7 +84,7 @@ mod tests {
 
     fn row(tool: &str, status: &str, args_summary: &str) -> RunToolCallRow {
         RunToolCallRow {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             tool: tool.into(),
             source: "skill".into(),
             plugin_id: None,

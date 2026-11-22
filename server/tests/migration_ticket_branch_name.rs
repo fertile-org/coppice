@@ -1,4 +1,5 @@
 #![cfg(feature = "embedded-test-db")]
+use uuid::Uuid;
 
 mod common;
 
@@ -7,8 +8,6 @@ use std::str::FromStr;
 
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
-use uuid::Uuid;
-
 struct MigrationDb {
     name: String,
     pool: PgPool,

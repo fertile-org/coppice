@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::copy::plan::NO_PM;
 use crate::domain::comment::AuthorType;
 use crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
@@ -28,21 +29,19 @@ use crate::services::workflow_service::WorkflowService;
 use sqlx::PgPool;
 use sqlx::Row;
 use std::str::FromStr;
-use uuid::Uuid;
-
 const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
 const JOB_TYPE_CHAT_TURN: &str = "chat_turn";
 
 pub struct StartRunOptions {
     pub context_profile: ContextProfile,
-    pub trigger_comment_id: Option<Uuid>,
+    pub trigger_comment_id: Option<Id>,
     /// Move a Done ticket to In Progress in the run-insert transaction, after
     /// a person asked an agent to resolve a merge conflict.
     pub reopen_done_after_merge_conflict: bool,
     /// Assignee to set when reopening a Done ticket. Applied in the same
     /// transaction as the queued run so a failed start leaves the ticket
     /// Done and unassigned.
-    pub reopen_assignee_id: Option<Uuid>,
+    pub reopen_assignee_id: Option<Id>,
 }
 
 impl Default for StartRunOptions {
@@ -164,7 +163,7 @@ impl<'a> RunService<'a> {
     /// The check counts tickets. It does not read the plan or send a prompt.
     async fn hold_if_ready_queue_is_full(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: TicketStatus,
         job_type: &str,
     ) -> Result<(), RunError> {
@@ -193,7 +192,7 @@ impl<'a> RunService<'a> {
         Err(RunError::Validation(hold.message))
     }
 
-    pub async fn start_run(&self, ticket_id: Uuid) -> Result<AgentRun, RunError> {
+    pub async fn start_run(&self, ticket_id: Id) -> Result<AgentRun, RunError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
 
         let agent_id = ticket
@@ -252,7 +251,7 @@ impl<'a> RunService<'a> {
         }
 
         let mut tx = self.pool.begin().await?;
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
 
         let row = sqlx::query(
             r#"
@@ -278,7 +277,7 @@ impl<'a> RunService<'a> {
         .bind(run_status_to_str(RunStatus::Queued))
         .bind(PROFILE_ID)
         .bind(ContextProfile::Full.as_str())
-        .bind(None::<Uuid>)
+        .bind(None::<Id>)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(row) = row else {
@@ -292,7 +291,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(JOB_TYPE_WORK_ON_TICKET)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -318,7 +317,7 @@ impl<'a> RunService<'a> {
 
     /// A PM on Backlog without Skip planning writes the plan. No repository
     /// is required. The planner is the enabled PM, not necessarily this assignee.
-    async fn start_assigned_planning(&self, ticket_id: Uuid) -> Result<AgentRun, RunError> {
+    async fn start_assigned_planning(&self, ticket_id: Id) -> Result<AgentRun, RunError> {
         match PlanningService::new(self.pool)
             .start_planning(ticket_id)
             .await
@@ -333,7 +332,7 @@ impl<'a> RunService<'a> {
         }
     }
 
-    pub async fn get(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
+    pub async fn get(&self, run_id: Id) -> Result<AgentRun, RunError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -355,8 +354,8 @@ impl<'a> RunService<'a> {
 
     pub async fn active_for_ticket_agent(
         &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        ticket_id: Id,
+        agent_id: Id,
     ) -> Result<Option<AgentRun>, RunError> {
         let row = sqlx::query(
             r#"
@@ -381,7 +380,7 @@ impl<'a> RunService<'a> {
     }
 
     /// Queued or running runs on a ticket, oldest first.
-    pub async fn active_for_ticket(&self, ticket_id: Uuid) -> Result<Vec<AgentRun>, RunError> {
+    pub async fn active_for_ticket(&self, ticket_id: Id) -> Result<Vec<AgentRun>, RunError> {
         let rows = sqlx::query(
             r#"
             SELECT
@@ -404,7 +403,7 @@ impl<'a> RunService<'a> {
 
     pub async fn list_for_ticket(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Vec<AgentRunWithConnector>, RunError> {
         self.list_recent_for_ticket(ticket_id, i64::MAX).await
     }
@@ -412,7 +411,7 @@ impl<'a> RunService<'a> {
     /// The newest `limit` runs for a ticket, newest first.
     pub async fn list_recent_for_ticket(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         limit: i64,
     ) -> Result<Vec<AgentRunWithConnector>, RunError> {
         let rows = sqlx::query(
@@ -454,7 +453,7 @@ impl<'a> RunService<'a> {
             .collect())
     }
 
-    pub async fn stop(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
+    pub async fn stop(&self, run_id: Id) -> Result<AgentRun, RunError> {
         // Capture prior status: cancel_for_run drops the pending job, so a
         // still-queued plugin-build stop never reaches the worker revert path.
         let row = sqlx::query(
@@ -486,7 +485,7 @@ impl<'a> RunService<'a> {
 
         let was_queued: String = row.get("was_status");
         let was_job_type: String = row.get("was_job_type");
-        let plugin_build_id: Option<Uuid> = row.get("plugin_build_id");
+        let plugin_build_id: Option<Id> = row.get("plugin_build_id");
 
         // Cut off gateway access right away rather than waiting for the worker
         // to notice the cancel; a stopped run's submission is already cleared.
@@ -520,13 +519,13 @@ impl<'a> RunService<'a> {
 
     /// Best effort: the run is already terminal, and the worker's own grant
     /// revokes again when the connector returns.
-    async fn revoke_run_tokens(&self, run_id: Uuid) {
+    async fn revoke_run_tokens(&self, run_id: Id) {
         if let Err(err) = TokenService::new(self.pool).revoke_for_run(run_id).await {
             tracing::warn!(%run_id, error = %err, "failed to revoke run tool token");
         }
     }
 
-    pub async fn retry(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
+    pub async fn retry(&self, run_id: Id) -> Result<AgentRun, RunError> {
         crate::host_env::invalidate();
         let run = self.get(run_id).await?;
 
@@ -542,7 +541,7 @@ impl<'a> RunService<'a> {
         self.start_run(ticket_id).await
     }
 
-    pub async fn mark_running(&self, run_id: Uuid) -> Result<(), RunError> {
+    pub async fn mark_running(&self, run_id: Id) -> Result<(), RunError> {
         let result = sqlx::query(
             r#"
             UPDATE agent_runs
@@ -564,7 +563,7 @@ impl<'a> RunService<'a> {
 
     pub async fn finish_with_apply(
         &self,
-        run_id: Uuid,
+        run_id: Id,
         apply: ApplyResult,
         worktree_path: Option<String>,
         branch_name: Option<String>,
@@ -634,8 +633,8 @@ impl<'a> RunService<'a> {
 
     pub async fn start_run_for_agent(
         &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        ticket_id: Id,
+        agent_id: Id,
         job_type: &str,
         options: StartRunOptions,
     ) -> Result<AgentRun, RunError> {
@@ -686,7 +685,7 @@ impl<'a> RunService<'a> {
         let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
 
         let row = sqlx::query(
             r#"
@@ -726,7 +725,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(job_type)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -750,7 +749,7 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
-    async fn agent_key_and_role(&self, agent_id: Uuid) -> Result<(String, String), RunError> {
+    async fn agent_key_and_role(&self, agent_id: Id) -> Result<(String, String), RunError> {
         let agent = AgentService::new(self.pool).get(agent_id).await?;
         let agent_key = agent
             .preset_source
@@ -768,13 +767,13 @@ impl<'a> RunService<'a> {
     #[allow(clippy::too_many_arguments)]
     async fn apply_queued_run_start_status(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        ticket_id: Uuid,
+        ticket_id: Id,
         agent_key: &str,
         agent_role: &str,
         job_type: &str,
         context_profile: ContextProfile,
         reopen_done_after_merge_conflict: bool,
-        reopen_assignee_id: Option<Uuid>,
+        reopen_assignee_id: Option<Id>,
     ) -> Result<(), RunError> {
         let row = sqlx::query(
             r#"
@@ -818,14 +817,14 @@ impl<'a> RunService<'a> {
         if new_status == TicketStatus::InProgress {
             let skip_planning: bool = row.get("skip_planning");
             let content_version: i32 = row.get("content_version");
-            let approved_id: Option<Uuid> = row.get("approved_plan_id");
+            let approved_id: Option<Id> = row.get("approved_plan_id");
             let approved_version: Option<i32> = row.get("approved_plan_content_version");
             let approved = if skip_planning {
                 false
             } else {
                 match (approved_id, approved_version) {
                     (Some(plan_id), Some(version)) if version == content_version => {
-                        let latest: Option<(Uuid, i32)> = sqlx::query_as(
+                        let latest: Option<(Id, i32)> = sqlx::query_as(
                             r#"
                             SELECT id, content_version
                             FROM ticket_plans
@@ -876,9 +875,9 @@ impl<'a> RunService<'a> {
     /// `after_status_write(Done, InProgress)` is a no-op, so it is not called.
     async fn reopen_done_after_merge_conflict(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        ticket_id: Uuid,
+        ticket_id: Id,
         current: TicketStatus,
-        assignee_id: Option<Uuid>,
+        assignee_id: Option<Id>,
     ) -> Result<(), RunError> {
         if current != TicketStatus::Done {
             return Err(RunError::Validation(
@@ -914,12 +913,12 @@ impl<'a> RunService<'a> {
 
     pub async fn start_chat_turn(
         &self,
-        chat_session_id: Uuid,
-        chat_message_id: Uuid,
-        agent_id: Uuid,
+        chat_session_id: Id,
+        chat_message_id: Id,
+        agent_id: Id,
     ) -> Result<AgentRun, RunError> {
         let mut tx = self.pool.begin().await?;
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
 
         let row = sqlx::query(
             r#"
@@ -961,7 +960,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(JOB_TYPE_CHAT_TURN)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -976,10 +975,10 @@ impl<'a> RunService<'a> {
     /// transaction so the batch and its run commit together.
     pub async fn start_compaction_run_in_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        batch_id: Uuid,
-        agent_id: Uuid,
+        batch_id: Id,
+        agent_id: Id,
     ) -> Result<AgentRun, RunError> {
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1011,7 +1010,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(JOB_TYPE_COMPACT_KNOWLEDGE)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -1025,10 +1024,10 @@ impl<'a> RunService<'a> {
     /// transaction so the check and its run commit together.
     pub async fn create_connector_check_run(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        check_id: Uuid,
-        agent_id: Uuid,
+        check_id: Id,
+        agent_id: Id,
     ) -> Result<AgentRun, RunError> {
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1060,7 +1059,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(JOB_TYPE_CONNECTOR_CHECK)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -1073,8 +1072,8 @@ impl<'a> RunService<'a> {
     /// Queue a plugin-build plan or build run. Owner is `plugin_build_id` only.
     pub async fn create_plugin_build_run(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        plugin_build_id: Uuid,
-        agent_id: Uuid,
+        plugin_build_id: Id,
+        agent_id: Id,
         job_type: &str,
     ) -> Result<AgentRun, RunError> {
         if job_type != JOB_TYPE_PLAN_PLUGIN_BUILD && job_type != JOB_TYPE_BUILD_PLUGIN {
@@ -1082,7 +1081,7 @@ impl<'a> RunService<'a> {
                 "unsupported plugin build job type: {job_type}"
             )));
         }
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1114,7 +1113,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(job_type)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -1126,7 +1125,7 @@ impl<'a> RunService<'a> {
 
     pub async fn finish_run(
         &self,
-        run_id: Uuid,
+        run_id: Id,
         run_status: RunStatus,
         worktree_path: Option<String>,
         branch_name: Option<String>,
@@ -1160,7 +1159,7 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
-    pub async fn finish_failed(&self, run_id: Uuid, message: &str) -> Result<AgentRun, RunError> {
+    pub async fn finish_failed(&self, run_id: Id, message: &str) -> Result<AgentRun, RunError> {
         let row = sqlx::query(
             r#"
             UPDATE agent_runs
@@ -1195,7 +1194,7 @@ impl<'a> RunService<'a> {
     /// Written before the connector starts so a crash can still see them.
     pub async fn record_worktree_start(
         &self,
-        run_id: Uuid,
+        run_id: Id,
         worktree_path: &str,
         branch_name: &str,
         start_sha: &str,
@@ -1218,7 +1217,7 @@ impl<'a> RunService<'a> {
 
     /// Store the first model the CLI reported. A later or blank value does not
     /// replace it, and this never copies the agent's saved model.
-    pub async fn set_console_kind(&self, run_id: Uuid, kind: &str) -> Result<(), RunError> {
+    pub async fn set_console_kind(&self, run_id: Id, kind: &str) -> Result<(), RunError> {
         sqlx::query("UPDATE agent_runs SET console_kind = $2 WHERE id = $1")
             .bind(run_id)
             .bind(kind)
@@ -1227,7 +1226,7 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
-    pub async fn set_reported_model(&self, run_id: Uuid, model: &str) -> Result<(), RunError> {
+    pub async fn set_reported_model(&self, run_id: Id, model: &str) -> Result<(), RunError> {
         let model = model.trim();
         if model.is_empty() {
             return Ok(());
@@ -1248,7 +1247,7 @@ impl<'a> RunService<'a> {
     }
 
     /// Reported model and whether it is on the connector's uncovered list.
-    pub async fn model_display(&self, run_id: Uuid) -> Result<(Option<String>, bool), RunError> {
+    pub async fn model_display(&self, run_id: Id) -> Result<(Option<String>, bool), RunError> {
         let row = sqlx::query(
             r#"
             SELECT ar.reported_model,
@@ -1275,7 +1274,7 @@ impl<'a> RunService<'a> {
 
     pub async fn set_session_id(
         &self,
-        run_id: Uuid,
+        run_id: Id,
         session_id: &str,
         connector: &str,
     ) -> Result<(), RunError> {
@@ -1292,10 +1291,10 @@ impl<'a> RunService<'a> {
     /// from another connector are skipped: the agent may have switched since.
     pub async fn latest_ticket_session(
         &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        ticket_id: Id,
+        agent_id: Id,
         connector: &str,
-        excluding_run: Uuid,
+        excluding_run: Id,
     ) -> Result<Option<String>, RunError> {
         let session_id = sqlx::query_scalar(
             r#"
@@ -1317,7 +1316,7 @@ impl<'a> RunService<'a> {
     }
 
     /// Drop a session id captured from a resume attempt that did not continue.
-    pub async fn clear_session_id(&self, run_id: Uuid) -> Result<(), RunError> {
+    pub async fn clear_session_id(&self, run_id: Id) -> Result<(), RunError> {
         sqlx::query("UPDATE agent_runs SET session_id = NULL WHERE id = $1")
             .bind(run_id)
             .execute(self.pool)
@@ -1325,7 +1324,7 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
-    pub async fn mark_interrupted(&self, run_id: Uuid, reason: &str) -> Result<AgentRun, RunError> {
+    pub async fn mark_interrupted(&self, run_id: Id, reason: &str) -> Result<AgentRun, RunError> {
         let message = format!("interrupted: {reason}");
         let run = self.finish_failed(run_id, &message).await?;
 
@@ -1370,7 +1369,7 @@ impl<'a> RunService<'a> {
 
     pub async fn agent_connector_for_run(
         &self,
-        agent_id: Uuid,
+        agent_id: Id,
     ) -> Result<Option<String>, RunError> {
         sqlx::query_scalar("SELECT connector FROM agents WHERE id = $1")
             .bind(agent_id)
@@ -1379,7 +1378,7 @@ impl<'a> RunService<'a> {
             .map_err(RunError::from)
     }
 
-    pub async fn is_cancelled(&self, run_id: Uuid) -> Result<bool, RunError> {
+    pub async fn is_cancelled(&self, run_id: Id) -> Result<bool, RunError> {
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
                 .bind(run_id)
@@ -1397,7 +1396,7 @@ impl<'a> RunService<'a> {
 /// before the process exits. The first non-empty value wins.
 pub fn spawn_reported_model_writer(
     pool: PgPool,
-    run_id: Uuid,
+    run_id: Id,
     stream: &crate::sessions::run_registry::RunStreamHandle,
 ) -> tokio::task::JoinHandle<()> {
     // Move only the receiver: holding the handle would keep it alive forever
@@ -1422,7 +1421,7 @@ pub fn spawn_reported_model_writer(
 /// Persist whatever the stream has already captured. Safe to call more than once.
 pub async fn record_reported_model(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: Id,
     stream: &crate::sessions::run_registry::RunStreamHandle,
 ) {
     if let Some(model) = stream.reported_model() {
@@ -1444,8 +1443,8 @@ mod tests {
         Some(pool)
     }
 
-    async fn insert_run(pool: &PgPool, status: RunStatus) -> Uuid {
-        let board_id = Uuid::new_v4();
+    async fn insert_run(pool: &PgPool, status: RunStatus) -> Id {
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("test board")
@@ -1454,7 +1453,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -1472,7 +1471,7 @@ mod tests {
         .await
         .expect("insert agent");
 
-        let ticket_id = Uuid::new_v4();
+        let ticket_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -1491,7 +1490,7 @@ mod tests {
         .await
         .expect("insert ticket");
 
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1540,7 +1539,7 @@ mod tests {
             return;
         };
         let run_id = insert_run(&pool, RunStatus::Queued).await;
-        let job_id = Uuid::new_v4();
+        let job_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_jobs (id, run_id, job_type, status)
@@ -1598,7 +1597,7 @@ mod tests {
 
         let svc = RunService::new(&pool);
         let active = svc.list_active_runs().await.expect("list active runs");
-        let active_ids: Vec<Uuid> = active.iter().map(|run| run.id).collect();
+        let active_ids: Vec<Id> = active.iter().map(|run| run.id).collect();
 
         assert!(active_ids.contains(&running_id));
         assert!(active_ids.contains(&queued_id));
@@ -1674,7 +1673,7 @@ mod tests {
             .output()
             .expect("git commit");
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("handoff board")
@@ -1683,7 +1682,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -1702,7 +1701,7 @@ mod tests {
         .await
         .expect("insert agent");
 
-        let repo_id = Uuid::new_v4();
+        let repo_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO repos (id, name, local_path, default_branch, verification_status)
@@ -1718,7 +1717,7 @@ mod tests {
         .await
         .expect("insert repo");
 
-        let ticket_id = Uuid::new_v4();
+        let ticket_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -1762,7 +1761,7 @@ mod tests {
             return;
         };
         let run_id = insert_run(&pool, RunStatus::Succeeded).await;
-        let ticket_id: Uuid = sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
+        let ticket_id: Id = sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
             .bind(run_id)
             .fetch_one(&pool)
             .await

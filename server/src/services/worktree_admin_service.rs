@@ -1,4 +1,5 @@
 //! List and remove ticket worktrees across all repositories (Repositories → Worktrees).
+use crate::domain::Id;
 
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_from_str, status_to_str};
@@ -14,8 +15,6 @@ use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 const SIZE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const DIRTY_CHECK_CONCURRENCY: usize = 8;
 const SIZE_WALK_CONCURRENCY: usize = 4;
@@ -161,9 +160,9 @@ fn is_ticket_worktree_folder(name: &str) -> bool {
 pub struct WorktreeAdminEntry {
     pub folder_name: String,
     pub path: String,
-    pub repo_id: Option<Uuid>,
+    pub repo_id: Option<Id>,
     pub repo_name: Option<String>,
-    pub ticket_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
     pub ticket_title: Option<String>,
     pub ticket_status: Option<String>,
     pub archived: bool,
@@ -214,12 +213,12 @@ pub enum WorktreeAdminError {
 }
 
 struct TicketMatch {
-    ticket_id: Uuid,
+    ticket_id: Id,
     title: String,
     status: TicketStatus,
     archived: bool,
     merged: bool,
-    repo_id: Uuid,
+    repo_id: Id,
     repo_name: String,
     last_run_at: Option<OffsetDateTime>,
     expected_dir: PathBuf,
@@ -305,7 +304,7 @@ impl<'a> WorktreeAdminService<'a> {
     pub async fn remove(
         &self,
         folder_names: &[String],
-        user_id: Uuid,
+        user_id: Id,
     ) -> Result<RemoveResponse, WorktreeAdminError> {
         let root = PathBuf::from(&self.state.config.agent.worktrees_path);
         let matches = self.load_ticket_matches(&root).await?;
@@ -325,7 +324,7 @@ impl<'a> WorktreeAdminService<'a> {
         &self,
         root: &Path,
         folder_name: &str,
-        user_id: Uuid,
+        user_id: Id,
         path_to_ticket: &HashMap<PathBuf, &TicketMatch>,
     ) -> RemoveResult {
         if !is_ticket_worktree_folder(folder_name) {
@@ -436,7 +435,7 @@ impl<'a> WorktreeAdminService<'a> {
     async fn has_active_run_for(
         &self,
         path: &Path,
-        ticket_id: Option<Uuid>,
+        ticket_id: Option<Id>,
     ) -> Result<bool, sqlx::Error> {
         let path_str = path.to_string_lossy().into_owned();
         let by_path: bool = sqlx::query_scalar(
@@ -500,12 +499,12 @@ impl<'a> WorktreeAdminService<'a> {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let ticket_id: Uuid = row.get("ticket_id");
+            let ticket_id: Id = row.get("ticket_id");
             let title: String = row.get("title");
             let status_raw: String = row.get("status");
             let status = status_from_str(&status_raw).unwrap_or(TicketStatus::Backlog);
             let archived_at: Option<OffsetDateTime> = row.get("archived_at");
-            let repo_id: Uuid = row.get("repo_id");
+            let repo_id: Id = row.get("repo_id");
             let repo_name: String = row.get("repo_name");
             let last_run_at: Option<OffsetDateTime> = row.get("last_run_at");
             let merged: bool = row.get("merged");
@@ -539,7 +538,7 @@ impl<'a> WorktreeAdminService<'a> {
         let mut paths = HashSet::new();
         for row in rows {
             // Chat runs have ticket_id NULL (migration 020); Row::get panics on NULL.
-            let ticket_id: Option<Uuid> = row.get("ticket_id");
+            let ticket_id: Option<Id> = row.get("ticket_id");
             if let Some(ticket_id) = ticket_id {
                 ticket_ids.insert(ticket_id);
             }
@@ -555,7 +554,7 @@ impl<'a> WorktreeAdminService<'a> {
 }
 
 struct ActiveRuns {
-    ticket_ids: HashSet<Uuid>,
+    ticket_ids: HashSet<Id>,
     paths: HashSet<PathBuf>,
 }
 
@@ -763,7 +762,7 @@ mod tests {
         assert!(!compute_finished(&active));
 
         let mut done = base.clone();
-        done.ticket_id = Some(Uuid::nil());
+        done.ticket_id = Some(Id::nil());
         done.ticket_status = Some("done".into());
         assert!(compute_finished(&done));
 

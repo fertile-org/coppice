@@ -25,6 +25,7 @@
 //! outlive the idle period by up to an hour. Measured with git 2.43: a one-file
 //! clone and checkout was 15 ms, a 32 MiB incompressible blob was 67 ms, and an
 //! 80 MiB run of zeros was 62 ms. Reading 40 README first lines was 38 ms.
+use crate::domain::Id;
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -41,8 +42,6 @@ use coppice_config::{
     default_chat_open_repo_cap,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 pub const INDEX_FILE: &str = "REPOS.md";
 const STATE_FILE: &str = ".coppice-chat.json";
 
@@ -167,7 +166,7 @@ struct OpenedRepo {
     last_used_unix_ms: u64,
 }
 
-pub fn chat_dir(worktrees_root: &Path, session_id: Uuid) -> PathBuf {
+pub fn chat_dir(worktrees_root: &Path, session_id: Id) -> PathBuf {
     worktrees_root.join("chat").join(session_id.to_string())
 }
 
@@ -218,7 +217,7 @@ pub fn slug_error(slug: &str) -> Option<&'static str> {
 /// for that copy.
 pub fn begin_chat_workspace<F>(
     worktrees_root: &Path,
-    session_id: Uuid,
+    session_id: Id,
     repos: &[LinkedRepo],
     carried: &[String],
     limits: &ChatRepoLimits,
@@ -303,7 +302,7 @@ where
 
 pub fn open_repo(
     chat_dir: &Path,
-    session_id: Uuid,
+    session_id: Id,
     repos: &[LinkedRepo],
     slug: &str,
     limits: &ChatRepoLimits,
@@ -458,7 +457,7 @@ pub fn slugs_to_restore(chat_dir: &Path, repos: &[LinkedRepo]) -> Vec<String> {
         .collect()
 }
 
-pub fn remove_chat_workspace(worktrees_root: &Path, session_id: Uuid) -> std::io::Result<()> {
+pub fn remove_chat_workspace(worktrees_root: &Path, session_id: Id) -> std::io::Result<()> {
     let root = worktrees_root.join("chat");
     let path = chat_dir(worktrees_root, session_id);
     remove_tree_inside(&root, &path)
@@ -483,7 +482,7 @@ pub fn sweep_idle_copies(
         if !is_real_dir(&dir) {
             continue;
         }
-        if entry.file_name().to_string_lossy().parse::<Uuid>().is_err() {
+        if entry.file_name().to_string_lossy().parse::<Id>().is_err() {
             continue;
         }
         let _guard = dir_lock(&dir)?;
@@ -569,8 +568,8 @@ pub fn sweep_aged_chat_folders(
 }
 
 /// Most-used repository on a board. Ties break by name, then id.
-pub fn choose_focus_repo(counts: &[(Uuid, String, i64)]) -> Option<Uuid> {
-    let mut best: Option<&(Uuid, String, i64)> = None;
+pub fn choose_focus_repo(counts: &[(Id, String, i64)]) -> Option<Id> {
+    let mut best: Option<&(Id, String, i64)> = None;
     for row in counts {
         best = Some(match best {
             None => row,
@@ -590,7 +589,7 @@ pub fn choose_focus_repo(counts: &[(Uuid, String, i64)]) -> Option<Uuid> {
     best.map(|row| row.0)
 }
 
-pub fn assign_slug(name: &str, id: Uuid, used: &mut std::collections::HashSet<String>) -> String {
+pub fn assign_slug(name: &str, id: Id, used: &mut std::collections::HashSet<String>) -> String {
     let mut slug = crate::domain::slug::slugify(name);
     if slug.is_empty() {
         slug = "repo".into();
@@ -1130,7 +1129,7 @@ mod tests {
 
     fn open_notes(
         dir: &Path,
-        session: Uuid,
+        session: Id,
         repos: &[LinkedRepo],
         slug: &str,
         limits: &ChatRepoLimits,
@@ -1170,7 +1169,7 @@ mod tests {
     fn slug_rejects_paths_and_unknowns() {
         let root = tempfile::tempdir().unwrap();
         let repo = init_repo(root.path(), "demo");
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         fs::create_dir_all(&dir).unwrap();
         let repos = vec![linked("demo", repo, false)];
@@ -1217,7 +1216,7 @@ mod tests {
         )
         .unwrap();
 
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let repos = vec![linked("demo", repo.clone(), true)];
         let (result, notes) = open_notes(
             &chat_dir(root.path(), session),
@@ -1250,7 +1249,7 @@ mod tests {
     fn second_open_is_idempotent() {
         let root = tempfile::tempdir().unwrap();
         let repo = init_repo(root.path(), "demo");
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         let repos = vec![linked("demo", repo, false)];
         let limits = ChatRepoLimits::default();
@@ -1266,7 +1265,7 @@ mod tests {
     #[test]
     fn cap_closes_the_least_recently_used_copy() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         let mut repos = Vec::new();
         for name in ["alpha", "beta", "gamma"] {
@@ -1303,8 +1302,8 @@ mod tests {
         let repo = init_repo(root.path(), "demo");
         let repos = vec![linked("demo", repo, false)];
         let limits = ChatRepoLimits::default();
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
+        let a = Id::new();
+        let b = Id::new();
         let first = open_notes(&chat_dir(root.path(), a), a, &repos, "demo", &limits)
             .0
             .unwrap();
@@ -1322,7 +1321,7 @@ mod tests {
     #[test]
     fn concurrent_opens_on_one_chat_both_succeed() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         fs::create_dir_all(&dir).unwrap();
         let repos = vec![
@@ -1353,7 +1352,7 @@ mod tests {
     #[test]
     fn idle_sweep_drops_copies_and_delete_removes_the_folder() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let repo = init_repo(root.path(), "demo");
         let repos = vec![linked("demo", repo, false)];
         let dir = chat_dir(root.path(), session);
@@ -1383,7 +1382,7 @@ mod tests {
     #[test]
     fn hostile_state_slugs_do_not_delete_outside_the_chat_dir() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         fs::create_dir_all(&dir).unwrap();
         let outside_abs = root.path().join("outside-abs");
@@ -1482,7 +1481,7 @@ mod tests {
     #[test]
     fn broken_copy_is_rebuilt() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let repo = init_repo(root.path(), "demo");
         let repos = vec![linked("demo", repo, false)];
         let dir = chat_dir(root.path(), session);
@@ -1511,7 +1510,7 @@ mod tests {
     #[test]
     fn age_sweep_deletes_quiet_chat_folders() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let dir = chat_dir(root.path(), session);
         fs::create_dir_all(&dir).unwrap();
         let state = ChatRepoState {
@@ -1535,7 +1534,7 @@ mod tests {
         let head = git_stdout(&repo, &["rev-parse", "HEAD"], Duration::from_secs(5)).unwrap();
         let mut repo_row = linked("demo", repo, false);
         repo_row.default_branch = "main".into();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let outcome = open_notes(
             &chat_dir(root.path(), session),
             session,
@@ -1551,7 +1550,7 @@ mod tests {
     #[test]
     fn broken_repo_uses_the_failure_line() {
         let root = tempfile::tempdir().unwrap();
-        let session = Uuid::new_v4();
+        let session = Id::new();
         let repos = vec![linked("demo", root.path().join("missing-checkout"), true)];
         let (err, notes) = open_notes(
             &chat_dir(root.path(), session),
@@ -1566,8 +1565,8 @@ mod tests {
 
     #[test]
     fn focus_choice_prefers_the_most_used_repo() {
-        let alpha = Uuid::from_u128(1);
-        let beta = Uuid::from_u128(2);
+        let alpha = Id::from_u128(1);
+        let beta = Id::from_u128(2);
         let chosen = choose_focus_repo(&[(beta, "Beta".into(), 1), (alpha, "Alpha".into(), 3)]);
         assert_eq!(chosen, Some(alpha));
         let tie = choose_focus_repo(&[(beta, "Beta".into(), 2), (alpha, "Alpha".into(), 2)]);
@@ -1577,8 +1576,8 @@ mod tests {
     #[test]
     fn duplicate_names_get_distinct_slugs() {
         let mut used = std::collections::HashSet::new();
-        let first = assign_slug("Demo", Uuid::from_u128(1), &mut used);
-        let second = assign_slug("Demo", Uuid::from_u128(2), &mut used);
+        let first = assign_slug("Demo", Id::from_u128(1), &mut used);
+        let second = assign_slug("Demo", Id::from_u128(2), &mut used);
         assert_eq!(first, "demo");
         assert_ne!(first, second);
         assert!(!second.contains('/'));
@@ -1595,7 +1594,7 @@ mod tests {
         };
         let started = Instant::now();
         let workspace =
-            begin_chat_workspace(root.path(), Uuid::new_v4(), &repos, &[], &limits, |_| {})
+            begin_chat_workspace(root.path(), Id::new(), &repos, &[], &limits, |_| {})
                 .unwrap();
         let returned = started.elapsed();
         assert!(
@@ -1635,7 +1634,7 @@ mod tests {
         let started = Instant::now();
         let workspace = begin_chat_workspace(
             root.path(),
-            Uuid::new_v4(),
+            Id::new(),
             &many,
             &[],
             &ChatRepoLimits::default(),
@@ -1667,7 +1666,7 @@ mod tests {
         let started = Instant::now();
         let workspace = begin_chat_workspace(
             large_root.path(),
-            Uuid::new_v4(),
+            Id::new(),
             &large,
             &[],
             &ChatRepoLimits::default(),
@@ -1698,7 +1697,7 @@ mod tests {
         let started = Instant::now();
         let workspace = begin_chat_workspace(
             broken_root.path(),
-            Uuid::new_v4(),
+            Id::new(),
             &broken,
             &[],
             &ChatRepoLimits::default(),

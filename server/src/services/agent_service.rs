@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use crate::domain::agent::{compare_agents_for_board, Agent, AgentPreset, ThinkingLevel};
 use crate::services::plugin_service::PluginService;
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 pub struct AgentService<'a> {
     pool: &'a PgPool,
 }
@@ -60,7 +59,7 @@ impl<'a> AgentService<'a> {
         Ok(agents)
     }
 
-    pub async fn get(&self, agent_id: Uuid) -> Result<Agent, AgentError> {
+    pub async fn get(&self, agent_id: Id) -> Result<Agent, AgentError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -79,7 +78,7 @@ impl<'a> AgentService<'a> {
         Ok(row_to_agent(&row))
     }
 
-    pub async fn get_preset(&self, preset_id: Uuid) -> Result<AgentPreset, AgentError> {
+    pub async fn get_preset(&self, preset_id: Id) -> Result<AgentPreset, AgentError> {
         let row = sqlx::query(
             r#"
             SELECT id, key, role, responsibilities, default_plugins
@@ -98,7 +97,7 @@ impl<'a> AgentService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_from_preset(
         &self,
-        preset_id: Uuid,
+        preset_id: Id,
         name: &str,
         system_prompt: &str,
         connector: Option<&str>,
@@ -197,7 +196,7 @@ impl<'a> AgentService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
-        agent_id: Uuid,
+        agent_id: Id,
         name: Option<&str>,
         role: Option<&str>,
         responsibilities: Option<&[String]>,
@@ -266,7 +265,7 @@ impl<'a> AgentService<'a> {
         Ok(row_to_agent(&row))
     }
 
-    pub async fn delete(&self, agent_id: Uuid) -> Result<(), AgentError> {
+    pub async fn delete(&self, agent_id: Id) -> Result<(), AgentError> {
         let has_knowledge_provenance: bool = sqlx::query_scalar(
             r#"
             SELECT EXISTS(
@@ -319,7 +318,7 @@ impl<'a> AgentService<'a> {
         enabled: bool,
         preset_source: Option<&str>,
     ) -> Result<Agent, AgentError> {
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO agents (
@@ -432,7 +431,7 @@ fn stored_thinking_level(row: &sqlx::postgres::PgRow) -> Option<ThinkingLevel> {
     let stored = row.get::<Option<String>, _>("thinking_level")?;
     let level = ThinkingLevel::parse(&stored);
     if level.is_none() {
-        let agent_id: Uuid = row.get("id");
+        let agent_id: Id = row.get("id");
         tracing::warn!(
             %agent_id,
             stored,

@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::{ToolContent, ToolDefinition, ToolResult};
 use crate::mcp::source::{
@@ -10,8 +11,6 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
-use uuid::Uuid;
-
 const TRUNCATION_SUFFIX: &str = "\n…[truncated: use limit/before to page]";
 const ARGS_SUMMARY_CHARS: usize = 200;
 /// The chat reply path; allowed on read-only profiles despite writing.
@@ -297,7 +296,7 @@ fn allowed_for(profile: ContextProfile, job_type: &str, def: &ToolDefinition) ->
 struct CallLog<'a> {
     tool: &'a str,
     source: SourceKind,
-    plugin_id: Option<Uuid>,
+    plugin_id: Option<Id>,
     args: &'a Value,
     status: CallStatus,
     error: Option<&'a str>,
@@ -315,7 +314,7 @@ async fn log_call(state: &AppState, scope: &RunToolScope, entry: CallLog<'_>) {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(scope.run_id)
     .bind(entry.tool)
     .bind(entry.source.as_str())
@@ -408,7 +407,7 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use std::sync::Arc;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     struct FakeSource {
         kind: SourceKind,
@@ -451,9 +450,9 @@ mod tests {
 
     fn scope(profile: ContextProfile) -> RunToolScope {
         RunToolScope {
-            token_id: Uuid::new_v4(),
-            run_id: Uuid::new_v4(),
-            agent_id: Uuid::new_v4(),
+            token_id: Id::new(),
+            run_id: Id::new(),
+            agent_id: Id::new(),
             ticket_id: None,
             chat_session_id: None,
             board_id: None,
@@ -581,7 +580,7 @@ mod tests {
 
         // A board on the conversation token only marks the focus repo.
         let mut attached = scope(ContextProfile::Conversation);
-        attached.board_id = Some(Uuid::new_v4());
+        attached.board_id = Some(Id::new());
         let attached_tools = registry.tools_for(&attached).await;
         assert!(attached_tools.iter().any(|t| t.def.name == "board_list"));
         let attached_search = attached_tools
@@ -806,7 +805,7 @@ mod tests {
         }
         async fn claim_unlisted(&self, _scope: &RunToolScope, name: &str) -> Option<UnlistedClaim> {
             name.starts_with("p__").then(|| UnlistedClaim {
-                plugin_id: Some(Uuid::from_u128(5)),
+                plugin_id: Some(Id::from_u128(5)),
                 message: "plugin \"p\" unavailable".into(),
             })
         }
@@ -825,7 +824,7 @@ mod tests {
             Some((
                 SourceKind::Plugin,
                 UnlistedClaim {
-                    plugin_id: Some(Uuid::from_u128(5)),
+                    plugin_id: Some(Id::from_u128(5)),
                     message: "plugin \"p\" unavailable".into(),
                 }
             ))

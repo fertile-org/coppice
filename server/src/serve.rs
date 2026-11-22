@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -30,7 +31,7 @@ pub struct ServeOptions {
     pub config_path: Option<PathBuf>,
 }
 
-async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &str) {
+async fn interrupt_orphaned_run(state: &AppState, run_id: Id, reason: &str) {
     match mark_run_interrupted(state, run_id, reason).await {
         Ok(interrupted) => {
             block_working_ticket(state, &interrupted).await;
@@ -126,7 +127,7 @@ async fn block_working_ticket(state: &AppState, run: &crate::domain::run::AgentR
 pub async fn shutdown_agent_sessions(state: &AppState) {
     let mut seen = std::collections::HashSet::new();
     for raw in crate::process_tree::tracked_run_ids() {
-        let Ok(run_id) = uuid::Uuid::parse_str(&raw) else {
+        let Ok(run_id) = Id::parse_str(&raw) else {
             continue;
         };
         if seen.insert(run_id) {
@@ -254,8 +255,8 @@ async fn note_restart(
 
 async fn leave_restart_comment(
     pool: &sqlx::PgPool,
-    ticket_id: uuid::Uuid,
-    run_id: uuid::Uuid,
+    ticket_id: Id,
+    run_id: Id,
     comment: &str,
 ) {
     if let Err(err) = CommentService::new(pool)

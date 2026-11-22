@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::{Duration, OffsetDateTime};
-use uuid::Uuid;
-
 pub const JOB_TYPE_COMPACT_KNOWLEDGE: &str = "compact_knowledge";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,19 +63,19 @@ impl BatchTrigger {
 
 #[derive(Debug, Clone)]
 pub struct CompactionBatch {
-    pub id: Uuid,
-    pub agent_id: Uuid,
+    pub id: Id,
+    pub agent_id: Id,
     pub agent_name: Option<String>,
-    pub run_id: Option<Uuid>,
+    pub run_id: Option<Id>,
     pub status: BatchStatus,
     pub trigger: BatchTrigger,
-    pub cycle_id: Uuid,
+    pub cycle_id: Id,
     pub cycle_started_at: OffsetDateTime,
     pub ticket_count: i32,
     pub candidate_count: Option<i32>,
     pub summary: Option<String>,
     pub error_message: Option<String>,
-    pub created_by: Option<Uuid>,
+    pub created_by: Option<Id>,
     pub created_at: OffsetDateTime,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
@@ -100,7 +99,7 @@ pub fn next_scheduled_at(
 
 /// Keep queue order and stop at the first ticket that would overflow the byte
 /// budget. The first ticket is always taken; its context is truncated later.
-pub fn select_within_bytes(candidates: &[(Uuid, i64)], max_bytes: usize) -> Vec<Uuid> {
+pub fn select_within_bytes(candidates: &[(Id, i64)], max_bytes: usize) -> Vec<Id> {
     let max_bytes = i64::try_from(max_bytes).unwrap_or(i64::MAX);
     let mut total: i64 = 0;
     let mut selected = Vec::new();
@@ -161,9 +160,9 @@ mod tests {
 
     #[test]
     fn select_within_bytes_keeps_order_and_always_takes_one() {
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
-        let c = Uuid::new_v4();
+        let a = Id::new();
+        let b = Id::new();
+        let c = Id::new();
         assert_eq!(
             select_within_bytes(&[(a, 40), (b, 50), (c, 5)], 100),
             vec![a, b, c]

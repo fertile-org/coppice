@@ -10,6 +10,7 @@
 //! to the CLI. The directory is removed after a successful merge or when the
 //! ticket is deleted. Accept and a failed merge leave it in place: a failed
 //! merge returns the ticket to In Progress.
+use crate::domain::Id;
 
 use std::collections::HashSet;
 use std::io;
@@ -17,8 +18,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::attachment::Attachment;
 use crate::services::comment_service::CommentService;
 use crate::storage::attachment_store::sanitize_filename;
@@ -62,17 +61,17 @@ pub struct TicketAttachmentLaunch {
 }
 
 pub struct SourceAttachment {
-    pub id: Uuid,
+    pub id: Id,
     pub filename: String,
     pub content_type: String,
     pub storage_path: PathBuf,
     pub origin: &'static str,
 }
 
-pub fn ticket_attachment_dir(artifacts_dir: &str, ticket_id: Uuid) -> io::Result<PathBuf> {
+pub fn ticket_attachment_dir(artifacts_dir: &str, ticket_id: Id) -> io::Result<PathBuf> {
     crate::providers::artifacts_path(
         artifacts_dir,
-        &["ticket-attachments", &ticket_id.to_string()],
+        &["ticket-attachments", ticket_id.as_ref()],
     )
     .map_err(io::Error::other)
 }
@@ -94,7 +93,7 @@ pub fn is_vision_image(content_type: &str) -> bool {
 /// directory left by an earlier run.
 pub fn stage_files(
     artifacts_dir: &str,
-    ticket_id: Uuid,
+    ticket_id: Id,
     worktree: &Path,
     sources: &[SourceAttachment],
 ) -> io::Result<TicketAttachmentLaunch> {
@@ -154,7 +153,7 @@ pub async fn stage_ticket_attachments(
     pool: &PgPool,
     artifacts_dir: &str,
     worktree: &Path,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> anyhow::Result<TicketAttachmentLaunch> {
     let sources = load_sources(pool, ticket_id).await?;
     Ok(stage_files(artifacts_dir, ticket_id, worktree, &sources)?)
@@ -167,7 +166,7 @@ pub fn load_for_run(
     let (Some(artifacts_dir), Some(ticket_id)) = (artifacts_dir, ticket_id) else {
         return TicketAttachmentLaunch::default();
     };
-    let Ok(ticket_id) = Uuid::parse_str(ticket_id) else {
+    let Ok(ticket_id) = Id::parse_str(ticket_id) else {
         return TicketAttachmentLaunch::default();
     };
     let Ok(dir) = ticket_attachment_dir(artifacts_dir, ticket_id) else {
@@ -304,14 +303,14 @@ pub fn apply_external_read_env(
     Ok(())
 }
 
-pub fn clear_staged_ticket_attachments(artifacts_dir: &str, ticket_id: Uuid) -> io::Result<()> {
+pub fn clear_staged_ticket_attachments(artifacts_dir: &str, ticket_id: Id) -> io::Result<()> {
     let dir = ticket_attachment_dir(artifacts_dir, ticket_id)?;
     clear_dir(&dir)
 }
 
 pub fn clear_if_ended(
     artifacts_dir: &str,
-    ticket_id: Uuid,
+    ticket_id: Id,
     end: AttachmentFolderEnd,
 ) -> io::Result<bool> {
     if !remove_folder_on(end) {
@@ -322,20 +321,20 @@ pub fn clear_if_ended(
 }
 
 /// Staged copies go away with the ticket. Accept does not call this.
-pub fn on_ticket_deleted(artifacts_dir: &str, ticket_id: Uuid) -> io::Result<()> {
+pub fn on_ticket_deleted(artifacts_dir: &str, ticket_id: Id) -> io::Result<()> {
     clear_if_ended(artifacts_dir, ticket_id, AttachmentFolderEnd::TicketDeleted)?;
     Ok(())
 }
 
-async fn load_sources(pool: &PgPool, ticket_id: Uuid) -> anyhow::Result<Vec<SourceAttachment>> {
+async fn load_sources(pool: &PgPool, ticket_id: Id) -> anyhow::Result<Vec<SourceAttachment>> {
     let description_ids =
-        sqlx::query_scalar::<_, Vec<Uuid>>("SELECT attachment_ids FROM tickets WHERE id = $1")
+        sqlx::query_scalar::<_, Vec<Id>>("SELECT attachment_ids FROM tickets WHERE id = $1")
             .bind(ticket_id)
             .fetch_optional(pool)
             .await?
             .unwrap_or_default();
 
-    let comment_rows = sqlx::query_scalar::<_, Vec<Uuid>>(
+    let comment_rows = sqlx::query_scalar::<_, Vec<Id>>(
         r#"
         SELECT attachment_ids FROM ticket_comments
         WHERE ticket_id = $1 AND cardinality(attachment_ids) > 0
@@ -346,7 +345,7 @@ async fn load_sources(pool: &PgPool, ticket_id: Uuid) -> anyhow::Result<Vec<Sour
     .fetch_all(pool)
     .await?;
 
-    let mut ordered: Vec<(Uuid, &'static str)> = Vec::new();
+    let mut ordered: Vec<(Id, &'static str)> = Vec::new();
     let mut seen = HashSet::new();
     for id in description_ids {
         if seen.insert(id) {
@@ -364,11 +363,11 @@ async fn load_sources(pool: &PgPool, ticket_id: Uuid) -> anyhow::Result<Vec<Sour
         return Ok(Vec::new());
     }
 
-    let ids: Vec<Uuid> = ordered.iter().map(|(id, _)| *id).collect();
+    let ids: Vec<Id> = ordered.iter().map(|(id, _)| *id).collect();
     let attachments = CommentService::new(pool)
         .list_attachments_by_ids(&ids)
         .await?;
-    let by_id: std::collections::HashMap<Uuid, Attachment> =
+    let by_id: std::collections::HashMap<Id, Attachment> =
         attachments.into_iter().map(|att| (att.id, att)).collect();
 
     let mut sources = Vec::new();
@@ -448,15 +447,15 @@ mod tests {
         let artifacts = tempfile::tempdir().expect("artifacts");
         let worktree = tempfile::tempdir().expect("worktree");
         let store = tempfile::tempdir().expect("store");
-        let notes_id = Uuid::new_v4();
-        let image_id = Uuid::new_v4();
+        let notes_id = Id::new();
+        let image_id = Id::new();
         let notes = store.path().join("notes.txt");
         let image = store.path().join("shot.png");
         std::fs::write(&notes, NOTES).unwrap();
         std::fs::write(&image, PNG).unwrap();
         let launch = stage_files(
             artifacts.path().to_str().unwrap(),
-            Uuid::new_v4(),
+            Id::new(),
             worktree.path(),
             &[
                 SourceAttachment {
@@ -518,7 +517,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let err = stage_files(
             root.path().join("inside").to_str().unwrap(),
-            Uuid::new_v4(),
+            Id::new(),
             root.path(),
             &[],
         )
@@ -533,7 +532,7 @@ mod tests {
         let ticket_id = dir
             .rsplit('/')
             .next()
-            .and_then(|id| Uuid::parse_str(id).ok())
+            .and_then(|id| Id::parse_str(id).ok())
             .unwrap();
         let artifacts = sample.artifacts_path.to_str().unwrap();
         assert!(!clear_if_ended(artifacts, ticket_id, AttachmentFolderEnd::Accepted).unwrap());
@@ -549,7 +548,7 @@ mod tests {
         let sample = sample();
         let dir = sample.launch.dir.clone().unwrap();
         let ticket_id =
-            Uuid::parse_str(Path::new(&dir).file_name().unwrap().to_str().unwrap()).unwrap();
+            Id::parse_str(Path::new(&dir).file_name().unwrap().to_str().unwrap()).unwrap();
         on_ticket_deleted(sample.artifacts_path.to_str().unwrap(), ticket_id).unwrap();
         assert!(!Path::new(&dir).exists());
     }
@@ -657,7 +656,7 @@ mod tests {
             Ok(pool) => pool,
             Err(_) => return,
         };
-        let user_id = Uuid::new_v4();
+        let user_id = Id::new();
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'admin')",
         )
@@ -676,8 +675,8 @@ mod tests {
             .unwrap();
 
         let store = tempfile::tempdir().unwrap();
-        let image_id = Uuid::new_v4();
-        let notes_id = Uuid::new_v4();
+        let image_id = Id::new();
+        let notes_id = Id::new();
         let image_src = store.path().join("shot.png");
         let notes_src = store.path().join("notes.txt");
         std::fs::write(&image_src, PNG).unwrap();

@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationType {
     AgentRunFinished,
@@ -32,16 +31,16 @@ impl NotificationType {
 
 #[derive(Debug, Clone)]
 pub struct Notification {
-    pub id: Uuid,
-    pub recipient_user_id: Uuid,
+    pub id: Id,
+    pub recipient_user_id: Id,
     pub kind: NotificationType,
     pub title: String,
     pub body: Option<String>,
-    pub ticket_id: Option<Uuid>,
-    pub run_id: Option<Uuid>,
-    pub agent_id: Option<Uuid>,
-    pub comment_id: Option<Uuid>,
-    pub mention_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
+    pub run_id: Option<Id>,
+    pub agent_id: Option<Id>,
+    pub comment_id: Option<Id>,
+    pub mention_id: Option<Id>,
     pub source_key: String,
     pub read_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

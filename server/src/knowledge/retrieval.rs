@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use super::fts::{build_tsquery, query_terms, terms};
 use crate::config::KnowledgeRetrievalConfig;
 use sqlx::{PgPool, Row};
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub const INBOX_SIMILAR_DEFAULT_LIMIT: usize = 5;
 pub const INBOX_SIMILAR_MAX_LIMIT: usize = 10;
 /// Upper bound on eligible rows loaded for one run; the context budget trims further.
@@ -44,9 +43,9 @@ macro_rules! agent_visible_predicates {
       AND (cardinality($5::text[]) = 0 OR r.knowledge_type = ANY($5::text[]))
       AND (
             r.scope = 'workspace'
-            OR (r.scope = 'board' AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
+            OR (r.scope = 'board' AND ($1::varchar[] IS NULL OR r.board_id = ANY($1::varchar[])))
             OR (r.scope = 'agent' AND r.agent_id = $2
-                AND ($1::uuid[] IS NULL OR r.board_id = ANY($1::uuid[])))
+                AND ($1::varchar[] IS NULL OR r.board_id = ANY($1::varchar[])))
           )
 "#
     };
@@ -70,14 +69,14 @@ pub const ELIGIBLE_KNOWLEDGE_FROM: &str = eligible_knowledge_from!();
 
 #[derive(Debug, Clone)]
 pub struct RetrievedKnowledge {
-    pub item_id: Uuid,
-    pub revision_id: Uuid,
+    pub item_id: Id,
+    pub revision_id: Id,
     pub scope: String,
     pub knowledge_type: String,
     pub title: String,
     pub content: String,
     pub source_type: String,
-    pub source_id: Option<Uuid>,
+    pub source_id: Option<Id>,
     pub confidence: String,
     /// Summed IDF of the query terms matched; `0.0` when none matched.
     pub score: f64,
@@ -88,12 +87,12 @@ pub struct RetrievedKnowledge {
 
 #[derive(Debug, Clone)]
 pub struct SimilarKnowledgeNeighbor {
-    pub item_id: Uuid,
-    pub revision_id: Uuid,
+    pub item_id: Id,
+    pub revision_id: Id,
     pub title: String,
     pub knowledge_type: String,
     pub scope: String,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
     pub score: f64,
     pub status: String,
 }
@@ -180,7 +179,7 @@ WHERE "#,
     live_knowledge_predicates!(),
     agent_visible_predicates!(),
     r#"
-  AND i.id = ANY($4::uuid[])
+  AND i.id = ANY($4::varchar[])
 "#
 );
 
@@ -227,7 +226,7 @@ LIMIT $5
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetrievalScope {
     /// Board notes for these boards only (an empty list matches none).
-    Boards(Vec<Uuid>),
+    Boards(Vec<Id>),
     /// Board notes from every board; results carry `board_name`.
     AllBoards,
 }
@@ -238,7 +237,7 @@ pub enum RetrievalScope {
 pub async fn retrieve(
     pool: &PgPool,
     scope: &RetrievalScope,
-    agent_id: Uuid,
+    agent_id: Id,
     query_title: &str,
     query_body: &str,
     config: &KnowledgeRetrievalConfig,
@@ -266,8 +265,8 @@ pub async fn retrieve(
 pub async fn fetch_visible(
     pool: &PgPool,
     scope: &RetrievalScope,
-    agent_id: Uuid,
-    item_ids: &[Uuid],
+    agent_id: Id,
+    item_ids: &[Id],
     config: &KnowledgeRetrievalConfig,
 ) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
     let (board_ids, with_board_name) = scope_binding(scope);
@@ -287,7 +286,7 @@ pub async fn fetch_visible(
     Ok(found)
 }
 
-fn scope_binding(scope: &RetrievalScope) -> (Option<Vec<Uuid>>, bool) {
+fn scope_binding(scope: &RetrievalScope) -> (Option<Vec<Id>>, bool) {
     match scope {
         RetrievalScope::Boards(ids) => (Some(ids.clone()), false),
         RetrievalScope::AllBoards => (None, true),
@@ -324,10 +323,10 @@ fn retrieved_from_row(
 /// confidence/type filters. `score` is [`near_duplicate_score`].
 pub async fn find_similar_inbox(
     pool: &PgPool,
-    exclude_item_id: Uuid,
+    exclude_item_id: Id,
     query_title: &str,
     query_body: &str,
-    prefer_board_id: Option<Uuid>,
+    prefer_board_id: Option<Id>,
     prefer_scope: &str,
     limit: usize,
 ) -> Result<Vec<SimilarKnowledgeNeighbor>, sqlx::Error> {
@@ -382,10 +381,10 @@ pub async fn find_similar_inbox(
 
 /// One approved item's folded text, for pairwise comparison.
 struct FoldedItem {
-    id: Uuid,
+    id: Id,
     scope: String,
-    board_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
+    board_id: Option<Id>,
+    agent_id: Option<Id>,
     title: String,
     content: String,
 }
@@ -396,9 +395,9 @@ struct FoldedItem {
 /// workspace-wide or on one of `board_ids`.
 pub async fn near_duplicate_pairs(
     pool: &PgPool,
-    board_ids: &[Uuid],
+    board_ids: &[Id],
     limit: usize,
-) -> Result<Vec<(Uuid, Uuid, f64)>, sqlx::Error> {
+) -> Result<Vec<(Id, Id, f64)>, sqlx::Error> {
     let rows = sqlx::query(
         r#"
         SELECT i.id, r.scope, r.board_id, r.agent_id,
@@ -437,7 +436,7 @@ pub async fn near_duplicate_pairs(
         .map_err(|error| sqlx::Error::Io(std::io::Error::other(error)))
 }
 
-fn score_pairs(items: &[FoldedItem], limit: usize) -> Vec<(Uuid, Uuid, f64)> {
+fn score_pairs(items: &[FoldedItem], limit: usize) -> Vec<(Id, Id, f64)> {
     let notes: Vec<(&FoldedItem, NoteTerms)> = items
         .iter()
         .map(|item| (item, NoteTerms::new(&item.title, &item.content)))
@@ -520,8 +519,8 @@ mod tests {
         assert!(!RETRIEVAL_QUERY_SQL.contains("<=>"));
         assert_eq!(ELIGIBLE_KNOWLEDGE_FROM, eligible_knowledge_from!());
         assert!(RETRIEVAL_QUERY_SQL.contains("r.scope = 'workspace'"));
-        assert!(RETRIEVAL_QUERY_SQL.contains("r.board_id = ANY($1::uuid[])"));
-        assert!(RETRIEVAL_QUERY_SQL.contains("$1::uuid[] IS NULL"));
+        assert!(RETRIEVAL_QUERY_SQL.contains("r.board_id = ANY($1::varchar[])"));
+        assert!(RETRIEVAL_QUERY_SQL.contains("$1::varchar[] IS NULL"));
         assert!(RETRIEVAL_QUERY_SQL.contains("r.agent_id = $2"));
         assert!(RETRIEVAL_QUERY_SQL.contains("LEFT JOIN boards"));
         assert!(FETCH_VISIBLE_SQL.contains("r.agent_id = $2"));
@@ -584,9 +583,9 @@ mod tests {
 
     #[test]
     fn pairs_need_the_same_board_and_a_high_score() {
-        let board = Some(Uuid::new_v4());
+        let board = Some(Id::new());
         let item = |board_id, title: &str, content: &str| FoldedItem {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             scope: "board".into(),
             board_id,
             agent_id: None,
@@ -608,17 +607,17 @@ mod tests {
 
     #[test]
     fn pairs_need_the_same_scope_and_agent() {
-        let board = Some(Uuid::new_v4());
+        let board = Some(Id::new());
         let item = |scope: &str, agent_id| FoldedItem {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             scope: scope.into(),
             board_id: board,
             agent_id,
             title: DRAG_TITLE.into(),
             content: DRAG_BODY.into(),
         };
-        let agent_a = Some(Uuid::new_v4());
-        let agent_b = Some(Uuid::new_v4());
+        let agent_a = Some(Id::new());
+        let agent_b = Some(Id::new());
         let items = [
             item("agent", agent_a),
             item("agent", agent_b),
@@ -632,13 +631,13 @@ mod tests {
 
     #[test]
     fn pair_scores_equal_near_duplicate_score() {
-        let board = Some(Uuid::new_v4());
+        let board = Some(Id::new());
         let paraphrase_title = "Refuse drag into review during an active run";
         let paraphrase_body = "Dragging a ticket into In Review is refused while it has an \
             active run. The server checks hasActiveRun and answers 409; cancel the run or wait \
             for it to finish, then make the move again.";
         let item = |title: &str, content: &str| FoldedItem {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             scope: "board".into(),
             board_id: board,
             agent_id: None,

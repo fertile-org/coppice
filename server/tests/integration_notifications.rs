@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -114,13 +115,13 @@ async fn setup_ticket_with_agent(app: &axum::Router, cookie: &str, csrf: &str) -
 /// `created_at` so ordering tests are deterministic.
 async fn insert_notification(
     pool: &sqlx::PgPool,
-    recipient_user_id: uuid::Uuid,
+    recipient_user_id: Id,
     source_key: &str,
     title: &str,
     created_at: &str,
     read: bool,
-) -> uuid::Uuid {
-    let id = uuid::Uuid::new_v4();
+) -> Id {
+    let id = Id::new();
     let created_ts =
         time::OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339)
             .unwrap();
@@ -148,12 +149,12 @@ async fn insert_notification(
     id
 }
 
-async fn admin_user_id(pool: &sqlx::PgPool) -> uuid::Uuid {
+async fn admin_user_id(pool: &sqlx::PgPool) -> Id {
     let row = sqlx::query("SELECT id FROM users WHERE email = 'admin@localhost'")
         .fetch_one(pool)
         .await
         .unwrap();
-    row.get::<uuid::Uuid, _>("id")
+    row.get::<Id, _>("id")
 }
 
 #[tokio::test]
@@ -186,7 +187,7 @@ async fn mark_read_requires_csrf_token() {
     }
     let (app, cookie, _csrf) = common::bootstrap_and_login().await;
 
-    let id = uuid::Uuid::new_v4();
+    let id = Id::new();
     let res = app
         .clone()
         .oneshot(
@@ -222,7 +223,7 @@ async fn run_finished_creates_notification_and_dedupes() {
     )
     .await;
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -230,14 +231,14 @@ async fn run_finished_creates_notification_and_dedupes() {
         "#,
     )
     .bind(run_id)
-    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
-    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .bind(ticket_id.parse::<Id>().unwrap())
+    .bind(agent_id.parse::<Id>().unwrap())
     .execute(&pool)
     .await
     .unwrap();
 
-    let ticket_uuid = ticket_id.parse::<uuid::Uuid>().unwrap();
-    let agent_uuid = agent_id.parse::<uuid::Uuid>().unwrap();
+    let ticket_uuid = ticket_id.parse::<Id>().unwrap();
+    let agent_uuid = agent_id.parse::<Id>().unwrap();
     let svc = NotificationService::new(&pool);
     let created = svc
         .create_for_run_finished(run_id, ticket_uuid, agent_uuid, "succeeded")
@@ -321,9 +322,9 @@ async fn workflow_agent_mention_creates_notification() {
     .await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
-    let ticket_id = ticket_id.parse::<uuid::Uuid>().unwrap();
-    let engineer_id = engineer_id.parse::<uuid::Uuid>().unwrap();
-    let pm_id = pm_id.parse::<uuid::Uuid>().unwrap();
+    let ticket_id = ticket_id.parse::<Id>().unwrap();
+    let engineer_id = engineer_id.parse::<Id>().unwrap();
+    let pm_id = pm_id.parse::<Id>().unwrap();
     sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
         .bind(ticket_id)
         .bind(engineer_id)
@@ -331,7 +332,7 @@ async fn workflow_agent_mention_creates_notification() {
         .await
         .unwrap();
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -366,7 +367,7 @@ async fn workflow_agent_mention_creates_notification() {
         .await
         .unwrap();
 
-    let (mention_id, comment_id): (uuid::Uuid, uuid::Uuid) = sqlx::query_as(
+    let (mention_id, comment_id): (Id, Id) = sqlx::query_as(
         "SELECT id, comment_id FROM ticket_mentions WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(ticket_id)
@@ -704,7 +705,7 @@ async fn mark_read_unknown_id_returns_not_found() {
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/notifications/{}/read", uuid::Uuid::new_v4()),
+            &format!("/api/notifications/{}/read", Id::new()),
             "",
             &cookie,
             &csrf,
@@ -732,7 +733,7 @@ async fn stopping_queued_run_creates_cancelled_notification() {
         &csrf,
     )
     .await;
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -740,8 +741,8 @@ async fn stopping_queued_run_creates_cancelled_notification() {
         "#,
     )
     .bind(run_id)
-    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
-    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .bind(ticket_id.parse::<Id>().unwrap())
+    .bind(agent_id.parse::<Id>().unwrap())
     .execute(pool)
     .await
     .unwrap();
@@ -794,7 +795,7 @@ async fn interrupted_run_creates_failed_notification() {
         &csrf,
     )
     .await;
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -802,8 +803,8 @@ async fn interrupted_run_creates_failed_notification() {
         "#,
     )
     .bind(run_id)
-    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
-    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .bind(ticket_id.parse::<Id>().unwrap())
+    .bind(agent_id.parse::<Id>().unwrap())
     .execute(pool)
     .await
     .unwrap();
@@ -828,7 +829,7 @@ async fn interrupted_run_creates_failed_notification() {
         .unwrap()
         .contains("failed"));
 
-    let published_run_id = uuid::Uuid::new_v4();
+    let published_run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -836,8 +837,8 @@ async fn interrupted_run_creates_failed_notification() {
         "#,
     )
     .bind(published_run_id)
-    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
-    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .bind(ticket_id.parse::<Id>().unwrap())
+    .bind(agent_id.parse::<Id>().unwrap())
     .execute(pool)
     .await
     .unwrap();
@@ -922,7 +923,7 @@ async fn stopping_running_run_publishes_cancellation_once() {
     let run_id = started["run"]["id"]
         .as_str()
         .unwrap()
-        .parse::<uuid::Uuid>()
+        .parse::<Id>()
         .unwrap();
 
     let stream_deadline = Instant::now() + Duration::from_secs(5);
@@ -971,7 +972,7 @@ async fn stopping_running_run_publishes_cancellation_once() {
 
 async fn git_needs_action_rows(
     pool: &sqlx::PgPool,
-    ticket_id: uuid::Uuid,
+    ticket_id: Id,
 ) -> Vec<(String, String)> {
     sqlx::query(
         "SELECT title, COALESCE(body, '') AS body FROM notifications \
@@ -1000,7 +1001,7 @@ async fn conflict_outcome_notifies_once() {
     let pool = state.db.clone().expect("pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let ticket_id = Id::parse_str(&ticket_id).unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
         .bind(ticket_id)
         .execute(&pool)
@@ -1042,7 +1043,7 @@ async fn successful_chain_sends_no_notification() {
     let pool = state.db.clone().expect("pool");
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let ticket_id = Id::parse_str(&ticket_id).unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
         .bind(ticket_id)
         .execute(&pool)
@@ -1080,7 +1081,14 @@ async fn human_accept_with_merge_off_sends_no_notification() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+    common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     for (method, uri, body) in [
         (
             "PATCH",
@@ -1100,7 +1108,7 @@ async fn human_accept_with_merge_off_sends_no_notification() {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{uri}");
     }
-    let id = uuid::Uuid::parse_str(&ticket_id).unwrap();
+    let id = Id::parse_str(&ticket_id).unwrap();
     // The person who accepted knows; the Done badge and the amber card cover
     // the rest. An auto-accept does notify (integration_git_flow).
     let rows = git_needs_action_rows(&pool, id).await;

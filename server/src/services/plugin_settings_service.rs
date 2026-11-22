@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use crate::crypto::SecretStore;
 use crate::services::secret_service::{SecretError, SecretService};
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
-use uuid::Uuid;
-
 #[derive(Debug, thiserror::Error)]
 pub enum PluginSettingsError {
     #[error("unknown setting \"{0}\"")]
@@ -31,7 +30,7 @@ impl<'a> PluginSettingsService<'a> {
 
     pub async fn configured_keys(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
     ) -> Result<BTreeSet<String>, PluginSettingsError> {
         let keys: Vec<String> = sqlx::query_scalar(
             r#"
@@ -48,7 +47,7 @@ impl<'a> PluginSettingsService<'a> {
 
     pub async fn configured_keys_by_plugin(
         &self,
-    ) -> Result<BTreeMap<Uuid, BTreeSet<String>>, PluginSettingsError> {
+    ) -> Result<BTreeMap<Id, BTreeSet<String>>, PluginSettingsError> {
         let rows = sqlx::query(
             r#"
             SELECT ps.plugin_id, ps.key FROM plugin_settings ps
@@ -58,7 +57,7 @@ impl<'a> PluginSettingsService<'a> {
         )
         .fetch_all(self.pool)
         .await?;
-        let mut by_plugin: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
+        let mut by_plugin: BTreeMap<Id, BTreeSet<String>> = BTreeMap::new();
         for row in rows {
             by_plugin
                 .entry(row.get("plugin_id"))
@@ -70,7 +69,7 @@ impl<'a> PluginSettingsService<'a> {
 
     pub async fn reentry_keys(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
     ) -> Result<BTreeSet<String>, PluginSettingsError> {
         let keys: Vec<String> = sqlx::query_scalar(
             r#"
@@ -87,7 +86,7 @@ impl<'a> PluginSettingsService<'a> {
 
     pub async fn reentry_keys_by_plugin(
         &self,
-    ) -> Result<BTreeMap<Uuid, BTreeSet<String>>, PluginSettingsError> {
+    ) -> Result<BTreeMap<Id, BTreeSet<String>>, PluginSettingsError> {
         let rows = sqlx::query(
             r#"
             SELECT ps.plugin_id, ps.key FROM plugin_settings ps
@@ -97,7 +96,7 @@ impl<'a> PluginSettingsService<'a> {
         )
         .fetch_all(self.pool)
         .await?;
-        let mut by_plugin: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
+        let mut by_plugin: BTreeMap<Id, BTreeSet<String>> = BTreeMap::new();
         for row in rows {
             by_plugin
                 .entry(row.get("plugin_id"))
@@ -110,7 +109,7 @@ impl<'a> PluginSettingsService<'a> {
     /// Validates every key against `allowed` before writing; an empty value clears the key.
     pub async fn set(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
         allowed: &BTreeSet<String>,
         values: BTreeMap<String, String>,
     ) -> Result<(), PluginSettingsError> {
@@ -143,8 +142,8 @@ impl<'a> PluginSettingsService<'a> {
         Ok(())
     }
 
-    async fn clear(&self, plugin_id: Uuid, key: &str) -> Result<(), PluginSettingsError> {
-        let secret_id: Option<Uuid> = sqlx::query_scalar(
+    async fn clear(&self, plugin_id: Id, key: &str) -> Result<(), PluginSettingsError> {
+        let secret_id: Option<Id> = sqlx::query_scalar(
             "DELETE FROM plugin_settings WHERE plugin_id = $1 AND key = $2 RETURNING secret_id",
         )
         .bind(plugin_id)
@@ -162,7 +161,7 @@ impl<'a> PluginSettingsService<'a> {
 
     pub async fn decrypted(
         &self,
-        plugin_id: Uuid,
+        plugin_id: Id,
     ) -> Result<BTreeMap<String, String>, PluginSettingsError> {
         let rows = sqlx::query(
             r#"

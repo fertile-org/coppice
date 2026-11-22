@@ -20,6 +20,7 @@
 //! scans `/proc/<pid>/environ` for the tag and stops them too. macOS has no
 //! readable environ, so escapees still outlive the run there.
 
+use crate::domain::Id;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -181,7 +182,7 @@ impl ProcessRegistry {
         cmd: &mut Command,
         meta: SpawnMeta,
     ) -> io::Result<TrackedProcess> {
-        let tree_token = uuid::Uuid::new_v4().simple().to_string();
+        let tree_token = Id::new().simple().to_string();
         cmd.env(TREE_ENV, &tree_token);
         // SAFETY: `setsid(2)` is async-signal-safe and runs in the forked child
         // before exec, so the agent becomes its own session and process group.

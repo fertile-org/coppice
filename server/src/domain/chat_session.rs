@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatSessionStatus {
     Active,
@@ -33,12 +32,12 @@ impl std::str::FromStr for ChatSessionStatus {
 
 #[derive(Debug, Clone)]
 pub struct ChatSession {
-    pub id: Uuid,
-    pub board_id: Option<Uuid>,
-    pub owner_user_id: Uuid,
-    pub agent_id: Uuid,
-    pub repo_id: Option<Uuid>,
-    pub parent_session_id: Option<Uuid>,
+    pub id: Id,
+    pub board_id: Option<Id>,
+    pub owner_user_id: Id,
+    pub agent_id: Id,
+    pub repo_id: Option<Id>,
+    pub parent_session_id: Option<Id>,
     pub status: ChatSessionStatus,
     pub provider_session_id: Option<String>,
     pub provider_session_connector: Option<String>,
@@ -46,7 +45,7 @@ pub struct ChatSession {
     pub last_message_at: Option<OffsetDateTime>,
     pub last_message_role: Option<String>,
     pub has_active_run: bool,
-    pub active_run_id: Option<Uuid>,
+    pub active_run_id: Option<Id>,
     /// First human message, trimmed to one line. Absent until that message exists.
     pub title: Option<String>,
     pub created_at: OffsetDateTime,

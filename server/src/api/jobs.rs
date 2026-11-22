@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::pool_from_state;
 use crate::domain::job::{job_status_to_str, AgentJob};
 use crate::middleware::admin::AdminUser;
@@ -7,8 +8,6 @@ use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::Serialize;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/api/agent-jobs", get(list_jobs))
 }
@@ -16,8 +15,8 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JobResponse {
-    id: Uuid,
-    run_id: Uuid,
+    id: Id,
+    run_id: Id,
     job_type: String,
     status: String,
     attempts: i32,

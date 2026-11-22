@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use super::{best_effort_persist_artifacts, JobCancelled};
 use crate::domain::connector_check::{evaluate_check, sanitize_failure};
 use crate::domain::context_profile::ContextProfile;
@@ -32,7 +31,7 @@ pub(super) async fn execute_connector_check(
     run_svc: &RunService<'_>,
     run: &AgentRun,
 ) -> anyhow::Result<()> {
-    let (check_id, expected_connector): (Option<Uuid>, Option<String>) = sqlx::query_as(
+    let (check_id, expected_connector): (Option<Id>, Option<String>) = sqlx::query_as(
         "SELECT r.connector_check_id, c.connector FROM agent_runs r \
          LEFT JOIN connector_checks c ON c.id = r.connector_check_id WHERE r.id = $1",
     )
@@ -92,7 +91,7 @@ async fn run_check(
     run_svc: &RunService<'_>,
     run: &AgentRun,
     checks: &ConnectorCheckService<'_>,
-    check_id: Uuid,
+    check_id: Id,
     expected_connector: &str,
     scratch: &Path,
     secrets: &mut Vec<String>,

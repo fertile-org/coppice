@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use super::models::{ModelInfo, ModelListCache};
 use super::{
     mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
@@ -159,7 +160,7 @@ impl AgentProvider for OpenCodeProvider {
         let key = input
             .run_id
             .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            .unwrap_or_else(|| Id::new().to_string());
         let mut env = input
             .mcp
             .as_ref()

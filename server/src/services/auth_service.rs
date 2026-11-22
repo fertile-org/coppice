@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::config::AuthConfig;
 use crate::domain::session::{Session, SessionBundle};
 use crate::domain::user::User;
@@ -10,8 +11,6 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::Row;
 use time::{Duration, OffsetDateTime};
-use uuid::Uuid;
-
 pub struct AuthService<'a> {
     pool: &'a PgPool,
 }
@@ -48,7 +47,7 @@ impl<'a> AuthService<'a> {
             return Err(AuthError::BootstrapNotAllowed);
         }
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let password_hash = hash_password(password).map_err(|_| AuthError::PasswordHash)?;
         let row = sqlx::query(
             r#"
@@ -177,7 +176,7 @@ impl<'a> AuthService<'a> {
         }))
     }
 
-    pub async fn logout(&self, session_id: Uuid) -> Result<(), AuthError> {
+    pub async fn logout(&self, session_id: Id) -> Result<(), AuthError> {
         sqlx::query("DELETE FROM sessions WHERE id = $1")
             .bind(session_id)
             .execute(self.pool)
@@ -213,7 +212,7 @@ impl<'a> AuthService<'a> {
 
         let session_expires_at: OffsetDateTime = row.get("session_expires_at");
         if session_expires_at < OffsetDateTime::now_utc() {
-            let session_id: Uuid = row.get("session_id");
+            let session_id: Id = row.get("session_id");
             sqlx::query("DELETE FROM sessions WHERE id = $1")
                 .bind(session_id)
                 .execute(self.pool)
@@ -238,7 +237,7 @@ impl<'a> AuthService<'a> {
     }
 
     async fn create_session(&self, user: User) -> Result<SessionBundle, AuthError> {
-        let session_id = Uuid::new_v4();
+        let session_id = Id::new();
         let session_token = generate_token();
         let csrf_token = generate_token();
         let token_hash = hash_token(&session_token);

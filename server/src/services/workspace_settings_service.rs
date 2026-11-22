@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use crate::domain::agent::Agent;
 use crate::providers::connector_enforces_read_only;
 use crate::services::agent_service::{AgentError, AgentService};
 use sqlx::PgPool;
-use uuid::Uuid;
-
 const COMPACTION_AGENT_FK: &str = "workspace_settings_knowledge_compaction_agent_id_fkey";
 
 #[derive(Debug, thiserror::Error)]
@@ -28,8 +27,8 @@ impl<'a> WorkspaceSettingsService<'a> {
     }
 
     /// The configured compaction agent id; a missing settings row reads as unset.
-    pub async fn knowledge_compaction_agent_id(&self) -> Result<Option<Uuid>, sqlx::Error> {
-        let id: Option<Option<Uuid>> = sqlx::query_scalar(
+    pub async fn knowledge_compaction_agent_id(&self) -> Result<Option<Id>, sqlx::Error> {
+        let id: Option<Option<Id>> = sqlx::query_scalar(
             "SELECT knowledge_compaction_agent_id FROM workspace_settings WHERE id",
         )
         .fetch_optional(self.pool)
@@ -52,8 +51,8 @@ impl<'a> WorkspaceSettingsService<'a> {
 
     pub async fn set_knowledge_compaction_agent(
         &self,
-        agent_id: Option<Uuid>,
-        user_id: Uuid,
+        agent_id: Option<Id>,
+        user_id: Id,
     ) -> Result<Option<Agent>, WorkspaceSettingsError> {
         let agent = match agent_id {
             Some(agent_id) => {
@@ -96,7 +95,7 @@ impl<'a> WorkspaceSettingsService<'a> {
     }
 }
 
-async fn load_agent(pool: &PgPool, agent_id: Uuid) -> Result<Agent, WorkspaceSettingsError> {
+async fn load_agent(pool: &PgPool, agent_id: Id) -> Result<Agent, WorkspaceSettingsError> {
     AgentService::new(pool)
         .get(agent_id)
         .await

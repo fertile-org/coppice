@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::AppState;
@@ -11,8 +12,6 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use uuid::Uuid;
-
 /// Multipart framing on top of the largest allowed file.
 const MULTIPART_OVERHEAD: usize = 1024 * 1024;
 
@@ -32,7 +31,7 @@ pub fn routes(max_upload_bytes: u64) -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentUploadResponse {
-    id: Uuid,
+    id: Id,
     filename: String,
     content_type: String,
     size_bytes: i64,
@@ -89,7 +88,7 @@ async fn upload_attachment(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let id = Uuid::new_v4();
+    let id = Id::new();
     let storage_path = state
         .attachments
         .save(id, &filename, &content_type, &bytes)
@@ -127,7 +126,7 @@ async fn upload_attachment(
 async fn get_attachment(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(attachment_id): Path<Uuid>,
+    Path(attachment_id): Path<Id>,
 ) -> Result<Response, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = CommentService::new(pool);

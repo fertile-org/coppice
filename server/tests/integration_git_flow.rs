@@ -1,17 +1,16 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use coppice_server::domain::git_state::GitOutcome;
 use coppice_server::services::human_review_service::HumanReviewService;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 const SHA: &str = "abc1234abc1234abc1234abc1234abc1234abc12";
 
 async fn setup_ticket() -> (
     std::sync::Arc<coppice_server::AppState>,
-    Uuid,
-    Uuid,
+    Id,
+    Id,
     common::AgentTestEnv,
 ) {
     let (state, app, cookie, csrf, env) =
@@ -19,11 +18,11 @@ async fn setup_ticket() -> (
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let pool = state.db.clone().expect("pool");
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&pool)
         .await
         .expect("user");
-    (state, Uuid::parse_str(&ticket_id).unwrap(), user_id, env)
+    (state, Id::parse_str(&ticket_id).unwrap(), user_id, env)
 }
 
 #[tokio::test]
@@ -176,7 +175,7 @@ async fn repo_git_flow_defaults_off() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo = create_repo_json(&app, None, &cookie, &csrf).await;
     assert_eq!(repo["mergeAfterAccept"], false);
@@ -189,7 +188,7 @@ async fn repo_git_flow_patch_roundtrip() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |cfg| {
             cfg.git.push_enabled = true;
         })
@@ -237,7 +236,7 @@ async fn push_after_merge_rejected_without_remote() {
     if !common::db_available().await {
         return;
     }
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |cfg| {
             cfg.git.push_enabled = true;
         })
@@ -270,7 +269,7 @@ async fn push_after_merge_can_be_turned_off_while_gated() {
     // Turned on before the gate closed (e.g. push was disabled in config later).
     let pool = state.db.clone().expect("pool");
     sqlx::query("UPDATE repos SET push_after_merge = TRUE WHERE id = $1")
-        .bind(Uuid::parse_str(&id).unwrap())
+        .bind(Id::parse_str(&id).unwrap())
         .execute(&pool)
         .await
         .expect("force push_after_merge on");
@@ -317,7 +316,14 @@ async fn accepted_ticket_with_worktree() -> MergeFixture {
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path =
-        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+        common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     MergeFixture {
         _git_keep: git_dir,
         _worktrees: worktrees,
@@ -399,7 +405,7 @@ async fn review_of(
     fx: &MergeFixture,
 ) -> coppice_server::services::human_review_service::HumanReview {
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     HumanReviewService::new(&pool)
         .get(id)
         .await
@@ -510,7 +516,7 @@ async fn wait_for_ticket_updates(
     count: usize,
 ) {
     use coppice_server::events::bus::AppEvent;
-    let want = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let want = Id::parse_str(&fx.ticket_id).unwrap();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut seen = 0;
     while seen < count {
@@ -566,7 +572,7 @@ async fn cleanup_publishes_ticket_update() {
     assert_eq!(merge_main(&fx).await.status(), StatusCode::OK);
 
     // One update comes from the merge itself, a second from the cleanup.
-    let want = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let want = Id::parse_str(&fx.ticket_id).unwrap();
     let mut updates = 0;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while updates < 2 {
@@ -596,11 +602,18 @@ async fn cleanup_kept_worktree_sets_outcome() {
     wait_for_ticket_updates(&mut rx, &fx, 2).await;
     assert!(!fx.worktree_path.exists());
     let worktrees_root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
-    common::setup_worktree_with_commit(&fx.local_path, &worktrees_root, "test-repo", &fx.ticket_id);
+    common::setup_persisted_worktree(
+        fx.state.db.as_ref().expect("db"),
+        &fx.local_path,
+        &worktrees_root,
+        "test-repo",
+        &fx.ticket_id,
+    )
+    .await;
     std::fs::write(fx.worktree_path.join("scratch.txt"), "uncommitted\n").unwrap();
 
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     coppice_server::services::worktree_cleanup::cleanup_ticket(
         &pool,
         &fx.state.event_bus,
@@ -661,7 +674,14 @@ async fn sync_push_clears_not_pushed() {
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path =
-        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+        common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     let fx = MergeFixture {
         _git_keep: git_dir,
         _worktrees: worktrees,
@@ -681,7 +701,7 @@ async fn sync_push_clears_not_pushed() {
     wait_for_ticket_updates(&mut rx, &fx, 2).await;
 
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     HumanReviewService::new(&pool)
         .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
         .await
@@ -740,7 +760,14 @@ async fn repo_sync_push_clears_not_pushed() {
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path =
-        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+        common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     let fx = MergeFixture {
         _git_keep: git_dir,
         _worktrees: worktrees,
@@ -759,7 +786,7 @@ async fn repo_sync_push_clears_not_pushed() {
     wait_for_ticket_updates(&mut rx, &fx, 2).await;
 
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     HumanReviewService::new(&pool)
         .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
         .await
@@ -788,7 +815,7 @@ async fn not_pushed_is_kept_without_a_remote_tracking_ref() {
     wait_for_ticket_updates(&mut rx, &fx, 2).await;
 
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     HumanReviewService::new(&pool)
         .set_git_outcome(id, Some(GitOutcome::NotPushed), Some("Not pushed"))
         .await
@@ -809,7 +836,7 @@ async fn cleanup_does_not_clear_other_outcomes() {
     let fx = accepted_ticket_with_worktree().await;
     accept(&fx).await;
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     HumanReviewService::new(&pool)
         .set_git_outcome(
             id,
@@ -891,7 +918,14 @@ async fn chain_fixture(
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path =
-        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
+        common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     ChainFixture {
         fx: MergeFixture {
             _git_keep: git_dir,
@@ -931,7 +965,7 @@ fn current_branch(dir: &std::path::Path) -> String {
 }
 
 async fn run_chain(fx: &MergeFixture) -> ChainOutcome {
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     git_chain::run_after_accept(&fx.state, id).await
 }
 
@@ -947,7 +981,7 @@ async fn wait_for_worktree_gone(path: &std::path::Path) {
 
 async fn merge_comment_count(fx: &MergeFixture) -> i64 {
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM ticket_comments WHERE ticket_id = $1 AND body LIKE '**Merge:**%'",
     )
@@ -1078,7 +1112,7 @@ async fn push_gate_off_records_not_pushed() {
     // still close the gate after it was turned on.
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE repos SET push_after_merge = true WHERE id = $1")
-        .bind(Uuid::parse_str(&cf.repo_id).unwrap())
+        .bind(Id::parse_str(&cf.repo_id).unwrap())
         .execute(&pool)
         .await
         .unwrap();
@@ -1147,12 +1181,14 @@ async fn chain_is_serialized_per_repo() {
     let worktrees_root = std::path::PathBuf::from(&fx.state.config.agent.worktrees_path);
     let second_id = common::create_test_ticket(&fx.app, &fx.board_id, &fx.cookie, &fx.csrf).await;
     common::set_ticket_repo(&fx.app, &second_id, &cf.repo_id, &fx.cookie, &fx.csrf).await;
-    let second_worktree = common::setup_worktree_with_commit(
+    let second_worktree = common::setup_persisted_worktree(
+        fx.state.db.as_ref().expect("db"),
         &fx.local_path,
         &worktrees_root,
         "test-repo",
         &second_id,
-    );
+    )
+    .await;
     std::fs::write(second_worktree.join("second.txt"), "second\n").unwrap();
     git(&second_worktree, &["add", "second.txt"]);
     git(&second_worktree, &["commit", "-m", "second"]);
@@ -1171,8 +1207,8 @@ async fn chain_is_serialized_per_repo() {
     accept(fx).await;
     accept(&second).await;
 
-    let first_id = Uuid::parse_str(&fx.ticket_id).unwrap();
-    let second_uuid = Uuid::parse_str(&second_id).unwrap();
+    let first_id = Id::parse_str(&fx.ticket_id).unwrap();
+    let second_uuid = Id::parse_str(&second_id).unwrap();
     let (a, b) = tokio::join!(
         tokio::spawn({
             let state = fx.state.clone();
@@ -1215,7 +1251,7 @@ async fn chain_restores_checked_out_branch() {
 /// is spawned and the test sees `run_after_accept`'s own outcome.
 async fn done_without_spawned_chain(fx: &MergeFixture) {
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     let res = post(
         fx,
         "PATCH",
@@ -1225,7 +1261,7 @@ async fn done_without_spawned_chain(fx: &MergeFixture) {
     .await;
     assert_eq!(res.status(), StatusCode::OK);
     let head = rev(&fx.worktree_path, "HEAD");
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&pool)
         .await
         .expect("user");
@@ -1240,7 +1276,7 @@ async fn done_without_spawned_chain(fx: &MergeFixture) {
     assert_eq!(ticket_status(fx).await, "done");
 }
 
-async fn git_needs_action_bodies(pool: &sqlx::PgPool, ticket_id: Uuid) -> Vec<String> {
+async fn git_needs_action_bodies(pool: &sqlx::PgPool, ticket_id: Id) -> Vec<String> {
     sqlx::query_scalar(
         "SELECT body FROM notifications WHERE type = 'git_needs_action' AND ticket_id = $1",
     )
@@ -1288,7 +1324,7 @@ async fn chain_merge_error_records_reason_and_notifies_once() {
     // The same failure again does not ring the bell twice.
     assert_eq!(run_chain(fx).await, ChainOutcome::MergeFailed);
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     assert_eq!(git_needs_action_bodies(&pool, id).await, vec![reason]);
 }
 
@@ -1316,7 +1352,7 @@ async fn chain_outcome_not_pushed_when_gate_is_off() {
     let cf = chain_fixture(false, true, false).await;
     let pool = cf.fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE repos SET push_after_merge = true WHERE id = $1")
-        .bind(Uuid::parse_str(&cf.repo_id).unwrap())
+        .bind(Id::parse_str(&cf.repo_id).unwrap())
         .execute(&pool)
         .await
         .unwrap();
@@ -1412,7 +1448,7 @@ use coppice_server::services::run_service::{RunService, StartRunOptions};
 const COPPICE_ACCEPTED: &str =
     "Accepted by Coppice (human review skipped): ticket moved to **Done**.";
 
-async fn comment_count(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) -> i64 {
+async fn comment_count(pool: &sqlx::PgPool, ticket_id: Id, body: &str) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2")
         .bind(ticket_id)
         .bind(body)
@@ -1421,7 +1457,7 @@ async fn comment_count(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) -> i64 
         .expect("count comments")
 }
 
-async fn skip_review_notices(pool: &sqlx::PgPool, ticket_id: Uuid) -> Vec<String> {
+async fn skip_review_notices(pool: &sqlx::PgPool, ticket_id: Id) -> Vec<String> {
     sqlx::query_scalar(
         "SELECT body FROM ticket_comments WHERE ticket_id = $1 \
          AND author_type = 'system' AND body LIKE 'Skip human review%' ORDER BY created_at",
@@ -1432,7 +1468,7 @@ async fn skip_review_notices(pool: &sqlx::PgPool, ticket_id: Uuid) -> Vec<String
     .expect("skip review notices")
 }
 
-async fn wait_for_comment(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) {
+async fn wait_for_comment(pool: &sqlx::PgPool, ticket_id: Id, body: &str) {
     for _ in 0..300 {
         if comment_count(pool, ticket_id, body).await > 0 {
             return;
@@ -1443,10 +1479,10 @@ async fn wait_for_comment(pool: &sqlx::PgPool, ticket_id: Uuid, body: &str) {
 }
 
 /// A repo ticket with a worktree commit, waiting in final review.
-async fn final_review_fixture(flagged: bool) -> (MergeFixture, sqlx::PgPool, Uuid) {
+async fn final_review_fixture(flagged: bool) -> (MergeFixture, sqlx::PgPool, Id) {
     let fx = accepted_ticket_with_worktree().await;
     let pool = fx.state.db.clone().expect("pool");
-    let id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let id = Id::parse_str(&fx.ticket_id).unwrap();
     sqlx::query(
         "UPDATE tickets SET status = 'wait_for_final_review', skip_human_review = $2 WHERE id = $1",
     )
@@ -1459,12 +1495,12 @@ async fn final_review_fixture(flagged: bool) -> (MergeFixture, sqlx::PgPool, Uui
 }
 
 /// An earlier agent comment, posted before the review passed.
-async fn add_agent_comment(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) {
+async fn add_agent_comment(pool: &sqlx::PgPool, ticket_id: Id, intent: &str) {
     sqlx::query(
         "INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at) \
          VALUES ($1, $2, 'agent', 'Please change this.', $3, now() - interval '1 minute')",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(ticket_id)
     .bind(intent)
     .execute(pool)
@@ -1473,7 +1509,7 @@ async fn add_agent_comment(pool: &sqlx::PgPool, ticket_id: Uuid, intent: &str) {
 }
 
 /// An agent review passed the worktree's current commit.
-async fn mark_review_passed(fx: &MergeFixture, pool: &sqlx::PgPool, ticket_id: Uuid) {
+async fn mark_review_passed(fx: &MergeFixture, pool: &sqlx::PgPool, ticket_id: Id) {
     sqlx::query(
         "UPDATE tickets SET agent_review_passed_at = now(), agent_review_passed_sha = $2 \
          WHERE id = $1",
@@ -1485,7 +1521,7 @@ async fn mark_review_passed(fx: &MergeFixture, pool: &sqlx::PgPool, ticket_id: U
     .unwrap();
 }
 
-async fn review_pass_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> (bool, Option<String>) {
+async fn review_pass_of(pool: &sqlx::PgPool, ticket_id: Id) -> (bool, Option<String>) {
     let (at, sha): (Option<time::OffsetDateTime>, Option<String>) = sqlx::query_as(
         "SELECT agent_review_passed_at, agent_review_passed_sha FROM tickets WHERE id = $1",
     )
@@ -1496,7 +1532,7 @@ async fn review_pass_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> (bool, Option<S
     (at.is_some(), sha)
 }
 
-async fn status_of(pool: &sqlx::PgPool, ticket_id: Uuid) -> String {
+async fn status_of(pool: &sqlx::PgPool, ticket_id: Id) -> String {
     sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_one(pool)
@@ -1529,13 +1565,13 @@ async fn flagged_ticket_with_clean_review_auto_accepts() {
     let qc_id = common::create_agent_with_preset_key(&app, "qc", "Skip QC", &cookie, &csrf).await;
     // A QC run that passes, so the ticket reaches final review.
     sqlx::query("UPDATE agents SET preset_source = 'qc_pass' WHERE id = $1")
-        .bind(Uuid::parse_str(&qc_id).unwrap())
+        .bind(Id::parse_str(&qc_id).unwrap())
         .execute(&pool)
         .await
         .unwrap();
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let id = Uuid::parse_str(&ticket_id).unwrap();
+    let id = Id::parse_str(&ticket_id).unwrap();
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     sqlx::query("UPDATE tickets SET skip_human_review = true WHERE id = $1")
         .bind(id)
@@ -1641,7 +1677,7 @@ async fn split_ticket_blocks_auto_accept() {
     mark_review_passed(&fx, &pool, id).await;
     let child = common::create_test_ticket(&fx.app, &fx.board_id, &fx.cookie, &fx.csrf).await;
     sqlx::query("UPDATE tickets SET parent_ticket_id = $2 WHERE id = $1")
-        .bind(Uuid::parse_str(&child).unwrap())
+        .bind(Id::parse_str(&child).unwrap())
         .bind(id)
         .execute(&pool)
         .await
@@ -1699,9 +1735,9 @@ async fn scope_b_path_without_review_waits() {
         &csrf,
     )
     .await;
-    let engineer = Uuid::parse_str(&engineer_id).unwrap();
+    let engineer = Id::parse_str(&engineer_id).unwrap();
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let id = Uuid::parse_str(&ticket_id).unwrap();
+    let id = Id::parse_str(&ticket_id).unwrap();
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     // The implementer resumes in In Review after a clarification: its finish
     // goes straight to final review with no agent code review.
@@ -1780,7 +1816,7 @@ async fn blocked_agent_after_pass_blocks_auto_accept() {
         "INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at) \
          VALUES ($1, $2, 'agent', 'Blocked on a defect.', 'blocked', now() + interval '1 second')",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(id)
     .execute(&pool)
     .await

@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::events::mark_run_interrupted;
@@ -19,12 +20,10 @@ use coppice_connectors::ConsoleKind;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
-
 pub async fn live_ws_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, StatusCode> {
     let cookie = headers
@@ -45,7 +44,7 @@ struct RecoveryOutcome {
 
 async fn mark_recovery_interrupted(
     state: &AppState,
-    run_id: Uuid,
+    run_id: Id,
     reason: &str,
 ) -> RecoveryOutcome {
     match mark_run_interrupted(state, run_id, reason).await {
@@ -78,7 +77,7 @@ async fn mark_recovery_interrupted(
     }
 }
 
-async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocket) {
+async fn handle_live_socket(state: Arc<AppState>, run_id: Id, socket: WebSocket) {
     let (mut sender, _receiver) = socket.split();
 
     let Some(pool) = state.db.as_ref() else {
@@ -176,7 +175,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
 
 async fn wait_for_run_stream(
     state: &AppState,
-    run_id: Uuid,
+    run_id: Id,
     max_wait: Duration,
 ) -> Option<Arc<crate::sessions::run_registry::RunStreamHandle>> {
     // The stream handle is registered before the run is marked running, so a
@@ -206,7 +205,7 @@ async fn wait_for_run_stream(
 
 async fn replay_and_subscribe(
     state: &AppState,
-    run_id: Uuid,
+    run_id: Id,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     handle: &Arc<crate::sessions::run_registry::RunStreamHandle>,
 ) {
@@ -246,7 +245,7 @@ async fn replay_and_subscribe(
 
 async fn recv_replay_or_removed(
     registry: &RunStreamRegistry,
-    run_id: Uuid,
+    run_id: Id,
     rx: &mut tokio::sync::broadcast::Receiver<LiveMessage>,
 ) -> Option<Result<LiveMessage, tokio::sync::broadcast::error::RecvError>> {
     loop {
@@ -284,10 +283,10 @@ fn classify_replay_recv(
 async fn handle_opencode_recovery(
     state: &AppState,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    run_id: Uuid,
+    run_id: Id,
     run: &AgentRun,
 ) -> RecoveryOutcome {
-    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
+    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, run_id.as_ref());
 
     if let Some(snapshot) = ArtifactService::read_session_snapshot(&paths) {
         if send_live_message(sender, &LiveMessage::Snapshot { snapshot })
@@ -318,7 +317,7 @@ async fn handle_opencode_recovery(
         }
     };
 
-    let Some(base_url) = state.opencode_runs.base_url(&run_id.to_string()) else {
+    let Some(base_url) = state.opencode_runs.base_url(run_id.as_ref()) else {
         if state.run_streams.get(run_id).is_some() {
             return RecoveryOutcome {
                 recoverable: Some(true),
@@ -385,11 +384,11 @@ async fn handle_opencode_recovery(
 async fn handle_structured_console_recovery(
     state: &AppState,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    run_id: Uuid,
+    run_id: Id,
     run: &AgentRun,
 ) -> RecoveryOutcome {
     // Replay structured console events from disk (preferred) or legacy terminal log.
-    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
+    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, run_id.as_ref());
     let console_events = ArtifactService::read_console_events_tail(&paths, REPLAY_CONSOLE_BYTES);
     if !console_events.is_empty() {
         for event in console_events {
@@ -440,8 +439,8 @@ const REPLAY_CONSOLE_BYTES: u64 = 8 * 1024 * 1024;
 /// Most terminal log bytes replayed from disk.
 const REPLAY_TERMINAL_BYTES: u64 = 4 * 1024 * 1024;
 
-fn read_terminal_log_artifact(state: &AppState, run_id: Uuid) -> Option<Vec<u8>> {
-    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
+fn read_terminal_log_artifact(state: &AppState, run_id: Id) -> Option<Vec<u8>> {
+    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, run_id.as_ref());
     ArtifactService::read_terminal_log_tail(&paths, REPLAY_TERMINAL_BYTES)
 }
 
@@ -497,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn run_stream_receiver_lags_on_overflow() {
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let mut rx = handle.subscribe();
 
@@ -522,7 +521,7 @@ mod tests {
     #[tokio::test]
     async fn removed_stream_drains_queued_messages_before_end() {
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let mut rx = handle.subscribe();
 

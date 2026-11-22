@@ -5,6 +5,7 @@
 //! Ready and starts the Tech Lead when one is available. Skip planning sends
 //! the ticket straight from Backlog to Ready. A missing Tech Lead does not
 //! block the ticket: Ready stays put and a comment explains why.
+use crate::domain::Id;
 
 use crate::copy::plan::{
     self, format_plan, APPROVE_ONLY_FROM_PLAN_REVIEW, ASK_COMMENT_REQUIRED,
@@ -32,14 +33,12 @@ use serde::Serialize;
 use sqlx::PgPool;
 use sqlx::Row;
 use sqlx::{Postgres, Transaction};
-use uuid::Uuid;
-
 pub use crate::domain::workflow::JOB_TYPE_PLAN_TICKET as PLAN_JOB;
 
 #[derive(Debug)]
 pub enum StartOutcome {
-    Started(Uuid),
-    AlreadyRunning(Uuid),
+    Started(Id),
+    AlreadyRunning(Id),
     Skipped,
     NoPlanner,
 }
@@ -77,7 +76,7 @@ impl From<crate::services::comment_service::CommentError> for PlanError {
 }
 
 pub struct ApprovedPlan {
-    pub plan_id: Uuid,
+    pub plan_id: Id,
     pub markdown: String,
     pub steps: Vec<String>,
 }
@@ -85,16 +84,16 @@ pub struct ApprovedPlan {
 /// One plan revision stored off the comment thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketPlan {
-    pub id: Uuid,
-    pub ticket_id: Uuid,
-    pub run_id: Option<Uuid>,
-    pub agent_id: Option<Uuid>,
+    pub id: Id,
+    pub ticket_id: Id,
+    pub run_id: Option<Id>,
+    pub agent_id: Option<Id>,
     pub revision: i32,
     pub body: String,
     pub content_version: i32,
     pub change_request: Option<String>,
     /// The design set the plan reflects, and the option it was written against.
-    pub design_set_id: Option<Uuid>,
+    pub design_set_id: Option<Id>,
     pub design_option_id: Option<String>,
     /// Live plan-run set id → option id the plan was written around.
     pub design_picks: serde_json::Map<String, serde_json::Value>,
@@ -114,7 +113,7 @@ impl<'a> PlanningService<'a> {
 
     /// Start the PM's planning run. Used from Backlog, and from Ready when a
     /// ticket is sitting there with no plan (older rows).
-    pub async fn start_planning(&self, ticket_id: Uuid) -> Result<StartOutcome, PlanError> {
+    pub async fn start_planning(&self, ticket_id: Id) -> Result<StartOutcome, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if !matches!(
             ticket.ticket.status,
@@ -128,7 +127,7 @@ impl<'a> PlanningService<'a> {
     /// Ready was just entered with an approved plan or Skip planning.
     /// Start the Tech Lead when one exists. A missing Tech Lead leaves the
     /// ticket in Ready and posts an explanation.
-    pub async fn on_entered_ready(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    pub async fn on_entered_ready(&self, ticket_id: Id) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::Ready {
             return Ok(());
@@ -142,7 +141,7 @@ impl<'a> PlanningService<'a> {
         self.start_tech_lead(ticket_id).await
     }
 
-    async fn start_tech_lead(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    async fn start_tech_lead(&self, ticket_id: Id) -> Result<(), PlanError> {
         if self.is_split_parent(ticket_id).await? {
             return Ok(());
         }
@@ -195,7 +194,7 @@ impl<'a> PlanningService<'a> {
         }
     }
 
-    async fn note(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
+    async fn note(&self, ticket_id: Id, body: &str) -> Result<(), PlanError> {
         CommentService::new(self.pool)
             .create(
                 ticket_id,
@@ -212,8 +211,8 @@ impl<'a> PlanningService<'a> {
 
     async fn start(
         &self,
-        ticket_id: Uuid,
-        trigger_comment_id: Option<Uuid>,
+        ticket_id: Id,
+        trigger_comment_id: Option<Id>,
     ) -> Result<StartOutcome, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.skip_planning {
@@ -244,11 +243,11 @@ impl<'a> PlanningService<'a> {
     async fn queue_plan_run(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        ticket_id: Uuid,
-        planner_id: Uuid,
-        trigger_comment_id: Option<Uuid>,
+        ticket_id: Id,
+        planner_id: Id,
+        trigger_comment_id: Option<Id>,
     ) -> Result<StartOutcome, PlanError> {
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let inserted = sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -275,7 +274,7 @@ impl<'a> PlanningService<'a> {
             let existing = self.active_plan_run(ticket_id).await?;
             return Ok(StartOutcome::AlreadyRunning(existing.unwrap_or(run_id)));
         };
-        let inserted_id: Uuid = row.get("id");
+        let inserted_id: Id = row.get("id");
 
         sqlx::query(
             r#"
@@ -283,7 +282,7 @@ impl<'a> PlanningService<'a> {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(inserted_id)
         .bind(JOB_TYPE_PLAN_TICKET)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -295,10 +294,10 @@ impl<'a> PlanningService<'a> {
     /// Insert a plan revision. Does not move the ticket; call [`Self::bind_latest_plan`].
     pub async fn insert_plan(
         &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
+        ticket_id: Id,
+        agent_id: Id,
         summary: &str,
-        run_id: Option<Uuid>,
+        run_id: Option<Id>,
         no_visible_change: bool,
         suggest_skip_review: bool,
     ) -> Result<TicketPlan, PlanError> {
@@ -317,9 +316,9 @@ impl<'a> PlanningService<'a> {
     #[allow(clippy::too_many_arguments)]
     async fn insert_plan_body(
         &self,
-        ticket_id: Uuid,
-        agent_id: Option<Uuid>,
-        run_id: Option<Uuid>,
+        ticket_id: Id,
+        agent_id: Option<Id>,
+        run_id: Option<Id>,
         body: &str,
         revision: Option<i32>,
         no_visible_change: bool,
@@ -414,7 +413,7 @@ impl<'a> PlanningService<'a> {
             }
             // Every live plan-run set → option (chosen or recommended). Legacy
             // columns keep the newest set for older readers.
-            let designs: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+            let designs: Vec<(Id, Option<String>)> = sqlx::query_as(
                 r#"
                 SELECT d.id, COALESCE(d.chosen_option_id, d.recommended_option_id)
                 FROM design_sets d
@@ -444,7 +443,7 @@ impl<'a> PlanningService<'a> {
             }
         };
         let picks_json = serde_json::Value::Object(design_picks);
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let row = sqlx::query(
             r#"
             INSERT INTO ticket_plans (
@@ -475,14 +474,14 @@ impl<'a> PlanningService<'a> {
     }
 
     /// Clear approval and move Backlog/Ready into Plan Review.
-    pub async fn bind_latest_plan(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    pub async fn bind_latest_plan(&self, ticket_id: Id) -> Result<(), PlanError> {
         let Some(plan) = self.latest_plan(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
         };
         self.bind_plan(ticket_id, plan.id).await
     }
 
-    async fn bind_plan(&self, ticket_id: Uuid, _plan_id: Uuid) -> Result<(), PlanError> {
+    async fn bind_plan(&self, ticket_id: Id, _plan_id: Id) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         sqlx::query(
             r#"
@@ -507,7 +506,7 @@ impl<'a> PlanningService<'a> {
 
     pub async fn approve(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         workflow: &crate::config::WorkflowConfig,
         skip_human_review: Option<bool>,
         accept_recommended: bool,
@@ -601,7 +600,7 @@ impl<'a> PlanningService<'a> {
     /// the content version (and the approval) stays as it is.
     async fn write_plan_into_description(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         description: &str,
         plan_body: &str,
     ) -> Result<(), PlanError> {
@@ -635,9 +634,9 @@ impl<'a> PlanningService<'a> {
     pub(crate) async fn approve_child_plan(
         &self,
         parent: &crate::domain::ticket::Ticket,
-        child_id: Uuid,
+        child_id: Id,
         spec: &crate::domain::workflow::SplitTicketSpec,
-        recommended_by: Uuid,
+        recommended_by: Id,
     ) -> Result<(), PlanError> {
         let body = plan::child_plan(
             &parent.title,
@@ -677,7 +676,7 @@ impl<'a> PlanningService<'a> {
         &self,
         parent: &crate::domain::ticket::Ticket,
         pending: &crate::domain::workflow::PendingSplitRecommendation,
-        plan_id: Uuid,
+        plan_id: Id,
         workflow: &crate::config::WorkflowConfig,
     ) -> Result<usize, PlanError> {
         let children = crate::services::split_service::SplitService::new(self.pool, workflow)
@@ -687,7 +686,7 @@ impl<'a> PlanningService<'a> {
         TicketService::new(self.pool)
             .clear_pending_split_recommendation(parent.id)
             .await?;
-        let child_ids: Vec<Uuid> = children.iter().map(|child| child.id).collect();
+        let child_ids: Vec<Id> = children.iter().map(|child| child.id).collect();
         sqlx::query(
             r#"
             INSERT INTO ticket_plan_splits (parent_ticket_id, plan_id, child_order)
@@ -711,7 +710,7 @@ impl<'a> PlanningService<'a> {
     /// True when the split parent can be verified: every sub-ticket that is
     /// not archived is Done and merged, nothing is verifying it yet, and it
     /// is not already waiting for Human Review or Done.
-    pub async fn verify_available(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+    pub async fn verify_available(&self, ticket_id: Id) -> Result<bool, PlanError> {
         let row: (bool, i64, i64, bool) = sqlx::query_as(
             r#"
             SELECT
@@ -750,9 +749,9 @@ impl<'a> PlanningService<'a> {
     /// the PM who plans tickets.
     pub async fn start_verification(
         &self,
-        ticket_id: Uuid,
-        agent_id: Option<Uuid>,
-    ) -> Result<Uuid, PlanError> {
+        ticket_id: Id,
+        agent_id: Option<Id>,
+    ) -> Result<Id, PlanError> {
         if !self.is_split_parent(ticket_id).await? {
             return Err(PlanError::Validation(plan::VERIFY_NOT_A_PARENT.into()));
         }
@@ -782,7 +781,7 @@ impl<'a> PlanningService<'a> {
                 planner_for_ticket(&agents).ok_or_else(|| PlanError::Validation(NO_PM.into()))?
             }
         };
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
@@ -804,7 +803,7 @@ impl<'a> PlanningService<'a> {
         sqlx::query(
             "INSERT INTO agent_jobs (id, run_id, job_type, status) VALUES ($1, $2, $3, $4)",
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(run_id)
         .bind(crate::domain::workflow::JOB_TYPE_VERIFY_PARENT)
         .bind(job_status_to_str(JobStatus::Pending))
@@ -818,7 +817,7 @@ impl<'a> PlanningService<'a> {
     /// sub-tickets as merged or excluded.
     pub async fn verification_brief(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<VerificationBrief, PlanError> {
         let criteria = match self.approved_plan(ticket_id).await? {
             Some(plan) => plan::plan_criteria(&plan.markdown),
@@ -858,7 +857,7 @@ impl<'a> PlanningService<'a> {
     }
 
     /// True for a ticket split at Plan Review. It gets no implementation run.
-    pub async fn is_split_parent(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+    pub async fn is_split_parent(&self, ticket_id: Id) -> Result<bool, PlanError> {
         Ok(sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM ticket_plan_splits WHERE parent_ticket_id = $1)",
         )
@@ -870,7 +869,7 @@ impl<'a> PlanningService<'a> {
     /// The ticket's question round, if the planner asked one.
     pub async fn questions(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<PlanQuestionsState>, PlanError> {
         let row: Option<(serde_json::Value, Option<serde_json::Value>, bool)> = sqlx::query_as(
             r#"
@@ -892,7 +891,7 @@ impl<'a> PlanningService<'a> {
     }
 
     /// Questions are allowed once, and only before the ticket's first plan.
-    pub async fn can_ask_questions(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+    pub async fn can_ask_questions(&self, ticket_id: Id) -> Result<bool, PlanError> {
         let blocked: bool = sqlx::query_scalar(
             r#"
             SELECT EXISTS(SELECT 1 FROM ticket_plan_questions WHERE ticket_id = $1)
@@ -909,9 +908,9 @@ impl<'a> PlanningService<'a> {
     /// where it waits for answers. `comment_id` is the posted questions comment.
     pub async fn record_questions(
         &self,
-        ticket_id: Uuid,
-        run_id: Option<Uuid>,
-        comment_id: Option<Uuid>,
+        ticket_id: Id,
+        run_id: Option<Id>,
+        comment_id: Option<Id>,
         questions: &[crate::providers::PlanQuestion],
     ) -> Result<(), PlanError> {
         if questions.len() > plan::MAX_PLAN_QUESTIONS {
@@ -947,7 +946,7 @@ impl<'a> PlanningService<'a> {
 
     /// Post the human's answers and start planning again with them. The
     /// ticket stays in Plan Review while the plan is written.
-    pub async fn send_answers(&self, ticket_id: Uuid, answers: &[String]) -> Result<(), PlanError> {
+    pub async fn send_answers(&self, ticket_id: Id, answers: &[String]) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         TicketService::ensure_not_archived(&ticket.ticket)?;
         let Some(state) = self
@@ -1008,7 +1007,7 @@ impl<'a> PlanningService<'a> {
 
     pub async fn ask_for_changes(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         body: &str,
     ) -> Result<StartOutcome, PlanError> {
         let mut tx = self.pool.begin().await?;
@@ -1027,7 +1026,7 @@ impl<'a> PlanningService<'a> {
     pub async fn ask_for_changes_in(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        ticket_id: Uuid,
+        ticket_id: Id,
         body: &str,
     ) -> Result<StartOutcome, PlanError> {
         // Two requests take turns, so the second sees the first one's run.
@@ -1092,7 +1091,7 @@ impl<'a> PlanningService<'a> {
         self.queue_plan_run(tx, ticket_id, planner.id, None).await
     }
 
-    pub async fn approved_plan(&self, ticket_id: Uuid) -> Result<Option<ApprovedPlan>, PlanError> {
+    pub async fn approved_plan(&self, ticket_id: Id) -> Result<Option<ApprovedPlan>, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if !TicketService::new(self.pool)
             .approved_plan_is_current(&ticket.ticket)
@@ -1113,7 +1112,7 @@ impl<'a> PlanningService<'a> {
         }))
     }
 
-    pub async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
+    pub async fn active_plan_run(&self, ticket_id: Id) -> Result<Option<Id>, PlanError> {
         let id = sqlx::query_scalar(
             r#"
             SELECT id FROM agent_runs
@@ -1135,7 +1134,7 @@ impl<'a> PlanningService<'a> {
     /// `None` when the latest plan has no change request (a first plan).
     pub async fn revision_context(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<PlanRevisionContext>, PlanError> {
         let Some(latest) = self.latest_plan(ticket_id).await? else {
             return Ok(None);
@@ -1156,7 +1155,7 @@ impl<'a> PlanningService<'a> {
     }
 
     /// Every non-null change request on the ticket, oldest revision first.
-    pub async fn change_requests(&self, ticket_id: Uuid) -> Result<Vec<String>, PlanError> {
+    pub async fn change_requests(&self, ticket_id: Id) -> Result<Vec<String>, PlanError> {
         let requests: Vec<String> = sqlx::query_scalar(
             r#"
             SELECT change_request
@@ -1173,7 +1172,7 @@ impl<'a> PlanningService<'a> {
         Ok(requests)
     }
 
-    pub async fn latest_plan(&self, ticket_id: Uuid) -> Result<Option<TicketPlan>, PlanError> {
+    pub async fn latest_plan(&self, ticket_id: Id) -> Result<Option<TicketPlan>, PlanError> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
@@ -1191,7 +1190,7 @@ impl<'a> PlanningService<'a> {
         Ok(row.as_ref().map(row_to_plan))
     }
 
-    async fn plan_by_id(&self, plan_id: Uuid) -> Result<Option<TicketPlan>, PlanError> {
+    async fn plan_by_id(&self, plan_id: Id) -> Result<Option<TicketPlan>, PlanError> {
         let row = sqlx::query(
             r#"
             SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
@@ -1211,7 +1210,7 @@ impl<'a> PlanningService<'a> {
     /// and none may be out of date relative to the plan.
     async fn refuse_unready_designs(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         plan: &TicketPlan,
         accept_recommended: bool,
     ) -> Result<(), PlanError> {
@@ -1263,7 +1262,7 @@ impl<'a> PlanningService<'a> {
 }
 
 /// Option id the plan was written around for `set_id` (picks map, else legacy columns).
-pub fn plan_option_for_set(plan: &TicketPlan, set_id: Uuid) -> Option<String> {
+pub fn plan_option_for_set(plan: &TicketPlan, set_id: Id) -> Option<String> {
     if let Some(value) = plan.design_picks.get(&set_id.to_string()) {
         return value.as_str().map(str::to_string);
     }
@@ -1350,7 +1349,7 @@ pub fn status_after_planning_run(current: TicketStatus) -> Option<TicketStatus> 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuggestedAssignee {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
 }
 
@@ -1423,7 +1422,7 @@ mod tests {
 
     fn agent(id: u128, role: &str, key: &str, enabled: bool, created_secs: i64) -> Agent {
         Agent {
-            id: Uuid::from_u128(id),
+            id: Id::from_u128(id),
             name: role.into(),
             role: role.into(),
             responsibilities: vec![],
@@ -1463,8 +1462,8 @@ mod tests {
     fn backlog_ticket() -> Ticket {
         let now = OffsetDateTime::from_unix_timestamp(1).unwrap();
         Ticket {
-            id: Uuid::from_u128(9),
-            board_id: Uuid::from_u128(8),
+            id: Id::from_u128(9),
+            board_id: Id::from_u128(8),
             repo_id: None,
             title: "New ticket".into(),
             description: String::new(),
@@ -1510,7 +1509,7 @@ mod tests {
     fn suggested_assignee_is_none_when_the_ticket_is_assigned() {
         let pm = agent(1, "PM", "pm", true, 1);
         let mut ticket = backlog_ticket();
-        ticket.assignee_agent_id = Some(Uuid::from_u128(2));
+        ticket.assignee_agent_id = Some(Id::from_u128(2));
         assert!(suggested_assignee(&ticket, Some(&pm)).is_none());
     }
 

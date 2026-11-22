@@ -1,9 +1,8 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 #[tokio::test]
 async fn list_presets_has_ten_entries() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -243,14 +242,14 @@ async fn list_agents_orders_by_role_and_stays_stable_after_edit() {
     let base = "2026-01-01T00:00:00Z";
     for id in [&qc, &pm, &tech_lead, &fe, &custom_id, &be_first] {
         sqlx::query("UPDATE agents SET created_at = $2::timestamptz WHERE id = $1")
-            .bind(Uuid::parse_str(id).unwrap())
+            .bind(Id::parse_str(id).unwrap())
             .bind(base)
             .execute(pool)
             .await
             .unwrap();
     }
     sqlx::query("UPDATE agents SET created_at = $2::timestamptz WHERE id = $1")
-        .bind(Uuid::parse_str(&be_second).unwrap())
+        .bind(Id::parse_str(&be_second).unwrap())
         .bind("2026-01-01T00:00:01Z")
         .execute(pool)
         .await
@@ -496,7 +495,7 @@ async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves
     assert_eq!(create.status(), StatusCode::CREATED);
     let knowledge = common::json_body(create).await;
     let item_id = knowledge["id"].as_str().unwrap();
-    let revision_id = Uuid::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
+    let revision_id = Id::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
 
     let deleted = app
         .clone()
@@ -546,7 +545,7 @@ async fn deleting_agent_with_run_sourced_knowledge_keeps_provenance_without_the_
         &csrf,
     )
     .await;
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -554,8 +553,8 @@ async fn deleting_agent_with_run_sourced_knowledge_keeps_provenance_without_the_
         "#,
     )
     .bind(run_id)
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
-    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(state.db.as_ref().unwrap())
     .await
     .unwrap();
@@ -645,14 +644,14 @@ async fn deleting_agent_with_run_sourced_knowledge_keeps_provenance_without_the_
         .await
         .unwrap();
     assert_eq!(run_count, 0);
-    let (ticket, agent): (Option<Uuid>, Option<Uuid>) =
+    let (ticket, agent): (Option<Id>, Option<Id>) =
         sqlx::query_as("SELECT ticket_id, agent_id FROM knowledge_provenance WHERE run_id = $1")
             .bind(run_id)
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(ticket, Some(Uuid::parse_str(&ticket_id).unwrap()));
-    assert_eq!(agent, Some(Uuid::parse_str(&agent_id).unwrap()));
+    assert_eq!(ticket, Some(Id::parse_str(&ticket_id).unwrap()));
+    assert_eq!(agent, Some(Id::parse_str(&agent_id).unwrap()));
 }
 
 #[tokio::test]
@@ -691,9 +690,9 @@ async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
         .unwrap();
     assert_eq!(knowledge.status(), StatusCode::CREATED);
     let knowledge = common::json_body(knowledge).await;
-    let item_id = Uuid::parse_str(knowledge["id"].as_str().unwrap()).unwrap();
-    let revision_id = Uuid::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
-    let run_id = Uuid::new_v4();
+    let item_id = Id::parse_str(knowledge["id"].as_str().unwrap()).unwrap();
+    let revision_id = Id::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
+    let run_id = Id::new();
     let pool = state.db.as_ref().unwrap();
     sqlx::query(
         r#"
@@ -702,8 +701,8 @@ async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
         "#,
     )
     .bind(run_id)
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
-    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(pool)
     .await
     .unwrap();
@@ -714,7 +713,7 @@ async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
         ) VALUES ($1, $2, $3, $4, 1, 0.9, 12)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(run_id)
     .bind(item_id)
     .bind(revision_id)
@@ -741,7 +740,7 @@ async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
         .await
         .expect("a run that used knowledge can be deleted");
 
-    let (usage_run, usage_rank): (Option<Uuid>, i32) =
+    let (usage_run, usage_rank): (Option<Id>, i32) =
         sqlx::query_as("SELECT run_id, rank FROM knowledge_usage_logs WHERE revision_id = $1")
             .bind(revision_id)
             .fetch_one(pool)

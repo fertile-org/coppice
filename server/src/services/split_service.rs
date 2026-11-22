@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::collections::HashMap;
 
 use crate::config::WorkflowConfig;
@@ -13,8 +14,6 @@ use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 /// A split proposed by a plan is created only by approving the plan.
 pub const PLAN_SPLIT_NEEDS_APPROVAL: &str =
     "Approve the plan to create these sub-tickets, or ask for changes to drop them.";
@@ -51,7 +50,7 @@ impl<'a> SplitService<'a> {
         &self,
         parent: &Ticket,
         splits: &[SplitTicketSpec],
-        recommended_by: Uuid,
+        recommended_by: Id,
         auto_split: bool,
     ) -> Result<ApplySplitOutcome, SplitError> {
         if splits.is_empty() {
@@ -87,7 +86,7 @@ impl<'a> SplitService<'a> {
         &self,
         parent: &Ticket,
         splits: &[SplitTicketSpec],
-        recommended_by: Uuid,
+        recommended_by: Id,
     ) -> Result<(), SplitError> {
         let recommended_at = OffsetDateTime::now_utc()
             .format(&Rfc3339)
@@ -110,7 +109,7 @@ impl<'a> SplitService<'a> {
         &self,
         parent: &Ticket,
         splits: &[SplitTicketSpec],
-        recommended_by: Uuid,
+        recommended_by: Id,
     ) -> Result<Vec<Ticket>, SplitError> {
         let agents = AgentService::new(self.pool).list_agents().await?;
         let agent_ids = build_agent_key_map(&agents);
@@ -180,7 +179,7 @@ impl<'a> SplitService<'a> {
         Ok(children)
     }
 
-    pub async fn approve_splits(&self, ticket_id: Uuid) -> Result<Vec<Ticket>, SplitError> {
+    pub async fn approve_splits(&self, ticket_id: Id) -> Result<Vec<Ticket>, SplitError> {
         let ticket_svc = TicketService::new(self.pool);
         let parent = ticket_svc.get(ticket_id).await?;
         TicketService::ensure_not_archived(&parent.ticket)?;
@@ -215,7 +214,7 @@ impl<'a> SplitService<'a> {
         Ok(children)
     }
 
-    pub async fn dismiss_splits(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, SplitError> {
+    pub async fn dismiss_splits(&self, ticket_id: Id) -> Result<TicketWithDisplay, SplitError> {
         let ticket_svc = TicketService::new(self.pool);
         let parent = ticket_svc.get(ticket_id).await?;
         TicketService::ensure_not_archived(&parent.ticket)?;
@@ -241,7 +240,7 @@ impl<'a> SplitService<'a> {
 
     pub async fn list_children(
         &self,
-        parent_ticket_id: Uuid,
+        parent_ticket_id: Id,
     ) -> Result<Vec<TicketWithDisplay>, SplitError> {
         TicketService::new(self.pool)
             .list_children(parent_ticket_id)
@@ -250,7 +249,7 @@ impl<'a> SplitService<'a> {
     }
 }
 
-fn build_agent_key_map(agents: &[Agent]) -> HashMap<String, Uuid> {
+fn build_agent_key_map(agents: &[Agent]) -> HashMap<String, Id> {
     let mut ids = HashMap::new();
 
     for agent in agents {
@@ -285,7 +284,7 @@ mod tests {
             return;
         };
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("split board")
@@ -294,7 +293,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let pm_agent_id = Uuid::new_v4();
+        let pm_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -313,7 +312,7 @@ mod tests {
         .await
         .expect("insert pm agent");
 
-        let parent_id = Uuid::new_v4();
+        let parent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -385,7 +384,7 @@ mod tests {
             return;
         };
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("split auto board")
@@ -394,7 +393,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let pm_agent_id = Uuid::new_v4();
+        let pm_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -413,7 +412,7 @@ mod tests {
         .await
         .expect("insert pm agent");
 
-        let parent_id = Uuid::new_v4();
+        let parent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -496,7 +495,7 @@ mod tests {
             return;
         };
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("split auto board")
@@ -505,7 +504,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let pm_agent_id = Uuid::new_v4();
+        let pm_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -524,7 +523,7 @@ mod tests {
         .await
         .expect("insert pm agent");
 
-        let engineer_agent_id = Uuid::new_v4();
+        let engineer_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -543,7 +542,7 @@ mod tests {
         .await
         .expect("insert engineer agent");
 
-        let parent_id = Uuid::new_v4();
+        let parent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -620,7 +619,7 @@ mod tests {
             return;
         };
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("split empty assign board")
@@ -629,7 +628,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let pm_agent_id = Uuid::new_v4();
+        let pm_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -648,7 +647,7 @@ mod tests {
         .await
         .expect("insert pm agent");
 
-        let parent_id = Uuid::new_v4();
+        let parent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (

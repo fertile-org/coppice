@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -126,7 +127,7 @@ async fn mention_chat_mode_starts_respond_to_mention_run() {
     assert_eq!(started_runs.len(), 1);
     assert_eq!(started_runs[0]["agentKey"], "pm-agent");
 
-    let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
+    let run_id = Id::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
     let row: (String, String) =
         sqlx::query_as("SELECT job_type, context_profile FROM agent_runs WHERE id = $1")
             .bind(run_id)
@@ -164,7 +165,7 @@ async fn mention_agent_mode_starts_work_on_ticket_run() {
     assert_eq!(started_runs.len(), 1);
     assert_eq!(started_runs[0]["agentKey"], "backend-engineer");
 
-    let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
+    let run_id = Id::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
     let row: (String, String) =
         sqlx::query_as("SELECT job_type, context_profile FROM agent_runs WHERE id = $1")
             .bind(run_id)
@@ -211,7 +212,7 @@ async fn full_name_mention_selects_agent_when_preset_matches_another_agent() {
         WHERE ticket_mentions.ticket_id = $1
         "#,
     )
-    .bind(uuid::Uuid::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
     .fetch_one(&pool)
     .await
     .expect("mentioned agent name");

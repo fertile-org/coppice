@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::run::{run_status_to_str, AgentRun};
 use crate::events::publish_run_finished;
@@ -16,8 +17,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agent-runs/active", get(active_runs))
@@ -30,10 +29,10 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ToolCallResponse {
-    id: Uuid,
+    id: Id,
     tool: String,
     source: String,
-    plugin_id: Option<Uuid>,
+    plugin_id: Option<Id>,
     plugin_name: Option<String>,
     status: String,
     error: Option<String>,
@@ -81,11 +80,11 @@ impl From<StatusCode> for MessageError {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunResponse {
-    id: Uuid,
-    ticket_id: Option<Uuid>,
-    chat_session_id: Option<Uuid>,
-    chat_message_id: Option<Uuid>,
-    agent_id: Uuid,
+    id: Id,
+    ticket_id: Option<Id>,
+    chat_session_id: Option<Id>,
+    chat_message_id: Option<Id>,
+    agent_id: Id,
     job_type: String,
     status: String,
     sandbox_profile_id: String,
@@ -212,7 +211,7 @@ async fn active_runs(
 async fn get_run(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<Json<SingleRunResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
@@ -230,7 +229,7 @@ async fn get_run(
 async fn stop_run(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<Json<SingleRunResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
@@ -268,7 +267,7 @@ async fn stop_run(
 async fn retry_run(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<(StatusCode, Json<SingleRunResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
@@ -287,7 +286,7 @@ async fn retry_run(
 async fn list_tool_calls(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<Id>,
 ) -> Result<Json<ToolCallsResponse>, MessageError> {
     let pool = pool_from_state(&state)?;
     let service = RunToolCallService::new(pool);
@@ -314,11 +313,11 @@ mod tests {
     #[test]
     fn run_status_serializes_as_snake_case() {
         let run = AgentRun {
-            id: Uuid::new_v4(),
-            ticket_id: Some(Uuid::new_v4()),
+            id: Id::new(),
+            ticket_id: Some(Id::new()),
             chat_session_id: None,
             chat_message_id: None,
-            agent_id: Uuid::new_v4(),
+            agent_id: Id::new(),
             job_type: "work_on_ticket".into(),
             status: RunStatus::Running,
             sandbox_profile_id: "permissive-default".into(),

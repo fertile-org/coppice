@@ -9,6 +9,7 @@ pub mod comment;
 pub mod connector_check;
 pub mod context_profile;
 pub mod git_state;
+pub mod id;
 pub mod job;
 pub mod knowledge;
 pub mod knowledge_compaction;
@@ -24,3 +25,5 @@ pub mod ticket;
 pub mod usage;
 pub mod user;
 pub mod workflow;
+
+pub use id::{Id, InvalidId};

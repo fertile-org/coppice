@@ -1,6 +1,7 @@
 //! `.agent/context.md` for a `compact_knowledge` run: instructions, existing
 //! knowledge for dedupe/supersession, the batch's Done tickets, and the output
 //! contract. Bounded per ticket and per batch.
+use crate::domain::Id;
 
 use crate::knowledge::retrieval::near_duplicate_pairs;
 use crate::services::knowledge_service::PROPOSED_BY_AGENT_REASON;
@@ -8,8 +9,6 @@ use crate::util::truncate::truncate_with_ellipsis;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use uuid::Uuid;
-
 pub const MAX_DESCRIPTION_BYTES: usize = 8_000;
 pub const MAX_COMMENTS_PER_TICKET: usize = 8;
 pub const MAX_COMMENT_BYTES: usize = 1_500;
@@ -102,8 +101,8 @@ pub fn select_comments(all_newest_first: Vec<CompactionComment>) -> Vec<Compacti
 
 #[derive(Debug, Clone)]
 pub struct CompactionTicket {
-    pub id: Uuid,
-    pub board_id: Uuid,
+    pub id: Id,
+    pub board_id: Id,
     pub board_name: String,
     pub title: String,
     pub description: String,
@@ -117,10 +116,10 @@ pub struct CompactionTicket {
 
 #[derive(Debug, Clone)]
 pub struct ExistingKnowledge {
-    pub id: Uuid,
+    pub id: Id,
     pub status: String,
     pub scope: String,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
     pub knowledge_type: String,
     pub title: String,
     pub excerpt: String,
@@ -132,9 +131,9 @@ pub struct ExistingKnowledge {
 /// Two approved items that read alike, shown so the agent can propose a merge.
 #[derive(Debug, Clone)]
 pub struct DuplicatePair {
-    pub first_id: Uuid,
+    pub first_id: Id,
     pub first_title: String,
-    pub second_id: Uuid,
+    pub second_id: Id,
     pub second_title: String,
 }
 
@@ -142,7 +141,7 @@ pub struct DuplicatePair {
 pub const MAX_DUPLICATE_PAIRS: usize = 10;
 
 pub struct CompactionContextInput<'a> {
-    pub batch_id: Uuid,
+    pub batch_id: Id,
     pub tickets: &'a [CompactionTicket],
     pub existing: &'a [ExistingKnowledge],
     /// Approved near-duplicate pairs; titles only, never content.
@@ -383,7 +382,7 @@ fn write_contract(out: &mut String) {
 /// Load the batch's tickets and relevant existing knowledge from the database.
 pub async fn load_compaction_context(
     pool: &PgPool,
-    batch_id: Uuid,
+    batch_id: Id,
     max_candidates: usize,
     max_ticket_bytes: usize,
 ) -> Result<String, sqlx::Error> {
@@ -402,7 +401,7 @@ pub async fn load_compaction_context(
     .await?;
     let mut tickets = Vec::with_capacity(rows.len());
     for row in rows {
-        let id: Uuid = row.try_get("id")?;
+        let id: Id = row.try_get("id")?;
         let newest_first = sqlx::query(
             r#"
             SELECT author_type, intent, body
@@ -461,7 +460,7 @@ pub async fn load_compaction_context(
         });
     }
 
-    let board_ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.board_id).collect();
+    let board_ids: Vec<Id> = tickets.iter().map(|ticket| ticket.board_id).collect();
     let existing = sqlx::query(
         r#"
         SELECT i.id, i.status, r.scope, r.board_id, r.knowledge_type, r.title, r.content, i.policy_reason
@@ -504,11 +503,11 @@ pub async fn load_compaction_context(
     .collect::<Result<Vec<_>, sqlx::Error>>()?;
 
     let pairs = near_duplicate_pairs(pool, &board_ids, MAX_DUPLICATE_PAIRS).await?;
-    let pair_ids: Vec<Uuid> = pairs
+    let pair_ids: Vec<Id> = pairs
         .iter()
         .flat_map(|(first, second, _)| [*first, *second])
         .collect();
-    let titles: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>(
+    let titles: HashMap<Id, String> = sqlx::query_as::<_, (Id, String)>(
         r#"
         SELECT i.id, r.title
         FROM knowledge_items i
@@ -549,8 +548,8 @@ mod tests {
 
     fn ticket(title: &str, description: &str, comments: usize) -> CompactionTicket {
         CompactionTicket {
-            id: Uuid::new_v4(),
-            board_id: Uuid::new_v4(),
+            id: Id::new(),
+            board_id: Id::new(),
             board_name: "Core".into(),
             title: title.into(),
             description: description.into(),
@@ -572,7 +571,7 @@ mod tests {
         budget: usize,
     ) -> String {
         build_compaction_context(&CompactionContextInput {
-            batch_id: Uuid::nil(),
+            batch_id: Id::nil(),
             tickets,
             existing,
             duplicates: &[],
@@ -584,13 +583,13 @@ mod tests {
     #[test]
     fn context_lists_duplicate_pairs_and_merge_instruction() {
         let pair = DuplicatePair {
-            first_id: Uuid::new_v4(),
+            first_id: Id::new(),
             first_title: "Use `make test-unit`\n- injected line".into(),
-            second_id: Uuid::new_v4(),
+            second_id: Id::new(),
             second_title: "Run make test-unit".into(),
         };
         let markdown = build_compaction_context(&CompactionContextInput {
-            batch_id: Uuid::nil(),
+            batch_id: Id::nil(),
             tickets: &[],
             existing: &[],
             duplicates: std::slice::from_ref(&pair),
@@ -613,7 +612,7 @@ mod tests {
     fn includes_instructions_existing_knowledge_tickets_and_contract() {
         let tickets = [ticket("Add CSRF check", "Mutations need X-CSRF-Token.", 2)];
         let existing = [ExistingKnowledge {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             status: "approved".into(),
             scope: "board".into(),
             board_id: Some(tickets[0].board_id),
@@ -655,7 +654,7 @@ mod tests {
         proposal: bool,
     ) -> ExistingKnowledge {
         ExistingKnowledge {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             status: status.into(),
             scope: "board".into(),
             board_id: None,

@@ -592,6 +592,8 @@ fn result_event_is_error(value: &serde_json::Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
     use std::path::PathBuf;
@@ -1115,7 +1117,7 @@ mod tests {
             std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
 
         publish_fixture_lines(&handle, &raw);
 

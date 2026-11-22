@@ -1,8 +1,7 @@
+use crate::domain::Id;
 use crate::domain::board::Board;
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 pub struct BoardService<'a> {
     pool: &'a PgPool,
 }
@@ -41,7 +40,7 @@ impl<'a> BoardService<'a> {
     }
 
     pub async fn create_board(&self, name: &str) -> Result<Board, BoardError> {
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let slug = slugify(name);
         let row = sqlx::query(
             r#"
@@ -59,7 +58,7 @@ impl<'a> BoardService<'a> {
         Ok(row_to_board(&row))
     }
 
-    pub async fn get_board(&self, board_id: Uuid) -> Result<Board, BoardError> {
+    pub async fn get_board(&self, board_id: Id) -> Result<Board, BoardError> {
         let row = sqlx::query(
             r#"
             SELECT id, name, slug, created_at, review_cap, review_cap_counts_in_review
@@ -77,7 +76,7 @@ impl<'a> BoardService<'a> {
 
     pub async fn update_board(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         name: Option<&str>,
     ) -> Result<Board, BoardError> {
         let current = self.get_board(board_id).await?;

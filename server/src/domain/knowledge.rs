@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub const MAX_KNOWLEDGE_TITLE_CHARS: usize = 160;
 pub const MAX_KNOWLEDGE_CONTENT_CHARS: usize = 12_000;
 
@@ -63,51 +62,51 @@ pub enum KnowledgeStatus {
 #[derive(Debug, Clone)]
 pub struct KnowledgeRevisionInput {
     pub scope: KnowledgeScope,
-    pub board_id: Option<Uuid>,
-    pub agent_id: Option<Uuid>,
+    pub board_id: Option<Id>,
+    pub agent_id: Option<Id>,
     pub knowledge_type: KnowledgeType,
     pub title: String,
     pub content: String,
     pub source_type: KnowledgeSourceType,
-    pub source_id: Option<Uuid>,
-    pub source_run_id: Option<Uuid>,
+    pub source_id: Option<Id>,
+    pub source_run_id: Option<Id>,
     pub confidence: KnowledgeConfidence,
 }
 
 #[derive(Debug, Clone)]
 pub struct KnowledgeItemView {
-    pub id: Uuid,
+    pub id: Id,
     pub version: i32,
     pub status: KnowledgeStatus,
-    pub revision_id: Uuid,
+    pub revision_id: Id,
     pub revision_number: i32,
-    pub active_revision_id: Option<Uuid>,
+    pub active_revision_id: Option<Id>,
     pub scope: KnowledgeScope,
-    pub board_id: Option<Uuid>,
+    pub board_id: Option<Id>,
     pub board_name: Option<String>,
-    pub agent_id: Option<Uuid>,
+    pub agent_id: Option<Id>,
     pub agent_name: Option<String>,
     pub knowledge_type: KnowledgeType,
     pub title: String,
     pub content: String,
     pub source_type: KnowledgeSourceType,
-    pub source_id: Option<Uuid>,
-    pub source_run_id: Option<Uuid>,
+    pub source_id: Option<Id>,
+    pub source_run_id: Option<Id>,
     pub confidence: KnowledgeConfidence,
-    pub approved_by: Option<Uuid>,
+    pub approved_by: Option<Id>,
     pub approved_at: Option<OffsetDateTime>,
     pub approval_mode: Option<String>,
     pub policy_decision: Option<String>,
     pub policy_reason: Option<String>,
     pub rejection_reason: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
-    pub supersedes_item_id: Option<Uuid>,
-    pub superseded_by: Option<Uuid>,
+    pub supersedes_item_id: Option<Id>,
+    pub superseded_by: Option<Id>,
     pub stale_at: Option<OffsetDateTime>,
-    pub compaction_batch_id: Option<Uuid>,
-    pub compaction_agent_id: Option<Uuid>,
+    pub compaction_batch_id: Option<Id>,
+    pub compaction_agent_id: Option<Id>,
     pub compaction_agent_name: Option<String>,
-    pub source_ticket_ids: Vec<Uuid>,
+    pub source_ticket_ids: Vec<Id>,
     pub usage_count: i64,
     /// Outdated or wrong flags from agents on the active revision.
     pub open_flag_count: i64,
@@ -225,7 +224,7 @@ mod tests {
     fn valid_input() -> KnowledgeRevisionInput {
         KnowledgeRevisionInput {
             scope: KnowledgeScope::Board,
-            board_id: Some(Uuid::new_v4()),
+            board_id: Some(Id::new()),
             agent_id: None,
             knowledge_type: KnowledgeType::TestCommand,
             title: " Run tests ".into(),

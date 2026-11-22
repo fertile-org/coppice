@@ -1,5 +1,6 @@
-//! A short process PATH plus a login shell that adds tools must still find CLIs.
 #![cfg(feature = "embedded-test-db")]
+
+//! A short process PATH plus a login shell that adds tools must still find CLIs.
 
 mod common;
 

@@ -1,4 +1,5 @@
 //! What picking a design option does, depending on the ticket and its plan.
+use crate::domain::Id;
 
 use crate::copy::plan::{
     plan_design_change_note, DESIGN_SUPERSEDED, NO_PM, PLAN_ALREADY_RUNNING, PLAN_DESIGN_FINAL,
@@ -13,8 +14,6 @@ use crate::services::planning_service::{
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
 use std::path::Path;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChoiceMode {
@@ -50,7 +49,7 @@ fn refusal(message: &str) -> DesignChoiceError {
 pub async fn choice_state(
     pool: &PgPool,
     set: &DesignSetSummary,
-    ticket_id: Option<Uuid>,
+    ticket_id: Option<Id>,
     inherited: bool,
 ) -> Result<ChoiceState, DesignChoiceError> {
     let ticket = match ticket_id {
@@ -115,9 +114,9 @@ pub async fn choice_state(
 pub async fn choose_design(
     pool: &PgPool,
     artifacts: &Path,
-    set_id: Uuid,
+    set_id: Id,
     option_id: &str,
-    user_id: Uuid,
+    user_id: Id,
 ) -> Result<(), DesignChoiceError> {
     let svc = DesignService::new(pool, artifacts);
     let record = svc.get(set_id).await?;

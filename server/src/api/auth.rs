@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::session::Session;
 use crate::domain::user::User;
 use crate::services::auth_service::{AuthError, AuthService};
@@ -61,7 +62,7 @@ struct LoginBody {
 
 #[derive(Serialize)]
 struct UserResponse {
-    id: uuid::Uuid,
+    id: Id,
     email: String,
     role: String,
 }

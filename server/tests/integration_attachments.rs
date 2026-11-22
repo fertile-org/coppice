@@ -1,10 +1,9 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
-use uuid::Uuid;
-
-async fn upload(app: &axum::Router, name: &str, contents: &str, cookie: &str, csrf: &str) -> Uuid {
+async fn upload(app: &axum::Router, name: &str, contents: &str, cookie: &str, csrf: &str) -> Id {
     let res = app
         .clone()
         .oneshot(common::multipart_request(
@@ -19,13 +18,13 @@ async fn upload(app: &axum::Router, name: &str, contents: &str, cookie: &str, cs
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED, "upload {name}");
     let body = common::json_body(res).await;
-    Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+    Id::parse_str(body["id"].as_str().unwrap()).unwrap()
 }
 
 async fn set_ticket_attachments(
     app: &axum::Router,
     ticket_id: &str,
-    ids: &[Uuid],
+    ids: &[Id],
     cookie: &str,
     csrf: &str,
 ) {
@@ -43,7 +42,7 @@ async fn set_ticket_attachments(
     assert_eq!(res.status(), StatusCode::OK);
 }
 
-async fn row_exists(pool: &sqlx::PgPool, id: Uuid) -> bool {
+async fn row_exists(pool: &sqlx::PgPool, id: Id) -> bool {
     sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM attachments WHERE id = $1)")
         .bind(id)
         .fetch_one(pool)

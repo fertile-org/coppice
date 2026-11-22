@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TicketStatus {
@@ -65,7 +64,7 @@ pub fn validate_substatus(
             let valid = meta
                 .get("agentId")
                 .and_then(|v| v.as_str())
-                .and_then(|s| Uuid::parse_str(s).ok())
+                .and_then(|s| Id::parse_str(s).ok())
                 .is_some();
             if !valid {
                 return Some("agentId required");
@@ -151,7 +150,7 @@ pub fn build_substatus_display(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     #[test]
     fn waiting_for_agent_requires_agent_id() {
@@ -164,7 +163,7 @@ mod tests {
 
     #[test]
     fn waiting_for_agent_accepts_valid_metadata() {
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         assert!(validate_substatus(
             Some(Substatus::WaitingForAgent),
             &Some(serde_json::json!({ "agentId": agent_id })),

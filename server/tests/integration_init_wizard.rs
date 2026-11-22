@@ -1,6 +1,7 @@
+#![cfg(feature = "embedded-test-db")]
+
 //! Init wizard confirm creates a repo, a board, and a starter team, and does
 //! not spawn a connector check or a run.
-#![cfg(feature = "embedded-test-db")]
 
 mod common;
 
