@@ -285,7 +285,7 @@ impl WorktreeService {
         branch: &str,
     ) -> Result<(), WorktreeError> {
         if worktree_dir.join(".git").exists() {
-            return Ok(());
+            return ensure_worktree_on_branch(git_dir, worktree_dir, branch).await;
         }
 
         // Directory may have been deleted manually while git still lists a prunable
@@ -309,6 +309,88 @@ impl WorktreeService {
                 run_git_in(git_dir, &["worktree", "add", &path, branch]).await
             }
             Err(err) => Err(err),
+        }
+    }
+}
+
+/// Put an existing worktree on `branch`, creating or fast-forwarding the ref.
+///
+/// Refuses to move a tip that is not an ancestor of worktree HEAD (would drop
+/// commits). Never uses `git branch -f` — checkout elsewhere fails naturally.
+async fn ensure_worktree_on_branch(
+    git_dir: &Path,
+    worktree_dir: &Path,
+    branch: &str,
+) -> Result<(), WorktreeError> {
+    if worktree_branch_name(worktree_dir).await?.as_deref() == Some(branch) {
+        return Ok(());
+    }
+
+    let head = git_head_sha(worktree_dir).await?;
+
+    if !local_branch_exists(git_dir, branch).await? {
+        run_git_in(worktree_dir, &["checkout", "-b", branch]).await?;
+        return Ok(());
+    }
+
+    let tip = git_ref_sha(git_dir, branch).await?;
+    if tip != head {
+        if !is_ancestor(git_dir, &tip, &head).await? {
+            return Err(WorktreeError::GitCommandFailed {
+                command: format!("git merge-base --is-ancestor {branch} HEAD"),
+                stderr: format!(
+                    "refusing to move `{branch}`: tip is not an ancestor of worktree HEAD"
+                ),
+            });
+        }
+        // Checkout then ff-merge moves the tip without `branch -f` / update-ref.
+        run_git_in(worktree_dir, &["checkout", branch]).await?;
+        run_git_in(worktree_dir, &["merge", "--ff-only", &head]).await?;
+        return Ok(());
+    }
+
+    run_git_in(worktree_dir, &["checkout", branch]).await
+}
+
+async fn worktree_branch_name(worktree: &Path) -> Result<Option<String>, WorktreeError> {
+    let output = crate::services::git_cmd::output(Some(worktree), &["branch", "--show-current"])
+        .await
+        .map_err(WorktreeError::from)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorktreeError::GitCommandFailed {
+            command: "git branch --show-current".into(),
+            stderr,
+        });
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(name))
+    }
+}
+
+async fn is_ancestor(
+    git_dir: &Path,
+    ancestor: &str,
+    descendant: &str,
+) -> Result<bool, WorktreeError> {
+    let output = crate::services::git_cmd::output(
+        Some(git_dir),
+        &["merge-base", "--is-ancestor", ancestor, descendant],
+    )
+    .await
+    .map_err(WorktreeError::from)?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(WorktreeError::GitCommandFailed {
+                command: format!("git merge-base --is-ancestor {ancestor} {descendant}"),
+                stderr,
+            })
         }
     }
 }
@@ -1002,5 +1084,149 @@ mod tests {
         assert!(porcelain_line_is_agent_context("?? .agent/context.md"));
         assert!(!porcelain_line_is_agent_context("?? leak.txt"));
         assert!(!porcelain_line_is_agent_context(" M README.md"));
+    }
+
+    fn add_worktree_on_branch(repo: &Path, worktree: &Path, branch: &str) {
+        std::process::Command::new("git")
+            .current_dir(repo)
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                worktree.to_str().unwrap(),
+                "main",
+            ])
+            .status()
+            .expect("worktree add");
+    }
+
+    fn commit_file(worktree: &Path, name: &str, contents: &str, message: &str) {
+        std::fs::write(worktree.join(name), contents).expect("write");
+        std::process::Command::new("git")
+            .current_dir(worktree)
+            .args(["add", name])
+            .status()
+            .expect("add");
+        std::process::Command::new("git")
+            .current_dir(worktree)
+            .args(["commit", "-m", message])
+            .status()
+            .expect("commit");
+    }
+
+    #[tokio::test]
+    async fn ensure_worktree_creates_title_slug_from_legacy_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+        let worktree = tmp.path().join("wt");
+        let legacy = "agent/TICKET-550e8400";
+        let slug = "agent/550e8400-safe-retarget";
+        add_worktree_on_branch(&repo, &worktree, legacy);
+        commit_file(&worktree, "feature.txt", "feat\n", "feature");
+        let head = git_sha(&worktree, "HEAD");
+
+        let service = WorktreeService::new(tmp.path().join("worktrees"));
+        service
+            .ensure_worktree(&repo, &worktree, slug)
+            .await
+            .expect("ensure");
+
+        assert_eq!(git_sha(&repo, slug), head);
+        assert_eq!(
+            String::from_utf8_lossy(
+                &std::process::Command::new("git")
+                    .current_dir(&worktree)
+                    .args(["branch", "--show-current"])
+                    .output()
+                    .expect("show-current")
+                    .stdout
+            )
+            .trim(),
+            slug
+        );
+        sync_worktree_to_branch_tip(&repo, &worktree, slug)
+            .await
+            .expect("sync after ensure");
+    }
+
+    #[tokio::test]
+    async fn ensure_worktree_fast_forwards_existing_branch_to_head() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+        let main_sha = git_sha(&repo, "main");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["branch", "agent/550e8400-slug", "main"])
+            .status()
+            .expect("create slug at main");
+
+        let worktree = tmp.path().join("wt");
+        add_worktree_on_branch(&repo, &worktree, "agent/TICKET-550e8400");
+        commit_file(&worktree, "ahead.txt", "ahead\n", "ahead");
+        let head = git_sha(&worktree, "HEAD");
+        assert_ne!(head, main_sha);
+        assert_eq!(git_sha(&repo, "agent/550e8400-slug"), main_sha);
+
+        let service = WorktreeService::new(tmp.path().join("worktrees"));
+        service
+            .ensure_worktree(&repo, &worktree, "agent/550e8400-slug")
+            .await
+            .expect("ensure");
+
+        assert_eq!(git_sha(&repo, "agent/550e8400-slug"), head);
+        assert_eq!(
+            String::from_utf8_lossy(
+                &std::process::Command::new("git")
+                    .current_dir(&worktree)
+                    .args(["branch", "--show-current"])
+                    .output()
+                    .expect("show-current")
+                    .stdout
+            )
+            .trim(),
+            "agent/550e8400-slug"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_worktree_refuses_non_ancestor_retarget() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["checkout", "-b", "agent/550e8400-slug"])
+            .status()
+            .expect("slug branch");
+        commit_file(&repo, "slug-only.txt", "slug\n", "slug commit");
+        let slug_tip = git_sha(&repo, "agent/550e8400-slug");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["checkout", "main"])
+            .status()
+            .expect("back to main");
+
+        let worktree = tmp.path().join("wt");
+        add_worktree_on_branch(&repo, &worktree, "agent/TICKET-550e8400");
+        commit_file(&worktree, "legacy-only.txt", "legacy\n", "legacy commit");
+
+        let service = WorktreeService::new(tmp.path().join("worktrees"));
+        let err = service
+            .ensure_worktree(&repo, &worktree, "agent/550e8400-slug")
+            .await
+            .expect_err("must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("refusing to move") && msg.contains("not an ancestor"),
+            "{msg}"
+        );
+        assert_eq!(git_sha(&repo, "agent/550e8400-slug"), slug_tip);
     }
 }
