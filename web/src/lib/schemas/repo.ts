@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const verificationStatusSchema = z.enum([
   'ready',
@@ -10,7 +11,7 @@ export const verificationStatusSchema = z.enum([
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>;
 
 export const repoSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   name: z.string(),
   localPath: z.string(),
   remoteUrl: z.string().nullable(),

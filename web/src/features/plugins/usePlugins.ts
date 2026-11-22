@@ -17,6 +17,7 @@ import {
   pluginPublishResultSchema,
   type PluginPublishResult,
 } from '../../lib/schemas/pluginBuild';
+import { idSchema } from '../../lib/schemas/id';
 
 export const PLUGIN_DIRS_QUERY_KEY = ['plugin-dirs'] as const;
 export const PLUGINS_QUERY_KEY = ['plugins'] as const;
@@ -324,7 +325,7 @@ export function useUpdatePlugin() {
 
 const pluginAgentsSchema = z.object({
   mode: z.enum(['all', 'explicit']),
-  agentIds: z.array(z.string().uuid()),
+  agentIds: z.array(idSchema),
 });
 
 export type PluginAgentAssignment = z.infer<typeof pluginAgentsSchema>;

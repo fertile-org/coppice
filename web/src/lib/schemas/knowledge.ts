@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const knowledgeStatusSchema = z.enum([
   'pending',
@@ -42,38 +43,38 @@ export const knowledgeSourceTypeSchema = z.enum([
 export const knowledgeConfidenceSchema = z.enum(['low', 'medium', 'high']);
 
 export const knowledgeItemSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   version: z.number().int().positive(),
   status: knowledgeStatusSchema,
-  revisionId: z.string().uuid(),
+  revisionId: idSchema,
   revisionNumber: z.number().int().positive(),
-  activeRevisionId: z.string().uuid().nullable(),
+  activeRevisionId: idSchema.nullable(),
   scope: knowledgeScopeSchema,
-  boardId: z.string().uuid().nullable(),
+  boardId: idSchema.nullable(),
   boardName: z.string().nullable(),
-  agentId: z.string().uuid().nullable(),
+  agentId: idSchema.nullable(),
   agentName: z.string().nullable(),
   knowledgeType: knowledgeTypeSchema,
   title: z.string(),
   content: z.string(),
   sourceType: knowledgeSourceTypeSchema,
-  sourceId: z.string().uuid().nullable(),
-  sourceRunId: z.string().uuid().nullable(),
+  sourceId: idSchema.nullable(),
+  sourceRunId: idSchema.nullable(),
   confidence: knowledgeConfidenceSchema,
-  approvedBy: z.string().uuid().nullable(),
+  approvedBy: idSchema.nullable(),
   approvedAt: z.string().nullable(),
   approvalMode: z.string().nullable(),
   policyDecision: z.string().nullable(),
   policyReason: z.string().nullable(),
   rejectionReason: z.string().nullable(),
   expiresAt: z.string().nullable(),
-  supersedesItemId: z.string().uuid().nullable(),
-  supersededBy: z.string().uuid().nullable(),
+  supersedesItemId: idSchema.nullable(),
+  supersededBy: idSchema.nullable(),
   staleAt: z.string().nullable(),
-  compactionBatchId: z.string().uuid().nullable(),
-  compactionAgentId: z.string().uuid().nullable(),
+  compactionBatchId: idSchema.nullable(),
+  compactionAgentId: idSchema.nullable(),
   compactionAgentName: z.string().nullable(),
-  sourceTicketIds: z.array(z.string().uuid()),
+  sourceTicketIds: z.array(idSchema),
   usageCount: z.number().int().nonnegative(),
   openFlagCount: z.number().int().nonnegative(),
   lastUsedAt: z.string().nullable(),
@@ -87,8 +88,8 @@ export const knowledgePageSchema = z.object({
 });
 
 export const knowledgeUsageSchema = z.object({
-  itemId: z.string().uuid(),
-  revisionId: z.string().uuid(),
+  itemId: idSchema,
+  revisionId: idSchema,
   rank: z.number().int().positive(),
   score: z.number(),
   tokenCount: z.number().int().nonnegative(),
@@ -97,7 +98,7 @@ export const knowledgeUsageSchema = z.object({
   knowledgeType: knowledgeTypeSchema,
   scope: knowledgeScopeSchema,
   sourceType: knowledgeSourceTypeSchema,
-  sourceId: z.string().uuid().nullable(),
+  sourceId: idSchema.nullable(),
   includedAt: z.string(),
 });
 
@@ -106,12 +107,12 @@ export const knowledgeUsageListSchema = z.object({
 });
 
 export const similarNeighborSchema = z.object({
-  itemId: z.string().uuid(),
-  revisionId: z.string().uuid(),
+  itemId: idSchema,
+  revisionId: idSchema,
   title: z.string(),
   knowledgeType: knowledgeTypeSchema,
   scope: knowledgeScopeSchema,
-  boardId: z.string().uuid().nullable(),
+  boardId: idSchema.nullable(),
   score: z.number(),
   status: z.string(),
 });
@@ -151,10 +152,10 @@ export const knowledgeFlagListSchema = z.object({
 });
 
 export const compactionBatchSchema = z.object({
-  id: z.string().uuid(),
-  agentId: z.string().uuid(),
+  id: idSchema,
+  agentId: idSchema,
   agentName: z.string().nullable(),
-  runId: z.string().uuid().nullable(),
+  runId: idSchema.nullable(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed']),
   trigger: z.enum(['scheduled', 'manual', 'retry']),
   ticketCount: z.number().int().nonnegative(),
@@ -179,7 +180,7 @@ export const compactionStatusSchema = z.object({
   configured: z.boolean(),
   agent: z
     .object({
-      id: z.string().uuid(),
+      id: idSchema,
       name: z.string(),
       enabled: z.boolean(),
       connector: z.string(),

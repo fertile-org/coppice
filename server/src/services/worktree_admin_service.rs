@@ -136,7 +136,8 @@ fn dir_size_bytes(path: &Path) -> u64 {
     total
 }
 
-/// `TICKET-<8 hex>-<slug>` — skips `chat/`, `plan-scratch/`, `plugin-builds/`, `knowledge-compaction/`.
+/// `TICKET-<8 chars>-<slug>` — short id is UUID hex or nanoid alphabet.
+/// Skips `chat/`, `plan-scratch/`, `plugin-builds/`, `knowledge-compaction/`.
 fn is_ticket_worktree_folder(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("TICKET-") else {
         return false;
@@ -148,7 +149,9 @@ fn is_ticket_worktree_folder(name: &str) -> bool {
         return false;
     };
     short.len() == 8
-        && short.chars().all(|c| c.is_ascii_hexdigit())
+        && short
+            .bytes()
+            .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'z'))
         && !slug.is_empty()
         && slug
             .chars()
@@ -720,6 +723,7 @@ mod tests {
     fn folder_name_pattern_accepts_ticket_dirs() {
         assert!(is_ticket_worktree_folder("TICKET-fd82310c-coppice"));
         assert!(is_ticket_worktree_folder("TICKET-550e8400-my-repo"));
+        assert!(is_ticket_worktree_folder("TICKET-abc123xy-my-repo"));
         assert!(!is_ticket_worktree_folder("chat"));
         assert!(!is_ticket_worktree_folder("plan-scratch"));
         assert!(!is_ticket_worktree_folder("plugin-builds"));

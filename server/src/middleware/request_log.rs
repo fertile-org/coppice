@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(http["fields"]["status"], 200);
         assert!(http["fields"]["duration_ms"].as_u64().is_some(), "{http}");
         let request_id = http["fields"]["request_id"].as_str().expect("request id");
-        Id::parse_str(request_id).expect("request id is a uuid");
+        Id::parse_str(request_id).expect("request id is a valid id");
         assert!(http["fields"].get("run_id").is_none(), "{http}");
         let timestamp = http["timestamp"].as_str().expect("timestamp");
         assert!(

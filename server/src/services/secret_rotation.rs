@@ -1800,7 +1800,7 @@ mod tests {
     impl RoleGuard {
         async fn create(pool: &sqlx::PgPool, password: &str) -> Self {
             let opts = (*pool.connect_options()).clone();
-            let name = format!("rk_{:x}", Id::new().as_u128());
+            let name = format!("rk_{}", Id::new().as_str());
             let database = opts.get_database().unwrap().to_string();
             let create = format!(
                 "CREATE ROLE {name} LOGIN PASSWORD '{}'",
@@ -2275,7 +2275,7 @@ mod tests {
         let _pool = pool().await;
         let login = super_login().await;
         let new_password = generate_secret();
-        let role = format!("absent_{:x}", Id::new().as_u128());
+        let role = format!("absent_{}", Id::new().as_str());
         let root = secrets_dir();
         let dir = root.path().join("secrets");
         let (logs, _guard) = capture_logs();

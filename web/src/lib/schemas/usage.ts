@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 /** A null count means the connector did not report it. */
 const count = z.number().int().nullable();
@@ -81,8 +82,8 @@ export type UsageGroup = z.infer<typeof usageGroupSchema>;
 export const ticketUsageSchema = z.object({
   runs: z.array(
     z.object({
-      runId: z.string().uuid(),
-      agentId: z.string().uuid(),
+      runId: idSchema,
+      agentId: idSchema,
       jobType: z.string(),
       /** `null` when Coppice could not read the run's usage. */
       usage: runUsageSchema.nullable(),

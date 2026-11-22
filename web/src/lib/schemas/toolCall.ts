@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const toolCallSourceSchema = z.enum(['core', 'skill', 'plugin']);
 
@@ -9,10 +10,10 @@ export const toolCallStatusSchema = z.enum(['ok', 'error', 'denied', 'timeout'])
 export type ToolCallStatus = z.infer<typeof toolCallStatusSchema>;
 
 export const runToolCallSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   tool: z.string(),
   source: toolCallSourceSchema,
-  pluginId: z.string().uuid().nullable(),
+  pluginId: idSchema.nullable(),
   pluginName: z.string().nullable(),
   status: toolCallStatusSchema,
   error: z.string().nullable(),

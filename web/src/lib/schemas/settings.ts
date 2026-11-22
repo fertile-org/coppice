@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const readOnlyConnectorSchema = z.object({
   id: z.string(),
@@ -6,10 +7,10 @@ export const readOnlyConnectorSchema = z.object({
 });
 
 export const knowledgeSettingsSchema = z.object({
-  compactionAgentId: z.string().uuid().nullable(),
+  compactionAgentId: idSchema.nullable(),
   compactionAgent: z
     .object({
-      id: z.string().uuid(),
+      id: idSchema,
       name: z.string(),
       enabled: z.boolean(),
       connector: z.string(),

@@ -146,7 +146,7 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
 
 fn required_uuid(args: &Value, key: &str) -> Result<Id, ToolError> {
     let raw = required_str(args, key)?;
-    Id::parse_str(raw).map_err(|_| ToolError::InvalidArgs(format!("{key} must be a uuid")))
+    Id::parse_str(raw).map_err(|_| ToolError::InvalidArgs(format!("{key} must be a valid id")))
 }
 
 fn map_err(err: DesignError) -> ToolError {

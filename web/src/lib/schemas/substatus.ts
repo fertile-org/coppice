@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const SUBSTATUSES = [
   'waiting_for_agent',
@@ -26,8 +27,6 @@ export const SUBSTATUS_LABELS: Record<Substatus, string> = {
   blocked_by_error: 'Blocked — error',
 };
 
-const uuidSchema = z.string().uuid();
-
 export const substatusMetadataSchema = z
   .object({
     substatus: substatusSchema,
@@ -37,7 +36,7 @@ export const substatusMetadataSchema = z
     switch (data.substatus) {
       case 'waiting_for_agent': {
         const agentId = data.metadata.agentId;
-        if (typeof agentId !== 'string' || !uuidSchema.safeParse(agentId).success) {
+        if (typeof agentId !== 'string' || !idSchema.safeParse(agentId).success) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: 'agentId required',

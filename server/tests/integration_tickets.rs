@@ -681,3 +681,139 @@ async fn create_ticket_with_skip_human_review() {
     let patched: serde_json::Value = common::json_body(patched).await;
     assert_eq!(patched["skipHumanReview"], true);
 }
+
+fn assert_short_id(raw: &str) {
+    assert_eq!(raw.len(), 12, "{raw}");
+    assert!(
+        raw.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'z')),
+        "{raw}"
+    );
+}
+
+#[tokio::test]
+async fn new_records_get_short_ids_and_both_formats_are_accepted() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    assert_short_id(&board_id);
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    assert_short_id(&ticket_id);
+
+    let comment_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"nanoid check"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(comment_res.status(), StatusCode::CREATED);
+    let comment: serde_json::Value = common::json_body(comment_res).await;
+    let comment_id = comment["id"].as_str().unwrap();
+    assert_short_id(comment_id);
+
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    assert_short_id(&agent_id);
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let run_id = Id::new();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'work_on_ticket', 'queued', 'permissive')
+        "#,
+    )
+    .bind(run_id)
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
+    .execute(&pool)
+    .await
+    .expect("insert run");
+    assert_short_id(run_id.as_str());
+
+    let runs = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/runs"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(runs.status(), StatusCode::OK);
+    let runs_body: serde_json::Value = common::json_body(runs).await;
+    let listed = runs_body["runs"][0]["id"].as_str().unwrap();
+    assert_eq!(listed, run_id.as_str());
+
+    let bad = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/tickets/NOT-A-VALID-ID",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        bad.status().is_client_error(),
+        "invalid id should be 4xx, got {}",
+        bad.status()
+    );
+
+    let legacy = Id::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, created_by)
+        VALUES ($1, $2, 'Legacy UUID', '', 'backlog', 'user')
+        "#,
+    )
+    .bind(legacy)
+    .bind(Id::parse_str(&board_id).unwrap())
+    .execute(&pool)
+    .await
+    .expect("insert legacy uuid ticket");
+
+    let legacy_get = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{legacy}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(legacy_get.status(), StatusCode::OK);
+
+    let short_get = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(short_get.status(), StatusCode::OK);
+
+    let bad_pk = sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, 'x', 'bad-pk')")
+        .bind("NOT-A-VALID-ID")
+        .execute(&pool)
+        .await;
+    assert!(bad_pk.is_err(), "CHECK must reject a bad primary key");
+}

@@ -1,5 +1,6 @@
-/** Same regex as server `design_markers::DESIGN_MARKER`. */
-const DESIGN_MARKER = /\{\{design:([0-9a-f-]{36})\}\}/g;
+/** Same acceptance as server `design_markers`: UUID or 12-char `[0-9a-z]`. */
+const DESIGN_MARKER =
+  /\{\{design:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-z]{12})\}\}/g;
 
 export type PlanSegment =
   | { type: 'text'; text: string }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { substatusSchema } from './substatus';
+import { idSchema } from './id';
 
 export const ticketStatusSchema = z.enum([
   'backlog',
@@ -21,8 +22,8 @@ export type TicketPriorityValue = z.infer<typeof ticketPrioritySchema>;
 export const updateTicketSchema = z.object({
   title: z.string().min(1, 'Title is required').optional(),
   description: z.string().optional(),
-  attachmentIds: z.array(z.string().uuid()).optional(),
-  repoId: z.string().uuid().optional().nullable(),
+  attachmentIds: z.array(idSchema).optional(),
+  repoId: idSchema.optional().nullable(),
   priority: ticketPrioritySchema.optional().nullable(),
   branchName: z.string().optional().nullable(),
   skipPlanning: z.boolean().optional(),
@@ -59,14 +60,14 @@ export const createCommentSchema = z.object({
       'system_event',
     ])
     .optional(),
-  attachmentIds: z.array(z.string().uuid()).optional(),
+  attachmentIds: z.array(idSchema).optional(),
 });
 
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
 
 export const pendingRecommendationSchema = z.object({
   recommendedAgentKey: z.string(),
-  recommendedByAgentId: z.string().uuid(),
+  recommendedByAgentId: idSchema,
   recommendedAt: z.string(),
   summary: z.string().optional(),
 });
@@ -84,7 +85,7 @@ export const splitTicketSpecSchema = z.object({
 export type SplitTicketSpec = z.infer<typeof splitTicketSpecSchema>;
 
 export const pendingSplitRecommendationSchema = z.object({
-  recommendedByAgentId: z.string().uuid(),
+  recommendedByAgentId: idSchema,
   recommendedAt: z.string(),
   splits: z.array(splitTicketSpecSchema),
   /** Proposed with a plan: created only by approving that plan. */
@@ -96,27 +97,27 @@ export type PendingSplitRecommendation = z.infer<
 >;
 
 export const ticketSchema = z.object({
-  id: z.string().uuid(),
-  boardId: z.string().uuid(),
-  repoId: z.string().uuid().optional(),
+  id: idSchema,
+  boardId: idSchema,
+  repoId: idSchema.optional(),
   title: z.string(),
   description: z.string(),
   status: ticketStatusSchema,
   substatus: z.string().optional(),
   substatusMetadata: z.record(z.unknown()).optional(),
   priority: ticketPrioritySchema.optional(),
-  assigneeAgentId: z.string().uuid().optional(),
+  assigneeAgentId: idSchema.optional(),
   suggestedAssignee: z
     .object({
-      id: z.string().uuid(),
+      id: idSchema,
       name: z.string(),
     })
     .nullable()
     .optional(),
-  ownerUserId: z.string().uuid().optional(),
+  ownerUserId: idSchema.optional(),
   branchName: z.string().optional(),
   createdBy: z.string(),
-  createdById: z.string().uuid().optional(),
+  createdById: idSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   lastActivityAt: z.string(),
@@ -127,7 +128,7 @@ export const ticketSchema = z.object({
     })
     .optional(),
   pendingAssignRecommendation: pendingRecommendationSchema.nullable().optional(),
-  parentTicketId: z.string().uuid().nullable().optional(),
+  parentTicketId: idSchema.nullable().optional(),
   pendingSplitRecommendation: pendingSplitRecommendationSchema
     .nullable()
     .optional(),
@@ -138,11 +139,11 @@ export const ticketSchema = z.object({
   latestPlanRunStatus: z.string().nullable().optional(),
   hasActiveRun: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
-  attachmentIds: z.array(z.string().uuid()).optional(),
+  attachmentIds: z.array(idSchema).optional(),
   attachments: z
     .array(
       z.object({
-        id: z.string().uuid(),
+        id: idSchema,
         filename: z.string(),
         contentType: z.string(),
         sizeBytes: z.number(),
@@ -155,8 +156,8 @@ export const ticketSchema = z.object({
       shortSha: z.string(),
       stale: z.boolean(),
       merged: z.boolean().optional(),
-      commentIds: z.array(z.string().uuid()),
-      runIds: z.array(z.string().uuid()),
+      commentIds: z.array(idSchema),
+      runIds: z.array(idSchema),
     })
     .nullable()
     .optional(),

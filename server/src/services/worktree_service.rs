@@ -12,12 +12,10 @@ pub struct WorktreePaths {
     pub worktree_dir: PathBuf,
 }
 
-/// First 8 hex chars of the ticket UUID (the segment before the first `-`).
+/// First 8 chars of the ticket id (UUID hex prefix, or the start of a short id).
 pub fn ticket_short_id(ticket_id: Id) -> String {
-    ticket_id.as_ref().split('-')
-        .next()
-        .unwrap_or("ticket")
-        .to_string()
+    let s = ticket_id.as_str();
+    s.chars().take(8).collect()
 }
 
 /// Legacy branch used before title slugs, and when the title yields an empty slug.
@@ -25,7 +23,7 @@ pub fn legacy_ticket_branch(ticket_id: Id) -> String {
     format!("agent/TICKET-{}", ticket_short_id(ticket_id))
 }
 
-/// `agent/<8hex>-<title-slug>`, or [`legacy_ticket_branch`] when the slug is empty.
+/// `agent/<8chars>-<title-slug>`, or [`legacy_ticket_branch`] when the slug is empty.
 pub fn build_ticket_branch(ticket_id: Id, title: &str) -> String {
     let slug = slugify_truncated(title, TITLE_SLUG_MAX);
     if slug.is_empty() {
@@ -667,6 +665,21 @@ mod tests {
             ticket_id,
             "Đăng nhập"
         )));
+    }
+
+    #[test]
+    fn ticket_short_id_takes_first_eight_chars_for_short_ids() {
+        let ticket_id = Id::parse_str("abc123xyz789").unwrap();
+        assert_eq!(ticket_short_id(ticket_id), "abc123xy");
+        assert_eq!(
+            build_ticket_branch(ticket_id, "Fix login redirect"),
+            "agent/abc123xy-fix-login-redirect"
+        );
+        assert_eq!(legacy_ticket_branch(ticket_id), "agent/TICKET-abc123xy");
+        assert_eq!(
+            compute_paths(Path::new("/data/worktrees"), "My Repo", ticket_id).worktree_dir,
+            PathBuf::from("/data/worktrees/TICKET-abc123xy-my-repo")
+        );
     }
 
     #[test]

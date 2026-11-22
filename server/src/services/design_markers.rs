@@ -1,35 +1,31 @@
-//! Shared `{{design:<uuid>}}` markers in plan markdown.
-//! Pattern matches the web helper: `\{\{design:([0-9a-f-]{36})\}\}`.
+//! Shared `{{design:<id>}}` markers in plan markdown.
+//! Pattern matches the web helper: UUID or 12-char `[0-9a-z]`.
 use crate::domain::Id;
 
 const PREFIX: &str = "{{design:";
 const SUFFIX: &str = "}}";
-const ID_LEN: usize = 36;
 
 fn is_marker_id(id: &str) -> bool {
-    id.len() == ID_LEN
-        && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'-'))
-        && Id::parse_str(id).is_ok()
+    Id::parse_str(id).is_ok()
 }
 
 /// Walk `markdown`, calling `on_marker` for each well-formed marker. Returns text
 /// with every marker (valid or not-well-formed prefix that looks like one) removed
 /// when `strip` is true; otherwise returns the original string unchanged at the end.
 fn for_each_marker<'a>(markdown: &'a str, mut on_marker: impl FnMut(usize, usize, &'a str)) {
-    let bytes = markdown.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
+    while i < markdown.len() {
         if markdown[i..].starts_with(PREFIX) {
             let id_start = i + PREFIX.len();
-            let id_end = id_start + ID_LEN;
-            if id_end + SUFFIX.len() <= markdown.len()
-                && markdown[id_end..].starts_with(SUFFIX)
-                && is_marker_id(&markdown[id_start..id_end])
-            {
-                let end = id_end + SUFFIX.len();
-                on_marker(i, end, &markdown[id_start..id_end]);
-                i = end;
-                continue;
+            if let Some(rel) = markdown[id_start..].find(SUFFIX) {
+                let id_end = id_start + rel;
+                let id = &markdown[id_start..id_end];
+                if is_marker_id(id) {
+                    let end = id_end + SUFFIX.len();
+                    on_marker(i, end, id);
+                    i = end;
+                    continue;
+                }
             }
         }
         i += 1;
@@ -52,8 +48,8 @@ pub fn strip_design_markers(markdown: &str) -> String {
 pub fn design_marker_ids(markdown: &str) -> Vec<Id> {
     let mut ids = Vec::new();
     for_each_marker(markdown, |_, _, id| {
-        if let Ok(uuid) = Id::parse_str(id) {
-            ids.push(uuid);
+        if let Ok(parsed) = Id::parse_str(id) {
+            ids.push(parsed);
         }
     });
     ids
@@ -106,6 +102,13 @@ mod tests {
         assert!(!out.contains("{{design:"));
         assert!(out.contains("## UI design"));
         assert!(out.contains("### Steps"));
+    }
+
+    #[test]
+    fn strips_short_id_markers() {
+        let id = Id::parse_str("abc123xyz789").unwrap();
+        let md = format!("before {{{{design:{id}}}}} after");
+        assert_eq!(strip_design_markers(&md), "before  after");
     }
 
     #[test]

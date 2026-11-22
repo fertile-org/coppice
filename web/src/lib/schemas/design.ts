@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const designOptionSchema = z.object({
   id: z.string(),
@@ -31,10 +32,10 @@ export const designKindSchema = z
   .default('ui');
 
 export const designSetSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   title: z.string(),
   kind: designKindSchema,
-  runId: z.string().uuid(),
+  runId: idSchema,
   options: z.array(designOptionSchema),
   chosen: chosenDesignOptionSchema.nullable(),
   recommended: chosenDesignOptionSchema.nullable(),
