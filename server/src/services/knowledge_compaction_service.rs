@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::config::KnowledgeConfig;
 use crate::domain::agent::Agent;
 use crate::domain::knowledge::scope_from_str;
@@ -23,8 +24,6 @@ use sqlx::Connection;
 use sqlx::{PgPool, Row};
 use std::collections::{HashMap, HashSet};
 use time::{Duration, OffsetDateTime};
-use uuid::Uuid;
-
 const ONE_ACTIVE_BATCH_INDEX: &str = "knowledge_compaction_one_active_batch";
 const MAX_SUMMARY_BYTES: usize = 8_000;
 const MAX_ERROR_BYTES: usize = 2_000;
@@ -55,7 +54,7 @@ pub enum CompactionError {
     #[error("no knowledge compaction batch is running")]
     NoActiveBatch,
     #[error("knowledge compaction batch {0} is no longer active")]
-    BatchNotActive(Uuid),
+    BatchNotActive(Id),
     #[error(transparent)]
     Knowledge(#[from] KnowledgeError),
     #[error(transparent)]
@@ -93,7 +92,7 @@ pub struct BatchOutcome {
 /// A batch failure resolved by [`KnowledgeCompactionService::reconcile`].
 #[derive(Debug, Clone)]
 pub struct ReconciledFailure {
-    pub batch_id: Uuid,
+    pub batch_id: Id,
     pub notified: bool,
 }
 
@@ -153,12 +152,12 @@ impl<'a> KnowledgeCompactionService<'a> {
         if now < due_at {
             return Ok(None);
         }
-        self.create_batch_or_skip(agent.id, BatchTrigger::Scheduled, Uuid::new_v4(), now, None)
+        self.create_batch_or_skip(agent.id, BatchTrigger::Scheduled, Id::new(), now, None)
             .await
     }
 
     /// "Compact now": start a drain cycle immediately, ignoring the interval.
-    pub async fn start_manual(&self, user_id: Uuid) -> Result<CompactionBatch, CompactionError> {
+    pub async fn start_manual(&self, user_id: Id) -> Result<CompactionBatch, CompactionError> {
         let agent = self.ready_agent().await?;
         if self.active_batch().await?.is_some() {
             return Err(CompactionError::ActiveBatch);
@@ -166,7 +165,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         self.create_batch(
             agent.id,
             BatchTrigger::Manual,
-            Uuid::new_v4(),
+            Id::new(),
             OffsetDateTime::now_utc(),
             Some(user_id),
         )
@@ -175,7 +174,7 @@ impl<'a> KnowledgeCompactionService<'a> {
     }
 
     /// Reset attempts on failed tickets and start a retry cycle.
-    pub async fn retry(&self, user_id: Uuid) -> Result<CompactionBatch, CompactionError> {
+    pub async fn retry(&self, user_id: Id) -> Result<CompactionBatch, CompactionError> {
         let agent = self.ready_agent().await?;
         if self.active_batch().await?.is_some() {
             return Err(CompactionError::ActiveBatch);
@@ -192,7 +191,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         self.create_batch(
             agent.id,
             BatchTrigger::Retry,
-            Uuid::new_v4(),
+            Id::new(),
             OffsetDateTime::now_utc(),
             Some(user_id),
         )
@@ -200,7 +199,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         .ok_or(CompactionError::NothingToRetry)
     }
 
-    pub async fn mark_batch_running(&self, batch_id: Uuid) -> Result<(), CompactionError> {
+    pub async fn mark_batch_running(&self, batch_id: Id) -> Result<(), CompactionError> {
         let updated = sqlx::query(
             r#"
             UPDATE knowledge_compaction_batches
@@ -221,8 +220,8 @@ impl<'a> KnowledgeCompactionService<'a> {
     /// the batch succeeded, and drop its queue rows, all in one transaction.
     pub async fn complete_batch(
         &self,
-        batch_id: Uuid,
-        run_id: Uuid,
+        batch_id: Id,
+        run_id: Id,
         agent_summary: &str,
         specs: &[KnowledgeCandidateSpec],
     ) -> Result<BatchOutcome, CompactionError> {
@@ -263,21 +262,21 @@ impl<'a> KnowledgeCompactionService<'a> {
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
 
-        let referenced = |pick: fn(&KnowledgeCandidateSpec) -> Option<&String>| -> Vec<Uuid> {
+        let referenced = |pick: fn(&KnowledgeCandidateSpec) -> Option<&String>| -> Vec<Id> {
             specs
                 .iter()
                 .filter_map(pick)
-                .filter_map(|raw| Uuid::parse_str(raw.trim()).ok())
+                .filter_map(|raw| Id::parse_str(raw.trim()).ok())
                 .collect()
         };
-        let agent_ids: HashSet<Uuid> =
+        let agent_ids: HashSet<Id> =
             sqlx::query_scalar("SELECT id FROM agents WHERE id = ANY($1)")
                 .bind(referenced(|spec| spec.agent_id.as_ref()))
                 .fetch_all(&mut *tx)
                 .await?
                 .into_iter()
                 .collect();
-        let supersedable: HashMap<Uuid, SupersedableItem> = sqlx::query(
+        let supersedable: HashMap<Id, SupersedableItem> = sqlx::query(
             r#"
             SELECT i.id, r.scope, r.board_id, r.agent_id
             FROM knowledge_items i
@@ -364,7 +363,7 @@ impl<'a> KnowledgeCompactionService<'a> {
             match inserted {
                 Ok(item_id) => {
                     if !citations.is_empty() {
-                        let revision_id: Uuid = sqlx::query_scalar(
+                        let revision_id: Id = sqlx::query_scalar(
                             "SELECT current_revision_id FROM knowledge_items WHERE id = $1",
                         )
                         .bind(item_id)
@@ -414,16 +413,16 @@ impl<'a> KnowledgeCompactionService<'a> {
     async fn anchor_citations(
         &self,
         specs: &[KnowledgeCandidateSpec],
-    ) -> HashMap<i32, (Option<Uuid>, Vec<ResolvedCitation>)> {
-        let first_sources: Vec<Option<Uuid>> = specs
+    ) -> HashMap<i32, (Option<Id>, Vec<ResolvedCitation>)> {
+        let first_sources: Vec<Option<Id>> = specs
             .iter()
             .map(|spec| {
                 spec.source_ticket_ids
                     .first()
-                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+                    .and_then(|raw| Id::parse_str(raw.trim()).ok())
             })
             .collect();
-        let ticket_repos: HashMap<Uuid, Option<Uuid>> = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        let ticket_repos: HashMap<Id, Option<Id>> = sqlx::query_as::<_, (Id, Option<Id>)>(
             "SELECT id, repo_id FROM tickets WHERE id = ANY($1)",
         )
         .bind(first_sources.iter().flatten().copied().collect::<Vec<_>>())
@@ -434,20 +433,20 @@ impl<'a> KnowledgeCompactionService<'a> {
         .collect();
         // A merge has no source ticket: it takes the repo its superseded
         // item's active revision is already anchored to, if any.
-        let merged_ids: Vec<Uuid> = specs
+        let merged_ids: Vec<Id> = specs
             .iter()
             .enumerate()
             .filter(|(position, _)| first_sources[*position].is_none())
             .filter_map(|(_, spec)| {
                 spec.supersedes_item_id
                     .as_deref()
-                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+                    .and_then(|raw| Id::parse_str(raw.trim()).ok())
             })
             .collect();
-        let merged_repos: HashMap<Uuid, Uuid> = if merged_ids.is_empty() {
+        let merged_repos: HashMap<Id, Id> = if merged_ids.is_empty() {
             HashMap::new()
         } else {
-            sqlx::query_as::<_, (Uuid, Uuid)>(
+            sqlx::query_as::<_, (Id, Id)>(
                 r#"
                 SELECT DISTINCT ON (i.id) i.id, c.repo_id
                 FROM knowledge_items i
@@ -481,7 +480,7 @@ impl<'a> KnowledgeCompactionService<'a> {
                 None => spec
                     .supersedes_item_id
                     .as_deref()
-                    .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+                    .and_then(|raw| Id::parse_str(raw.trim()).ok())
                     .and_then(|item| merged_repos.get(&item).copied()),
             };
             let resolved = resolve_anchors(self.pool, repo_id, &paths).await;
@@ -497,7 +496,7 @@ impl<'a> KnowledgeCompactionService<'a> {
     /// false when the batch was already resolved.
     pub async fn fail_batch(
         &self,
-        batch_id: Uuid,
+        batch_id: Id,
         error_message: &str,
         count_attempt: bool,
     ) -> Result<bool, CompactionError> {
@@ -552,9 +551,9 @@ impl<'a> KnowledgeCompactionService<'a> {
         .await?;
         let mut resolved = Vec::new();
         for row in rows {
-            let batch_id: Uuid = row.try_get("batch_id")?;
-            let agent_id: Uuid = row.try_get("agent_id")?;
-            let run_id: Uuid = row.try_get("run_id")?;
+            let batch_id: Id = row.try_get("batch_id")?;
+            let agent_id: Id = row.try_get("agent_id")?;
+            let run_id: Id = row.try_get("run_id")?;
             let status: String = row.try_get("status")?;
             let run_error: Option<String> = row.try_get("error_message")?;
             let (message, counts_as_failure) = match status.as_str() {
@@ -601,7 +600,7 @@ impl<'a> KnowledgeCompactionService<'a> {
 
     /// Cancel the active batch's run and release its tickets without counting
     /// an attempt or notifying. Returns the cancelled batch and its run id.
-    pub async fn cancel(&self) -> Result<(CompactionBatch, Uuid), CompactionError> {
+    pub async fn cancel(&self) -> Result<(CompactionBatch, Id), CompactionError> {
         let active = self
             .active_batch()
             .await?
@@ -633,7 +632,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         row.as_ref().map(row_to_batch).transpose()
     }
 
-    pub async fn batch(&self, batch_id: Uuid) -> Result<Option<CompactionBatch>, CompactionError> {
+    pub async fn batch(&self, batch_id: Id) -> Result<Option<CompactionBatch>, CompactionError> {
         let sql = format!("{BATCH_SELECT} WHERE b.id = $1");
         let row = sqlx::query(&sql)
             .bind(batch_id)
@@ -709,11 +708,11 @@ impl<'a> KnowledgeCompactionService<'a> {
     /// Like [`Self::create_batch`], but losing a race for the active slot is not an error.
     async fn create_batch_or_skip(
         &self,
-        agent_id: Uuid,
+        agent_id: Id,
         trigger: BatchTrigger,
-        cycle_id: Uuid,
+        cycle_id: Id,
         cycle_started_at: OffsetDateTime,
-        created_by: Option<Uuid>,
+        created_by: Option<Id>,
     ) -> Result<Option<CompactionBatch>, CompactionError> {
         match self
             .create_batch(agent_id, trigger, cycle_id, cycle_started_at, created_by)
@@ -728,11 +727,11 @@ impl<'a> KnowledgeCompactionService<'a> {
     /// queue a batch plus its agent run in one transaction.
     async fn create_batch(
         &self,
-        agent_id: Uuid,
+        agent_id: Id,
         trigger: BatchTrigger,
-        cycle_id: Uuid,
+        cycle_id: Id,
         cycle_started_at: OffsetDateTime,
-        created_by: Option<Uuid>,
+        created_by: Option<Id>,
     ) -> Result<Option<CompactionBatch>, CompactionError> {
         let compaction = &self.config.compaction;
         let mut tx = self.pool.begin().await?;
@@ -772,14 +771,14 @@ impl<'a> KnowledgeCompactionService<'a> {
         let candidates = rows
             .iter()
             .map(|row| Ok((row.try_get("ticket_id")?, row.try_get("source_bytes")?)))
-            .collect::<Result<Vec<(Uuid, i64)>, sqlx::Error>>()?;
+            .collect::<Result<Vec<(Id, i64)>, sqlx::Error>>()?;
         let ticket_ids = select_within_bytes(&candidates, compaction.batch_max_source_bytes);
         if ticket_ids.is_empty() {
             tx.rollback().await?;
             return Ok(None);
         }
 
-        let batch_id = Uuid::new_v4();
+        let batch_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO knowledge_compaction_batches (
@@ -811,7 +810,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         sqlx::query(
             r#"
             INSERT INTO knowledge_compaction_batch_tickets (batch_id, ticket_id)
-            SELECT $1, ticket_id FROM UNNEST($2::uuid[]) AS ticket_id
+            SELECT $1, ticket_id FROM UNNEST($2::varchar[]) AS ticket_id
             "#,
         )
         .bind(batch_id)
@@ -819,7 +818,7 @@ impl<'a> KnowledgeCompactionService<'a> {
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE knowledge_compaction_queue SET batch_id = $1 WHERE ticket_id = ANY($2::uuid[])",
+            "UPDATE knowledge_compaction_queue SET batch_id = $1 WHERE ticket_id = ANY($2::varchar[])",
         )
         .bind(batch_id)
         .bind(&ticket_ids)

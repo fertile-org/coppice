@@ -1,10 +1,9 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct Session {
-    pub id: Uuid,
-    pub user_id: Uuid,
+    pub id: Id,
+    pub user_id: Id,
     pub csrf_token: String,
     pub expires_at: OffsetDateTime,
 }

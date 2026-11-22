@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -117,7 +118,7 @@ pub(super) async fn execute_plan(
 
 async fn snapshot_plan_refs(
     git_dir: Option<&Path>,
-    ticket_id: uuid::Uuid,
+    ticket_id: Id,
 ) -> Option<RepoRefSnapshot> {
     let dir = git_dir?;
     match snapshot_repo_refs(dir).await {
@@ -155,7 +156,7 @@ pub(crate) fn append_work_design_instruction(
 /// question round (offered once, or answered).
 async fn append_plan_sections(
     pool: &PgPool,
-    ticket_id: uuid::Uuid,
+    ticket_id: Id,
     revision_input: Option<&crate::services::planning_service::PlanRevisionContext>,
     markdown: &mut String,
 ) -> anyhow::Result<()> {
@@ -196,7 +197,7 @@ async fn append_plan_sections(
 /// When branches, tags, or remotes moved, append the command diff to the run log.
 async fn record_plan_ref_changes(
     artifacts_dir: &str,
-    run_id: uuid::Uuid,
+    run_id: Id,
     git_dir: Option<&Path>,
     before: Option<&RepoRefSnapshot>,
 ) {
@@ -216,8 +217,8 @@ async fn record_plan_ref_changes(
     append_plan_ref_diff(artifacts_dir, run_id, &diff);
 }
 
-fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
-    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
+fn append_plan_ref_diff(artifacts_dir: &str, run_id: Id, diff: &str) {
+    let paths = RunArtifactPaths::new(artifacts_dir, run_id.as_ref());
     let ends_with_newline =
         ArtifactService::read_terminal_log_tail(&paths, 1).is_none_or(|last| last.ends_with(b"\n"));
     let mut bytes = Vec::new();
@@ -236,8 +237,8 @@ fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
 async fn plan_scratch_source(
     _state: &AppState,
     pool: &PgPool,
-    ticket_id: uuid::Uuid,
-    repo_id: Option<uuid::Uuid>,
+    ticket_id: Id,
+    repo_id: Option<Id>,
 ) -> anyhow::Result<Option<PlanScratchSource>> {
     let Some(repo_id) = repo_id else {
         return Ok(None);
@@ -261,7 +262,7 @@ async fn plan_scratch_source(
     }))
 }
 
-async fn note_discarded_plan_changes(pool: &PgPool, ticket_id: uuid::Uuid) {
+async fn note_discarded_plan_changes(pool: &PgPool, ticket_id: Id) {
     if let Err(err) = CommentService::new(pool)
         .create(
             ticket_id,
@@ -596,7 +597,7 @@ async fn drive_plan_run(
             }
         }
     } else {
-        let comment_id: Option<uuid::Uuid> = sqlx::query_scalar(
+        let comment_id: Option<Id> = sqlx::query_scalar(
             r#"
             SELECT id FROM ticket_comments
             WHERE ticket_id = $1 AND intent = 'clarification_request'
@@ -655,7 +656,7 @@ mod tests {
     use crate::plugins::builtin::{DESIGN_SKILL_ID, DESIGN_TECHNICAL_SKILL_ID};
     use crate::plugins::skills::SkillInfo;
     use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
-    use uuid::Uuid;
+    use crate::domain::Id;
 
     #[test]
     fn design_guidance_needs_the_design_skill() {
@@ -697,8 +698,8 @@ mod tests {
     fn ref_diff_is_appended_to_the_run_log() {
         let dir = tempfile::tempdir().expect("tempdir");
         let artifacts = dir.path().to_str().expect("utf8");
-        let run_id = Uuid::from_u128(9);
-        let paths = RunArtifactPaths::new(artifacts, &run_id.to_string());
+        let run_id = Id::from_u128(9);
+        let paths = RunArtifactPaths::new(artifacts, run_id.as_ref());
         ArtifactService::write_terminal_log(&paths, b"Mock agent starting...\n").expect("log");
         append_plan_ref_diff(
             artifacts,

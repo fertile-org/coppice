@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
     Queued,
@@ -14,11 +13,11 @@ pub enum RunStatus {
 
 #[derive(Debug, Clone)]
 pub struct AgentRun {
-    pub id: Uuid,
-    pub ticket_id: Option<Uuid>,
-    pub chat_session_id: Option<Uuid>,
-    pub chat_message_id: Option<Uuid>,
-    pub agent_id: Uuid,
+    pub id: Id,
+    pub ticket_id: Option<Id>,
+    pub chat_session_id: Option<Id>,
+    pub chat_message_id: Option<Id>,
+    pub agent_id: Id,
     pub job_type: String,
     pub status: RunStatus,
     pub sandbox_profile_id: String,
@@ -27,7 +26,7 @@ pub struct AgentRun {
     pub error_message: Option<String>,
     pub session_id: Option<String>,
     pub context_profile: ContextProfile,
-    pub trigger_comment_id: Option<Uuid>,
+    pub trigger_comment_id: Option<Id>,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

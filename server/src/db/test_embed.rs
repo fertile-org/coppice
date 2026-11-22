@@ -445,6 +445,7 @@ fn pick_free_port() -> anyhow::Result<u16> {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
     #[tokio::test]
     async fn embedded_test_pool_connects_and_migrates() {
         let pool = super::embedded_test_pool().await.expect("embedded pool");
@@ -474,7 +475,7 @@ mod tests {
             .await
             .expect("truncate first");
 
-        let board_id = uuid::Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("isolated board")
@@ -493,7 +494,7 @@ mod tests {
             VALUES ($1, $2, $3, $4, $5)
             "#,
         )
-        .bind(uuid::Uuid::new_v4())
+        .bind(Id::new())
         .bind(board_id)
         .bind("isolated ticket")
         .bind("backlog")

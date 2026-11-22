@@ -1,6 +1,6 @@
+use crate::domain::Id;
 use sqlx::{PgPool, Row};
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 use super::design_sketch;
 
@@ -31,10 +31,10 @@ pub fn reject_rel_path(path: &str) -> Option<&'static str> {
 
 #[derive(Debug, Clone)]
 pub struct CreateScope {
-    pub ticket_id: Option<Uuid>,
-    pub chat_session_id: Option<Uuid>,
-    pub run_id: Uuid,
-    pub agent_id: Uuid,
+    pub ticket_id: Option<Id>,
+    pub chat_session_id: Option<Id>,
+    pub run_id: Id,
+    pub agent_id: Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -125,7 +125,7 @@ pub fn chosen_option(options: &[DesignOption], index: usize) -> ChosenOption {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedSet {
-    pub id: Uuid,
+    pub id: Id,
     /// Relative to the artifacts dir: `designs/{id}`.
     pub dir: String,
 }
@@ -175,10 +175,10 @@ impl DesignKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesignSetSummary {
-    pub id: Uuid,
+    pub id: Id,
     pub title: String,
     pub kind: DesignKind,
-    pub run_id: Uuid,
+    pub run_id: Id,
     /// Relative to the artifacts dir, as stored.
     pub dir: String,
     pub options: Vec<DesignOption>,
@@ -197,7 +197,7 @@ pub struct DesignSetSummary {
 /// The design a ticket's work should follow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveDesign {
-    pub set_id: Uuid,
+    pub set_id: Id,
     pub title: String,
     pub selected: ChosenOption,
     /// Absolute path of the selected option's entry file. None when the set's
@@ -207,8 +207,8 @@ pub struct EffectiveDesign {
 
 pub struct DesignSetRecord {
     pub summary: DesignSetSummary,
-    pub ticket_id: Option<Uuid>,
-    pub chat_session_id: Option<Uuid>,
+    pub ticket_id: Option<Id>,
+    pub chat_session_id: Option<Id>,
     pub published: bool,
 }
 
@@ -258,7 +258,7 @@ impl<'a> DesignService<'a> {
                 ));
             }
         };
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let dir = format!("designs/{id}");
         std::fs::create_dir_all(self.artifacts_dir.join(&dir)).map_err(invalid_io)?;
         sqlx::query(
@@ -284,8 +284,8 @@ impl<'a> DesignService<'a> {
 
     pub async fn write(
         &self,
-        set_id: Uuid,
-        run_id: Uuid,
+        set_id: Id,
+        run_id: Id,
         rel: &str,
         bytes: &[u8],
     ) -> Result<(), DesignError> {
@@ -296,7 +296,7 @@ impl<'a> DesignService<'a> {
             return Err(DesignError::Invalid("file exceeds 512 KiB".into()));
         }
         let row = self.load(set_id).await?;
-        let row_run: Uuid = row.get("run_id");
+        let row_run: Id = row.get("run_id");
         if row_run != run_id {
             return Err(DesignError::Invalid("run does not match design set".into()));
         }
@@ -323,14 +323,14 @@ impl<'a> DesignService<'a> {
 
     pub async fn publish(
         &self,
-        set_id: Uuid,
-        run_id: Uuid,
+        set_id: Id,
+        run_id: Id,
         options: Vec<DesignOption>,
         recommended_option_id: &str,
         recommended_reason: Option<&str>,
-    ) -> Result<Uuid, DesignError> {
+    ) -> Result<Id, DesignError> {
         let row = self.load(set_id).await?;
-        let row_run: Uuid = row.get("run_id");
+        let row_run: Id = row.get("run_id");
         if row_run != run_id {
             return Err(DesignError::Invalid("run does not match design set".into()));
         }
@@ -366,8 +366,8 @@ impl<'a> DesignService<'a> {
         let options_json =
             serde_json::to_value(&options).map_err(|err| DesignError::Invalid(err.to_string()))?;
 
-        let ticket_id: Option<Uuid> = row.get("ticket_id");
-        let chat_session_id: Option<Uuid> = row.get("chat_session_id");
+        let ticket_id: Option<Id> = row.get("ticket_id");
+        let chat_session_id: Option<Id> = row.get("chat_session_id");
         let mut tx = self.pool.begin().await?;
         // One published row per (run, kind). A later publish replaces that card.
         sqlx::query(
@@ -420,8 +420,8 @@ impl<'a> DesignService<'a> {
                           WHERE r.id = $4 AND r.job_type = 'plan_ticket'
                       ))
                   AND (
-                      ($2::uuid IS NOT NULL AND ticket_id = $2)
-                      OR ($3::uuid IS NOT NULL AND chat_session_id = $3)
+                      ($2::varchar IS NOT NULL AND ticket_id = $2)
+                      OR ($3::varchar IS NOT NULL AND chat_session_id = $3)
                   )
                 "#,
             )
@@ -438,7 +438,7 @@ impl<'a> DesignService<'a> {
     }
 
     /// Count technical sets published on this run (for the plan set cap).
-    pub async fn technical_sets_on_run(&self, run_id: Uuid) -> Result<usize, DesignError> {
+    pub async fn technical_sets_on_run(&self, run_id: Id) -> Result<usize, DesignError> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)::bigint
@@ -454,7 +454,7 @@ impl<'a> DesignService<'a> {
         Ok(count as usize)
     }
 
-    pub async fn get(&self, set_id: Uuid) -> Result<DesignSetRecord, DesignError> {
+    pub async fn get(&self, set_id: Id) -> Result<DesignSetRecord, DesignError> {
         let row = self.load(set_id).await?;
         Ok(DesignSetRecord {
             summary: summary_from_row(&row)?,
@@ -464,7 +464,7 @@ impl<'a> DesignService<'a> {
         })
     }
 
-    pub async fn read_file(&self, set_id: Uuid, rel: &str) -> Result<Vec<u8>, DesignError> {
+    pub async fn read_file(&self, set_id: Id, rel: &str) -> Result<Vec<u8>, DesignError> {
         if let Some(reason) = reject_rel_path(rel) {
             return Err(DesignError::Invalid(reason.into()));
         }
@@ -490,7 +490,7 @@ impl<'a> DesignService<'a> {
 
     pub async fn list_for_ticket(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let mut sets = self.list_scoped(Some(ticket_id), None).await?;
         if let Some(parent_id) = self.parent_of(ticket_id).await? {
@@ -505,7 +505,7 @@ impl<'a> DesignService<'a> {
     /// The design a ticket's work follows: its own, else its parent's.
     pub async fn effective_for_ticket(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<EffectiveDesign>, DesignError> {
         let mut set = self.own_effective(ticket_id).await?;
         if set.is_none() {
@@ -542,8 +542,8 @@ impl<'a> DesignService<'a> {
         }))
     }
 
-    async fn parent_of(&self, ticket_id: Uuid) -> Result<Option<Uuid>, DesignError> {
-        let parent: Option<Option<Uuid>> =
+    async fn parent_of(&self, ticket_id: Id) -> Result<Option<Id>, DesignError> {
+        let parent: Option<Option<Id>> =
             sqlx::query_scalar("SELECT parent_ticket_id FROM tickets WHERE id = $1")
                 .bind(ticket_id)
                 .fetch_optional(self.pool)
@@ -555,7 +555,7 @@ impl<'a> DesignService<'a> {
     /// live plan-run set with a selection. Sets are newest first.
     async fn own_effective(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Option<DesignSetSummary>, DesignError> {
         let sets = self.list_scoped(Some(ticket_id), None).await?;
         let live = |set: &&DesignSetSummary| !set.superseded;
@@ -573,16 +573,16 @@ impl<'a> DesignService<'a> {
 
     pub async fn list_for_chat(
         &self,
-        chat_session_id: Uuid,
+        chat_session_id: Id,
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         self.list_scoped(None, Some(chat_session_id)).await
     }
 
     pub async fn choose(
         &self,
-        set_id: Uuid,
+        set_id: Id,
         option_id: &str,
-        user_id: Uuid,
+        user_id: Id,
     ) -> Result<(), DesignError> {
         let row = self.load(set_id).await?;
         let options = options_from_row(&row)?;
@@ -595,8 +595,8 @@ impl<'a> DesignService<'a> {
 
     async fn list_scoped(
         &self,
-        ticket_id: Option<Uuid>,
-        chat_session_id: Option<Uuid>,
+        ticket_id: Option<Id>,
+        chat_session_id: Option<Id>,
     ) -> Result<Vec<DesignSetSummary>, DesignError> {
         let rows = sqlx::query(
             r#"
@@ -610,8 +610,8 @@ impl<'a> DesignService<'a> {
             FROM design_sets
             WHERE published_at IS NOT NULL
               AND (
-                  ($1::uuid IS NOT NULL AND ticket_id = $1)
-                  OR ($2::uuid IS NOT NULL AND chat_session_id = $2)
+                  ($1::varchar IS NOT NULL AND ticket_id = $1)
+                  OR ($2::varchar IS NOT NULL AND chat_session_id = $2)
               )
             ORDER BY created_at DESC, id DESC
             "#,
@@ -623,7 +623,7 @@ impl<'a> DesignService<'a> {
         rows.iter().map(summary_from_row).collect()
     }
 
-    async fn load(&self, set_id: Uuid) -> Result<sqlx::postgres::PgRow, DesignError> {
+    async fn load(&self, set_id: Id) -> Result<sqlx::postgres::PgRow, DesignError> {
         sqlx::query(
             r#"
             SELECT id, title, kind, ticket_id, chat_session_id, run_id, dir, options, chosen_option_id,
@@ -648,9 +648,9 @@ impl<'a> DesignService<'a> {
 /// Store a pick without checking it. Callers validate the option first.
 pub(crate) async fn save_choice<'e>(
     executor: impl sqlx::PgExecutor<'e>,
-    set_id: Uuid,
+    set_id: Id,
     option_id: &str,
-    user_id: Uuid,
+    user_id: Id,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"

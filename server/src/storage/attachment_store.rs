@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
-
 #[derive(Clone)]
 pub struct AttachmentStore {
     root: PathBuf,
@@ -25,7 +24,7 @@ impl AttachmentStore {
 
     pub fn save(
         &self,
-        id: Uuid,
+        id: Id,
         filename: &str,
         _content_type: &str,
         bytes: &[u8],
@@ -43,7 +42,7 @@ impl AttachmentStore {
 
 impl AttachmentStore {
     /// Remove an attachment's folder. A folder that is already gone is fine.
-    pub fn delete(&self, id: Uuid) -> std::io::Result<()> {
+    pub fn delete(&self, id: Id) -> std::io::Result<()> {
         match std::fs::remove_dir_all(self.root.join(id.to_string())) {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
             other => other,

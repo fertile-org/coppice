@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::Router;
@@ -13,8 +14,6 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 struct RunFixture {
     state: Arc<AppState>,
     app: Router,
@@ -36,8 +35,8 @@ async fn run_fixture() -> RunFixture {
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let pool = state.db.clone().expect("db pool");
-    let ticket_uuid: Uuid = ticket_id.parse().unwrap();
-    let agent_uuid: Uuid = agent_id.parse().unwrap();
+    let ticket_uuid: Id = ticket_id.parse().unwrap();
+    let agent_uuid: Id = agent_id.parse().unwrap();
     let run = RunService::new(&pool)
         .start_run_for_agent(
             ticket_uuid,
@@ -56,7 +55,7 @@ async fn run_fixture() -> RunFixture {
         board_id: Some(board_id.parse().unwrap()),
         profile: ContextProfile::HumanAgent,
         job_type: "work_on_ticket".into(),
-        compaction_ticket_ids: vec![Uuid::new_v4()],
+        compaction_ticket_ids: vec![Id::new()],
         plugin_ids: vec![],
     };
     RunFixture {
@@ -151,7 +150,7 @@ async fn serve(fx: &RunFixture) -> String {
     format!("http://{addr}/mcp")
 }
 
-async fn tool_call_rows(pool: &PgPool, run_id: Uuid) -> Vec<(String, String, String)> {
+async fn tool_call_rows(pool: &PgPool, run_id: Id) -> Vec<(String, String, String)> {
     sqlx::query_as(
         "SELECT tool, source, status FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
     )
@@ -290,9 +289,9 @@ async fn mcp_internal_error_hides_details() {
             .expect("lazy pool"),
     );
     let scope = RunToolScope {
-        token_id: Uuid::new_v4(),
-        run_id: Uuid::new_v4(),
-        agent_id: Uuid::new_v4(),
+        token_id: Id::new(),
+        run_id: Id::new(),
+        agent_id: Id::new(),
         ticket_id: None,
         chat_session_id: None,
         board_id: None,
@@ -354,7 +353,7 @@ async fn skill_list_returns_builtin_skills() {
 
 // ---- Task 4: per-run token lifecycle + mock tool calls ----
 
-async fn wait_for_run_status(pool: &PgPool, run_id: Uuid, wanted: &str) {
+async fn wait_for_run_status(pool: &PgPool, run_id: Id, wanted: &str) {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
@@ -379,20 +378,20 @@ async fn wait_for_run_status(pool: &PgPool, run_id: Uuid, wanted: &str) {
 
 struct TokenRow {
     profile: String,
-    chat_session_id: Option<Uuid>,
-    ticket_id: Option<Uuid>,
-    board_id: Option<Uuid>,
-    compaction_ticket_ids: Vec<Uuid>,
+    chat_session_id: Option<Id>,
+    ticket_id: Option<Id>,
+    board_id: Option<Id>,
+    compaction_ticket_ids: Vec<Id>,
     revoked: bool,
 }
 
-async fn token_rows(pool: &PgPool, run_id: Uuid) -> Vec<TokenRow> {
+async fn token_rows(pool: &PgPool, run_id: Id) -> Vec<TokenRow> {
     let rows: Vec<(
         String,
-        Option<Uuid>,
-        Option<Uuid>,
-        Option<Uuid>,
-        Vec<Uuid>,
+        Option<Id>,
+        Option<Id>,
+        Option<Id>,
+        Vec<Id>,
         bool,
     )> = sqlx::query_as(
         "SELECT context_profile, chat_session_id, ticket_id, board_id, \
@@ -421,13 +420,13 @@ async fn token_rows(pool: &PgPool, run_id: Uuid) -> Vec<TokenRow> {
 
 /// Ticket run through the worker with the gateway listening; returns the run id.
 async fn run_ticket_with_tool_calls(
-) -> (Arc<AppState>, Uuid, common::AgentTestEnv, tempfile::TempDir) {
+) -> (Arc<AppState>, Id, common::AgentTestEnv, tempfile::TempDir) {
     run_ticket_with_fixture("mcp/ticket_tool_call").await
 }
 
 async fn run_ticket_with_fixture(
     fixture: &str,
-) -> (Arc<AppState>, Uuid, common::AgentTestEnv, tempfile::TempDir) {
+) -> (Arc<AppState>, Id, common::AgentTestEnv, tempfile::TempDir) {
     let (state, app, cookie, csrf, env) = common::bootstrap_and_login_with_gateway(fixture).await;
     let (git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
@@ -451,7 +450,7 @@ async fn run_ticket_with_fixture(
         .unwrap();
     assert_eq!(res.status(), 201);
     let body = common::json_body(res).await;
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
     (state, run_id, env, git_dir)
@@ -537,7 +536,7 @@ async fn chat_turn_and_compaction_get_scoped_tokens() {
         .await
         .unwrap();
     assert_eq!(res.status(), 201);
-    let chat_run: Uuid = common::json_body(res).await["runId"]
+    let chat_run: Id = common::json_body(res).await["runId"]
         .as_str()
         .unwrap()
         .parse()
@@ -556,7 +555,7 @@ async fn chat_turn_and_compaction_get_scoped_tokens() {
 
     // Knowledge compaction.
     std::env::set_var("MOCK_AGENT_RESPONSE", "mcp/compact_tool_call");
-    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
+    let admin_id: Id = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -564,7 +563,7 @@ async fn chat_turn_and_compaction_get_scoped_tokens() {
         .set_knowledge_compaction_agent(Some(agent_id.parse().unwrap()), admin_id)
         .await
         .unwrap();
-    let ticket_id: Uuid = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
+    let ticket_id: Id = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -644,7 +643,7 @@ async fn create_other_board(fx: &RunFixture) -> String {
 }
 
 async fn set_ticket_title(pool: &PgPool, ticket_id: &str, title: &str) {
-    sqlx::query("UPDATE tickets SET title = $1 WHERE id = $2::uuid")
+    sqlx::query("UPDATE tickets SET title = $1 WHERE id = $2::varchar")
         .bind(title)
         .bind(ticket_id)
         .execute(pool)
@@ -735,7 +734,7 @@ async fn ticket_comments_pages_large_threads() {
         &url,
         &token,
         "ticket_comments",
-        json!({"before": Uuid::new_v4().to_string()}),
+        json!({"before": Id::new().to_string()}),
     )
     .await;
     assert!(is_error);
@@ -881,7 +880,7 @@ async fn ticket_search_matches_title_on_board() {
     set_ticket_title(&fx.pool, &matching, "Payment gateway retries").await;
     let archived = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
     set_ticket_title(&fx.pool, &archived, "Payment archived").await;
-    sqlx::query("UPDATE tickets SET archived_at = now() WHERE id = $1::uuid")
+    sqlx::query("UPDATE tickets SET archived_at = now() WHERE id = $1::varchar")
         .bind(&archived)
         .execute(&fx.pool)
         .await
@@ -920,20 +919,20 @@ async fn ticket_search_matches_title_on_board() {
 
 // ---- Task 6: knowledge_search + comment_post ----
 
-async fn seed_knowledge(pool: &PgPool, board_id: Uuid, title: &str, status: &str) -> Uuid {
+async fn seed_knowledge(pool: &PgPool, board_id: Id, title: &str, status: &str) -> Id {
     let content = format!("Zebrafish procedure: {title}");
     seed_knowledge_with_content(pool, board_id, title, &content, status).await
 }
 
 async fn seed_knowledge_with_content(
     pool: &PgPool,
-    board_id: Uuid,
+    board_id: Id,
     title: &str,
     content: &str,
     status: &str,
-) -> Uuid {
-    let item_id = Uuid::new_v4();
-    let revision_id = Uuid::new_v4();
+) -> Id {
+    let item_id = Id::new();
+    let revision_id = Id::new();
     let approved = status == "approved";
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, $2, 1)")
         .bind(item_id)
@@ -973,14 +972,14 @@ async fn seed_knowledge_with_content(
 async fn seed_scoped_knowledge(
     pool: &PgPool,
     scope: &str,
-    board_id: Option<Uuid>,
-    agent_id: Option<Uuid>,
+    board_id: Option<Id>,
+    agent_id: Option<Id>,
     title: &str,
     content: &str,
     status: &str,
-) -> Uuid {
-    let item_id = Uuid::new_v4();
-    let revision_id = Uuid::new_v4();
+) -> Id {
+    let item_id = Id::new();
+    let revision_id = Id::new();
     let approved = status == "approved";
     sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, $2, 1)")
         .bind(item_id)
@@ -1028,8 +1027,8 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     let fx = run_fixture().await;
     let url = serve(&fx).await;
     let home = fx.scope.board_id.unwrap();
-    let other_board: Uuid = create_other_board(&fx).await.parse().unwrap();
-    let other_agent: Uuid =
+    let other_board: Id = create_other_board(&fx).await.parse().unwrap();
+    let other_agent: Id =
         common::create_test_agent_from_preset(&fx.app, "Other Agent", &fx.cookie, &fx.csrf)
             .await
             .parse()
@@ -1208,7 +1207,7 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     );
 }
 
-async fn item_of(pool: &PgPool, revision_id: Uuid) -> Uuid {
+async fn item_of(pool: &PgPool, revision_id: Id) -> Id {
     sqlx::query_scalar("SELECT item_id FROM knowledge_revisions WHERE id = $1")
         .bind(revision_id)
         .fetch_one(pool)
@@ -1216,7 +1215,7 @@ async fn item_of(pool: &PgPool, revision_id: Uuid) -> Uuid {
         .unwrap()
 }
 
-async fn usage_count(pool: &PgPool, run_id: Uuid, revision_id: Uuid) -> i64 {
+async fn usage_count(pool: &PgPool, run_id: Id, revision_id: Id) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1 AND revision_id = $2",
     )
@@ -1379,7 +1378,7 @@ async fn knowledge_get_rejects_more_than_five_ids() {
     let url = serve(&fx).await;
     let token =
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let ids: Vec<String> = (0..6).map(|_| Uuid::new_v4().to_string()).collect();
+    let ids: Vec<String> = (0..6).map(|_| Id::new().to_string()).collect();
     let (is_error, text) = call_tool(&url, &token, "knowledge_get", json!({"ids": ids})).await;
     assert!(is_error);
     assert!(text.contains("at most 5"), "{text}");
@@ -1430,11 +1429,11 @@ async fn run_context_is_slim_and_knowledge_arrives_only_via_search() {
         .unwrap();
     assert_eq!(res.status(), 201);
     let body = common::json_body(res).await;
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
 
     // Usage is logged by the tool call only, and only for the approved revision.
-    let logged: Vec<Uuid> =
+    let logged: Vec<Id> =
         sqlx::query_scalar("SELECT revision_id FROM knowledge_usage_logs WHERE run_id = $1")
             .bind(run_id)
             .fetch_all(&pool)
@@ -1518,7 +1517,7 @@ async fn m06_smoke_fixture_logs_each_approved_revision_once() {
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
 
     let pool = state.db.clone().unwrap();
-    let board: Uuid = board_id.parse().unwrap();
+    let board: Id = board_id.parse().unwrap();
     let manual = seed_knowledge(&pool, board, "M06 exact retrieval 1-2", "approved").await;
     let compacted = seed_knowledge(
         &pool,
@@ -1541,14 +1540,14 @@ async fn m06_smoke_fixture_logs_each_approved_revision_once() {
         .await
         .unwrap();
     assert_eq!(res.status(), 201);
-    let run_id: Uuid = common::json_body(res).await["run"]["id"]
+    let run_id: Id = common::json_body(res).await["run"]["id"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
 
-    let mut logged: Vec<Uuid> =
+    let mut logged: Vec<Id> =
         sqlx::query_scalar("SELECT revision_id FROM knowledge_usage_logs WHERE run_id = $1")
             .bind(run_id)
             .fetch_all(&pool)
@@ -1597,14 +1596,14 @@ async fn comment_post_creates_agent_comment() {
         json!({"body": "Progress note"}),
     )
     .await;
-    let comment_id: Uuid = out["commentId"].as_str().unwrap().parse().unwrap();
+    let comment_id: Id = out["commentId"].as_str().unwrap().parse().unwrap();
 
     let (author_type, author_id, intent, body, ticket_id): (
         String,
-        Option<Uuid>,
+        Option<Id>,
         String,
         String,
-        Uuid,
+        Id,
     ) = sqlx::query_as(
         "SELECT author_type, author_id, intent, body, ticket_id FROM ticket_comments WHERE id = $1",
     )
@@ -1665,7 +1664,7 @@ async fn comment_post_capped_per_run() {
 
 // ---- Task 7: result_submit + finish-time preference ----
 
-async fn mark_running(pool: &PgPool, run_id: Uuid) {
+async fn mark_running(pool: &PgPool, run_id: Id) {
     sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
         .bind(run_id)
         .execute(pool)
@@ -1673,7 +1672,7 @@ async fn mark_running(pool: &PgPool, run_id: Uuid) {
         .unwrap();
 }
 
-async fn submitted_result(pool: &PgPool, run_id: Uuid) -> Option<Value> {
+async fn submitted_result(pool: &PgPool, run_id: Id) -> Option<Value> {
     sqlx::query_scalar("SELECT submitted_result FROM agent_runs WHERE id = $1")
         .bind(run_id)
         .fetch_one(pool)
@@ -1681,7 +1680,7 @@ async fn submitted_result(pool: &PgPool, run_id: Uuid) -> Option<Value> {
         .unwrap()
 }
 
-async fn agent_comment_bodies(pool: &PgPool, run_id: Uuid) -> Vec<String> {
+async fn agent_comment_bodies(pool: &PgPool, run_id: Id) -> Vec<String> {
     sqlx::query_scalar(
         "SELECT body FROM ticket_comments \
          WHERE ticket_id = (SELECT ticket_id FROM agent_runs WHERE id = $1) \
@@ -1951,7 +1950,7 @@ async fn stopped_run_revokes_token_and_discards_submission() {
         .unwrap();
     assert_eq!(res.status(), 201);
     let body = common::json_body(res).await;
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
 
     // Wait (bounded) until the agent has submitted its result and is now
@@ -2060,8 +2059,8 @@ async fn run_ticket_with_sample_plugin(
     assign: bool,
 ) -> (
     Arc<AppState>,
-    Uuid,
-    Uuid,
+    Id,
+    Id,
     Vec<tempfile::TempDir>,
     common::AgentTestEnv,
 ) {
@@ -2074,8 +2073,8 @@ struct SamplePluginRun {
     app: Router,
     cookie: String,
     csrf: String,
-    run_id: Uuid,
-    plugin_id: Uuid,
+    run_id: Id,
+    plugin_id: Id,
     dirs: Vec<tempfile::TempDir>,
     env: common::AgentTestEnv,
 }
@@ -2146,7 +2145,7 @@ async fn sample_plugin_run(assign: bool) -> SamplePluginRun {
         &csrf,
     )
     .await;
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
     SamplePluginRun {
@@ -2161,7 +2160,7 @@ async fn sample_plugin_run(assign: bool) -> SamplePluginRun {
     }
 }
 
-async fn token_plugin_ids(pool: &PgPool, run_id: Uuid) -> Vec<Uuid> {
+async fn token_plugin_ids(pool: &PgPool, run_id: Id) -> Vec<Id> {
     sqlx::query_scalar("SELECT plugin_ids FROM run_tool_tokens WHERE run_id = $1")
         .bind(run_id)
         .fetch_one(pool)
@@ -2242,7 +2241,7 @@ async fn add_mcp_plugin(
     cookie: &str,
     csrf: &str,
     name: &str,
-) -> (Uuid, tempfile::TempDir) {
+) -> (Id, tempfile::TempDir) {
     let plugins = tempfile::tempdir().unwrap();
     copy_tree(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2263,7 +2262,7 @@ async fn add_inline_mcp_plugin(
     name: &str,
     env: Value,
     settings: Value,
-) -> (Uuid, tempfile::TempDir) {
+) -> (Id, tempfile::TempDir) {
     let plugins = tempfile::tempdir().unwrap();
     let root = plugins.path().join(name);
     std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
@@ -2291,7 +2290,7 @@ async fn register_mcp_plugin(
     plugins: &tempfile::TempDir,
     name: &str,
     mut settings: Value,
-) -> Uuid {
+) -> Id {
     settings["FAKE_MCP_BIN"] = env!("CARGO_BIN_EXE_fake-mcp").into();
     let dir = api(
         app,
@@ -2353,10 +2352,10 @@ struct McpPluginRun {
     cookie: String,
     csrf: String,
     url: String,
-    run_id: Uuid,
+    run_id: Id,
     board_id: String,
     agent_id: String,
-    plugin_id: Uuid,
+    plugin_id: Id,
     _dirs: Vec<tempfile::TempDir>,
     _env: common::AgentTestEnv,
 }
@@ -2391,7 +2390,7 @@ async fn run_ticket_with_mcp_plugin(fixture: &str) -> McpPluginRun {
         &csrf,
     )
     .await;
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
     let url = state.config.mcp.base_url.clone().expect("gateway url");
@@ -2419,7 +2418,7 @@ async fn plugin_mcp_tool_listed_and_called() {
     let fx = run_ticket_with_mcp_plugin("mcp/plugin_mcp_tool_call").await;
     let pool = fx.state.db.clone().unwrap();
     assert_eq!(token_plugin_ids(&pool, fx.run_id).await, vec![fx.plugin_id]);
-    let rows: Vec<(String, String, Option<Uuid>, String)> = sqlx::query_as(
+    let rows: Vec<(String, String, Option<Id>, String)> = sqlx::query_as(
         "SELECT tool, source, plugin_id, status FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
     )
     .bind(fx.run_id)
@@ -2519,7 +2518,7 @@ async fn chat_profile_lists_only_read_only_plugin_tools() {
         &fx.csrf,
     )
     .await;
-    let chat_run: Uuid = message["runId"].as_str().unwrap().parse().unwrap();
+    let chat_run: Id = message["runId"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(&pool, chat_run, "succeeded").await;
     std::env::remove_var("MOCK_AGENT_RESPONSE");
     assert_eq!(token_plugin_ids(&pool, chat_run).await, vec![fx.plugin_id]);
@@ -2538,7 +2537,7 @@ async fn chat_profile_lists_only_read_only_plugin_tools() {
 
 /// Queued (not executed) run plus a gateway server; the plugin is enabled but
 /// not assigned, so tests choose the token's plugin snapshot themselves.
-async fn queued_run_with_mcp_plugin(name: &str) -> (RunFixture, Uuid, tempfile::TempDir) {
+async fn queued_run_with_mcp_plugin(name: &str) -> (RunFixture, Id, tempfile::TempDir) {
     let fx = run_fixture().await;
     let (plugin_id, dir) = add_mcp_plugin(&fx.app, &fx.cookie, &fx.csrf, name).await;
     (fx, plugin_id, dir)
@@ -2706,7 +2705,7 @@ async fn undecryptable_plugin_settings_skip_only_that_plugin() {
         .server_specs_for(&[good_id, bad_id], &fx.state.secret_store, true)
         .await
         .expect("enabled specs");
-    let ids: Vec<Uuid> = specs.iter().map(|s| s.key.plugin_id).collect();
+    let ids: Vec<Id> = specs.iter().map(|s| s.key.plugin_id).collect();
     assert_eq!(ids, vec![good_id]);
     assert!(plugins
         .server_specs_for(&[bad_id], &fx.state.secret_store, false)
@@ -2836,7 +2835,7 @@ async fn down_plugin_server_call_is_blamed_on_the_plugin() {
         (true, "plugin \"mcp-broken\" unavailable".to_string())
     );
 
-    type CallRow = (String, String, Option<Uuid>, String, Option<String>);
+    type CallRow = (String, String, Option<Id>, String, Option<String>);
     let rows: Vec<CallRow> = sqlx::query_as(
         "SELECT tool, source, plugin_id, status, error FROM run_tool_calls \
          WHERE run_id = $1 ORDER BY created_at",
@@ -2880,7 +2879,7 @@ async fn down_plugin_server_call_is_blamed_on_the_plugin() {
 
 async fn get_tool_calls(
     app: &Router,
-    run_id: Uuid,
+    run_id: Id,
     cookie: &str,
     csrf: &str,
 ) -> (axum::http::StatusCode, Value) {
@@ -2901,9 +2900,9 @@ async fn get_tool_calls(
 
 async fn insert_tool_call(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: Id,
     tool: &str,
-    plugin_id: Option<Uuid>,
+    plugin_id: Option<Id>,
     args_summary: &str,
     status: &str,
     offset_secs: i32,
@@ -2920,7 +2919,7 @@ async fn insert_tool_call(
                  CASE WHEN $7 = 'ok' THEN NULL ELSE 'boom' END, 12, \
                  now() + make_interval(secs => $8))",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(run_id)
     .bind(tool)
     .bind(source)
@@ -3050,7 +3049,7 @@ async fn tool_calls_unknown_run_404() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let (status, body) = get_tool_calls(&app, Uuid::new_v4(), &cookie, &csrf).await;
+    let (status, body) = get_tool_calls(&app, Id::new(), &cookie, &csrf).await;
     assert_eq!(status, 404);
     assert_eq!(body["message"], "agent run not found");
 }
@@ -3092,7 +3091,7 @@ fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-async fn fixture_repo_id(fx: &RunFixture) -> Uuid {
+async fn fixture_repo_id(fx: &RunFixture) -> Id {
     let path = fx._git_dir.path().display().to_string();
     sqlx::query_scalar("SELECT id FROM repos WHERE local_path = $1")
         .bind(path)
@@ -3101,12 +3100,12 @@ async fn fixture_repo_id(fx: &RunFixture) -> Uuid {
         .unwrap()
 }
 
-async fn cite(pool: &PgPool, revision_id: Uuid, repo_id: Uuid, path: &str, sha: Option<&str>) {
+async fn cite(pool: &PgPool, revision_id: Id, repo_id: Id, path: &str, sha: Option<&str>) {
     sqlx::query(
         "INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(revision_id)
     .bind(repo_id)
     .bind(path)
@@ -3118,7 +3117,7 @@ async fn cite(pool: &PgPool, revision_id: Uuid, repo_id: Uuid, path: &str, sha: 
 
 /// Freshness from `knowledge_search` (query `mulberry`) and `knowledge_get`
 /// for the one seeded revision; asserts both agree and returns the get entry.
-async fn freshness_of(fx: &RunFixture, revision_id: Uuid) -> (String, Value) {
+async fn freshness_of(fx: &RunFixture, revision_id: Id) -> (String, Value) {
     let url = serve(fx).await;
     let token =
         common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
@@ -3141,7 +3140,7 @@ async fn freshness_of(fx: &RunFixture, revision_id: Uuid) -> (String, Value) {
     (state, entry)
 }
 
-async fn seed_mulberry(fx: &RunFixture) -> Uuid {
+async fn seed_mulberry(fx: &RunFixture) -> Id {
     seed_knowledge_with_content(
         &fx.pool,
         fx.scope.board_id.unwrap(),
@@ -3213,7 +3212,7 @@ async fn freshness_unknown_when_repo_path_is_gone() {
 
 // ---- Task 8: knowledge_flag ----
 
-async fn flag_rows(pool: &PgPool, item: Uuid) -> Vec<(String, String)> {
+async fn flag_rows(pool: &PgPool, item: Id) -> Vec<(String, String)> {
     sqlx::query_as(
         "SELECT verdict, reason FROM knowledge_feedback WHERE item_id = $1 ORDER BY created_at",
     )
@@ -3332,10 +3331,10 @@ async fn knowledge_flag_repeat_reopens_a_closed_flag() {
         "INSERT INTO knowledge_feedback (id, item_id, revision_id, run_id, verdict) \
          VALUES ($1, $2, $3, $4, 'confirmed')",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(item)
     .bind(rev)
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .execute(&fx.pool)
     .await
     .unwrap();
@@ -3444,7 +3443,7 @@ async fn propose_creates_pending_with_source_and_citations() {
     args["citations"] = json!(["README.md", "../etc/passwd", "gone/missing.txt"]);
     let out = call_tool_json(&url, &token, "knowledge_propose", args).await;
     assert_eq!(out["status"], "pending", "{out}");
-    let item: Uuid = out["itemId"].as_str().unwrap().parse().unwrap();
+    let item: Id = out["itemId"].as_str().unwrap().parse().unwrap();
     let dropped = out["droppedCitations"].as_array().unwrap();
     assert_eq!(dropped.len(), 1, "{out}");
     assert_eq!(dropped[0]["path"], "../etc/passwd");
@@ -3463,12 +3462,12 @@ async fn propose_creates_pending_with_source_and_citations() {
     #[allow(clippy::type_complexity)]
     let (scope, board, source_type, source_id, confidence, provenance_run, created_by): (
         String,
-        Option<Uuid>,
+        Option<Id>,
         String,
-        Option<Uuid>,
+        Option<Id>,
         String,
-        Option<Uuid>,
-        Option<Uuid>,
+        Option<Id>,
+        Option<Id>,
     ) = sqlx::query_as(
         "SELECT r.scope, r.board_id, r.source_type, r.source_id, r.confidence, p.run_id, r.created_by \
          FROM knowledge_items i JOIN knowledge_revisions r ON r.id = i.current_revision_id \
@@ -3485,7 +3484,7 @@ async fn propose_creates_pending_with_source_and_citations() {
     assert_eq!(confidence, "high");
     assert_eq!(provenance_run, Some(fx.scope.run_id));
     assert_eq!(created_by, None);
-    let cites: Vec<(Option<Uuid>, String, Option<String>)> = sqlx::query_as(
+    let cites: Vec<(Option<Id>, String, Option<String>)> = sqlx::query_as(
         "SELECT c.repo_id, c.path, c.commit_sha FROM knowledge_citations c \
          JOIN knowledge_items i ON i.current_revision_id = c.revision_id \
          WHERE i.id = $1 ORDER BY c.path",
@@ -3738,7 +3737,7 @@ async fn proposed_item_is_not_searchable_until_approved() {
     assert_eq!(search["items"].as_array().unwrap().len(), 1, "{search}");
 }
 
-async fn run_proposal_count(pool: &PgPool, run_id: Uuid) -> i64 {
+async fn run_proposal_count(pool: &PgPool, run_id: Id) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM knowledge_revisions r JOIN knowledge_provenance p ON p.id = r.provenance_id \
          WHERE p.run_id = $1",

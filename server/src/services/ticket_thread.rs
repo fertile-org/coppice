@@ -1,16 +1,15 @@
+use crate::domain::Id;
 use std::collections::HashMap;
 
 use crate::domain::comment::{intent_to_str, AuthorType, Comment, CommentIntent};
 use crate::util::truncate::truncate_with_ellipsis;
-use uuid::Uuid;
-
 pub const TICKET_THREAD_MAX: usize = 4000;
 const COMMENT_BODY_MAX: usize = 400;
 
 /// Build a compact chronological summary of ticket comments for agent context.
 pub fn format_ticket_thread(
     comments: &[Comment],
-    agent_names: &HashMap<Uuid, String>,
+    agent_names: &HashMap<Id, String>,
 ) -> Option<String> {
     format_ticket_thread_with_limit(comments, agent_names, TICKET_THREAD_MAX)
 }
@@ -18,7 +17,7 @@ pub fn format_ticket_thread(
 /// Build a chronological comment section bounded for the caller's token allocation.
 pub fn format_ticket_thread_with_limit(
     comments: &[Comment],
-    agent_names: &HashMap<Uuid, String>,
+    agent_names: &HashMap<Id, String>,
     max_chars: usize,
 ) -> Option<String> {
     let mut relevant: Vec<&Comment> = comments
@@ -65,8 +64,8 @@ pub fn format_ticket_thread_with_limit(
 /// Build the most recent durable update from the agent that is continuing the work.
 pub fn format_previous_attempt_summary(
     comments: &[Comment],
-    agent_id: Uuid,
-    agent_names: &HashMap<Uuid, String>,
+    agent_id: Id,
+    agent_names: &HashMap<Id, String>,
 ) -> Option<String> {
     let comment = comments
         .iter()
@@ -87,7 +86,7 @@ pub fn format_previous_attempt_summary(
 /// Build a short excerpt of the most recent non-system comments for human chat context.
 pub fn format_thread_excerpt(
     comments: &[Comment],
-    agent_names: &HashMap<Uuid, String>,
+    agent_names: &HashMap<Id, String>,
     max_comments: usize,
     max_chars: usize,
 ) -> Option<String> {
@@ -124,7 +123,7 @@ pub fn format_thread_excerpt(
     Some(thread)
 }
 
-pub fn author_label(comment: &Comment, agent_names: &HashMap<Uuid, String>) -> String {
+pub fn author_label(comment: &Comment, agent_names: &HashMap<Id, String>) -> String {
     match comment.author_type {
         AuthorType::Human => "Human".into(),
         AuthorType::System => "System".into(),
@@ -142,10 +141,10 @@ mod tests {
 
     fn sample_comment(body: &str, intent: CommentIntent) -> Comment {
         Comment {
-            id: Uuid::new_v4(),
-            ticket_id: Uuid::new_v4(),
+            id: Id::new(),
+            ticket_id: Id::new(),
             author_type: AuthorType::Agent,
-            author_id: Some(Uuid::new_v4()),
+            author_id: Some(Id::new()),
             body: body.into(),
             intent,
             mentions: serde_json::json!([]),
@@ -157,7 +156,7 @@ mod tests {
 
     #[test]
     fn format_ticket_thread_includes_comments() {
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         let mut comment = sample_comment(
             "Implemented polling retry.",
             CommentIntent::ImplementationDone,
@@ -180,8 +179,8 @@ mod tests {
 
     #[test]
     fn previous_attempt_summary_uses_newest_update_from_same_agent() {
-        let agent_id = Uuid::new_v4();
-        let other_agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
+        let other_agent_id = Id::new();
         let base = OffsetDateTime::now_utc();
         let mut older = sample_comment("older matching update", CommentIntent::ProgressUpdate);
         older.author_id = Some(agent_id);
@@ -206,7 +205,7 @@ mod tests {
 
     #[test]
     fn format_thread_excerpt_limits_comments_and_chars() {
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         let mut names = HashMap::new();
         names.insert(agent_id, "Engineer".into());
         let base = OffsetDateTime::now_utc();
@@ -239,7 +238,7 @@ mod tests {
 
     #[test]
     fn format_ticket_thread_drops_oldest_when_over_budget() {
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         let mut names = HashMap::new();
         names.insert(agent_id, "Engineer".into());
 
@@ -262,7 +261,7 @@ mod tests {
 
     #[test]
     fn configurable_ticket_thread_limit_can_use_a_larger_context_allocation() {
-        let agent_id = Uuid::new_v4();
+        let agent_id = Id::new();
         let mut names = HashMap::new();
         names.insert(agent_id, "Engineer".into());
         let comments: Vec<Comment> = (0..50)

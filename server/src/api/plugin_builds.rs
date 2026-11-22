@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::pool_from_state;
 use crate::middleware::admin::AdminUser;
 use crate::services::plugin_build_service::{
@@ -18,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/plugin-builds", get(list_builds).post(create_build))
@@ -72,7 +71,7 @@ impl From<StatusCode> for ApiError {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuildResponse {
-    id: Uuid,
+    id: Id,
     answers: Value,
     plans: Value,
     status: String,
@@ -82,10 +81,10 @@ struct BuildResponse {
     plan_questions: Option<Value>,
     check_errors: Option<Value>,
     format_retries: i32,
-    plugin_id: Option<Uuid>,
+    plugin_id: Option<Id>,
     test_result: Option<Value>,
-    active_run_id: Option<Uuid>,
-    last_run_id: Option<Uuid>,
+    active_run_id: Option<Id>,
+    last_run_id: Option<Id>,
     last_run_status: Option<String>,
     created_at: String,
     updated_at: String,
@@ -97,7 +96,7 @@ struct BuildResponse {
 #[serde(rename_all = "camelCase")]
 struct RunStartResponse {
     build: BuildResponse,
-    run_id: Uuid,
+    run_id: Id,
 }
 
 #[derive(Deserialize, Default)]
@@ -224,7 +223,7 @@ async fn list_builds(
 async fn get_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<Json<BuildResponse>, ApiError> {
     let svc = service(&state)?;
     let build = svc.get(id).await?;
@@ -234,7 +233,7 @@ async fn get_build(
 async fn update_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<BuildResponse>, ApiError> {
     let update = PluginBuildUpdate {
@@ -252,7 +251,7 @@ async fn update_build(
 async fn cancel_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<Json<BuildResponse>, ApiError> {
     let svc = service(&state)?;
     let build = svc.cancel(id).await?;
@@ -262,7 +261,7 @@ async fn cancel_build(
 async fn discard_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<Json<BuildResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let svc = PluginBuildService::new(pool, state.config.agent.worktrees_path.clone());
@@ -282,7 +281,7 @@ async fn discard_build(
 async fn accept_build(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
     Json(body): Json<AcceptBody>,
 ) -> Result<Json<BuildResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
@@ -332,7 +331,7 @@ async fn accept_build(
 async fn start_plan_run(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
     Json(body): Json<PlanRunBody>,
 ) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
     let ready = |connector: &str| connector_is_ready(&state, connector);
@@ -352,7 +351,7 @@ async fn start_plan_run(
 async fn start_build_run(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Id>,
 ) -> Result<(StatusCode, Json<RunStartResponse>), ApiError> {
     let ready = |connector: &str| connector_is_ready(&state, connector);
     let svc = service(&state)?;

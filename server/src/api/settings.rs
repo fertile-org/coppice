@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::connectors_runtime::ConfigFileError;
 use crate::domain::agent::Agent;
@@ -18,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -73,7 +72,7 @@ impl IntoResponse for SettingsApiError {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompactionAgentResponse {
-    id: Uuid,
+    id: Id,
     name: String,
     enabled: bool,
     connector: String,
@@ -89,7 +88,7 @@ struct ReadOnlyConnectorResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeSettingsResponse {
-    compaction_agent_id: Option<Uuid>,
+    compaction_agent_id: Option<Id>,
     compaction_agent: Option<CompactionAgentResponse>,
     read_only_connectors: Vec<ReadOnlyConnectorResponse>,
 }
@@ -97,7 +96,7 @@ struct KnowledgeSettingsResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeSettingsBody {
-    compaction_agent_id: Option<Uuid>,
+    compaction_agent_id: Option<Id>,
 }
 
 fn read_only_connectors() -> Vec<ReadOnlyConnectorResponse> {

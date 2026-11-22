@@ -113,6 +113,8 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::providers::acp::AcpObserver;
     use crate::providers::acp_connector::AcpConsole;
@@ -122,7 +124,7 @@ mod tests {
 
     fn events(updates: &[Value]) -> Vec<Value> {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut console = AcpConsole::new("opencode", Some(handle.clone()));
         console.on_session("s1", Some("opencode/big-pickle"));

@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -5,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tower::ServiceExt;
 
-fn branch_exists(repo: &Path, ticket_id: uuid::Uuid) -> bool {
+fn branch_exists(repo: &Path, ticket_id: Id) -> bool {
     let short = ticket_id.to_string().split('-').next().unwrap().to_string();
     let branch = format!("agent/TICKET-{short}");
     let output = Command::new("git")
@@ -30,7 +31,7 @@ async fn setup() -> (
     axum::Router,
     String,
     String,
-    uuid::Uuid,
+    Id,
     PathBuf,
     PathBuf,
 ) {
@@ -222,25 +223,27 @@ async fn active_run_blocks_one_item_while_others_succeed() {
     let (_git, env, state, app, cookie, csrf, ticket_id, repo, worktree) = setup().await;
     let pool = state.db.clone().unwrap();
 
-    let board_id: uuid::Uuid = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
+    let board_id: Id = sqlx::query_scalar("SELECT board_id FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_one(&pool)
         .await
         .unwrap();
     let other_id =
         common::create_test_ticket(&app, &board_id.to_string(), &cookie, &csrf).await;
-    let repo_id = sqlx::query_scalar::<_, uuid::Uuid>("SELECT repo_id FROM tickets WHERE id = $1")
+    let repo_id = sqlx::query_scalar::<_, Id>("SELECT repo_id FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_one(&pool)
         .await
         .unwrap();
     common::set_ticket_repo(&app, &other_id, &repo_id.to_string(), &cookie, &csrf).await;
-    let other_wt = common::setup_worktree_with_commit(
+    let other_wt = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
         &repo,
         env.worktrees.path(),
         "test-repo",
         &other_id,
-    );
+    )
+    .await;
 
     let agent_id = common::create_agent_with_preset_key(
         &app,
@@ -256,9 +259,9 @@ async fn active_run_blocks_one_item_while_others_succeed() {
         VALUES ($1, $2, $3, 'implementation', 'running', 'permissive')
         "#,
     )
-    .bind(uuid::Uuid::new_v4())
+    .bind(Id::new())
     .bind(ticket_id)
-    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -312,11 +315,11 @@ async fn list_survives_a_queued_chat_run_with_null_ticket_id() {
         &csrf,
     )
     .await;
-    let owner_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+    let owner_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
         .fetch_one(&pool)
         .await
         .unwrap();
-    let session_id = uuid::Uuid::new_v4();
+    let session_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO chat_sessions (id, owner_user_id, agent_id, status)
@@ -325,7 +328,7 @@ async fn list_survives_a_queued_chat_run_with_null_ticket_id() {
     )
     .bind(session_id)
     .bind(owner_id)
-    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -337,9 +340,9 @@ async fn list_survives_a_queued_chat_run_with_null_ticket_id() {
         VALUES ($1, NULL, $2, $3, 'chat_turn', 'queued', 'permissive')
         "#,
     )
-    .bind(uuid::Uuid::new_v4())
+    .bind(Id::new())
     .bind(session_id)
-    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(&pool)
     .await
     .unwrap();

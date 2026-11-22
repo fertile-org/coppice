@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::providers::{AgentRunResult, ProviderError};
@@ -8,8 +9,6 @@ use crate::services::workflow_service::MAX_MENTIONS_PER_RUN;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
-use uuid::Uuid;
-
 /// Validates and stores the run's structured result. The latest *valid*
 /// submission wins, except in connector-check runs, which keep the first
 /// stored one; invalid ones are rejected and never overwrite it.
@@ -131,7 +130,7 @@ async fn questions_allowed(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
             "planQuestions is only for planning runs.".into(),
         ));
     }
-    let ticket_id: Option<Uuid> =
+    let ticket_id: Option<Id> =
         sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
             .bind(ctx.scope.run_id)
             .fetch_optional(ctx.pool)
@@ -155,7 +154,7 @@ async fn questions_allowed(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
     }
 }
 
-async fn run_is_running(pool: &PgPool, run_id: Uuid) -> Result<bool, sqlx::Error> {
+async fn run_is_running(pool: &PgPool, run_id: Id) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar("SELECT status = 'running' FROM agent_runs WHERE id = $1")
         .bind(run_id)
         .fetch_optional(pool)
@@ -166,8 +165,8 @@ async fn run_is_running(pool: &PgPool, run_id: Uuid) -> Result<bool, sqlx::Error
 /// Advisory checks on the agents a result points at; nothing here rejects.
 fn target_warnings(
     result: &AgentRunResult,
-    keys: &HashMap<String, Uuid>,
-    own_agent: Uuid,
+    keys: &HashMap<String, Id>,
+    own_agent: Id,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
@@ -248,7 +247,7 @@ fn target_warnings(
 /// A stored value that no longer deserializes is treated as absent.
 pub async fn take_submitted_result(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: Id,
 ) -> anyhow::Result<Option<AgentRunResult>> {
     let stored: Option<Option<Value>> =
         sqlx::query_scalar("SELECT submitted_result FROM agent_runs WHERE id = $1")
@@ -272,7 +271,7 @@ pub async fn take_submitted_result(
 /// and other provider errors ignore any submission.
 pub async fn prefer_submitted_result(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: Id,
     provider_result: Result<AgentRunResult, ProviderError>,
 ) -> Result<AgentRunResult, ProviderError> {
     if !matches!(
@@ -306,12 +305,12 @@ mod tests {
         .unwrap()
     }
 
-    fn keys() -> (HashMap<String, Uuid>, Uuid) {
-        let own = Uuid::new_v4();
+    fn keys() -> (HashMap<String, Id>, Id) {
+        let own = Id::new();
         let mut map = HashMap::new();
         map.insert("me".to_string(), own);
         for k in ["qc", "dba", "pm"] {
-            map.insert(k.to_string(), Uuid::new_v4());
+            map.insert(k.to_string(), Id::new());
         }
         (map, own)
     }

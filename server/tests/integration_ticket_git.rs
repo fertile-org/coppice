@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -92,12 +93,14 @@ async fn setup_repo_ticket_and_worktree() -> (
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path = common::setup_worktree_with_commit(
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
         &local_path,
         env.worktrees.path(),
         "test-repo",
         &ticket_id,
-    );
+    )
+    .await;
     (
         git_dir,
         env,
@@ -470,7 +473,7 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let _repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -521,7 +524,7 @@ async fn setup_finished_ticket() -> (
     axum::Router,
     String,
     String,
-    uuid::Uuid,
+    Id,
     PathBuf,
     PathBuf,
 ) {
@@ -533,12 +536,14 @@ async fn setup_finished_ticket() -> (
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path = common::setup_worktree_with_commit(
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
         &local_path,
         env.worktrees.path(),
         "test-repo",
         &ticket_id,
-    );
+    )
+    .await;
     (
         git_dir,
         env,
@@ -552,15 +557,15 @@ async fn setup_finished_ticket() -> (
     )
 }
 
-fn branch_exists(repo: &Path, ticket_id: uuid::Uuid) -> bool {
-    let short = ticket_id.to_string();
-    let short = short.split('-').next().unwrap();
+fn branch_exists(repo: &Path, ticket_id: Id) -> bool {
+    let branch =
+        coppice_server::services::worktree_service::build_ticket_branch(ticket_id, "Test ticket");
     Command::new("git")
         .args([
             "rev-parse",
             "--verify",
             "--quiet",
-            &format!("refs/heads/agent/TICKET-{short}"),
+            &format!("refs/heads/{branch}"),
         ])
         .current_dir(repo)
         .output()
@@ -579,7 +584,7 @@ async fn wait_until(mut done: impl FnMut() -> bool) -> bool {
     done()
 }
 
-async fn archive(app: &axum::Router, ticket_id: uuid::Uuid, cookie: &str, csrf: &str) {
+async fn archive(app: &axum::Router, ticket_id: Id, cookie: &str, csrf: &str) {
     let res = app
         .clone()
         .oneshot(common::json_request(
@@ -722,7 +727,7 @@ async fn an_active_run_blocks_cleanup_and_manual_remove() {
         &csrf,
     )
     .await;
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -731,7 +736,7 @@ async fn an_active_run_blocks_cleanup_and_manual_remove() {
     )
     .bind(run_id)
     .bind(ticket_id)
-    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -857,7 +862,7 @@ async fn ticket_with_remote(
     String,
 ) {
     let (git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, env) =
+    let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_state_and_workers("", |cfg| {
             cfg.git.push_enabled = true;
         })

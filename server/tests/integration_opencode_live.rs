@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::{header, StatusCode};
@@ -8,8 +9,6 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
 };
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn connect_ws(
     url: &str,
     cookie: &str,
@@ -58,7 +57,7 @@ async fn live_ws_replays_snapshot_when_no_registry() {
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     let session_id = "test-session-abc";
     let worktree_path = local_path.display().to_string();
     let pool = state.db.as_ref().unwrap();
@@ -73,8 +72,8 @@ async fn live_ws_replays_snapshot_when_no_registry() {
         "#,
     )
     .bind(run_id)
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
-    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .bind(&worktree_path)
     .bind(session_id)
     .execute(pool)
@@ -128,13 +127,13 @@ async fn insert_running_opencode_run(
     app: &axum::Router,
     cookie: &str,
     csrf: &str,
-) -> (Uuid, tempfile::TempDir) {
+) -> (Id, tempfile::TempDir) {
     let agent_id = create_opencode_agent(app, cookie, csrf).await;
     let board_id = common::create_test_board(app, cookie, csrf).await;
     let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
     let (git_dir, local_path) = common::create_temp_git_checkout();
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -145,8 +144,8 @@ async fn insert_running_opencode_run(
         "#,
     )
     .bind(run_id)
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
-    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&agent_id).unwrap())
     .bind(local_path.display().to_string())
     .execute(state.db.as_ref().unwrap())
     .await
@@ -154,7 +153,7 @@ async fn insert_running_opencode_run(
     (run_id, git_dir)
 }
 
-async fn run_status(state: &coppice_server::AppState, run_id: Uuid) -> String {
+async fn run_status(state: &coppice_server::AppState, run_id: Id) -> String {
     sqlx::query_scalar("SELECT status::text FROM agent_runs WHERE id = $1")
         .bind(run_id)
         .fetch_one(state.db.as_ref().unwrap())

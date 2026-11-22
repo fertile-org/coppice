@@ -1,10 +1,9 @@
 //! Final acceptance: Human Review → Done, by a person or by Coppice.
+use crate::domain::Id;
 
 use std::sync::Arc;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::git_state::TicketGitState;
 use crate::services::comment_service::CommentError;
 use crate::services::git_flow::{create_git_action_comment, Actor};
@@ -44,7 +43,7 @@ impl<'a> AcceptService<'a> {
     /// post the activity comment and publish the update.
     pub async fn accept(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         actor: Actor,
     ) -> Result<TicketWithDisplay, AcceptError> {
         let ticket_svc = TicketService::new(self.pool);

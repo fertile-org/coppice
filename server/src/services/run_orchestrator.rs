@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -36,8 +37,6 @@ use crate::services::workflow_service::{
 use crate::AppState;
 use serde_json::Value;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 fn is_review_capacity_hold(err: &RunError) -> bool {
     matches!(err, RunError::Validation(message) if crate::copy::review::is_ready_hold(message))
 }
@@ -549,7 +548,7 @@ impl<'a> RunOrchestrator<'a> {
 
     /// The run moved the ticket into final review. A failed auto-accept
     /// leaves it waiting for a person.
-    async fn try_auto_accept(&self, ticket_id: Uuid) {
+    async fn try_auto_accept(&self, ticket_id: Id) {
         let Some(state) = self.app_state else {
             tracing::debug!(%ticket_id, "no app state; auto-accept not checked");
             return;
@@ -905,23 +904,23 @@ impl<'a> RunOrchestrator<'a> {
 
 #[derive(Default)]
 struct SuccessfulMentionDispatch {
-    response_agent_ids: HashSet<Uuid>,
-    handled_mention_ids: Vec<Uuid>,
-    ignored_mention_ids: Vec<Uuid>,
+    response_agent_ids: HashSet<Id>,
+    handled_mention_ids: Vec<Id>,
+    ignored_mention_ids: Vec<Id>,
 }
 
 #[derive(Default)]
 struct CollaborationTargets {
     keys: Vec<String>,
-    agent_ids: Vec<Uuid>,
-    consultation_agent_ids: HashSet<Uuid>,
+    agent_ids: Vec<Id>,
+    consultation_agent_ids: HashSet<Id>,
     agent_requests: Vec<ResolvedAgentRequest>,
 }
 
 fn select_collaboration_targets(
     contract: &AgentRunResult,
     agents: &[Agent],
-    source_agent_id: Uuid,
+    source_agent_id: Id,
 ) -> CollaborationTargets {
     let agent_map = resolve_agent_keys(agents);
     let mut targets = CollaborationTargets::default();
@@ -968,11 +967,11 @@ fn select_collaboration_targets(
 
 fn select_target(
     key: &str,
-    source_agent_id: Uuid,
-    agent_map: &HashMap<String, Uuid>,
-    selected_agent_ids: &mut HashSet<Uuid>,
+    source_agent_id: Id,
+    agent_map: &HashMap<String, Id>,
+    selected_agent_ids: &mut HashSet<Id>,
     targets: &mut CollaborationTargets,
-) -> Option<Uuid> {
+) -> Option<Id> {
     let key = key.trim();
     let &target_id = agent_map.get(key)?;
     if target_id == source_agent_id {
@@ -998,10 +997,10 @@ fn enqueue_successful_consultation_jobs(
     run: &AgentRun,
     run_status: RunStatus,
     mentions: &[TicketMention],
-    consultation_agent_ids: &HashSet<Uuid>,
-    current_assignee_id: Option<Uuid>,
+    consultation_agent_ids: &HashSet<Id>,
+    current_assignee_id: Option<Id>,
     pending_recommendation: Option<&Value>,
-    board_agent_ids: &HashMap<String, Uuid>,
+    board_agent_ids: &HashMap<String, Id>,
     allow_consultation_dispatch: bool,
 ) -> SuccessfulMentionDispatch {
     let mut dispatch = SuccessfulMentionDispatch::default();
@@ -1016,7 +1015,7 @@ fn enqueue_successful_consultation_jobs(
         return dispatch;
     }
 
-    let mut scheduled_agent_ids: HashSet<Uuid> =
+    let mut scheduled_agent_ids: HashSet<Id> =
         action.enqueue_jobs.iter().map(|job| job.agent_id).collect();
     if let Some(assignee_id) = current_assignee_id {
         scheduled_agent_ids.insert(assignee_id);
@@ -1091,10 +1090,10 @@ fn enqueue_successful_consultation_jobs(
 }
 
 fn target_has_ownership(
-    target_id: Uuid,
-    current_assignee_id: Option<Uuid>,
+    target_id: Id,
+    current_assignee_id: Option<Id>,
     pending_recommendation: Option<&Value>,
-    board_agent_ids: &HashMap<String, Uuid>,
+    board_agent_ids: &HashMap<String, Id>,
 ) -> bool {
     current_assignee_id == Some(target_id)
         || pending_recommendation_target(pending_recommendation, board_agent_ids) == Some(target_id)
@@ -1102,8 +1101,8 @@ fn target_has_ownership(
 
 fn pending_recommendation_target(
     pending_recommendation: Option<&Value>,
-    board_agent_ids: &HashMap<String, Uuid>,
-) -> Option<Uuid> {
+    board_agent_ids: &HashMap<String, Id>,
+) -> Option<Id> {
     let pending_key = pending_recommendation?
         .get("recommendedAgentKey")?
         .as_str()?;
@@ -1114,7 +1113,7 @@ fn pending_recommendation_target(
 /// when it maps to that agent, else the name slug.
 pub(crate) fn board_agent_infos(
     agents: &[Agent],
-    agent_ids: &HashMap<String, Uuid>,
+    agent_ids: &HashMap<String, Id>,
 ) -> Vec<BoardAgentInfo> {
     agents
         .iter()
@@ -1135,7 +1134,7 @@ pub(crate) fn board_agent_infos(
         .collect()
 }
 
-fn build_board_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
+fn build_board_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Id>, Vec<String>) {
     let mut keys = Vec::new();
 
     for agent in agents {
@@ -1220,15 +1219,15 @@ mod tests {
     }
 
     struct TestFixture {
-        board_id: Uuid,
-        ticket_id: Uuid,
-        run_id: Uuid,
-        pm_agent_id: Uuid,
-        engineer_agent_id: Uuid,
+        board_id: Id,
+        ticket_id: Id,
+        run_id: Id,
+        pm_agent_id: Id,
+        engineer_agent_id: Id,
     }
 
     async fn insert_fixture(pool: &PgPool) -> TestFixture {
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("orchestrator board")
@@ -1237,7 +1236,7 @@ mod tests {
             .await
             .expect("insert board");
 
-        let pm_agent_id = Uuid::new_v4();
+        let pm_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -1256,7 +1255,7 @@ mod tests {
         .await
         .expect("insert pm agent");
 
-        let engineer_agent_id = Uuid::new_v4();
+        let engineer_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -1275,7 +1274,7 @@ mod tests {
         .await
         .expect("insert engineer agent");
 
-        let ticket_id = Uuid::new_v4();
+        let ticket_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO tickets (
@@ -1294,7 +1293,7 @@ mod tests {
         .await
         .expect("insert ticket");
 
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1444,10 +1443,10 @@ mod tests {
         }
     }
 
-    fn test_run(agent_id: Uuid, job_type: &str) -> AgentRun {
+    fn test_run(agent_id: Id, job_type: &str) -> AgentRun {
         AgentRun {
-            id: Uuid::new_v4(),
-            ticket_id: Some(Uuid::new_v4()),
+            id: Id::new(),
+            ticket_id: Some(Id::new()),
             chat_session_id: None,
             chat_message_id: None,
             agent_id,
@@ -1467,18 +1466,18 @@ mod tests {
         }
     }
 
-    fn pending_mention(agent_id: Uuid) -> crate::domain::mention::TicketMention {
+    fn pending_mention(agent_id: Id) -> crate::domain::mention::TicketMention {
         crate::domain::mention::TicketMention {
-            id: Uuid::new_v4(),
-            ticket_id: Uuid::new_v4(),
-            comment_id: Uuid::new_v4(),
+            id: Id::new(),
+            ticket_id: Id::new(),
+            comment_id: Id::new(),
             mentioned_agent_id: agent_id,
             resume_agent_id: None,
             status: crate::domain::mention::MentionStatus::Pending,
         }
     }
 
-    fn collaboration_agent(id: Uuid, name: &str, key: &str, enabled: bool) -> Agent {
+    fn collaboration_agent(id: Id, name: &str, key: &str, enabled: bool) -> Agent {
         Agent {
             id,
             name: name.into(),
@@ -1498,11 +1497,11 @@ mod tests {
 
     #[test]
     fn collaboration_targets_share_limit_and_ignore_invalid_duplicate_and_self_entries() {
-        let source_id = Uuid::from_u128(1);
-        let first_id = Uuid::from_u128(2);
-        let second_id = Uuid::from_u128(3);
-        let over_limit_id = Uuid::from_u128(4);
-        let disabled_id = Uuid::from_u128(5);
+        let source_id = Id::from_u128(1);
+        let first_id = Id::from_u128(2);
+        let second_id = Id::from_u128(3);
+        let over_limit_id = Id::from_u128(4);
+        let disabled_id = Id::from_u128(5);
         let agents = vec![
             collaboration_agent(source_id, "Source Agent", "source", true),
             collaboration_agent(first_id, "First Agent", "first", true),
@@ -1576,7 +1575,7 @@ mod tests {
         run: &AgentRun,
         status: RunStatus,
         mentions: &[TicketMention],
-        consultation_agent_ids: HashSet<Uuid>,
+        consultation_agent_ids: HashSet<Id>,
     ) -> SuccessfulMentionDispatch {
         enqueue_successful_consultation_jobs(
             action,
@@ -1593,8 +1592,8 @@ mod tests {
 
     #[test]
     fn successful_attention_mentions_do_not_enqueue_response_runs() {
-        let source_id = Uuid::from_u128(1);
-        let target_id = Uuid::from_u128(2);
+        let source_id = Id::from_u128(1);
+        let target_id = Id::from_u128(2);
         let run = test_run(source_id, "work_on_ticket");
         let mentions = vec![pending_mention(target_id)];
         let mut action = TransitionAction::default();
@@ -1615,8 +1614,8 @@ mod tests {
 
     #[test]
     fn successful_response_request_is_handled_without_chaining() {
-        let source_id = Uuid::from_u128(1);
-        let target_id = Uuid::from_u128(2);
+        let source_id = Id::from_u128(1);
+        let target_id = Id::from_u128(2);
         let run = test_run(source_id, "respond_to_mention");
         let mut action = TransitionAction::default();
         let mention = pending_mention(target_id);
@@ -1637,9 +1636,9 @@ mod tests {
 
     #[test]
     fn successful_requests_do_not_duplicate_handoff_or_assignee_runs() {
-        let source_id = Uuid::from_u128(1);
-        let handoff_target = Uuid::from_u128(2);
-        let assignee_target = Uuid::from_u128(3);
+        let source_id = Id::from_u128(1);
+        let handoff_target = Id::from_u128(2);
+        let assignee_target = Id::from_u128(3);
         let run = test_run(source_id, "work_on_ticket");
         let mut action = TransitionAction {
             new_assignee_id: Some(Some(assignee_target)),
@@ -1672,8 +1671,8 @@ mod tests {
 
     #[test]
     fn pending_assignment_recommendation_wins_over_consultation() {
-        let source_id = Uuid::from_u128(1);
-        let target_id = Uuid::from_u128(2);
+        let source_id = Id::from_u128(1);
+        let target_id = Id::from_u128(2);
         let run = test_run(source_id, "work_on_ticket");
         let mut action = TransitionAction::default();
         let mention = pending_mention(target_id);
@@ -1699,8 +1698,8 @@ mod tests {
 
     #[test]
     fn mentions_are_not_scheduled_for_blocked_or_unrelated_runs() {
-        let source_id = Uuid::from_u128(1);
-        let target_id = Uuid::from_u128(2);
+        let source_id = Id::from_u128(1);
+        let target_id = Id::from_u128(2);
         let mentions = [pending_mention(target_id)];
 
         for (job_type, status, profile) in [
@@ -1732,8 +1731,8 @@ mod tests {
 
     #[test]
     fn technical_refinement_requests_are_handled_without_response_runs() {
-        let source_id = Uuid::from_u128(1);
-        let target_id = Uuid::from_u128(2);
+        let source_id = Id::from_u128(1);
+        let target_id = Id::from_u128(2);
         let run = test_run(source_id, "work_on_ticket");
         let mention = pending_mention(target_id);
         let mention_id = mention.id;
@@ -1758,10 +1757,10 @@ mod tests {
 
     #[test]
     fn board_agent_maps_only_expose_enabled_implementer_aliases() {
-        let tech_lead_id = Uuid::from_u128(1);
-        let engineer_id = Uuid::from_u128(2);
-        let disabled_engineer_id = Uuid::from_u128(3);
-        let dual_lead_id = Uuid::from_u128(4);
+        let tech_lead_id = Id::from_u128(1);
+        let engineer_id = Id::from_u128(2);
+        let disabled_engineer_id = Id::from_u128(3);
+        let dual_lead_id = Id::from_u128(4);
         let mut tech_lead = collaboration_agent(tech_lead_id, "Tech Lead", "tech_lead", true);
         tech_lead.role = "Lead Engineer".into();
         let mut engineer =
@@ -1793,9 +1792,9 @@ mod tests {
     #[test]
     fn human_agent_done_does_not_change_status() {
         let ctx = TransitionContext {
-            ticket_id: Uuid::from_u128(1),
+            ticket_id: Id::from_u128(1),
             current_status: TicketStatus::Backlog,
-            assignee_agent_id: Some(Uuid::from_u128(0x100)),
+            assignee_agent_id: Some(Id::from_u128(0x100)),
             agent_role: "PM".into(),
             agent_key: "pm".into(),
             job_type: "work_on_ticket".into(),
@@ -1803,8 +1802,8 @@ mod tests {
             contract: pm_done_with_assign_to("backend_engineer"),
             board_agent_keys: vec!["pm".into(), "backend_engineer".into()],
             board_agent_ids: HashMap::from([
-                ("pm".into(), Uuid::from_u128(0x100)),
-                ("backend_engineer".into(), Uuid::from_u128(0x200)),
+                ("pm".into(), Id::from_u128(0x100)),
+                ("backend_engineer".into(), Id::from_u128(0x200)),
             ]),
             board_implementer_keys: vec!["backend_engineer".into()],
             auto_assign_enabled: true,
@@ -1840,7 +1839,7 @@ mod tests {
     async fn review_pass_after_reviewer_run(contract: AgentRunResult) -> Option<(bool, bool)> {
         let pool = test_pool().await?;
         let fx = insert_fixture(&pool).await;
-        let reviewer_id = Uuid::new_v4();
+        let reviewer_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -2169,7 +2168,7 @@ mod tests {
         assert_eq!(child_count, 0);
     }
 
-    async fn attach_ready_repo(pool: &PgPool, ticket_id: Uuid) -> tempfile::TempDir {
+    async fn attach_ready_repo(pool: &PgPool, ticket_id: Id) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().to_path_buf();
         std::process::Command::new("git")
@@ -2193,7 +2192,7 @@ mod tests {
             .output()
             .expect("git commit");
 
-        let repo_id = Uuid::new_v4();
+        let repo_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO repos (
@@ -2323,7 +2322,7 @@ mod tests {
             .await
             .expect("finish successful consultation run");
 
-        let mention_rows = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+        let mention_rows = sqlx::query_as::<_, (Id, Id, Option<Id>)>(
             r#"
             SELECT comment_id, mentioned_agent_id, resume_agent_id
             FROM ticket_mentions
@@ -2338,7 +2337,7 @@ mod tests {
         assert_eq!(mention_rows[0].1, fx.engineer_agent_id);
         assert_eq!(mention_rows[0].2, None);
 
-        let response_runs = sqlx::query_as::<_, (String, String, Option<Uuid>)>(
+        let response_runs = sqlx::query_as::<_, (String, String, Option<Id>)>(
             r#"
             SELECT job_type, status, trigger_comment_id
             FROM agent_runs
@@ -2427,7 +2426,7 @@ mod tests {
         };
         let fx = insert_fixture(&pool).await;
         let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
-        let active_target_run_id = Uuid::new_v4();
+        let active_target_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -2479,7 +2478,7 @@ mod tests {
             .expect("finish source when mention target is already active");
         assert_eq!(finished.status, RunStatus::Succeeded);
 
-        let mention_comment_id = sqlx::query_scalar::<_, Uuid>(
+        let mention_comment_id = sqlx::query_scalar::<_, Id>(
             "SELECT comment_id FROM ticket_mentions WHERE ticket_id = $1",
         )
         .bind(fx.ticket_id)
@@ -2522,7 +2521,7 @@ mod tests {
             .await
             .expect("finish unrelated target run");
 
-        let target_runs = sqlx::query_as::<_, (String, String, Option<Uuid>)>(
+        let target_runs = sqlx::query_as::<_, (String, String, Option<Id>)>(
             r#"
             SELECT job_type, status, trigger_comment_id FROM agent_runs
             WHERE ticket_id = $1 AND agent_id = $2
@@ -2563,7 +2562,7 @@ mod tests {
         };
         let fx = insert_fixture(&pool).await;
         let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
-        let active_target_run_id = Uuid::new_v4();
+        let active_target_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -2791,7 +2790,7 @@ mod tests {
         };
         let fx = insert_fixture(&pool).await;
         let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
-        let active_target_run_id = Uuid::new_v4();
+        let active_target_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -2912,7 +2911,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("mention persisted");
-        let failed_response_id = Uuid::new_v4();
+        let failed_response_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -3177,7 +3176,7 @@ mod tests {
         };
         let orchestrator = RunOrchestrator::new(&pool, &workflow);
         let human_chat_run = AgentRun {
-            id: Uuid::new_v4(),
+            id: Id::new(),
             ticket_id: Some(fx.ticket_id),
             chat_session_id: None,
             chat_message_id: None,
@@ -3215,7 +3214,7 @@ mod tests {
             .expect("prepare invalid handoff state");
         orchestrator
             .handle_terminal_run(&AgentRun {
-                id: Uuid::new_v4(),
+                id: Id::new(),
                 ..human_chat_run
             })
             .await;
@@ -3253,7 +3252,7 @@ mod tests {
         };
         let fx = insert_fixture(&pool).await;
         let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
-        let disabled_agent_id = Uuid::new_v4();
+        let disabled_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -3342,7 +3341,7 @@ mod tests {
         assert_eq!(persisted_requests.len(), 1);
         assert_eq!(persisted_requests[0].agent_key, "backend_engineer");
 
-        let target_runs = sqlx::query_as::<_, (Uuid, String)>(
+        let target_runs = sqlx::query_as::<_, (Id, String)>(
             r#"
             SELECT agent_id, job_type FROM agent_runs
             WHERE ticket_id = $1 AND job_type = 'respond_to_mention'
@@ -3439,7 +3438,7 @@ mod tests {
             .await
             .expect("make original engineer the first preset instance");
 
-        let second_engineer_id = Uuid::new_v4();
+        let second_engineer_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -3457,7 +3456,7 @@ mod tests {
         .await
         .expect("insert duplicate backend preset agent");
 
-        let qc_agent_id = Uuid::new_v4();
+        let qc_agent_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agents (
@@ -3543,7 +3542,7 @@ mod tests {
             .await
             .expect("finish qc defect handoff");
 
-        let target_runs = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+        let target_runs = sqlx::query_as::<_, (Id, Id, String)>(
             r#"
             SELECT id, agent_id, job_type FROM agent_runs
             WHERE ticket_id = $1 AND id <> $2
@@ -3564,7 +3563,7 @@ mod tests {
             )]
         );
 
-        let mentions = sqlx::query_as::<_, (Uuid, String)>(
+        let mentions = sqlx::query_as::<_, (Id, String)>(
             "SELECT mentioned_agent_id, status FROM ticket_mentions WHERE ticket_id = $1",
         )
         .bind(fx.ticket_id)
@@ -3687,7 +3686,7 @@ mod tests {
             .await
             .expect("finish engineer consultation request run");
 
-        let (pm_run_id, trigger_comment_id) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        let (pm_run_id, trigger_comment_id) = sqlx::query_as::<_, (Id, Option<Id>)>(
             r#"
             SELECT id, trigger_comment_id FROM agent_runs
             WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
@@ -3712,7 +3711,7 @@ mod tests {
         assert_eq!(before.ticket.substatus, Some(Substatus::WaitingForHuman));
         // No Tech Lead or reviewer on this board, so In Review is unassigned.
         assert_eq!(before.ticket.assignee_agent_id, None);
-        let pending_pm_mentions = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        let pending_pm_mentions = sqlx::query_as::<_, (Id, Option<Id>)>(
             r#"
             SELECT id, resume_agent_id FROM ticket_mentions
             WHERE ticket_id = $1 AND mentioned_agent_id = $2 AND status = 'pending'
@@ -3986,7 +3985,7 @@ mod tests {
         .await
         .expect("remove engineer ownership suppression");
 
-        let terminal_engineer_run_id = Uuid::new_v4();
+        let terminal_engineer_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -4263,7 +4262,7 @@ mod tests {
             .expect("ordinary mention persisted");
 
         // Engineer blocks and mentions PM
-        let block_run_id = Uuid::new_v4();
+        let block_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -4328,7 +4327,7 @@ mod tests {
             .await
             .expect("finish blocked run");
 
-        let (pm_run_id, trigger_comment_id) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        let (pm_run_id, trigger_comment_id) = sqlx::query_as::<_, (Id, Option<Id>)>(
             r#"
             SELECT id, trigger_comment_id FROM agent_runs
             WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
@@ -4342,7 +4341,7 @@ mod tests {
         .await
         .expect("auto-started pm respond_to_mention run");
         let trigger_comment_id = trigger_comment_id.expect("response run links blocked comment");
-        let clarification_mention_id = sqlx::query_scalar::<_, Uuid>(
+        let clarification_mention_id = sqlx::query_scalar::<_, Id>(
             r#"
             SELECT id FROM ticket_mentions
             WHERE ticket_id = $1 AND mentioned_agent_id = $2 AND comment_id = $3
@@ -4457,7 +4456,7 @@ mod tests {
         .expect("count response mention covered by resume handoff");
         assert_eq!(handled_resume_mention_count, 1);
 
-        let mention_statuses = sqlx::query_as::<_, (Uuid, String)>(
+        let mention_statuses = sqlx::query_as::<_, (Id, String)>(
             "SELECT id, status FROM ticket_mentions WHERE id = ANY($1)",
         )
         .bind(vec![ordinary_mention.id, clarification_mention_id])
@@ -4611,7 +4610,7 @@ mod tests {
             .await
             .expect("finish continued run");
 
-        let second_run_id = Uuid::new_v4();
+        let second_run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (

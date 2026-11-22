@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -7,8 +8,6 @@ use coppice_server::services::split_service::SplitService;
 use coppice_server::services::ticket_service::TicketService;
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 #[tokio::test]
 async fn approve_splits_creates_children() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -21,8 +20,8 @@ async fn approve_splits_creates_children() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
-    let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket uuid");
+    let pm_uuid = Id::parse_str(&pm_id).expect("pm uuid");
 
     let parent = TicketService::new(pool)
         .get(ticket_uuid)
@@ -128,7 +127,7 @@ async fn auto_split_creates_children_on_pm_run() {
     .await;
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket uuid");
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
@@ -217,8 +216,8 @@ async fn approved_split_children_can_start_without_skip_planning() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
-    let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket uuid");
+    let pm_uuid = Id::parse_str(&pm_id).expect("pm uuid");
 
     let parent = TicketService::new(pool)
         .get(ticket_uuid)
@@ -316,8 +315,8 @@ async fn split_children_do_not_inherit_skip_flag() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
-    let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
+    let ticket_uuid = Id::parse_str(&ticket_id).expect("ticket uuid");
+    let pm_uuid = Id::parse_str(&pm_id).expect("pm uuid");
     TicketService::new(pool)
         .set_skip_human_review(ticket_uuid, true)
         .await

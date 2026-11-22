@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::{http::StatusCode, Router};
@@ -112,7 +113,7 @@ async fn compaction_agent_rejects_unknown_and_non_read_only_agents() {
     let (status, _) = send(
         &app,
         "PUT",
-        serde_json::json!({ "compactionAgentId": uuid::Uuid::new_v4() }),
+        serde_json::json!({ "compactionAgentId": Id::new() }),
         &cookie,
         &csrf,
     )
@@ -122,7 +123,7 @@ async fn compaction_agent_rejects_unknown_and_non_read_only_agents() {
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Writer", &cookie, &csrf)
             .await;
-    sqlx::query("UPDATE agents SET connector = 'kilo-code' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'kilo-code' WHERE id = $1::varchar")
         .bind(&agent_id)
         .execute(state.db.as_ref().unwrap())
         .await
@@ -152,7 +153,7 @@ async fn compaction_agent_accepts_a_codex_agent() {
         &csrf,
     )
     .await;
-    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1::varchar")
         .bind(&agent_id)
         .execute(state.db.as_ref().unwrap())
         .await
@@ -186,7 +187,7 @@ async fn compaction_agent_accepts_a_cursor_agent() {
         &csrf,
     )
     .await;
-    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::uuid")
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1::varchar")
         .bind(&agent_id)
         .execute(state.db.as_ref().unwrap())
         .await

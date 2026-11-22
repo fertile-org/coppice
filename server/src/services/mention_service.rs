@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::agent::Agent;
 use crate::domain::mention::{MentionStatus, TicketMention};
 use crate::domain::slug::slugify;
@@ -7,8 +8,6 @@ use sqlx::PgPool;
 use sqlx::Row;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use uuid::Uuid;
-
 pub struct MentionService<'a> {
     pool: &'a PgPool,
 }
@@ -43,11 +42,11 @@ impl<'a> MentionService<'a> {
 
     pub async fn create_mentions(
         &self,
-        ticket_id: Uuid,
-        comment_id: Uuid,
+        ticket_id: Id,
+        comment_id: Id,
         keys: &[String],
-        resume_agent_id: Option<Uuid>,
-        board_id: Uuid,
+        resume_agent_id: Option<Id>,
+        board_id: Id,
     ) -> Result<Vec<TicketMention>, MentionError> {
         let _ = board_id;
         let agent_map = self.build_agent_key_map().await?;
@@ -61,10 +60,10 @@ impl<'a> MentionService<'a> {
 
     pub async fn create_mentions_for_agents(
         &self,
-        ticket_id: Uuid,
-        comment_id: Uuid,
-        agent_ids: &[Uuid],
-        resume_agent_id: Option<Uuid>,
+        ticket_id: Id,
+        comment_id: Id,
+        agent_ids: &[Id],
+        resume_agent_id: Option<Id>,
     ) -> Result<Vec<TicketMention>, MentionError> {
         let mut mentions = Vec::new();
         let mut mentioned_agent_ids = HashSet::new();
@@ -74,7 +73,7 @@ impl<'a> MentionService<'a> {
                 continue;
             }
 
-            let id = Uuid::new_v4();
+            let id = Id::new();
             let row = sqlx::query(
                 r#"
                 INSERT INTO ticket_mentions (
@@ -100,7 +99,7 @@ impl<'a> MentionService<'a> {
         Ok(mentions)
     }
 
-    pub async fn mark_handled(&self, mention_id: Uuid) -> Result<(), MentionError> {
+    pub async fn mark_handled(&self, mention_id: Id) -> Result<(), MentionError> {
         let result = sqlx::query(
             r#"
             UPDATE ticket_mentions
@@ -120,7 +119,7 @@ impl<'a> MentionService<'a> {
         Ok(())
     }
 
-    pub async fn get(&self, mention_id: Uuid) -> Result<TicketMention, MentionError> {
+    pub async fn get(&self, mention_id: Id) -> Result<TicketMention, MentionError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -137,7 +136,7 @@ impl<'a> MentionService<'a> {
         Ok(row_to_mention(&row))
     }
 
-    pub async fn mark_ignored(&self, mention_id: Uuid) -> Result<(), MentionError> {
+    pub async fn mark_ignored(&self, mention_id: Id) -> Result<(), MentionError> {
         let result = sqlx::query(
             r#"
             UPDATE ticket_mentions
@@ -159,8 +158,8 @@ impl<'a> MentionService<'a> {
 
     pub async fn find_pending_for_agent(
         &self,
-        ticket_id: Uuid,
-        mentioned_agent_id: Uuid,
+        ticket_id: Id,
+        mentioned_agent_id: Id,
     ) -> Result<Option<TicketMention>, MentionError> {
         self.find_pending_for_agent_and_comment(ticket_id, mentioned_agent_id, None)
             .await
@@ -168,9 +167,9 @@ impl<'a> MentionService<'a> {
 
     pub async fn find_pending_for_agent_and_comment(
         &self,
-        ticket_id: Uuid,
-        mentioned_agent_id: Uuid,
-        comment_id: Option<Uuid>,
+        ticket_id: Id,
+        mentioned_agent_id: Id,
+        comment_id: Option<Id>,
     ) -> Result<Option<TicketMention>, MentionError> {
         let row = sqlx::query(
             r#"
@@ -180,7 +179,7 @@ impl<'a> MentionService<'a> {
             WHERE ticket_id = $1
               AND mentioned_agent_id = $2
               AND status = $3
-              AND ($4::uuid IS NULL OR comment_id = $4)
+              AND ($4::varchar IS NULL OR comment_id = $4)
             ORDER BY created_at ASC
             LIMIT 1
             "#,
@@ -197,7 +196,7 @@ impl<'a> MentionService<'a> {
 
     pub async fn list_pending_for_ticket(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<Vec<TicketMention>, MentionError> {
         let rows = sqlx::query(
             r#"
@@ -222,8 +221,8 @@ impl<'a> MentionService<'a> {
     /// than retried automatically in a loop.
     pub async fn find_next_unscheduled_agent_request(
         &self,
-        ticket_id: Uuid,
-        mentioned_agent_id: Uuid,
+        ticket_id: Id,
+        mentioned_agent_id: Id,
     ) -> Result<Option<TicketMention>, MentionError> {
         let rows = sqlx::query(
             r#"
@@ -269,13 +268,13 @@ impl<'a> MentionService<'a> {
         Ok(None)
     }
 
-    async fn build_agent_key_map(&self) -> Result<HashMap<String, Uuid>, MentionError> {
+    async fn build_agent_key_map(&self) -> Result<HashMap<String, Id>, MentionError> {
         let agents = AgentService::new(self.pool).list_agents().await?;
         Ok(resolve_agent_keys(&agents))
     }
 }
 
-pub(crate) fn resolve_agent_keys(agents: &[Agent]) -> HashMap<String, Uuid> {
+pub(crate) fn resolve_agent_keys(agents: &[Agent]) -> HashMap<String, Id> {
     let mut map = HashMap::new();
 
     for agent in agents {

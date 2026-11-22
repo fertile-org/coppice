@@ -3,13 +3,12 @@
 //! A folder is removed when its run's ticket is archived, when the run ended
 //! more than `storage.run_artifacts_retention_days` ago, or when no run row
 //! exists for it any more. Queued and running runs are never touched.
+use crate::domain::Id;
 
 use sqlx::PgPool;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use uuid::Uuid;
-
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// A folder with no run row is left alone this long, in case its run row is
 /// still being written.
@@ -47,8 +46,8 @@ pub async fn sweep(
     let dirs = run_dirs(&runs_dir);
     let mut removed = 0;
     for chunk in dirs.chunks(BATCH) {
-        let ids: Vec<Uuid> = chunk.iter().map(|(id, _)| *id).collect();
-        let rows: Vec<(Uuid, bool)> = sqlx::query_as(
+        let ids: Vec<Id> = chunk.iter().map(|(id, _)| *id).collect();
+        let rows: Vec<(Id, bool)> = sqlx::query_as(
             r#"
             SELECT run.id,
                    run.status NOT IN ('queued', 'running')
@@ -84,9 +83,9 @@ pub async fn sweep(
 pub async fn remove_ticket_run_artifacts(
     pool: &PgPool,
     artifacts_dir: &Path,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> anyhow::Result<usize> {
-    let ids: Vec<Uuid> = sqlx::query_scalar(
+    let ids: Vec<Id> = sqlx::query_scalar(
         "SELECT id FROM agent_runs WHERE ticket_id = $1 AND status NOT IN ('queued', 'running')",
     )
     .bind(ticket_id)
@@ -99,7 +98,7 @@ pub async fn remove_ticket_run_artifacts(
         .count())
 }
 
-fn run_dirs(runs_dir: &Path) -> Vec<(Uuid, PathBuf)> {
+fn run_dirs(runs_dir: &Path) -> Vec<(Id, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(runs_dir) else {
         return Vec::new();
     };
@@ -107,7 +106,7 @@ fn run_dirs(runs_dir: &Path) -> Vec<(Uuid, PathBuf)> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|entry| {
-            let id = Uuid::parse_str(entry.file_name().to_str()?).ok()?;
+            let id = Id::parse_str(entry.file_name().to_str()?).ok()?;
             Some((id, entry.path()))
         })
         .collect()

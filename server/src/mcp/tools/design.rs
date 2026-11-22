@@ -1,11 +1,10 @@
+use crate::domain::Id;
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::design_service::{
     ChosenOption, CreateScope, DesignError, DesignKind, DesignOption, DesignService,
 };
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use uuid::Uuid;
-
 pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let scope = create_scope(ctx)?;
     let svc = DesignService::new(ctx.pool, &ctx.state.config.storage.artifacts_dir);
@@ -95,7 +94,7 @@ pub async fn dispatch(name: &str, ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
 /// The design a run should build, with the mockup's absolute path.
 pub(crate) async fn selected_design_json(
     svc: &DesignService<'_>,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<Value, ToolError> {
     let effective = svc.effective_for_ticket(ticket_id).await.map_err(map_err)?;
     Ok(match effective {
@@ -145,9 +144,9 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
         .ok_or_else(|| ToolError::InvalidArgs(format!("{key} is required")))
 }
 
-fn required_uuid(args: &Value, key: &str) -> Result<Uuid, ToolError> {
+fn required_uuid(args: &Value, key: &str) -> Result<Id, ToolError> {
     let raw = required_str(args, key)?;
-    Uuid::parse_str(raw).map_err(|_| ToolError::InvalidArgs(format!("{key} must be a uuid")))
+    Id::parse_str(raw).map_err(|_| ToolError::InvalidArgs(format!("{key} must be a uuid")))
 }
 
 fn map_err(err: DesignError) -> ToolError {

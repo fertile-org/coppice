@@ -1,9 +1,8 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 async fn get(app: &axum::Router, path: &str, cookie: &str, csrf: &str) -> axum::response::Response {
     app.clone()
         .oneshot(common::json_request("GET", path, "", cookie, csrf))
@@ -26,7 +25,7 @@ async fn ticket_comments_page_newest_first() {
         FROM generate_series(1, 450) AS n
         "#,
     )
-    .bind(Uuid::parse_str(&ticket_id).unwrap())
+    .bind(Id::parse_str(&ticket_id).unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -65,7 +64,7 @@ async fn ticket_comments_page_newest_first() {
         &app,
         &format!(
             "/api/tickets/{ticket_id}/comments?before={}",
-            Uuid::new_v4()
+            Id::new()
         ),
         &cookie,
         &csrf,
@@ -82,7 +81,7 @@ async fn chat_with_messages(
     axum::Router,
     String,
     String,
-    Uuid,
+    Id,
 ) {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let agent_id =
@@ -100,7 +99,7 @@ async fn chat_with_messages(
         .unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
     let session =
-        Uuid::parse_str(common::json_body(created).await["id"].as_str().unwrap()).unwrap();
+        Id::parse_str(common::json_body(created).await["id"].as_str().unwrap()).unwrap();
     sqlx::query(
         r#"
         INSERT INTO chat_messages (id, session_id, seq, role, body)

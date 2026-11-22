@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::usage::{UsageEvent, UsageSnapshot, UsageTracker};
 use crate::providers::usage::{reader_for, ProcessContext, UsageReader};
 use crate::sessions::run_artifact_log::RunArtifactLog;
@@ -7,8 +8,6 @@ use dashmap::DashMap;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, watch};
-use uuid::Uuid;
-
 pub struct RunStreamHandle {
     tx: broadcast::Sender<LiveMessage>,
     cancel_tx: watch::Sender<bool>,
@@ -232,7 +231,7 @@ impl RunStreamHandle {
 
 #[derive(Default)]
 pub struct RunStreamRegistry {
-    inner: DashMap<Uuid, Arc<RunStreamHandle>>,
+    inner: DashMap<Id, Arc<RunStreamHandle>>,
     /// `artifacts_dir` and the per-run byte cap. Without it, nothing is
     /// written while a run streams (unit tests).
     artifacts: Option<(String, u64)>,
@@ -252,7 +251,7 @@ impl RunStreamRegistry {
         }
     }
 
-    pub fn register(&self, run_id: Uuid) -> Arc<RunStreamHandle> {
+    pub fn register(&self, run_id: Id) -> Arc<RunStreamHandle> {
         let (tx, _) = broadcast::channel(2048);
         let (cancel_tx, _) = watch::channel(false);
         let (reported_tx, _) = watch::channel(String::new());
@@ -283,11 +282,11 @@ impl RunStreamRegistry {
         handle
     }
 
-    pub fn get(&self, run_id: Uuid) -> Option<Arc<RunStreamHandle>> {
+    pub fn get(&self, run_id: Id) -> Option<Arc<RunStreamHandle>> {
         self.inner.get(&run_id).map(|e| e.clone())
     }
 
-    pub fn remove(&self, run_id: Uuid) {
+    pub fn remove(&self, run_id: Id) {
         self.inner.remove(&run_id);
     }
 }
@@ -300,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn usage_is_read_only_after_track_usage() {
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let event = serde_json::json!({ "kind": "request", "tokens": { "output": 4 } });
         handle.observe_usage(&event);
@@ -335,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn context_window_goes_out_live_and_is_not_counted() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut live = handle.subscribe();
         handle.track_usage(UsageFormat::Normalized, &ProcessContext::default());
         handle.observe_usage(&serde_json::json!({
@@ -356,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn registry_broadcasts_live_messages() {
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let mut rx = handle.subscribe();
 
@@ -371,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn registry_broadcasts_frames() {
         let registry = RunStreamRegistry::new();
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         let handle = registry.register(run_id);
         let mut rx = handle.subscribe();
 
@@ -387,7 +386,7 @@ mod tests {
     #[test]
     fn reported_model_keeps_the_first_non_blank_value() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(Uuid::new_v4());
+        let handle = registry.register(Id::new());
         handle.note_reported_model("  ");
         assert_eq!(handle.reported_model(), None);
         handle.note_reported_model(" composer-2.5 ");
@@ -398,7 +397,7 @@ mod tests {
     #[test]
     fn live_buffer_keeps_only_the_last_500_messages() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(Uuid::new_v4());
+        let handle = registry.register(Id::new());
         for seq in 0..600 {
             handle.publish_frame(seq, format!("line-{seq}\n").into_bytes());
         }
@@ -419,7 +418,7 @@ mod tests {
         let registry = RunStreamRegistry::new();
         let mut ids = Vec::new();
         for _ in 0..10 {
-            let id = Uuid::new_v4();
+            let id = Id::new();
             let handle = registry.register(id);
             for seq in 0..80 {
                 handle.publish_frame(seq, b"chunk\n".to_vec());

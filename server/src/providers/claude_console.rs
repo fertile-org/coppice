@@ -231,6 +231,8 @@ fn tool_result_text(content: Option<&Value>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
 
@@ -241,7 +243,7 @@ mod tests {
     #[test]
     fn publishes_session_and_tool_events() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
 
@@ -280,7 +282,7 @@ mod tests {
 
     fn tool_start_event(name: &str, input: Value) -> Value {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
         publisher.handle_stream_json(
@@ -313,7 +315,7 @@ mod tests {
     #[test]
     fn duplicate_result_contract_is_skipped() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
         let contract =

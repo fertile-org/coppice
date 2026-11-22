@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::comment::{intent_to_str, Comment};
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::run_status_to_str;
@@ -17,8 +18,6 @@ use crate::services::ticket_thread;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 const COMMENTS_DEFAULT_LIMIT: usize = 20;
 const COMMENTS_MAX_LIMIT: usize = 50;
 const RUNS_DEFAULT_LIMIT: usize = 10;
@@ -43,7 +42,7 @@ pub(crate) fn split_ticket_description(description: &str) -> (String, Option<Str
 
 pub(crate) fn build_comments_json(
     comments: &[Comment],
-    agent_names: &HashMap<Uuid, String>,
+    agent_names: &HashMap<Id, String>,
 ) -> Value {
     comments
         .iter()
@@ -62,7 +61,7 @@ pub(crate) fn build_comments_json(
 
 pub(crate) fn build_runs_json(
     runs: &[AgentRunWithConnector],
-    agent_names: &HashMap<Uuid, String>,
+    agent_names: &HashMap<Id, String>,
     limit: usize,
 ) -> Value {
     runs.iter()
@@ -92,7 +91,7 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
     let ticket_id = match args.get("ticketId").filter(|v| !v.is_null()) {
         Some(v) => v
             .as_str()
-            .and_then(|s| Uuid::parse_str(s).ok())
+            .and_then(|s| Id::parse_str(s).ok())
             .ok_or_else(|| ToolError::InvalidArgs("ticketId must be a ticket id".into()))?,
         None => ctx.scope.ticket_id.ok_or_else(|| {
             ToolError::InvalidArgs("ticketId is required outside a ticket run".into())
@@ -166,11 +165,11 @@ fn agent_key(agent: &crate::domain::agent::Agent) -> String {
         .unwrap_or_else(|| slugify(&agent.name))
 }
 
-fn agent_names(agents: &[crate::domain::agent::Agent]) -> HashMap<Uuid, String> {
+fn agent_names(agents: &[crate::domain::agent::Agent]) -> HashMap<Id, String> {
     agents.iter().map(|a| (a.id, a.name.clone())).collect()
 }
 
-fn assignee_key(agents: &[crate::domain::agent::Agent], id: Option<Uuid>) -> Option<String> {
+fn assignee_key(agents: &[crate::domain::agent::Agent], id: Option<Id>) -> Option<String> {
     let id = id?;
     agents.iter().find(|a| a.id == id).map(agent_key)
 }
@@ -257,7 +256,7 @@ pub async fn call_ticket_comments(ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
         None => None,
         Some(v) => Some(
             v.as_str()
-                .and_then(|s| Uuid::parse_str(s).ok())
+                .and_then(|s| Id::parse_str(s).ok())
                 .ok_or_else(|| ToolError::InvalidArgs("before must be a comment id".into()))?,
         ),
     };
@@ -346,7 +345,7 @@ pub async fn call_ticket_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     Ok(json!({ "tickets": items }))
 }
 
-async fn board_names(ctx: &ToolCtx<'_>) -> Result<HashMap<Uuid, String>, ToolError> {
+async fn board_names(ctx: &ToolCtx<'_>) -> Result<HashMap<Id, String>, ToolError> {
     let boards = BoardService::new(ctx.pool)
         .list_boards()
         .await

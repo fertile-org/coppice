@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::substatus::{
     build_substatus_display, validate_status_substatus_combo, Substatus, SubstatusDisplay,
     TicketStatus,
@@ -15,8 +16,6 @@ use sqlx::PgPool;
 use sqlx::Row;
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub struct TicketService<'a> {
     pool: &'a PgPool,
 }
@@ -32,7 +31,7 @@ enum StatusWrite {
 #[derive(Debug, Default)]
 pub struct TicketFilters {
     pub status: Option<TicketStatus>,
-    pub assignee_agent_id: Option<Uuid>,
+    pub assignee_agent_id: Option<Id>,
     pub include_archived: bool,
 }
 
@@ -64,7 +63,7 @@ pub enum TicketError {
 /// current content. Same rule as [`TicketService::approved_plan_is_current`].
 fn plan_is_current(
     ticket: &Ticket,
-    latest_plan_id: Option<Uuid>,
+    latest_plan_id: Option<Id>,
     latest_plan_version: Option<i32>,
 ) -> bool {
     match (
@@ -129,7 +128,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn list_by_board(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         filters: &TicketFilters,
     ) -> Result<Vec<TicketWithDisplay>, TicketError> {
         self.ensure_board_exists(board_id).await?;
@@ -166,7 +165,7 @@ impl<'a> TicketService<'a> {
 
         let rows = q.fetch_all(self.pool).await?;
         let active_ticket_ids = self.active_ticket_ids_for_board(board_id).await?;
-        let active: std::collections::HashSet<Uuid> = active_ticket_ids.into_iter().collect();
+        let active: std::collections::HashSet<Id> = active_ticket_ids.into_iter().collect();
         self.enrich_many(rows.iter().map(row_to_ticket).collect(), &active)
             .await
     }
@@ -175,7 +174,7 @@ impl<'a> TicketService<'a> {
     /// activity first. `board_id: None` searches every board.
     pub async fn search(
         &self,
-        board_id: Option<Uuid>,
+        board_id: Option<Id>,
         query: Option<&str>,
         status: Option<TicketStatus>,
         limit: i64,
@@ -192,7 +191,7 @@ impl<'a> TicketService<'a> {
             SELECT {TICKET_COLUMNS_ALIASED}
             FROM tickets t
             WHERE t.archived_at IS NULL
-              AND ($1::uuid IS NULL OR t.board_id = $1)
+              AND ($1::varchar IS NULL OR t.board_id = $1)
               AND ($2::text IS NULL OR t.title ILIKE $2 OR t.description ILIKE $2)
               AND ($3::text IS NULL OR t.status = $3)
             ORDER BY t.updated_at DESC, t.id
@@ -212,13 +211,13 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         title: &str,
         description: &str,
-        repo_id: Option<Uuid>,
+        repo_id: Option<Id>,
         priority: Option<TicketPriority>,
         created_by: &str,
-        created_by_id: Uuid,
+        created_by_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         self.create_with_source(
             board_id,
@@ -236,14 +235,14 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_with_source(
         &self,
-        board_id: Uuid,
+        board_id: Id,
         title: &str,
         description: &str,
-        repo_id: Option<Uuid>,
+        repo_id: Option<Id>,
         priority: Option<TicketPriority>,
         created_by: &str,
-        created_by_id: Uuid,
-        source_chat_session_id: Option<Uuid>,
+        created_by_id: Id,
+        source_chat_session_id: Option<Id>,
     ) -> Result<TicketWithDisplay, TicketError> {
         self.ensure_board_exists(board_id).await?;
 
@@ -252,7 +251,7 @@ impl<'a> TicketService<'a> {
             None => self.default_repo_id().await?,
         };
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let status = TicketStatus::Backlog;
         let priority_str = priority_to_str(priority_for_create(priority));
 
@@ -295,11 +294,11 @@ impl<'a> TicketService<'a> {
         parent: &Ticket,
         title: &str,
         description: &str,
-        created_by_id: Uuid,
+        created_by_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         self.ensure_board_exists(parent.board_id).await?;
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let status = TicketStatus::Backlog;
         let priority_str = priority_to_str(priority_for_create(None));
 
@@ -339,7 +338,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn set_pending_split_recommendation(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         recommendation: PendingSplitRecommendation,
     ) -> Result<TicketWithDisplay, TicketError> {
         let value = serde_json::to_value(recommendation)
@@ -372,7 +371,7 @@ impl<'a> TicketService<'a> {
         self.enrich_ticket(ticket, has_active_run).await
     }
 
-    pub async fn get(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+    pub async fn get(&self, ticket_id: Id) -> Result<TicketWithDisplay, TicketError> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -401,13 +400,13 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn update_fields(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         title: Option<&str>,
         description: Option<&str>,
-        repo_id: Option<Option<Uuid>>,
+        repo_id: Option<Option<Id>>,
         priority: Option<Option<TicketPriority>>,
         branch_name: Option<Option<&str>>,
-        owner_user_id: Option<Option<Uuid>>,
+        owner_user_id: Option<Option<Id>>,
         skip_planning: Option<bool>,
         human_edit: bool,
     ) -> Result<TicketWithDisplay, TicketError> {
@@ -495,7 +494,7 @@ impl<'a> TicketService<'a> {
     /// Opt a ticket in or out of auto-accept after review. Not a content edit.
     pub async fn set_skip_human_review(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         skip_human_review: bool,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
@@ -526,8 +525,8 @@ impl<'a> TicketService<'a> {
 
     pub async fn set_attachment_ids(
         &self,
-        ticket_id: Uuid,
-        attachment_ids: &[Uuid],
+        ticket_id: Id,
+        attachment_ids: &[Id],
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         Self::ensure_not_archived(&current.ticket)?;
@@ -557,7 +556,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn update_status(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: TicketStatus,
         substatus: Option<Option<Substatus>>,
         substatus_metadata: Option<Option<Value>>,
@@ -575,7 +574,7 @@ impl<'a> TicketService<'a> {
     /// Clear the blocked substatus left by a crash so the run can resume.
     pub async fn clear_interrupted_block(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         self.write_status(
@@ -589,7 +588,7 @@ impl<'a> TicketService<'a> {
     }
 
     /// Accept is the only status write that may enter Done.
-    pub async fn accept_to_done(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+    pub async fn accept_to_done(&self, ticket_id: Id) -> Result<TicketWithDisplay, TicketError> {
         self.write_status(
             ticket_id,
             TicketStatus::Done,
@@ -602,7 +601,7 @@ impl<'a> TicketService<'a> {
 
     async fn write_status(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: TicketStatus,
         substatus: Option<Option<Substatus>>,
         substatus_metadata: Option<Option<Value>>,
@@ -716,11 +715,11 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn apply_workflow_update(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         status: Option<TicketStatus>,
         substatus: Option<Option<Substatus>>,
         substatus_metadata: Option<Option<Value>>,
-        assignee: Option<Option<Uuid>>,
+        assignee: Option<Option<Id>>,
         pending_recommendation: Option<Option<PendingRecommendation>>,
         clarification_round_delta: i32,
     ) -> Result<TicketWithDisplay, TicketError> {
@@ -814,7 +813,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn clear_pending_recommendation(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         let row = sqlx::query(
             r#"
@@ -842,7 +841,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn clear_pending_split_recommendation(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         let row = sqlx::query(
             r#"
@@ -870,7 +869,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn list_children(
         &self,
-        parent_ticket_id: Uuid,
+        parent_ticket_id: Id,
     ) -> Result<Vec<TicketWithDisplay>, TicketError> {
         self.get(parent_ticket_id).await?;
 
@@ -901,8 +900,8 @@ impl<'a> TicketService<'a> {
         .await?;
 
         let tickets: Vec<Ticket> = rows.iter().map(row_to_ticket).collect();
-        let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
-        let active: std::collections::HashSet<Uuid> = sqlx::query_scalar(
+        let ids: Vec<Id> = tickets.iter().map(|ticket| ticket.id).collect();
+        let active: std::collections::HashSet<Id> = sqlx::query_scalar(
             "SELECT DISTINCT ticket_id FROM agent_runs WHERE ticket_id = ANY($1) AND status IN ('queued', 'running')",
         )
         .bind(&ids)
@@ -915,8 +914,8 @@ impl<'a> TicketService<'a> {
 
     pub async fn assign_agent(
         &self,
-        ticket_id: Uuid,
-        agent_id: Option<Uuid>,
+        ticket_id: Id,
+        agent_id: Option<Id>,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         Self::ensure_not_archived(&current.ticket)?;
@@ -946,7 +945,7 @@ impl<'a> TicketService<'a> {
         self.enrich_row(&row).await
     }
 
-    pub async fn archive(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+    pub async fn archive(&self, ticket_id: Id) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         if self.ticket_has_active_run(ticket_id).await? {
             return Err(TicketError::ActiveRunExists);
@@ -979,7 +978,7 @@ impl<'a> TicketService<'a> {
         self.enrich_row(&row).await
     }
 
-    pub async fn unarchive(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+    pub async fn unarchive(&self, ticket_id: Id) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         if current.ticket.archived_at.is_none() {
             return Ok(current);
@@ -1019,7 +1018,7 @@ impl<'a> TicketService<'a> {
 
     pub async fn compute_last_activity_at(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<OffsetDateTime, TicketError> {
         let row = sqlx::query(
             r#"
@@ -1042,7 +1041,7 @@ impl<'a> TicketService<'a> {
         Ok(row.get("last_activity_at"))
     }
 
-    async fn ensure_board_exists(&self, board_id: Uuid) -> Result<(), TicketError> {
+    async fn ensure_board_exists(&self, board_id: Id) -> Result<(), TicketError> {
         let exists =
             sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM boards WHERE id = $1)")
                 .bind(board_id)
@@ -1055,8 +1054,8 @@ impl<'a> TicketService<'a> {
         Ok(())
     }
 
-    async fn default_repo_id(&self) -> Result<Option<Uuid>, TicketError> {
-        let ids = sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos LIMIT 2")
+    async fn default_repo_id(&self) -> Result<Option<Id>, TicketError> {
+        let ids = sqlx::query_scalar::<_, Id>("SELECT id FROM repos LIMIT 2")
             .fetch_all(self.pool)
             .await?;
 
@@ -1068,9 +1067,9 @@ impl<'a> TicketService<'a> {
 
     async fn active_ticket_ids_for_board(
         &self,
-        board_id: Uuid,
-    ) -> Result<HashSet<Uuid>, TicketError> {
-        let rows = sqlx::query_scalar::<_, Uuid>(
+        board_id: Id,
+    ) -> Result<HashSet<Id>, TicketError> {
+        let rows = sqlx::query_scalar::<_, Id>(
             r#"
             SELECT DISTINCT ar.ticket_id
             FROM agent_runs ar
@@ -1085,7 +1084,7 @@ impl<'a> TicketService<'a> {
         Ok(rows.into_iter().collect())
     }
 
-    pub(crate) async fn ticket_has_active_run(&self, ticket_id: Uuid) -> Result<bool, TicketError> {
+    pub(crate) async fn ticket_has_active_run(&self, ticket_id: Id) -> Result<bool, TicketError> {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS(
@@ -1130,12 +1129,12 @@ impl<'a> TicketService<'a> {
     async fn enrich_many(
         &self,
         tickets: Vec<Ticket>,
-        active: &std::collections::HashSet<Uuid>,
+        active: &std::collections::HashSet<Id>,
     ) -> Result<Vec<TicketWithDisplay>, TicketError> {
         if tickets.is_empty() {
             return Ok(Vec::new());
         }
-        let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
+        let ids: Vec<Id> = tickets.iter().map(|ticket| ticket.id).collect();
         let rows = sqlx::query(
             r#"
             SELECT
@@ -1176,9 +1175,9 @@ impl<'a> TicketService<'a> {
         .bind(crate::domain::workflow::JOB_TYPE_PLAN_TICKET)
         .fetch_all(self.pool)
         .await?;
-        let mut by_id: std::collections::HashMap<Uuid, sqlx::postgres::PgRow> = rows
+        let mut by_id: std::collections::HashMap<Id, sqlx::postgres::PgRow> = rows
             .into_iter()
-            .map(|row| (row.get::<Uuid, _>("id"), row))
+            .map(|row| (row.get::<Id, _>("id"), row))
             .collect();
         let mut reviews = HumanReviewService::new(self.pool).get_many(&ids).await?;
         let planning = crate::services::planning_service::PlanningService::new(self.pool);
@@ -1194,7 +1193,7 @@ impl<'a> TicketService<'a> {
                 &ticket.substatus_metadata,
                 agent_name.as_deref(),
             );
-            let latest_plan_id: Option<Uuid> = row.get("latest_plan_id");
+            let latest_plan_id: Option<Id> = row.get("latest_plan_id");
             let latest_plan_version: Option<i32> = row.get("latest_plan_version");
             let plan_approved = plan_is_current(&ticket, latest_plan_id, latest_plan_version);
             let plan_questions = if row.get::<bool, _>("has_plan_questions") {
@@ -1274,7 +1273,7 @@ impl<'a> TicketService<'a> {
         let Some(row) = row else {
             return Ok(false);
         };
-        let id: Uuid = row.get("id");
+        let id: Id = row.get("id");
         let version: i32 = row.get("content_version");
         Ok(id == approved_id && version == ticket.content_version)
     }
@@ -1282,7 +1281,7 @@ impl<'a> TicketService<'a> {
 
 async fn ticket_has_worktree_bearing_run(
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<bool, TicketError> {
     sqlx::query_scalar::<_, bool>(
         r#"
@@ -1353,7 +1352,7 @@ mod tests {
     #[tokio::test]
     async fn description_attachment_ids_round_trip_and_are_readable() {
         let pool = crate::db::shared_test_pool().await.expect("pool");
-        let user_id = Uuid::new_v4();
+        let user_id = Id::new();
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
         )
@@ -1363,7 +1362,7 @@ mod tests {
         .await
         .expect("user");
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("attach board")
@@ -1379,13 +1378,13 @@ mod tests {
             .expect("ticket");
         assert!(created.ticket.attachment_ids.is_empty());
 
-        let attachment_id = Uuid::new_v4();
+        let attachment_id = Id::new();
         CommentService::new(&pool)
             .create_attachment(attachment_id, "shot.png", "image/png", 4, "unused", user_id)
             .await
             .expect("attachment");
 
-        let other = Uuid::new_v4();
+        let other = Id::new();
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
         )
@@ -1413,7 +1412,7 @@ mod tests {
     #[tokio::test]
     async fn create_child_defaults_priority_to_medium() {
         let pool = crate::db::shared_test_pool().await.expect("pool");
-        let user_id = Uuid::new_v4();
+        let user_id = Id::new();
         sqlx::query(
             "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
         )
@@ -1423,7 +1422,7 @@ mod tests {
         .await
         .expect("user");
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
             .bind(board_id)
             .bind("child priority board")

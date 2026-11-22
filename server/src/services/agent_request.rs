@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use crate::providers::AgentRequest;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 pub const MAX_AGENT_REQUEST_CHARS: usize = 2_000;
 
 const METADATA_PREFIX: &str = "<!-- coppice-agent-requests: ";
@@ -9,7 +8,7 @@ const METADATA_SUFFIX: &str = " -->";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAgentRequest {
-    pub agent_id: Uuid,
+    pub agent_id: Id,
     pub request: AgentRequest,
 }
 
@@ -20,7 +19,7 @@ struct StoredAgentRequest {
     intent: String,
     request: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    agent_id: Option<Uuid>,
+    agent_id: Option<Id>,
 }
 
 pub fn normalized_agent_requests(requests: &[AgentRequest]) -> Vec<AgentRequest> {
@@ -96,7 +95,7 @@ pub fn agent_requests_from_comment(body: &str) -> Vec<AgentRequest> {
 
 pub fn agent_request_for_target_from_comment(
     body: &str,
-    target_agent_id: Uuid,
+    target_agent_id: Id,
 ) -> Option<AgentRequest> {
     stored_agent_requests_from_comment(body)
         .into_iter()
@@ -128,7 +127,7 @@ fn stored_agent_requests_from_comment(body: &str) -> Vec<StoredAgentRequest> {
         .unwrap_or_default()
 }
 
-fn stored_request(request: &AgentRequest, agent_id: Option<Uuid>) -> Option<StoredAgentRequest> {
+fn stored_request(request: &AgentRequest, agent_id: Option<Id>) -> Option<StoredAgentRequest> {
     normalize_request(request).map(|request| StoredAgentRequest {
         agent_key: request.agent_key,
         intent: request.intent,
@@ -221,7 +220,7 @@ mod tests {
         append_agent_requests_to_comment(&mut body, &original);
         body.push_str("\n\n---\n**Git:** committed `abc1234`");
 
-        let target_agent_id = Uuid::new_v4();
+        let target_agent_id = Id::new();
         let accepted = [ResolvedAgentRequest {
             agent_id: target_agent_id,
             request: original[1].clone(),
@@ -250,7 +249,7 @@ mod tests {
         );
 
         assert_eq!(
-            agent_request_for_target_from_comment(&body, Uuid::new_v4()),
+            agent_request_for_target_from_comment(&body, Id::new()),
             None
         );
     }

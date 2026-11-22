@@ -1,6 +1,7 @@
 //! A ticket run is announced on the event bus as soon as it is queued, so the
 //! drawer shows Stop while every worker is busy. These states spawn no
 //! workers, so runs stay `queued` like they do behind a full worker pool.
+use coppice_server::domain::Id;
 
 mod common;
 
@@ -11,13 +12,11 @@ use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
-use uuid::Uuid;
-
 /// The first `agent_run.started` for `ticket_id`, skipping other events.
 async fn next_run_started(
     events: &mut Receiver<AppEvent>,
-    ticket_id: Uuid,
-) -> (Uuid, Uuid, String) {
+    ticket_id: Id,
+) -> (Id, Id, String) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let event = tokio::time::timeout_at(deadline, events.recv())
@@ -61,7 +60,7 @@ async fn assign_with_auto_start_publishes_queued_run() {
     let mut events = state.event_bus.subscribe();
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
 
-    let ticket_id: Uuid = ticket_id.parse().unwrap();
+    let ticket_id: Id = ticket_id.parse().unwrap();
     let (run_id, event_agent_id, status) = next_run_started(&mut events, ticket_id).await;
     assert_eq!(status, "queued");
     assert_eq!(event_agent_id.to_string(), agent_id);
@@ -99,9 +98,9 @@ async fn orchestrator_hand_off_publishes_queued_run() {
     .await;
     let qc_id = common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
 
-    let ticket_id: Uuid = ticket_id.parse().unwrap();
-    let engineer_id: Uuid = engineer_id.parse().unwrap();
-    let qc_id: Uuid = qc_id.parse().unwrap();
+    let ticket_id: Id = ticket_id.parse().unwrap();
+    let engineer_id: Id = engineer_id.parse().unwrap();
+    let qc_id: Id = qc_id.parse().unwrap();
     sqlx::query("UPDATE tickets SET status = 'in_qa', assignee_agent_id = $2 WHERE id = $1")
         .bind(ticket_id)
         .bind(qc_id)
@@ -109,7 +108,7 @@ async fn orchestrator_hand_off_publishes_queued_run() {
         .await
         .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
@@ -159,14 +158,14 @@ async fn ticket_resume_skips_sessions_from_another_connector() {
 
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
-    let ticket_id: Uuid = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
+    let ticket_id: Id = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
         .await
         .parse()
         .unwrap();
-    let agent_id: Uuid = agent_id.parse().unwrap();
+    let agent_id: Id = agent_id.parse().unwrap();
 
     let insert_run = async || {
-        let run_id = Uuid::new_v4();
+        let run_id = Id::new();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)

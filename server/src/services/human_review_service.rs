@@ -5,23 +5,22 @@
 //! test report after they finish (`submitted_result` is cleared when the run
 //! finishes), so the acceptance records the run ids whose stored outcome it
 //! covers, plus any run that still holds a submitted result.
+use crate::domain::Id;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::domain::git_state::GitOutcome;
 use crate::domain::substatus::TicketStatus;
 use crate::services::workflow_service::WorkflowService;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanReview {
-    pub ticket_id: Uuid,
+    pub ticket_id: Id,
     pub head_sha: String,
-    pub comment_ids: Vec<Uuid>,
-    pub run_ids: Vec<Uuid>,
+    pub comment_ids: Vec<Id>,
+    pub run_ids: Vec<Id>,
     pub stale: bool,
-    pub accepted_by: Option<Uuid>,
+    pub accepted_by: Option<Id>,
     pub accepted_at: time::OffsetDateTime,
     pub merged_at: Option<time::OffsetDateTime>,
     pub accepted_by_coppice: bool,
@@ -46,7 +45,7 @@ impl<'a> HumanReviewService<'a> {
         Self { pool }
     }
 
-    pub async fn get(&self, ticket_id: Uuid) -> Result<Option<HumanReview>, sqlx::Error> {
+    pub async fn get(&self, ticket_id: Id) -> Result<Option<HumanReview>, sqlx::Error> {
         let row = sqlx::query(
             r#"
             SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
@@ -64,8 +63,8 @@ impl<'a> HumanReviewService<'a> {
     /// Reviews for many tickets in one query, keyed by ticket.
     pub async fn get_many(
         &self,
-        ticket_ids: &[Uuid],
-    ) -> Result<std::collections::HashMap<Uuid, HumanReview>, sqlx::Error> {
+        ticket_ids: &[Id],
+    ) -> Result<std::collections::HashMap<Id, HumanReview>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
             SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at,
@@ -87,8 +86,8 @@ impl<'a> HumanReviewService<'a> {
     /// Record acceptance of `head_sha`, replacing any earlier acceptance.
     pub async fn record_acceptance(
         &self,
-        ticket_id: Uuid,
-        accepted_by: Option<Uuid>,
+        ticket_id: Id,
+        accepted_by: Option<Id>,
         head_sha: &str,
     ) -> Result<HumanReview, HumanReviewError> {
         let head_sha = normalize_sha(head_sha);
@@ -137,7 +136,7 @@ impl<'a> HumanReviewService<'a> {
     /// path only. A later acceptance clears this.
     pub async fn record_merge(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         merged_sha: &str,
         base_branch: &str,
     ) -> Result<(), HumanReviewError> {
@@ -166,7 +165,7 @@ impl<'a> HumanReviewService<'a> {
     /// the outcome itself changed, so callers notify only then.
     pub async fn set_git_outcome(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         outcome: Option<GitOutcome>,
         reason: Option<&str>,
     ) -> Result<bool, HumanReviewError> {
@@ -206,7 +205,7 @@ impl<'a> HumanReviewService<'a> {
     /// reason changed.
     pub async fn set_not_merged_reason(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         reason: &str,
     ) -> Result<bool, HumanReviewError> {
         let result = sqlx::query(
@@ -231,7 +230,7 @@ impl<'a> HumanReviewService<'a> {
     /// when it cleared.
     pub async fn clear_git_outcome_if(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         expected: GitOutcome,
     ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
@@ -254,7 +253,7 @@ impl<'a> HumanReviewService<'a> {
     /// or a stale mark between listing and this write returns `false`.
     pub async fn record_remote_merge_if_current(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         accepted_sha: &str,
         merged_sha: &str,
     ) -> Result<bool, HumanReviewError> {
@@ -291,7 +290,7 @@ impl<'a> HumanReviewService<'a> {
 
     /// Both merge writers land here: the Merge button and the GitHub sweep.
     /// A failed advance does not undo the merge that was just recorded.
-    async fn advance_split_after_merge(&self, ticket_id: Uuid) {
+    async fn advance_split_after_merge(&self, ticket_id: Id) {
         if let Err(err) = crate::services::split_autopilot::SplitAutopilot::new(self.pool)
             .on_child_merged(ticket_id)
             .await
@@ -305,7 +304,7 @@ impl<'a> HumanReviewService<'a> {
     /// Takes an executor so a run start can do this in its own transaction.
     pub async fn retain_stale_acceptance(
         executor: impl sqlx::PgExecutor<'_>,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<(), HumanReviewError> {
         sqlx::query(
             r#"
@@ -324,7 +323,7 @@ impl<'a> HumanReviewService<'a> {
     /// Move a ticket that has no acceptance row back to Wait for Human Review
     /// so Accept can record one. Does not insert a review row. A ticket already
     /// in that column is left unchanged.
-    pub async fn return_for_acceptance(&self, ticket_id: Uuid) -> Result<(), HumanReviewError> {
+    pub async fn return_for_acceptance(&self, ticket_id: Id) -> Result<(), HumanReviewError> {
         let status = crate::domain::ticket::status_to_str(TicketStatus::WaitForFinalReview);
         sqlx::query(
             r#"
@@ -354,7 +353,7 @@ impl<'a> HumanReviewService<'a> {
     /// Returns whether this call invalidated a live acceptance.
     pub async fn observe_head(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         head_sha: &str,
     ) -> Result<bool, HumanReviewError> {
         let head_sha = normalize_sha(head_sha);
@@ -421,7 +420,7 @@ impl<'a> HumanReviewService<'a> {
         Ok(true)
     }
 
-    async fn evidence_comment_ids(&self, ticket_id: Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+    async fn evidence_comment_ids(&self, ticket_id: Id) -> Result<Vec<Id>, sqlx::Error> {
         sqlx::query_scalar(
             r#"
             SELECT id
@@ -436,7 +435,7 @@ impl<'a> HumanReviewService<'a> {
         .await
     }
 
-    async fn evidence_run_ids(&self, ticket_id: Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+    async fn evidence_run_ids(&self, ticket_id: Id) -> Result<Vec<Id>, sqlx::Error> {
         sqlx::query_scalar(
             r#"
             SELECT id

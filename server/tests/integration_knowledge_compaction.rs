@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::body::Body;
@@ -15,8 +16,6 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use tower::ServiceExt;
-use uuid::Uuid;
-
 struct Fixture {
     state: Arc<AppState>,
     app: Router,
@@ -79,7 +78,7 @@ impl Fixture {
             service.active_batch().await.unwrap().is_none(),
             "compaction did not settle"
         );
-        let ids: Vec<Uuid> = sqlx::query_scalar(
+        let ids: Vec<Id> = sqlx::query_scalar(
             "SELECT id FROM knowledge_compaction_batches ORDER BY created_at, id",
         )
         .fetch_all(self.pool())
@@ -124,15 +123,15 @@ impl Fixture {
         self.state.db.as_ref().unwrap()
     }
 
-    async fn admin_id(&self) -> Uuid {
+    async fn admin_id(&self) -> Id {
         sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
             .fetch_one(self.pool())
             .await
             .unwrap()
     }
 
-    async fn configure_agent(&self) -> Uuid {
-        let agent_id = Uuid::parse_str(
+    async fn configure_agent(&self) -> Id {
+        let agent_id = Id::parse_str(
             &common::create_agent_with_preset_key(
                 &self.app,
                 "backend_engineer",
@@ -150,14 +149,14 @@ impl Fixture {
         agent_id
     }
 
-    async fn ticket(&self) -> Uuid {
-        Uuid::parse_str(
+    async fn ticket(&self) -> Id {
+        Id::parse_str(
             &common::create_test_ticket(&self.app, &self.board_id, &self.cookie, &self.csrf).await,
         )
         .unwrap()
     }
 
-    async fn set_status(&self, ticket_id: Uuid, status: &str) {
+    async fn set_status(&self, ticket_id: Id, status: &str) {
         sqlx::query("UPDATE tickets SET status = $2 WHERE id = $1")
             .bind(ticket_id)
             .bind(status)
@@ -166,13 +165,13 @@ impl Fixture {
             .unwrap();
     }
 
-    async fn done_ticket(&self) -> Uuid {
+    async fn done_ticket(&self) -> Id {
         let ticket_id = self.ticket().await;
         self.set_status(ticket_id, "done").await;
         ticket_id
     }
 
-    async fn backdate_queue(&self, ticket_id: Uuid, by: Duration) {
+    async fn backdate_queue(&self, ticket_id: Id, by: Duration) {
         sqlx::query(
             "UPDATE knowledge_compaction_queue SET enqueued_at = now() - $2::interval WHERE ticket_id = $1",
         )
@@ -183,7 +182,7 @@ impl Fixture {
         .unwrap();
     }
 
-    async fn queue_rows(&self) -> Vec<(Uuid, Option<Uuid>, i32)> {
+    async fn queue_rows(&self) -> Vec<(Id, Option<Id>, i32)> {
         sqlx::query_as(
             "SELECT ticket_id, batch_id, attempts FROM knowledge_compaction_queue ORDER BY enqueued_at, ticket_id",
         )
@@ -193,7 +192,7 @@ impl Fixture {
     }
 
     /// Mark a batch succeeded the way the completion handler will.
-    async fn succeed_batch(&self, batch_id: Uuid) {
+    async fn succeed_batch(&self, batch_id: Id) {
         sqlx::query(
             "UPDATE knowledge_compaction_batches SET status = 'succeeded', ended_at = now() WHERE id = $1",
         )
@@ -315,7 +314,7 @@ async fn scheduled_tick_waits_for_the_interval_then_queues_one_batch_and_run() {
     assert_eq!(batch.agent_id, agent_id);
     assert_eq!(batch.ticket_count, 2);
 
-    let members: Vec<Uuid> = sqlx::query_scalar(
+    let members: Vec<Id> = sqlx::query_scalar(
         "SELECT ticket_id FROM knowledge_compaction_batch_tickets WHERE batch_id = $1 ORDER BY ticket_id",
     )
     .bind(batch.id)
@@ -331,13 +330,13 @@ async fn scheduled_tick_waits_for_the_interval_then_queues_one_batch_and_run() {
     assert_eq!(rows[2].1, None);
 
     let run: (
-        Uuid,
-        Option<Uuid>,
-        Option<Uuid>,
+        Id,
+        Option<Id>,
+        Option<Id>,
         String,
         String,
         String,
-        Uuid,
+        Id,
     ) = sqlx::query_as(
         r#"
         SELECT id, ticket_id, chat_session_id, job_type, context_profile, status, agent_id
@@ -379,9 +378,9 @@ async fn scheduled_tick_waits_for_the_interval_then_queues_one_batch_and_run() {
         ) VALUES ($1, $2, 'queued', 'manual', $3, now(), 1)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(agent_id)
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .execute(fx.pool())
     .await
     .expect_err("the unique index rejects a second active batch");
@@ -540,7 +539,7 @@ async fn compaction_run_creates_pending_candidates_without_notifications() {
     // Recorded when the run started.
     assert_eq!(connector.as_deref(), Some("mock"));
 
-    let items: Vec<(String, String, Option<Uuid>, Option<Uuid>, String)> = sqlx::query_as(
+    let items: Vec<(String, String, Option<Id>, Option<Id>, String)> = sqlx::query_as(
         r#"
         SELECT i.status, r.source_type, r.source_id, provenance.run_id, r.title
         FROM knowledge_items i
@@ -649,7 +648,7 @@ async fn failed_run_releases_tickets_notifies_every_user_once_and_retry_recovers
     assert_eq!(fx.queue_rows().await, vec![(ticket_id, None, 1)]);
 
     let users = fx.count("SELECT count(*) FROM users").await;
-    let notifications: Vec<(String, Option<Uuid>, String)> = sqlx::query_as(
+    let notifications: Vec<(String, Option<Id>, String)> = sqlx::query_as(
         "SELECT type, ticket_id, source_key FROM notifications ORDER BY recipient_user_id",
     )
     .fetch_all(fx.pool())
@@ -728,7 +727,7 @@ async fn connector_without_read_only_enforcement_fails_closed() {
 async fn codex_agent_can_be_saved_as_the_compaction_agent() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let fx = Fixture::new().await;
-    let agent_id = Uuid::parse_str(
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &fx.app,
             "backend_engineer",
@@ -761,7 +760,7 @@ async fn codex_agent_can_be_saved_as_the_compaction_agent() {
 async fn cursor_agent_can_be_saved_as_the_compaction_agent() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let fx = Fixture::new().await;
-    let agent_id = Uuid::parse_str(
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &fx.app,
             "backend_engineer",
@@ -835,7 +834,7 @@ async fn status_api_reports_each_state() {
     assert!(body["activeBatch"]["runId"].is_string());
     assert_eq!(body["queuedCount"], 0);
 
-    let batch_id = Uuid::parse_str(batch["id"].as_str().unwrap()).unwrap();
+    let batch_id = Id::parse_str(batch["id"].as_str().unwrap()).unwrap();
     sqlx::query("UPDATE agent_runs SET status = 'failed', error_message = 'provider exploded' WHERE compaction_batch_id = $1")
         .bind(batch_id)
         .execute(fx.pool())
@@ -884,7 +883,7 @@ async fn control_api_conflicts_and_cancel() {
     assert_eq!(cancelled["errorMessage"], "cancelled");
     let run_status: String =
         sqlx::query_scalar("SELECT status FROM agent_runs WHERE compaction_batch_id = $1")
-            .bind(Uuid::parse_str(batch["id"].as_str().unwrap()).unwrap())
+            .bind(Id::parse_str(batch["id"].as_str().unwrap()).unwrap())
             .fetch_one(fx.pool())
             .await
             .unwrap();
@@ -938,7 +937,7 @@ async fn compaction_anchors_citations_to_default_branch() {
     let fx = Fixture::new().await;
     fx.configure_agent().await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let repo_id = Uuid::parse_str(
+    let repo_id = Id::parse_str(
         &common::register_test_repo(
             &fx.app,
             &local_path.display().to_string(),
@@ -988,7 +987,7 @@ async fn compaction_anchors_citations_to_default_branch() {
         .unwrap();
     assert_eq!(outcome.created, 1, "{:?}", outcome.dropped);
 
-    let rows: Vec<(String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+    let rows: Vec<(String, Option<Id>, Option<String>)> = sqlx::query_as(
         r#"
         SELECT c.path, c.repo_id, c.commit_sha
         FROM knowledge_citations c
@@ -1023,9 +1022,9 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
     let fx = Fixture::new().await;
     fx.configure_agent().await;
     let admin = fx.admin_id().await;
-    let board_id = Uuid::parse_str(&fx.board_id).unwrap();
+    let board_id = Id::parse_str(&fx.board_id).unwrap();
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let repo_id = Uuid::parse_str(
+    let repo_id = Id::parse_str(
         &common::register_test_repo(
             &fx.app,
             &local_path.display().to_string(),
@@ -1062,7 +1061,7 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
     sqlx::query(
         "INSERT INTO knowledge_citations (id, revision_id, repo_id, path) VALUES ($1, $2, $3, 'README.md')",
     )
-    .bind(Uuid::new_v4())
+    .bind(Id::new())
     .bind(original.active_revision_id.unwrap())
     .bind(repo_id)
     .execute(fx.pool())
@@ -1088,11 +1087,11 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
     assert_eq!(outcome.created, 1, "{:?}", outcome.dropped);
 
     let (merged_id, status, source_type, source_id, board): (
-        Uuid,
+        Id,
         String,
         String,
-        Option<Uuid>,
-        Option<Uuid>,
+        Option<Id>,
+        Option<Id>,
     ) = sqlx::query_as(
         r#"
         SELECT i.id, i.status, r.source_type, r.source_id, r.board_id
@@ -1116,7 +1115,7 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
         .await,
         0
     );
-    let citation_repo: Option<Uuid> = sqlx::query_scalar(
+    let citation_repo: Option<Id> = sqlx::query_scalar(
         r#"
         SELECT c.repo_id FROM knowledge_citations c
         JOIN knowledge_items i ON i.current_revision_id = c.revision_id
@@ -1130,7 +1129,7 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
     assert_eq!(citation_repo, Some(repo_id));
 
     // The original is untouched until a human approves the merge.
-    let (original_status, superseded_by): (String, Option<Uuid>) =
+    let (original_status, superseded_by): (String, Option<Id>) =
         sqlx::query_as("SELECT status, superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original.id)
             .fetch_one(fx.pool())
@@ -1144,7 +1143,7 @@ async fn merge_candidate_stays_pending_and_keeps_original_until_approved() {
         .approve(merged_id, merged.version, admin)
         .await
         .unwrap();
-    let superseded_by: Option<Uuid> =
+    let superseded_by: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
             .bind(original.id)
             .fetch_one(fx.pool())
@@ -1159,7 +1158,7 @@ async fn verified_auto_approval_needs_an_anchored_citation() {
     let fx = Fixture::new().await;
     fx.configure_agent().await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let repo_id = Uuid::parse_str(
+    let repo_id = Id::parse_str(
         &common::register_test_repo(
             &fx.app,
             &local_path.display().to_string(),
@@ -1247,14 +1246,14 @@ async fn status_api_reports_the_oldest_pending_item() {
             "INSERT INTO knowledge_items (id, status, version, created_at)
              VALUES ($1, 'pending', 1, now() - make_interval(days => $2))",
         )
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .bind(age_days)
         .execute(fx.pool())
         .await
         .unwrap();
     }
     sqlx::query("INSERT INTO knowledge_items (id, status, version, created_at) VALUES ($1, 'approved', 1, now() - interval '30 days')")
-        .bind(Uuid::new_v4())
+        .bind(Id::new())
         .execute(fx.pool())
         .await
         .unwrap();
@@ -1282,7 +1281,7 @@ async fn near_identical_approved_items_show_as_possible_duplicates_in_the_loaded
     let fx = Fixture::new().await;
     fx.configure_agent().await;
     let admin = fx.admin_id().await;
-    let board_id = Uuid::parse_str(&fx.board_id).unwrap();
+    let board_id = Id::parse_str(&fx.board_id).unwrap();
     let knowledge = KnowledgeService::new(fx.pool(), &fx.state.config.knowledge);
     let mut ids = Vec::new();
     for title in [

@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::body::Body;
@@ -12,8 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 const KILO: &str = "kilo-code";
 
 /// A `kilo` script that prints the contents of a sibling `version` file, so
@@ -279,7 +278,7 @@ async fn last_run_reports_gateway_calls() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
     wait_for_run_end(&pool, run_id).await;
 
@@ -293,7 +292,7 @@ async fn last_run_reports_gateway_calls() {
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 
-async fn wait_for_run_end(pool: &PgPool, run_id: Uuid) {
+async fn wait_for_run_end(pool: &PgPool, run_id: Id) {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
@@ -336,7 +335,7 @@ async fn send_json(
     )
 }
 
-async fn admin_id(pool: &PgPool) -> Uuid {
+async fn admin_id(pool: &PgPool) -> Id {
     sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
         .fetch_one(pool)
         .await
@@ -347,7 +346,7 @@ async fn count(pool: &PgPool, sql: &str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
 }
 
-async fn set_agent_connector(pool: &PgPool, agent_id: Uuid, connector: &str) {
+async fn set_agent_connector(pool: &PgPool, agent_id: Id, connector: &str) {
     sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
         .bind(agent_id)
         .bind(connector)
@@ -356,7 +355,7 @@ async fn set_agent_connector(pool: &PgPool, agent_id: Uuid, connector: &str) {
         .unwrap();
 }
 
-async fn wait_for_check_end(pool: &PgPool, check_id: Uuid) -> String {
+async fn wait_for_check_end(pool: &PgPool, check_id: Id) -> String {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let status: String =
@@ -385,14 +384,14 @@ async fn run_mock_check(
     Router,
     String,
     String,
-    Uuid,
-    Uuid,
+    Id,
+    Id,
     common::AgentTestEnv,
 ) {
     let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_gateway(mock_response).await;
     let pool = state.db.clone().unwrap();
-    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+    let agent_id: Id = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -420,7 +419,7 @@ async fn check_run_passes_with_gateway_calls() {
     let pool = state.db.clone().unwrap();
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+    let agent_id: Id = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -616,11 +615,11 @@ async fn check_fails_when_agent_connector_changed() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_gateway("mcp/connector_check").await;
     let pool = state.db.clone().unwrap();
-    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+    let agent_id: Id = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
-    let check_id = Uuid::new_v4();
+    let check_id = Id::new();
     let mut tx = pool.begin().await.unwrap();
     sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
         .bind(agent_id)
@@ -700,7 +699,7 @@ async fn check_ticket_get_is_synthetic() {
     let pool = state.db.clone().unwrap();
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+    let agent_id: Id = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -803,12 +802,12 @@ async fn test_route_validation() {
     .await;
     let pool = state.db.clone().unwrap();
     let mock_agent = common::create_test_agent_from_preset(&app, "Mocky", &cookie, &csrf).await;
-    let codex_agent: Uuid = common::create_test_agent_from_preset(&app, "Codexy", &cookie, &csrf)
+    let codex_agent: Id = common::create_test_agent_from_preset(&app, "Codexy", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
     set_agent_connector(&pool, codex_agent, coppice_connectors::CODEX).await;
-    let kilo_agent: Uuid = common::create_test_agent_from_preset(&app, "Kiloy", &cookie, &csrf)
+    let kilo_agent: Id = common::create_test_agent_from_preset(&app, "Kiloy", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -854,7 +853,7 @@ async fn test_route_validation() {
         &app,
         "POST",
         &test_uri(KILO),
-        &body(&Uuid::new_v4()),
+        &body(&Id::new()),
         &cookie,
         &csrf,
     )
@@ -899,7 +898,7 @@ async fn test_route_validation() {
     let (status, _) = send(
         &app,
         "GET",
-        &format!("/api/tools/connector-checks/{}", Uuid::new_v4()),
+        &format!("/api/tools/connector-checks/{}", Id::new()),
         &cookie,
         &csrf,
     )
@@ -961,7 +960,7 @@ async fn stale_checks_failed_on_startup() {
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
-    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+    let agent_id: Id = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
         .await
         .parse()
         .unwrap();
@@ -1080,7 +1079,7 @@ fn write_version_script(dir: &Path, body: &str) -> PathBuf {
     panic!("version script never became executable");
 }
 
-async fn run_kilo_version_check(body: &str) -> (Arc<AppState>, Uuid, tempfile::TempDir) {
+async fn run_kilo_version_check(body: &str) -> (Arc<AppState>, Id, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = write_version_script(dir.path(), body);
     let (state, app, cookie, csrf, _env) = common::bootstrap_and_login_with_state_and_workers(
@@ -1089,7 +1088,7 @@ async fn run_kilo_version_check(body: &str) -> (Arc<AppState>, Uuid, tempfile::T
     )
     .await;
     let pool = state.db.clone().unwrap();
-    let agent_id: Uuid =
+    let agent_id: Id =
         common::create_test_agent_from_preset(&app, "Kilo Checker", &cookie, &csrf)
             .await
             .parse()

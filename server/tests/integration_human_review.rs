@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use std::path::{Path, PathBuf};
@@ -6,8 +7,6 @@ use std::process::Command;
 use axum::http::StatusCode;
 use coppice_server::services::ticket_git_service::TicketGitService;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 const MERGE_REFUSED: &str = "Not merged. This isn't the commit you reviewed.";
 const ACCEPT_AGAIN: &str = "Not merged. Accept again so Coppice knows which commit you reviewed.";
 
@@ -70,12 +69,14 @@ async fn setup() -> Fixture {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path = common::setup_worktree_with_commit(
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
         &local_path,
         env.worktrees.path(),
         "test-repo",
         &ticket_id,
-    );
+    )
+    .await;
     Fixture {
         _git_keep: git_dir,
         _env: env,
@@ -114,7 +115,7 @@ async fn set_wait_for_human_review(fx: &Fixture) {
 async fn seed_legacy_done(fx: &Fixture) {
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE tickets SET status = 'done', updated_at = now() WHERE id = $1")
-        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .bind(Id::parse_str(&fx.ticket_id).unwrap())
         .execute(&pool)
         .await
         .expect("seed legacy done");
@@ -154,7 +155,7 @@ async fn get_ticket(fx: &Fixture) -> serde_json::Value {
     common::json_body(res).await
 }
 
-async fn post_comment(fx: &Fixture, body: &str, intent: &str) -> Uuid {
+async fn post_comment(fx: &Fixture, body: &str, intent: &str) -> Id {
     let payload = serde_json::json!({ "body": body, "intent": intent });
     let res = fx
         .app
@@ -170,7 +171,7 @@ async fn post_comment(fx: &Fixture, body: &str, intent: &str) -> Uuid {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED, "comment {intent}");
     let json = common::json_body(res).await;
-    Uuid::parse_str(json["id"].as_str().unwrap()).unwrap()
+    Id::parse_str(json["id"].as_str().unwrap()).unwrap()
 }
 
 fn uuid_list(value: &serde_json::Value) -> Vec<String> {
@@ -193,7 +194,7 @@ async fn approval_records_head_sha_and_evidence() {
     let qa_comment = post_comment(&fx, "Checks passed", "qa_passed").await;
     let progress = post_comment(&fx, "Still working", "progress_update").await;
 
-    let agent_id = Uuid::parse_str(
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(
             &fx.app,
             "backend_engineer",
@@ -204,9 +205,9 @@ async fn approval_records_head_sha_and_evidence() {
         .await,
     )
     .unwrap();
-    let ticket_id = Uuid::parse_str(&fx.ticket_id).unwrap();
-    let succeeded_run = Uuid::new_v4();
-    let queued_run = Uuid::new_v4();
+    let ticket_id = Id::parse_str(&fx.ticket_id).unwrap();
+    let succeeded_run = Id::new();
+    let queued_run = Id::new();
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query(
         r#"
@@ -364,7 +365,7 @@ async fn new_commit_invalidates_review_and_returns_to_in_review() {
     let pool = fx.state.db.clone().expect("pool");
     let changed =
         TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
-            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .note_branch_head(Id::parse_str(&fx.ticket_id).unwrap())
             .await
             .expect("note branch head");
     assert!(changed);
@@ -415,7 +416,7 @@ async fn merged_ticket_is_not_marked_stale_when_branch_moves() {
     let pool = fx.state.db.clone().expect("pool");
     let changed =
         TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
-            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .note_branch_head(Id::parse_str(&fx.ticket_id).unwrap())
             .await
             .expect("note branch head");
     assert!(!changed);
@@ -452,7 +453,7 @@ async fn user_merge_comment_does_not_keep_review_fresh() {
     let pool = fx.state.db.clone().expect("pool");
     let changed =
         TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
-            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .note_branch_head(Id::parse_str(&fx.ticket_id).unwrap())
             .await
             .expect("note branch head");
     assert!(changed);
@@ -467,7 +468,7 @@ async fn user_merge_comment_does_not_keep_review_fresh() {
 async fn stored_merged_sha(fx: &Fixture) -> Option<String> {
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query_scalar("SELECT merged_sha FROM ticket_human_reviews WHERE ticket_id = $1")
-        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .bind(Id::parse_str(&fx.ticket_id).unwrap())
         .fetch_one(&pool)
         .await
         .expect("merged_sha")
@@ -526,7 +527,7 @@ async fn legacy_done_ticket_without_acceptance_stays_done_when_branch_moves() {
     let pool = fx.state.db.clone().expect("pool");
     let changed =
         TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
-            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .note_branch_head(Id::parse_str(&fx.ticket_id).unwrap())
             .await
             .expect("note branch head");
     assert!(!changed);
@@ -602,7 +603,7 @@ async fn legacy_done_ticket_without_acceptance_must_accept_before_merge() {
 async fn human_review_row_count(fx: &Fixture) -> i64 {
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query_scalar("SELECT COUNT(*) FROM ticket_human_reviews WHERE ticket_id = $1")
-        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .bind(Id::parse_str(&fx.ticket_id).unwrap())
         .fetch_one(&pool)
         .await
         .expect("review row count")
@@ -610,13 +611,13 @@ async fn human_review_row_count(fx: &Fixture) -> i64 {
 
 async fn seed_approved_plan(fx: &Fixture, markdown: &str) {
     let pool = fx.state.db.clone().expect("pool");
-    let ticket_id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let ticket_id = Id::parse_str(&fx.ticket_id).unwrap();
     let version: i32 = sqlx::query_scalar("SELECT content_version FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-    let plan_id = Uuid::new_v4();
+    let plan_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO ticket_plans (id, ticket_id, revision, body, content_version)
@@ -650,7 +651,7 @@ async fn seed_criteria_results(fx: &Fixture, sha: &str, results: serde_json::Val
         ON CONFLICT (ticket_id) DO UPDATE SET commit_sha = EXCLUDED.commit_sha, results = EXCLUDED.results
         "#,
     )
-    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+    .bind(Id::parse_str(&fx.ticket_id).unwrap())
     .bind(sha)
     .bind(results)
     .execute(&pool)

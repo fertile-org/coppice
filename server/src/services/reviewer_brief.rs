@@ -2,11 +2,10 @@
 //!
 //! Connectors that omit the fields leave no brief. A later verification run
 //! does not clear one an implementation run already stored.
+use crate::domain::Id;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::providers::AgentRunResult;
 
 /// Short on purpose: Human Review shows each field in a couple of lines.
@@ -38,7 +37,7 @@ impl<'a> ReviewerBriefService<'a> {
     /// result reported none. Other outcomes leave the stored brief alone.
     pub async fn record(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         result: &AgentRunResult,
         commit_sha: &str,
     ) -> Result<(), sqlx::Error> {
@@ -91,7 +90,7 @@ impl<'a> ReviewerBriefService<'a> {
         Ok(())
     }
 
-    pub async fn get(&self, ticket_id: Uuid) -> Result<Option<ReviewerBrief>, sqlx::Error> {
+    pub async fn get(&self, ticket_id: Id) -> Result<Option<ReviewerBrief>, sqlx::Error> {
         let row = sqlx::query(
             r#"
             SELECT how_it_works, changes_from_plan, look_here_first, commit_sha

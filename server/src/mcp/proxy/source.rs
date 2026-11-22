@@ -1,4 +1,5 @@
 //! Plugin MCP servers as the gateway's third tool source.
+use crate::domain::Id;
 
 use super::naming::{exposed_name, is_exposed_by};
 use super::pool::{McpServerPool, PoolError, PoolServerSpec, ServerKey};
@@ -16,11 +17,9 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginServerNames {
-    pub plugin_id: Uuid,
+    pub plugin_id: Id,
     pub plugin_name: String,
     pub servers: Vec<String>,
 }
@@ -28,9 +27,9 @@ pub struct PluginServerNames {
 #[async_trait]
 pub trait PluginServerCatalog: Send + Sync {
     /// Servers of the usable plugins among `plugin_ids`; empty on lookup failure.
-    async fn servers_for(&self, plugin_ids: &[Uuid]) -> Vec<PoolServerSpec>;
+    async fn servers_for(&self, plugin_ids: &[Id]) -> Vec<PoolServerSpec>;
     /// Same plugins as `servers_for`, names only (no settings decrypted).
-    async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames>;
+    async fn server_names_for(&self, plugin_ids: &[Id]) -> Vec<PluginServerNames>;
 }
 
 /// Enabled `ok` plugins from the database, settings decrypted.
@@ -47,7 +46,7 @@ impl DbPluginServerCatalog {
 
 #[async_trait]
 impl PluginServerCatalog for DbPluginServerCatalog {
-    async fn servers_for(&self, plugin_ids: &[Uuid]) -> Vec<PoolServerSpec> {
+    async fn servers_for(&self, plugin_ids: &[Id]) -> Vec<PoolServerSpec> {
         PluginService::new(&self.pool)
             .server_specs_for(plugin_ids, &self.store, true)
             .await
@@ -57,7 +56,7 @@ impl PluginServerCatalog for DbPluginServerCatalog {
             })
     }
 
-    async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames> {
+    async fn server_names_for(&self, plugin_ids: &[Id]) -> Vec<PluginServerNames> {
         PluginService::new(&self.pool)
             .mcp_server_names_for(plugin_ids)
             .await
@@ -265,7 +264,7 @@ mod tests {
 
     #[async_trait]
     impl PluginServerCatalog for FakeCatalog {
-        async fn servers_for(&self, plugin_ids: &[Uuid]) -> Vec<PoolServerSpec> {
+        async fn servers_for(&self, plugin_ids: &[Id]) -> Vec<PoolServerSpec> {
             self.queries.fetch_add(1, Ordering::SeqCst);
             self.specs
                 .iter()
@@ -274,7 +273,7 @@ mod tests {
                 .collect()
         }
 
-        async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames> {
+        async fn server_names_for(&self, plugin_ids: &[Id]) -> Vec<PluginServerNames> {
             let mut names: Vec<PluginServerNames> = Vec::new();
             for spec in self
                 .specs
@@ -354,7 +353,7 @@ mod tests {
         }
     }
 
-    const PLUGIN: Uuid = Uuid::from_u128(7);
+    const PLUGIN: Id = Id::from_u128(7);
 
     fn spec(env: BTreeMap<String, String>) -> PoolServerSpec {
         PoolServerSpec {
@@ -401,9 +400,9 @@ mod tests {
 
     fn scope(profile: ContextProfile) -> RunToolScope {
         RunToolScope {
-            token_id: Uuid::new_v4(),
-            run_id: Uuid::new_v4(),
-            agent_id: Uuid::new_v4(),
+            token_id: Id::new(),
+            run_id: Id::new(),
+            agent_id: Id::new(),
             ticket_id: None,
             chat_session_id: None,
             board_id: None,
@@ -467,7 +466,7 @@ mod tests {
         assert_eq!(catalog.queries.load(Ordering::SeqCst), 1);
     }
 
-    fn server(plugin_id: Uuid, name: &str, command: &str) -> PoolServerSpec {
+    fn server(plugin_id: Id, name: &str, command: &str) -> PoolServerSpec {
         let mut spec = spec(BTreeMap::new());
         spec.key.plugin_id = plugin_id;
         spec.plugin_name = name.into();
@@ -481,8 +480,8 @@ mod tests {
 
     #[tokio::test]
     async fn slow_server_skipped_after_bounded_wait() {
-        let fast = Uuid::from_u128(1);
-        let slow = Uuid::from_u128(2);
+        let fast = Id::from_u128(1);
+        let slow = Id::from_u128(2);
         let (source, _) = make_source(vec![
             server(fast, "fast", "fast"),
             server(slow, "slow", "slow"),
@@ -521,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_listers_share_a_start_that_finishes_within_budget() {
-        let plugin = Uuid::from_u128(3);
+        let plugin = Id::from_u128(3);
         let (source, _) = make_source(vec![server(plugin, "late", "starting")]);
         let mut scope = scope(ContextProfile::Full);
         scope.plugin_ids = vec![plugin];
@@ -572,7 +571,7 @@ mod tests {
         assert_eq!(source.claim_unlisted(&full, "other__echo").await, None);
 
         let mut other = scope(ContextProfile::Full);
-        other.plugin_ids = vec![Uuid::from_u128(99)];
+        other.plugin_ids = vec![Id::from_u128(99)];
         assert_eq!(source.claim_unlisted(&other, "mcp-fake__echo").await, None);
         let compaction = scope(ContextProfile::KnowledgeCompaction);
         assert_eq!(

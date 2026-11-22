@@ -4,13 +4,12 @@
 //! chat message lists its id. Removing it from a ticket deletes it right away
 //! once unreferenced; an hourly sweep catches uploads that were never
 //! attached (a cancelled composer, for example).
+use crate::domain::Id;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::storage::attachment_store::AttachmentStore;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -27,12 +26,12 @@ const UNREFERENCED: &str = r#"
 pub async fn delete_if_unreferenced(
     pool: &PgPool,
     store: &AttachmentStore,
-    ids: &[Uuid],
+    ids: &[Id],
 ) -> Result<usize, sqlx::Error> {
     if ids.is_empty() {
         return Ok(0);
     }
-    let deleted: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let deleted: Vec<Id> = sqlx::query_scalar(&format!(
         "DELETE FROM attachments a WHERE a.id = ANY($1) AND {UNREFERENCED} RETURNING a.id"
     ))
     .bind(ids)
@@ -44,7 +43,7 @@ pub async fn delete_if_unreferenced(
 
 /// Delete attachments older than the grace period that nothing references.
 pub async fn sweep(pool: &PgPool, store: &AttachmentStore) -> Result<usize, sqlx::Error> {
-    let deleted: Vec<Uuid> = sqlx::query_scalar(&format!(
+    let deleted: Vec<Id> = sqlx::query_scalar(&format!(
         "DELETE FROM attachments a
          WHERE a.created_at < now() - make_interval(hours => $1) AND {UNREFERENCED}
          RETURNING a.id"
@@ -56,7 +55,7 @@ pub async fn sweep(pool: &PgPool, store: &AttachmentStore) -> Result<usize, sqlx
     Ok(deleted.len())
 }
 
-fn remove_files(store: &AttachmentStore, ids: &[Uuid]) {
+fn remove_files(store: &AttachmentStore, ids: &[Id]) {
     for id in ids {
         if let Err(err) = store.delete(*id) {
             tracing::warn!(attachment_id = %id, error = %err, "could not remove attachment file");

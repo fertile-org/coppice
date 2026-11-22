@@ -1,11 +1,10 @@
 //! Per-run gateway access: mint a scoped token when a run starts and revoke it
 //! when the run ends (explicitly, or via the `Drop` backstop on early exits).
+use crate::domain::Id;
 
 use std::time::Duration;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use super::token::{NewRunToolScope, TokenService};
 use crate::AppState;
 
@@ -40,7 +39,7 @@ impl McpAccess {
 /// revokes it instead.
 pub struct RunToolGrant {
     pub access: McpAccess,
-    run_id: Uuid,
+    run_id: Id,
     pool: PgPool,
     revoked: bool,
 }

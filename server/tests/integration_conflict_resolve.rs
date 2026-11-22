@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -101,9 +102,14 @@ async fn finish_ticket(
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path =
-        common::setup_worktree_with_commit(&local_path, &worktrees_root, "test-repo", &ticket_id);
-    common::persist_setup_worktree_branch(state.db.as_ref().expect("db pool"), &ticket_id).await;
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        &worktrees_root,
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     TicketGit {
         _git_keep: git_dir,
         _worktrees: worktrees,
@@ -217,9 +223,9 @@ async fn insert_run(
         )
         "#,
     )
-    .bind(uuid::Uuid::new_v4())
-    .bind(uuid::Uuid::parse_str(&fx.ticket_id).unwrap())
-    .bind(uuid::Uuid::parse_str(agent_id).unwrap())
+    .bind(Id::new())
+    .bind(Id::parse_str(&fx.ticket_id).unwrap())
+    .bind(Id::parse_str(agent_id).unwrap())
     .bind(job_type)
     .bind(context_profile)
     .bind(created)
@@ -312,8 +318,8 @@ async fn resolve_conflict_starts_one_run_and_ignores_a_second_request() {
     );
 
     let pool = fx.state.db.clone().expect("pool");
-    let parsed = uuid::Uuid::parse_str(&run_id).unwrap();
-    let row: (String, String, Option<uuid::Uuid>) = sqlx::query_as(
+    let parsed = Id::parse_str(&run_id).unwrap();
+    let row: (String, String, Option<Id>) = sqlx::query_as(
         "SELECT job_type, context_profile, trigger_comment_id FROM agent_runs WHERE id = $1",
     )
     .bind(parsed)
@@ -398,7 +404,7 @@ async fn resolve_conflict_is_refused_when_connector_is_not_ready() {
     let agent_id = assign_ada(&fx).await;
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
-        .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+        .bind(Id::parse_str(&agent_id).unwrap())
         .execute(&pool)
         .await
         .expect("switch connector");
@@ -619,7 +625,7 @@ async fn merge_conflict_on_done_stays_done_until_asked() {
     assert_eq!(approved["humanReview"]["headSha"], approved_sha);
     assert_eq!(approved["humanReview"]["stale"], false);
     let pool = fx.state.db.clone().expect("pool");
-    let ticket_uuid = uuid::Uuid::parse_str(&fx.ticket_id).unwrap();
+    let ticket_uuid = Id::parse_str(&fx.ticket_id).unwrap();
     let accepted_at_before: time::OffsetDateTime =
         sqlx::query_scalar("SELECT accepted_at FROM ticket_human_reviews WHERE ticket_id = $1")
             .bind(ticket_uuid)
@@ -691,9 +697,9 @@ async fn merge_conflict_on_done_stays_done_until_asked() {
     let runs = list_runs(&fx).await;
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["id"], run_id);
-    let row: (String, Option<uuid::Uuid>) =
+    let row: (String, Option<Id>) =
         sqlx::query_as("SELECT context_profile, trigger_comment_id FROM agent_runs WHERE id = $1")
-            .bind(uuid::Uuid::parse_str(&run_id).unwrap())
+            .bind(Id::parse_str(&run_id).unwrap())
             .fetch_one(&pool)
             .await
             .expect("run row");
@@ -775,7 +781,7 @@ async fn asking_on_a_done_merge_conflict_with_a_connector_not_ready_stays_done()
     done_with_merge_conflict(&fx).await;
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
-        .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+        .bind(Id::parse_str(&agent_id).unwrap())
         .execute(&pool)
         .await
         .expect("switch connector");
@@ -949,9 +955,9 @@ async fn unassigned_done_ticket_preselects_last_implementer() {
     assert_eq!(ticket["status"], "in_progress");
     assert_eq!(ticket["assigneeAgentId"], frontend_id);
     let pool = fx.state.db.clone().expect("pool");
-    let row: (String, Option<uuid::Uuid>) =
+    let row: (String, Option<Id>) =
         sqlx::query_as("SELECT context_profile, trigger_comment_id FROM agent_runs WHERE id = $1")
-            .bind(uuid::Uuid::parse_str(asked["run"]["id"].as_str().unwrap()).unwrap())
+            .bind(Id::parse_str(asked["run"]["id"].as_str().unwrap()).unwrap())
             .fetch_one(&pool)
             .await
             .expect("run row");
@@ -1059,7 +1065,7 @@ async fn tech_lead_with_custom_role_resolve_reaches_in_review() {
     .await;
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE agents SET name = 'Architect', role = 'Architect' WHERE id = $1")
-        .bind(uuid::Uuid::parse_str(&tech_lead_id).unwrap())
+        .bind(Id::parse_str(&tech_lead_id).unwrap())
         .execute(&pool)
         .await
         .expect("rename tech lead role");
@@ -1106,7 +1112,7 @@ async fn asking_a_not_ready_agent_leaves_the_ticket_unchanged() {
     insert_run(&fx, &frontend_id, "work_on_ticket", "full", -10).await;
     let pool = fx.state.db.clone().expect("pool");
     sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
-        .bind(uuid::Uuid::parse_str(&frontend_id).unwrap())
+        .bind(Id::parse_str(&frontend_id).unwrap())
         .execute(&pool)
         .await
         .expect("switch connector");

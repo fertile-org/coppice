@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::tickets::{map_plan_error, publish_ticket_state, UpdateStatusError};
 use crate::services::chat_service::{ChatError, ChatService};
@@ -19,8 +20,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/tickets/{ticket_id}/designs", get(list_for_ticket))
@@ -81,10 +80,10 @@ fn option_responses(options: Vec<DesignOption>) -> Vec<DesignOptionResponse> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesignSetResponse {
-    id: Uuid,
+    id: Id,
     title: String,
     kind: DesignKind,
-    run_id: Uuid,
+    run_id: Id,
     options: Vec<DesignOptionResponse>,
     chosen: Option<ChosenOption>,
     recommended: Option<ChosenOption>,
@@ -110,7 +109,7 @@ fn artifacts(state: &AppState) -> PathBuf {
 async fn to_response(
     pool: &sqlx::PgPool,
     set: DesignSetSummary,
-    ticket_id: Option<Uuid>,
+    ticket_id: Option<Id>,
 ) -> Result<DesignSetResponse, StatusCode> {
     let choice = choice_state(pool, &set, ticket_id, set.inherited)
         .await
@@ -138,7 +137,7 @@ async fn to_response(
 async fn to_responses(
     pool: &sqlx::PgPool,
     sets: Vec<DesignSetSummary>,
-    ticket_id: Option<Uuid>,
+    ticket_id: Option<Id>,
 ) -> Result<Vec<DesignSetResponse>, StatusCode> {
     let mut responses = Vec::with_capacity(sets.len());
     for set in sets {
@@ -158,9 +157,9 @@ fn map_design(err: DesignError) -> StatusCode {
 
 async fn visible(
     pool: &sqlx::PgPool,
-    user_id: Uuid,
-    ticket_id: Option<Uuid>,
-    chat_session_id: Option<Uuid>,
+    user_id: Id,
+    ticket_id: Option<Id>,
+    chat_session_id: Option<Id>,
 ) -> Result<(), StatusCode> {
     if let Some(chat_session_id) = chat_session_id {
         return ChatService::new(pool)
@@ -188,7 +187,7 @@ async fn visible(
 async fn list_for_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
 ) -> Result<Json<Vec<DesignSetResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
     visible(pool, user.id, Some(ticket_id), None).await?;
@@ -202,7 +201,7 @@ async fn list_for_ticket(
 async fn list_for_chat(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
 ) -> Result<Json<Vec<DesignSetResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
     visible(pool, user.id, None, Some(session_id)).await?;
@@ -216,8 +215,8 @@ async fn list_for_chat(
 async fn open_published(
     svc: &DesignService<'_>,
     pool: &sqlx::PgPool,
-    user_id: Uuid,
-    set_id: Uuid,
+    user_id: Id,
+    set_id: Id,
 ) -> Result<DesignSetRecord, StatusCode> {
     let record = svc.get(set_id).await.map_err(map_design)?;
     visible(pool, user_id, record.ticket_id, record.chat_session_id).await?;
@@ -230,7 +229,7 @@ async fn open_published(
 async fn get_set(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(set_id): Path<Uuid>,
+    Path(set_id): Path<Id>,
 ) -> Result<Json<DesignSetResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let svc = DesignService::new(pool, artifacts(&state));
@@ -243,7 +242,7 @@ async fn get_set(
 async fn choose(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(set_id): Path<Uuid>,
+    Path(set_id): Path<Id>,
     Json(body): Json<ChooseBody>,
 ) -> Result<StatusCode, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
@@ -287,7 +286,7 @@ fn media_type(path: &str) -> &'static str {
 async fn get_file(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path((set_id, path)): Path<(Uuid, String)>,
+    Path((set_id, path)): Path<(Id, String)>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let pool = pool_from_state(&state)?;
     let svc = DesignService::new(pool, artifacts(&state));

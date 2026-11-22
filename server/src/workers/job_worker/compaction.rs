@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use std::path::PathBuf;
 
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use super::{best_effort_persist_artifacts, JobCancelled};
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::{AgentRun, RunStatus};
@@ -31,7 +30,7 @@ pub(super) async fn execute_compaction(
     run_svc: &RunService<'_>,
     run: &AgentRun,
 ) -> anyhow::Result<()> {
-    let batch_id: Uuid = sqlx::query_scalar::<_, Option<Uuid>>(
+    let batch_id: Id = sqlx::query_scalar::<_, Option<Id>>(
         "SELECT compaction_batch_id FROM agent_runs WHERE id = $1",
     )
     .bind(run.id)
@@ -89,7 +88,7 @@ pub(super) async fn execute_compaction(
         .mark_running(run.id)
         .await
         .context("mark compaction run running")?;
-    let compaction_ticket_ids: Vec<Uuid> = sqlx::query_scalar(
+    let compaction_ticket_ids: Vec<Id> = sqlx::query_scalar(
         "SELECT ticket_id FROM knowledge_compaction_batch_tickets WHERE batch_id = $1 ORDER BY ticket_id",
     )
     .bind(batch_id)

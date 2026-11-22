@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 use axum::{
     body::Body,
     http::{header, Request, StatusCode},
@@ -84,7 +85,7 @@ pub fn setup_worktree_with_commit(
     ticket_id: &str,
 ) -> PathBuf {
     use coppice_server::services::worktree_service::{compute_paths, legacy_ticket_branch};
-    let ticket_uuid: uuid::Uuid = ticket_id.parse().expect("ticket uuid");
+    let ticket_uuid: Id = ticket_id.parse().expect("ticket uuid");
     let paths = compute_paths(worktrees_root, repo_name, ticket_uuid);
     let branch = legacy_ticket_branch(ticket_uuid);
     std::fs::create_dir_all(&paths.worktree_dir).expect("worktree dir");
@@ -123,23 +124,66 @@ pub fn setup_worktree_with_commit(
     paths.worktree_dir
 }
 
-/// Record the legacy branch [`setup_worktree_with_commit`] created on the ticket.
-///
-/// Without this, the first job-worker run calls `ensure_ticket_branch_name` and stores a
-/// title-slug ref that was never created, so `sync_worktree_to_branch_tip` fails with
-/// `unknown revision`.
-pub async fn persist_setup_worktree_branch(pool: &sqlx::PgPool, ticket_id: &str) {
-    use coppice_server::services::worktree_service::legacy_ticket_branch;
-    let ticket_uuid: uuid::Uuid = ticket_id.parse().expect("ticket uuid");
-    let branch = legacy_ticket_branch(ticket_uuid);
-    sqlx::query(
-        "UPDATE tickets SET branch_name = $1, updated_at = now() WHERE id = $2 AND branch_name IS NULL",
-    )
-    .bind(&branch)
-    .bind(ticket_uuid)
-    .execute(pool)
-    .await
-    .expect("persist setup worktree branch");
+/// Worktree on `agent/<8hex>-test-ticket` with `tickets.branch_name` set to match
+/// (same title as create_test_ticket). Use when a later merge/ensure must find the branch.
+pub async fn setup_persisted_worktree(
+    pool: &sqlx::PgPool,
+    git_dir: &Path,
+    worktrees_root: &Path,
+    repo_name: &str,
+    ticket_id: &str,
+) -> PathBuf {
+    use coppice_server::services::worktree_service::{build_ticket_branch, compute_paths};
+    let ticket_uuid: Id = ticket_id.parse().expect("ticket uuid");
+    let paths = compute_paths(worktrees_root, repo_name, ticket_uuid);
+    let branch = build_ticket_branch(ticket_uuid, "Test ticket");
+    std::fs::create_dir_all(&paths.worktree_dir).expect("worktree dir");
+    let worktree_output = Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "-B",
+            &branch,
+            paths.worktree_dir.to_str().unwrap(),
+            "main",
+        ])
+        .current_dir(git_dir)
+        .output()
+        .expect("worktree add");
+    assert!(
+        worktree_output.status.success(),
+        "worktree add failed: {}",
+        String::from_utf8_lossy(&worktree_output.stderr)
+    );
+    std::fs::write(paths.worktree_dir.join("feature.txt"), "new feature\n").expect("write");
+    Command::new("git")
+        .args(["add", "feature.txt"])
+        .current_dir(&paths.worktree_dir)
+        .output()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-m", "feature"])
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@localhost")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@localhost")
+        .current_dir(&paths.worktree_dir)
+        .output()
+        .expect("git commit");
+    persist_test_ticket_branch(pool, ticket_id).await;
+    paths.worktree_dir
+}
+
+/// Persist the branch `setup_persisted_worktree` created.
+pub async fn persist_test_ticket_branch(pool: &sqlx::PgPool, ticket_id: &str) {
+    let id: Id = ticket_id.parse().expect("ticket uuid");
+    let branch = coppice_server::services::worktree_service::build_ticket_branch(id, "Test ticket");
+    sqlx::query("UPDATE tickets SET branch_name = $1 WHERE id = $2")
+        .bind(&branch)
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("persist test ticket branch");
 }
 
 pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
@@ -177,16 +221,16 @@ async fn init_test_plugins(
 ) -> Arc<coppice_server::plugins::skills::SkillCatalog> {
     static BASE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| tempfile::tempdir().expect("plugins tempdir"));
-    let dir = base.path().join(uuid::Uuid::new_v4().to_string());
+    let dir = base.path().join(Id::new().to_string());
     config.plugins.dir = dir.to_string_lossy().into_owned();
     config.plugins.marketplaces_dir = base
         .path()
-        .join(format!("{}-marketplaces", uuid::Uuid::new_v4()))
+        .join(format!("{}-marketplaces", Id::new()))
         .to_string_lossy()
         .into_owned();
     let builtin = base
         .path()
-        .join(format!("builtin-{}", uuid::Uuid::new_v4()));
+        .join(format!("builtin-{}", Id::new()));
     std::fs::create_dir_all(&builtin).expect("builtin plugins dir");
     coppice_server::plugins::builtin::materialize_builtin(&builtin).expect("materialize builtins");
     config.mcp.builtin_plugins_dir = std::fs::canonicalize(&builtin)
@@ -1048,7 +1092,7 @@ pub fn multipart_request_bytes(
 /// Mints a gateway token for an existing run, scoped from the run's own agent/ticket/board.
 pub async fn mint_test_token(
     state: &Arc<AppState>,
-    run_id: uuid::Uuid,
+    run_id: Id,
     profile: coppice_server::domain::context_profile::ContextProfile,
 ) -> String {
     mint_test_token_with_plugins(state, run_id, profile, vec![]).await
@@ -1057,14 +1101,14 @@ pub async fn mint_test_token(
 /// Like `mint_test_token`, with the given plugin snapshot.
 pub async fn mint_test_token_with_plugins(
     state: &Arc<AppState>,
-    run_id: uuid::Uuid,
+    run_id: Id,
     profile: coppice_server::domain::context_profile::ContextProfile,
-    plugin_ids: Vec<uuid::Uuid>,
+    plugin_ids: Vec<Id>,
 ) -> String {
     use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 
     let pool = state.db.as_ref().expect("db pool");
-    let (agent_id, ticket_id, job_type, board_id): (uuid::Uuid, uuid::Uuid, String, uuid::Uuid) =
+    let (agent_id, ticket_id, job_type, board_id): (Id, Id, String, Id) =
         sqlx::query_as(
             "SELECT r.agent_id, r.ticket_id, r.job_type, t.board_id \
              FROM agent_runs r JOIN tickets t ON t.id = r.ticket_id WHERE r.id = $1",

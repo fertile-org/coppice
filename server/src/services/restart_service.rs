@@ -1,12 +1,11 @@
 //! A crashed or restarted run waits for a person. The worktree stays until
 //! they resume, discard the changed files, or cancel.
+use crate::domain::Id;
 
 use std::path::Path;
 
 use sqlx::PgPool;
 use sqlx::Row;
-use uuid::Uuid;
-
 use crate::copy::restart::{
     comment_for, confirm_discard, ACTION_CANCEL, ACTION_DISCARD, ACTION_RESUME,
 };
@@ -34,7 +33,7 @@ pub enum RestartError {
 }
 
 pub struct RestartChoice {
-    pub run_id: Uuid,
+    pub run_id: Id,
     pub changed_files: i32,
     pub previous_status: TicketStatus,
     pub resume_label: &'static str,
@@ -53,8 +52,8 @@ impl<'a> RestartService<'a> {
 
     pub async fn record(
         &self,
-        run_id: Uuid,
-        ticket_id: Uuid,
+        run_id: Id,
+        ticket_id: Id,
         changed_files: u32,
         previous_status: TicketStatus,
     ) -> Result<(), RestartError> {
@@ -76,7 +75,7 @@ impl<'a> RestartService<'a> {
         Ok(())
     }
 
-    pub async fn open(&self, ticket_id: Uuid) -> Result<Option<RestartChoice>, RestartError> {
+    pub async fn open(&self, ticket_id: Id) -> Result<Option<RestartChoice>, RestartError> {
         let row = sqlx::query(
             r#"
             SELECT run_id, changed_files, previous_status
@@ -111,7 +110,7 @@ impl<'a> RestartService<'a> {
 
     pub async fn resume(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
     ) -> Result<crate::domain::run::AgentRun, RestartError> {
         let choice = self.require_open(ticket_id).await?;
         let tickets = TicketService::new(self.pool);
@@ -143,7 +142,7 @@ impl<'a> RestartService<'a> {
         Ok(run)
     }
 
-    pub async fn discard(&self, ticket_id: Uuid) -> Result<(), RestartError> {
+    pub async fn discard(&self, ticket_id: Id) -> Result<(), RestartError> {
         let choice = self.require_open(ticket_id).await?;
         if choice.changed_files == 0 {
             return Err(RestartError::UseCancel);
@@ -164,7 +163,7 @@ impl<'a> RestartService<'a> {
         Ok(())
     }
 
-    pub async fn cancel(&self, ticket_id: Uuid) -> Result<(), RestartError> {
+    pub async fn cancel(&self, ticket_id: Id) -> Result<(), RestartError> {
         let choice = self.require_open(ticket_id).await?;
         if choice.changed_files > 0 {
             return Err(RestartError::UseDiscard);
@@ -176,13 +175,13 @@ impl<'a> RestartService<'a> {
         Ok(())
     }
 
-    async fn require_open(&self, ticket_id: Uuid) -> Result<RestartChoice, RestartError> {
+    async fn require_open(&self, ticket_id: Id) -> Result<RestartChoice, RestartError> {
         self.open(ticket_id)
             .await?
             .ok_or(RestartError::NothingPending)
     }
 
-    async fn resolve(&self, run_id: Uuid) -> Result<(), RestartError> {
+    async fn resolve(&self, run_id: Id) -> Result<(), RestartError> {
         sqlx::query(
             r#"
             UPDATE run_restart_decisions
@@ -196,11 +195,11 @@ impl<'a> RestartService<'a> {
         Ok(())
     }
 
-    async fn worktree_path(&self, run_id: Uuid) -> Result<Option<String>, RestartError> {
+    async fn worktree_path(&self, run_id: Id) -> Result<Option<String>, RestartError> {
         Ok(RunService::new(self.pool).get(run_id).await?.worktree_path)
     }
 
-    async fn start_sha(&self, run_id: Uuid) -> Result<Option<String>, RestartError> {
+    async fn start_sha(&self, run_id: Id) -> Result<Option<String>, RestartError> {
         let sha = sqlx::query_scalar::<_, Option<String>>(
             "SELECT start_sha FROM agent_runs WHERE id = $1",
         )

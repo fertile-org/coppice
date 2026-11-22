@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -11,8 +12,6 @@ use sqlx::PgPool;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 fn builder_check_fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../fixtures/plugins/builder-check")
@@ -200,7 +199,7 @@ async fn create_get_list_cancel_discard_and_accept_cleanup() {
     let (status, created3) =
         send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
-    let id3: uuid::Uuid = created3["id"].as_str().unwrap().parse().unwrap();
+    let id3: Id = created3["id"].as_str().unwrap().parse().unwrap();
     let workspace3 = Path::new(created3["workspacePath"].as_str().unwrap()).to_path_buf();
     let pool = state.db.as_ref().unwrap();
     sqlx::query("UPDATE plugin_builds SET status = 'ready_to_try' WHERE id = $1")
@@ -234,7 +233,7 @@ async fn unknown_plugin_build_id_gets_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-async fn wait_for_run_status(pool: &PgPool, run_id: Uuid, wanted: &str) {
+async fn wait_for_run_status(pool: &PgPool, run_id: Id, wanted: &str) {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
@@ -309,7 +308,7 @@ async fn plan_run_persists_revision_with_advanced_and_ask_for_changes() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{started}");
     assert_eq!(started["build"]["status"], "planning");
-    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = started["runId"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(pool, run_id, "succeeded").await;
 
     let (status, got) = send(
@@ -338,7 +337,7 @@ async fn plan_run_persists_revision_with_advanced_and_ask_for_changes() {
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{revision2}");
-    let run2: Uuid = revision2["runId"].as_str().unwrap().parse().unwrap();
+    let run2: Id = revision2["runId"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(pool, run2, "succeeded").await;
 
     let (status, got2) = send(
@@ -398,7 +397,7 @@ async fn build_run_writes_workspace_files_and_keeps_building() {
     assert_eq!(status, StatusCode::OK);
 
     // Move to plan_ready (PATCH alone leaves drafting).
-    let build_id: Uuid = id.parse().unwrap();
+    let build_id: Id = id.parse().unwrap();
     sqlx::query("UPDATE plugin_builds SET status = 'plan_ready' WHERE id = $1")
         .bind(build_id)
         .execute(pool)
@@ -416,7 +415,7 @@ async fn build_run_writes_workspace_files_and_keeps_building() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{started}");
     assert_eq!(started["build"]["status"], "building");
-    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = started["runId"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(pool, run_id, "succeeded").await;
 
     assert!(workspace.join("README.md").is_file());
@@ -483,7 +482,7 @@ async fn plan_run_errors_when_connector_not_ready() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    let id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let (status, _) = send(
         &app,
         "PATCH",
@@ -531,7 +530,7 @@ async fn cancelling_queued_build_run_reverts_to_plan_ready() {
     assert_eq!(status, StatusCode::CREATED);
     let id = created["id"].as_str().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap()).to_path_buf();
-    let build_id: Uuid = id.parse().unwrap();
+    let build_id: Id = id.parse().unwrap();
 
     let (status, _) = send(
         &app,
@@ -569,7 +568,7 @@ async fn cancelling_queued_build_run_reverts_to_plan_ready() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{started}");
     assert_eq!(started["build"]["status"], "building");
-    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = started["runId"].as_str().unwrap().parse().unwrap();
 
     let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
         .bind(run_id)
@@ -614,7 +613,7 @@ async fn stopping_build_run_reverts_to_plan_ready_without_discard() {
     assert_eq!(status, StatusCode::CREATED);
     let id = created["id"].as_str().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap()).to_path_buf();
-    let build_id: Uuid = id.parse().unwrap();
+    let build_id: Id = id.parse().unwrap();
 
     let (status, _) = send(
         &app,
@@ -645,7 +644,7 @@ async fn stopping_build_run_reverts_to_plan_ready_without_discard() {
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{started}");
-    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = started["runId"].as_str().unwrap().parse().unwrap();
     wait_for_run_status(pool, run_id, "running").await;
 
     // Cancel the agent run (Stop build), not the build record.
@@ -685,7 +684,7 @@ async fn finalize_installs_disabled_and_auto_tests() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let build_id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap());
 
     // Agent writes only in the workspace; plant a valid fixture there.
@@ -769,7 +768,7 @@ async fn finalize_reuses_name_when_prior_install_is_missing() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let first_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let first_id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap());
     copy_tree(&builder_check_fixture("pass-minimal"), workspace);
     sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
@@ -819,7 +818,7 @@ async fn finalize_reuses_name_when_prior_install_is_missing() {
     let (status, created2) =
         send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED, "{created2}");
-    let second_id: Uuid = created2["id"].as_str().unwrap().parse().unwrap();
+    let second_id: Id = created2["id"].as_str().unwrap().parse().unwrap();
     let workspace2 = Path::new(created2["workspacePath"].as_str().unwrap());
     copy_tree(&builder_check_fixture("pass-minimal"), workspace2);
     sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
@@ -861,7 +860,7 @@ async fn finalize_check_failure_never_installs() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let build_id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap());
     copy_tree(&builder_check_fixture("fail-gateway"), workspace);
 
@@ -926,7 +925,7 @@ async fn try_again_and_ask_for_changes_from_check_failure() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let build_id: Id = created["id"].as_str().unwrap().parse().unwrap();
 
     sqlx::query(
         "UPDATE plugin_builds
@@ -961,7 +960,7 @@ async fn try_again_and_ask_for_changes_from_check_failure() {
     assert_eq!(started["build"]["formatRetries"], 0);
 
     // Stop the queued run so we can exercise Ask for changes next.
-    let run_id: Uuid = started["runId"].as_str().unwrap().parse().unwrap();
+    let run_id: Id = started["runId"].as_str().unwrap().parse().unwrap();
     RunService::new(pool).stop(run_id).await.unwrap();
     wait_for_run_status(pool, run_id, "cancelled").await;
 
@@ -1011,7 +1010,7 @@ async fn accept_enable_discard_uninstall_ask_from_ready_and_active_run_id() {
     let (status, created) = send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf)
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let build_id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap());
     copy_tree(&builder_check_fixture("pass-minimal"), workspace);
     sqlx::query("UPDATE plugin_builds SET status = 'building' WHERE id = $1")
@@ -1067,7 +1066,7 @@ async fn accept_enable_discard_uninstall_ask_from_ready_and_active_run_id() {
     assert!(planned["build"]["activeRunId"].is_string());
 
     // Cancel that plan run and restore ready_to_try for Accept.
-    let plan_run: Uuid = planned["runId"].as_str().unwrap().parse().unwrap();
+    let plan_run: Id = planned["runId"].as_str().unwrap().parse().unwrap();
     RunService::new(pool).stop(plan_run).await.unwrap();
     wait_for_run_status(pool, plan_run, "cancelled").await;
     sqlx::query(
@@ -1101,7 +1100,7 @@ async fn accept_enable_discard_uninstall_ask_from_ready_and_active_run_id() {
     let (status, created2) =
         send(&app, "POST", "/api/plugin-builds", Value::Null, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
-    let build_id2: Uuid = created2["id"].as_str().unwrap().parse().unwrap();
+    let build_id2: Id = created2["id"].as_str().unwrap().parse().unwrap();
     let workspace2 = Path::new(created2["workspacePath"].as_str().unwrap()).to_path_buf();
     let dest = Path::new(&state.config.plugins.dir).join("discard-me");
     copy_tree(&builder_check_fixture("pass-minimal"), &dest);
@@ -1205,11 +1204,11 @@ async fn ready_builder_plugin(
     cookie: &str,
     csrf: &str,
     name: &str,
-) -> (Uuid, Uuid) {
+) -> (Id, Id) {
     let pool = state.db.as_ref().unwrap();
     let (status, created) = send(app, "POST", "/api/plugin-builds", Value::Null, cookie, csrf).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let build_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let build_id: Id = created["id"].as_str().unwrap().parse().unwrap();
     let workspace = Path::new(created["workspacePath"].as_str().unwrap());
     copy_tree(&builder_check_fixture("pass-minimal"), workspace);
     let manifest = workspace.join(".claude-plugin/plugin.json");

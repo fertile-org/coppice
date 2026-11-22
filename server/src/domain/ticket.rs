@@ -1,9 +1,8 @@
+use crate::domain::Id;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TicketPriority {
@@ -15,30 +14,30 @@ pub enum TicketPriority {
 
 #[derive(Debug, Clone)]
 pub struct Ticket {
-    pub id: Uuid,
-    pub board_id: Uuid,
-    pub repo_id: Option<Uuid>,
+    pub id: Id,
+    pub board_id: Id,
+    pub repo_id: Option<Id>,
     pub title: String,
     pub description: String,
-    pub attachment_ids: Vec<Uuid>,
+    pub attachment_ids: Vec<Id>,
     pub status: TicketStatus,
     pub substatus: Option<Substatus>,
     pub substatus_metadata: Option<Value>,
     pub priority: Option<TicketPriority>,
-    pub assignee_agent_id: Option<Uuid>,
-    pub owner_user_id: Option<Uuid>,
+    pub assignee_agent_id: Option<Id>,
+    pub owner_user_id: Option<Id>,
     pub branch_name: Option<String>,
     pub pending_assign_recommendation: Option<Value>,
-    pub parent_ticket_id: Option<Uuid>,
+    pub parent_ticket_id: Option<Id>,
     pub pending_split_recommendation: Option<Value>,
     pub clarification_round: i32,
     pub skip_planning: bool,
     pub skip_human_review: bool,
     pub content_version: i32,
-    pub approved_plan_id: Option<Uuid>,
+    pub approved_plan_id: Option<Id>,
     pub approved_plan_content_version: Option<i32>,
     pub created_by: String,
-    pub created_by_id: Option<Uuid>,
+    pub created_by_id: Option<Id>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub archived_at: Option<OffsetDateTime>,

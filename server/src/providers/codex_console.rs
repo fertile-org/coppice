@@ -460,6 +460,8 @@ fn emit(stream: &Arc<RunStreamHandle>, event: Value) {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
     use crate::sessions::run_registry::RunStreamRegistry;
@@ -475,7 +477,7 @@ mod tests {
 
     fn mcp_title(server: &str, tool: &str) -> Value {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
         publisher.handle_json(
             &handle,
@@ -510,7 +512,7 @@ mod tests {
 
     fn published_fixture_events() -> Vec<Value> {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
         let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
             .expect("read Codex done fixture");
@@ -533,7 +535,7 @@ mod tests {
     #[test]
     fn publishes_session_and_text_events() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
 
@@ -570,7 +572,7 @@ mod tests {
     #[test]
     fn publishes_command_execution_result() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
 
@@ -602,7 +604,7 @@ mod tests {
     #[test]
     fn failed_and_declined_commands_publish_error_status() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
 
         for value in [
@@ -686,7 +688,7 @@ mod tests {
     #[test]
     fn publishes_collaboration_web_search_todo_and_error_items() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
         let values = [
             json!({
@@ -822,7 +824,7 @@ mod tests {
     #[test]
     fn reasoning_that_looks_like_a_contract_is_not_published_as_result() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
         let contract =
             r#"{"status":"done","summary":"Final.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
@@ -858,7 +860,7 @@ mod tests {
     #[test]
     fn unknown_and_malformed_events_are_ignored() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut publisher = publisher();
 
         for value in [
@@ -890,7 +892,7 @@ mod tests {
     #[test]
     fn extracts_result_contract_from_text() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
 
@@ -920,7 +922,7 @@ mod tests {
     #[test]
     fn duplicate_result_contract_is_skipped() {
         let registry = RunStreamRegistry::new();
-        let handle = registry.register(uuid::Uuid::new_v4());
+        let handle = registry.register(Id::new());
         let mut rx = handle.subscribe();
         let mut publisher = publisher();
         let contract =

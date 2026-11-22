@@ -1,9 +1,8 @@
 //! Server-owned git state of a ticket, and rechecks of the outcomes that
 //! resolve outside Coppice (a push done by hand, a worktree removed by hand).
+use crate::domain::Id;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::git_state::{derive_git_state, GitOutcome, GitStateInput, TicketGitState};
 use crate::domain::substatus::TicketStatus;
 use crate::services::git_ops::{ahead_behind, git_rev_parse};
@@ -46,7 +45,7 @@ impl<'a> GitStateService<'a> {
     /// Returns whether the outcome changed.
     pub async fn set_outcome_and_notify(
         pool: &PgPool,
-        ticket_id: Uuid,
+        ticket_id: Id,
         outcome: Option<GitOutcome>,
         reason: Option<&str>,
     ) -> Result<bool, TicketGitError> {
@@ -74,7 +73,7 @@ impl<'a> GitStateService<'a> {
     /// Returns whether the reason changed.
     pub async fn record_not_merged_reason(
         pool: &PgPool,
-        ticket_id: Uuid,
+        ticket_id: Id,
         reason: &str,
     ) -> Result<bool, TicketGitError> {
         let reviews = HumanReviewService::new(pool);
@@ -97,7 +96,7 @@ impl<'a> GitStateService<'a> {
 
     /// Clear a `NotPushed` or `WorktreeKept` outcome when local git says it is
     /// resolved. Never fetches. Returns the state afterwards.
-    pub async fn recheck(&self, ticket_id: Uuid) -> Result<TicketGitState, TicketGitError> {
+    pub async fn recheck(&self, ticket_id: Id) -> Result<TicketGitState, TicketGitError> {
         let reviews = HumanReviewService::new(self.pool);
         let Some(review) = reviews.get(ticket_id).await? else {
             return Ok(TicketGitState::InReview);
@@ -133,8 +132,8 @@ impl<'a> GitStateService<'a> {
 
     /// Recheck every ticket of a repo that is waiting on a push, for example
     /// after a push from Settings.
-    pub async fn recheck_repo_not_pushed(&self, repo_id: Uuid) -> Result<(), sqlx::Error> {
-        let ids: Vec<Uuid> = sqlx::query_scalar(
+    pub async fn recheck_repo_not_pushed(&self, repo_id: Id) -> Result<(), sqlx::Error> {
+        let ids: Vec<Id> = sqlx::query_scalar(
             r#"
             SELECT ticket.id
             FROM tickets ticket
@@ -154,7 +153,7 @@ impl<'a> GitStateService<'a> {
     }
 
     /// The default branch has nothing the remote-tracking ref lacks.
-    async fn not_pushed_resolved(&self, ticket_id: Uuid) -> Result<bool, TicketGitError> {
+    async fn not_pushed_resolved(&self, ticket_id: Id) -> Result<bool, TicketGitError> {
         let ctx = TicketGitService::from_state(self.state, self.pool)
             .resolve_context(ticket_id)
             .await?;
@@ -174,7 +173,7 @@ mod tests {
 
     fn review(stale: bool) -> HumanReview {
         HumanReview {
-            ticket_id: Uuid::nil(),
+            ticket_id: Id::nil(),
             head_sha: "abc".into(),
             comment_ids: vec![],
             run_ids: vec![],

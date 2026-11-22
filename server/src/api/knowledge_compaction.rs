@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::agent::Agent;
 use crate::domain::knowledge_compaction::{BatchStatus, CompactionBatch};
@@ -17,8 +18,6 @@ use serde::Serialize;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/knowledge/compaction", get(get_status))
@@ -88,7 +87,7 @@ enum CompactionState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentSummary {
-    id: Uuid,
+    id: Id,
     name: String,
     enabled: bool,
     connector: String,
@@ -97,10 +96,10 @@ struct AgentSummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BatchResponse {
-    id: Uuid,
-    agent_id: Uuid,
+    id: Id,
+    agent_id: Id,
     agent_name: Option<String>,
-    run_id: Option<Uuid>,
+    run_id: Option<Id>,
     status: &'static str,
     trigger: &'static str,
     ticket_count: i32,

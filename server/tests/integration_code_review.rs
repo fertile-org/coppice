@@ -72,12 +72,14 @@ async fn setup_review_repo(
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path = common::setup_worktree_with_commit(
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
         &local_path,
         env.worktrees.path(),
         "test-repo",
         &ticket_id,
-    );
+    )
+    .await;
     (
         git_dir,
         env,
@@ -366,7 +368,7 @@ async fn setup_quiet_review(auto_start: bool) -> QuietReview {
     let (git_dir, local_path) = common::create_temp_git_checkout();
     let worktrees = tempfile::tempdir().expect("worktrees");
     let worktrees_path = worktrees.path().to_string_lossy().into_owned();
-    let (_state, app, cookie, csrf) =
+    let (state, app, cookie, csrf) =
         common::bootstrap_and_login_with_state_config(move |config| {
             config.workflow.auto_start_runs = auto_start;
             config.agent.worktrees_path = worktrees_path;
@@ -377,8 +379,14 @@ async fn setup_quiet_review(auto_start: bool) -> QuietReview {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    let worktree_path =
-        common::setup_worktree_with_commit(&local_path, worktrees.path(), "test-repo", &ticket_id);
+    let worktree_path = common::setup_persisted_worktree(
+        state.db.as_ref().expect("db"),
+        &local_path,
+        worktrees.path(),
+        "test-repo",
+        &ticket_id,
+    )
+    .await;
     QuietReview {
         _git_dir: git_dir,
         _worktrees: worktrees,
@@ -760,7 +768,7 @@ async fn reject_invalid_worktree_path() {
     }
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
-    let (_state, app, cookie, csrf, _env) =
+    let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;

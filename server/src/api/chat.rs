@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::knowledge::item_response as knowledge_item_response;
 use crate::api::tickets::ticket_to_response;
@@ -19,8 +20,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -51,7 +50,7 @@ struct AcceptProposalBody {
     title: Option<String>,
     /// Ticket description, or knowledge content.
     description: Option<String>,
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
     knowledge_type: Option<String>,
     scope: Option<String>,
 }
@@ -69,15 +68,15 @@ struct AcceptProposalResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionBody {
-    agent_id: Uuid,
-    board_id: Option<Uuid>,
-    repo_id: Option<Uuid>,
+    agent_id: Id,
+    board_id: Option<Id>,
+    repo_id: Option<Id>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListSessionsQuery {
-    board_id: Option<Uuid>,
+    board_id: Option<Id>,
 }
 
 #[derive(Deserialize)]
@@ -90,24 +89,24 @@ struct PatchSessionBody {
 #[serde(rename_all = "camelCase")]
 struct PostMessageBody {
     body: String,
-    attachment_ids: Option<Vec<Uuid>>,
+    attachment_ids: Option<Vec<Id>>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionResponse {
-    id: Uuid,
-    board_id: Option<Uuid>,
-    owner_user_id: Uuid,
-    agent_id: Uuid,
-    repo_id: Option<Uuid>,
-    parent_session_id: Option<Uuid>,
+    id: Id,
+    board_id: Option<Id>,
+    owner_user_id: Id,
+    agent_id: Id,
+    repo_id: Option<Id>,
+    parent_session_id: Option<Id>,
     status: String,
     last_message_preview: String,
     last_message_at: Option<String>,
     last_message_role: Option<String>,
     has_active_run: bool,
-    active_run_id: Option<Uuid>,
+    active_run_id: Option<Id>,
     title: Option<String>,
     created_at: String,
     updated_at: String,
@@ -116,7 +115,7 @@ struct SessionResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentSummary {
-    id: Uuid,
+    id: Id,
     filename: String,
     content_type: String,
     size_bytes: i64,
@@ -125,14 +124,14 @@ struct AttachmentSummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageResponse {
-    id: Uuid,
-    session_id: Uuid,
+    id: Id,
+    session_id: Id,
     seq: i64,
     role: String,
     body: String,
-    agent_run_id: Option<Uuid>,
+    agent_run_id: Option<Id>,
     action_metadata: Option<serde_json::Value>,
-    attachment_ids: Vec<Uuid>,
+    attachment_ids: Vec<Id>,
     attachments: Vec<AttachmentSummary>,
     created_at: String,
 }
@@ -169,7 +168,7 @@ struct ListMessagesQuery {
 #[serde(rename_all = "camelCase")]
 struct PostMessageResponse {
     message: MessageResponse,
-    run_id: Uuid,
+    run_id: Id,
 }
 
 fn map_error(err: ChatError) -> StatusCode {
@@ -210,7 +209,7 @@ fn map_chat_start_error(err: ChatError) -> ChatApiError {
     }
 }
 
-fn discard_chat_workspace_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
+fn discard_chat_workspace_if_ended(state: &AppState, session_id: Id, status: ChatSessionStatus) {
     if !matches!(status, ChatSessionStatus::Archived) {
         return;
     }
@@ -255,7 +254,7 @@ fn attachment_to_summary(attachment: &Attachment) -> AttachmentSummary {
 
 fn message_response(
     message: ChatMessage,
-    attachments_by_id: &HashMap<Uuid, Attachment>,
+    attachments_by_id: &HashMap<Id, Attachment>,
 ) -> MessageResponse {
     let attachments = message
         .attachment_ids
@@ -281,8 +280,8 @@ fn message_response(
 async fn attachments_for_messages(
     pool: &sqlx::PgPool,
     messages: &[ChatMessage],
-) -> Result<HashMap<Uuid, Attachment>, StatusCode> {
-    let mut ids: Vec<Uuid> = messages
+) -> Result<HashMap<Id, Attachment>, StatusCode> {
+    let mut ids: Vec<Id> = messages
         .iter()
         .flat_map(|m| m.attachment_ids.clone())
         .collect();
@@ -333,7 +332,7 @@ async fn list_sessions(
 async fn get_session(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
 ) -> Result<Json<SessionResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let session = ChatService::new(pool)
@@ -346,7 +345,7 @@ async fn get_session(
 async fn patch_session(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
     Json(body): Json<PatchSessionBody>,
 ) -> Result<Json<SessionResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -362,7 +361,7 @@ async fn patch_session(
 async fn list_messages(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
     axum::extract::Query(query): axum::extract::Query<ListMessagesQuery>,
 ) -> Result<Json<MessageListResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -387,7 +386,7 @@ async fn list_messages(
 async fn post_message(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<Id>,
     Json(body): Json<PostMessageBody>,
 ) -> Result<(StatusCode, Json<PostMessageResponse>), ChatApiError> {
     let pool = pool_from_state(&state).map_err(ChatApiError::Status)?;
@@ -411,7 +410,7 @@ async fn post_message(
 async fn accept_proposal(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((session_id, message_id, proposal_id)): Path<(Id, Id, Id)>,
     body: Option<Json<AcceptProposalBody>>,
 ) -> Result<Json<AcceptProposalResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -446,7 +445,7 @@ async fn accept_proposal(
 async fn reject_proposal(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path((session_id, message_id, proposal_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((session_id, message_id, proposal_id)): Path<(Id, Id, Id)>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let message = ChatService::new(pool)

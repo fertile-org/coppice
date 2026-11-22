@@ -593,23 +593,23 @@ mod tests {
     use crate::domain::context_profile::ContextProfile;
     use crate::domain::workflow::BoardAgentInfo;
     use std::collections::HashMap;
-    use uuid::Uuid;
+    use crate::domain::Id;
 
-    fn pm_agent_id() -> Uuid {
-        Uuid::from_u128(0x100)
+    fn pm_agent_id() -> Id {
+        Id::from_u128(0x100)
     }
 
-    fn engineer_agent_id() -> Uuid {
-        Uuid::from_u128(0x200)
+    fn engineer_agent_id() -> Id {
+        Id::from_u128(0x200)
     }
 
-    fn tech_lead_agent_id() -> Uuid {
-        Uuid::from_u128(0x300)
+    fn tech_lead_agent_id() -> Id {
+        Id::from_u128(0x300)
     }
 
     fn minimal_ctx() -> TransitionContext {
         TransitionContext {
-            ticket_id: Uuid::from_u128(1),
+            ticket_id: Id::from_u128(1),
             current_status: TicketStatus::Backlog,
             assignee_agent_id: Some(pm_agent_id()),
             agent_role: "PM".into(),
@@ -690,20 +690,20 @@ mod tests {
         }
     }
 
-    fn agent_map(keys: &[(&str, Uuid)]) -> HashMap<String, Uuid> {
+    fn agent_map(keys: &[(&str, Id)]) -> HashMap<String, Id> {
         keys.iter().map(|(k, id)| (k.to_string(), *id)).collect()
     }
 
-    fn qc_agent_id() -> Uuid {
-        Uuid::from_u128(0x400)
+    fn qc_agent_id() -> Id {
+        Id::from_u128(0x400)
     }
 
-    fn reviewer_agent_id() -> Uuid {
-        Uuid::from_u128(0x500)
+    fn reviewer_agent_id() -> Id {
+        Id::from_u128(0x500)
     }
 
     /// A board of `(key, id, role, created_secs)` agents, all enabled.
-    fn with_board(ctx: TransitionContext, agents: &[(&str, Uuid, &str, i64)]) -> TransitionContext {
+    fn with_board(ctx: TransitionContext, agents: &[(&str, Id, &str, i64)]) -> TransitionContext {
         TransitionContext {
             board_agent_keys: agents.iter().map(|(key, ..)| key.to_string()).collect(),
             board_agent_ids: agents
@@ -723,7 +723,7 @@ mod tests {
         }
     }
 
-    fn full_board() -> Vec<(&'static str, Uuid, &'static str, i64)> {
+    fn full_board() -> Vec<(&'static str, Id, &'static str, i64)> {
         vec![
             ("pm", pm_agent_id(), "PM", 1),
             ("tech_lead", tech_lead_agent_id(), "Technical Lead", 2),
@@ -1475,7 +1475,7 @@ mod tests {
             current_status: TicketStatus::InQa,
             agent_role: "QC".into(),
             agent_key: "qc".into(),
-            assignee_agent_id: Some(Uuid::from_u128(0x300)),
+            assignee_agent_id: Some(Id::from_u128(0x300)),
             run_outcome: RunOutcome::Succeeded,
             contract: AgentRunResult::Done {
                 summary: "Defects found.".into(),
@@ -1502,7 +1502,7 @@ mod tests {
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
-                ("qc", Uuid::from_u128(0x300)),
+                ("qc", Id::from_u128(0x300)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
             auto_assign_enabled: true,
@@ -1522,7 +1522,7 @@ mod tests {
             current_status: TicketStatus::InQa,
             agent_role: "QC".into(),
             agent_key: "qc".into(),
-            assignee_agent_id: Some(Uuid::from_u128(0x300)),
+            assignee_agent_id: Some(Id::from_u128(0x300)),
             run_outcome: RunOutcome::Succeeded,
             contract: AgentRunResult::Done {
                 summary: "No defects — all checks pass.".into(),
@@ -1549,7 +1549,7 @@ mod tests {
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
-                ("qc", Uuid::from_u128(0x300)),
+                ("qc", Id::from_u128(0x300)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
             auto_assign_enabled: true,
@@ -1568,12 +1568,12 @@ mod tests {
             current_status: TicketStatus::InReview,
             agent_role: "Technical Lead".into(),
             agent_key: "tech_lead".into(),
-            assignee_agent_id: Some(Uuid::from_u128(0x400)),
+            assignee_agent_id: Some(Id::from_u128(0x400)),
             run_outcome: RunOutcome::Blocked,
             contract: blocked_with_mentions(&["backend_engineer"]),
             board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
-                ("tech_lead", Uuid::from_u128(0x400)),
+                ("tech_lead", Id::from_u128(0x400)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
             auto_assign_enabled: true,

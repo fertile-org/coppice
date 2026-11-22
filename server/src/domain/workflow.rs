@@ -1,11 +1,10 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
 use serde_json::Value;
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 /// Planning run. It does not create a worktree or commit.
 pub const JOB_TYPE_PLAN_TICKET: &str = "plan_ticket";
 /// Read-only run that checks a split parent against its acceptance criteria.
@@ -27,16 +26,16 @@ pub enum RunOutcome {
 
 #[derive(Debug, Clone)]
 pub struct TransitionContext {
-    pub ticket_id: Uuid,
+    pub ticket_id: Id,
     pub current_status: TicketStatus,
-    pub assignee_agent_id: Option<Uuid>,
+    pub assignee_agent_id: Option<Id>,
     pub agent_role: String,
     pub agent_key: String,
     pub job_type: String,
     pub run_outcome: RunOutcome,
     pub contract: AgentRunResult,
     pub board_agent_keys: Vec<String>,
-    pub board_agent_ids: HashMap<String, Uuid>,
+    pub board_agent_ids: HashMap<String, Id>,
     pub board_implementer_keys: Vec<String>,
     pub auto_assign_enabled: bool,
     pub clarification_round: i32,
@@ -53,7 +52,7 @@ pub struct TransitionContext {
 #[derive(Debug, Clone)]
 pub struct BoardAgentInfo {
     pub key: String,
-    pub id: Uuid,
+    pub id: Id,
     pub role: String,
     pub created_at: OffsetDateTime,
 }
@@ -75,7 +74,7 @@ pub struct SplitTicketSpec {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingSplitRecommendation {
-    pub recommended_by_agent_id: Uuid,
+    pub recommended_by_agent_id: Id,
     pub recommended_at: String,
     pub splits: Vec<SplitTicketSpec>,
     /// Proposed by a planning run: created only by approving that plan.
@@ -87,7 +86,7 @@ pub struct PendingSplitRecommendation {
 #[serde(rename_all = "camelCase")]
 pub struct PendingRecommendation {
     pub recommended_agent_key: String,
-    pub recommended_by_agent_id: Uuid,
+    pub recommended_by_agent_id: Id,
     pub recommended_at: String,
     pub summary: Option<String>,
 }
@@ -95,14 +94,14 @@ pub struct PendingRecommendation {
 #[derive(Debug, Clone)]
 pub struct JobRequest {
     pub job_type: String,
-    pub agent_id: Uuid,
-    pub resume_agent_id: Option<Uuid>,
+    pub agent_id: Id,
+    pub resume_agent_id: Option<Id>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TransitionAction {
     pub new_status: Option<TicketStatus>,
-    pub new_assignee_id: Option<Option<Uuid>>,
+    pub new_assignee_id: Option<Option<Id>>,
     pub pending_recommendation: Option<Option<PendingRecommendation>>,
     pub substatus: Option<Option<Substatus>>,
     pub substatus_metadata: Option<Option<Value>>,
@@ -185,7 +184,7 @@ pub fn is_stage_eligible(status: TicketStatus, agent_key: &str, agent_role: &str
 pub fn stage_owner_for(
     status: TicketStatus,
     agents: &[BoardAgentInfo],
-    exclude: Option<Uuid>,
+    exclude: Option<Id>,
 ) -> Option<&BoardAgentInfo> {
     agents
         .iter()
@@ -219,7 +218,7 @@ mod tests {
     fn board_agent(id: u128, key: &str, role: &str, created_secs: i64) -> BoardAgentInfo {
         BoardAgentInfo {
             key: key.into(),
-            id: Uuid::from_u128(id),
+            id: Id::from_u128(id),
             role: role.into(),
             created_at: OffsetDateTime::from_unix_timestamp(created_secs).unwrap(),
         }
@@ -261,12 +260,12 @@ mod tests {
             board_agent(4, "qc", "QC", 40),
         ];
         let owner = stage_owner_for(TicketStatus::InReview, &agents, None).unwrap();
-        assert_eq!(owner.id, Uuid::from_u128(3));
+        assert_eq!(owner.id, Id::from_u128(3));
         let owner =
-            stage_owner_for(TicketStatus::InReview, &agents, Some(Uuid::from_u128(3))).unwrap();
-        assert_eq!(owner.id, Uuid::from_u128(2));
+            stage_owner_for(TicketStatus::InReview, &agents, Some(Id::from_u128(3))).unwrap();
+        assert_eq!(owner.id, Id::from_u128(2));
         let owner = stage_owner_for(TicketStatus::InQa, &agents, None).unwrap();
-        assert_eq!(owner.id, Uuid::from_u128(4));
+        assert_eq!(owner.id, Id::from_u128(4));
         assert!(stage_owner_for(TicketStatus::InQa, &agents[..3], None).is_none());
     }
 

@@ -1,12 +1,11 @@
 //! Merge an accepted ticket branch into a base branch, then record the
 //! outcome, post the activity comment and clean up.
+use crate::domain::Id;
 
 use std::sync::Arc;
 
 use sqlx::PgPool;
 use tokio::sync::OwnedMutexGuard;
-use uuid::Uuid;
-
 use crate::domain::git_state::GitOutcome;
 use crate::domain::substatus::TicketStatus;
 use crate::services::git_chain;
@@ -44,7 +43,7 @@ impl<'a> TicketMergeFlow<'a> {
     /// lock.
     pub async fn merge(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         base_branch: &str,
         actor: Actor,
     ) -> Result<MergeBranchResult, TicketGitError> {
@@ -59,7 +58,7 @@ impl<'a> TicketMergeFlow<'a> {
     /// two runs for one ticket merge once.
     pub async fn merge_after_accept(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         base_branch: &str,
     ) -> Result<Option<MergeBranchResult>, TicketGitError> {
         let repo_id = self.repo_id(ticket_id).await;
@@ -81,14 +80,14 @@ impl<'a> TicketMergeFlow<'a> {
             .map(Some)
     }
 
-    async fn lock_repo(&self, repo_id: Option<Uuid>) -> Option<OwnedMutexGuard<()>> {
+    async fn lock_repo(&self, repo_id: Option<Id>) -> Option<OwnedMutexGuard<()>> {
         match repo_id {
             Some(id) => Some(git_chain::repo_lock(self.state, id).lock_owned().await),
             None => None,
         }
     }
 
-    async fn repo_id(&self, ticket_id: Uuid) -> Option<Uuid> {
+    async fn repo_id(&self, ticket_id: Id) -> Option<Id> {
         match TicketService::new(self.pool).get(ticket_id).await {
             Ok(ticket) => ticket.ticket.repo_id,
             // The merge reports the error itself.
@@ -99,10 +98,10 @@ impl<'a> TicketMergeFlow<'a> {
     /// Callers hold the repo's chain lock.
     async fn merge_locked(
         &self,
-        ticket_id: Uuid,
+        ticket_id: Id,
         base_branch: &str,
         actor: Actor,
-        repo_id: Option<Uuid>,
+        repo_id: Option<Id>,
     ) -> Result<MergeBranchResult, TicketGitError> {
         let merge = TicketGitService::from_state(self.state, self.pool)
             .merge_ticket_branch(ticket_id, base_branch)

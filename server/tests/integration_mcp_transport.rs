@@ -1,5 +1,7 @@
 #![cfg(feature = "embedded-test-db")]
 
+use coppice_server::domain::Id;
+
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -19,8 +21,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use uuid::Uuid;
-
 fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs
         .iter()
@@ -493,7 +493,7 @@ async fn assert_error_hides_secrets(spec: &ResolvedTransport) -> String {
 fn pool_spec(root: &Path) -> PoolServerSpec {
     PoolServerSpec {
         key: ServerKey {
-            plugin_id: Uuid::new_v4(),
+            plugin_id: Id::new(),
             server: "fake".into(),
         },
         plugin_name: "demo".into(),

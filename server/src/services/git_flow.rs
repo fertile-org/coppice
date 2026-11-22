@@ -1,8 +1,7 @@
 //! Shared pieces of the ticket git flow (accept, merge, push).
+use crate::domain::Id;
 
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::{CommentError, CommentService};
@@ -11,20 +10,20 @@ use crate::AppState;
 /// Who triggered a git-flow step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {
-    User(Uuid),
+    User(Id),
     /// The server itself, for example a skipped human review.
     Coppice,
 }
 
 impl Actor {
-    fn author(self) -> (AuthorType, Option<Uuid>, &'static str) {
+    fn author(self) -> (AuthorType, Option<Id>, &'static str) {
         match self {
             Actor::User(id) => (AuthorType::Human, Some(id), "human"),
             Actor::Coppice => (AuthorType::System, None, "system"),
         }
     }
 
-    pub(crate) fn accepted_by(self) -> Option<Uuid> {
+    pub(crate) fn accepted_by(self) -> Option<Id> {
         match self {
             Actor::User(id) => Some(id),
             Actor::Coppice => None,
@@ -36,7 +35,7 @@ impl Actor {
 pub async fn create_git_action_comment(
     state: &AppState,
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     actor: Actor,
     body: &str,
 ) -> Result<(), CommentError> {

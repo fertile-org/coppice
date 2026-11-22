@@ -1,7 +1,6 @@
+use crate::domain::Id;
 use sqlx::PgPool;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::bus::{AppEvent, EventBus};
@@ -32,7 +31,7 @@ pub async fn publish_ticket_and_runs(bus: &EventBus, pool: &PgPool, ticket: &Tic
 
 /// Reload the ticket and publish it with its active runs. A ticket that can't
 /// be loaded publishes nothing.
-pub async fn publish_ticket_state(bus: &EventBus, pool: &PgPool, ticket_id: Uuid) {
+pub async fn publish_ticket_state(bus: &EventBus, pool: &PgPool, ticket_id: Id) {
     if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
         publish_ticket_and_runs(bus, pool, &ticket).await;
     }
@@ -41,7 +40,7 @@ pub async fn publish_ticket_state(bus: &EventBus, pool: &PgPool, ticket_id: Uuid
 /// Announce that a ticket run's final usage snapshot is saved. Call it after
 /// `usage_service::record_usage` returns true; `agent_run.finished` may have
 /// been published earlier, before the final snapshot existed.
-pub fn publish_usage_updated(bus: &EventBus, ticket_id: Uuid, run_id: Uuid) {
+pub fn publish_usage_updated(bus: &EventBus, ticket_id: Id, run_id: Id) {
     bus.publish(AppEvent::UsageUpdated { ticket_id, run_id });
 }
 
@@ -68,7 +67,7 @@ pub fn publish_run_active(bus: &EventBus, run: &AgentRun) {
 
 /// Announce a ticket's active runs after a service call that may have queued
 /// one without handing it back (planning, Ready hand-offs, splits).
-pub async fn publish_ticket_active_runs(bus: &EventBus, pool: &PgPool, ticket_id: Uuid) {
+pub async fn publish_ticket_active_runs(bus: &EventBus, pool: &PgPool, ticket_id: Id) {
     match RunService::new(pool).active_for_ticket(ticket_id).await {
         Ok(runs) => {
             for run in &runs {
@@ -84,9 +83,9 @@ pub async fn publish_ticket_active_runs(bus: &EventBus, pool: &PgPool, ticket_id
 pub async fn publish_run_finished(
     state: &AppState,
     pool: &PgPool,
-    run_id: Uuid,
-    ticket_id: Option<Uuid>,
-    agent_id: Uuid,
+    run_id: Id,
+    ticket_id: Option<Id>,
+    agent_id: Id,
     status: RunStatus,
     error_message: Option<String>,
 ) {
@@ -121,7 +120,7 @@ pub async fn publish_run_finished(
 /// connected clients.
 pub async fn mark_run_interrupted(
     state: &AppState,
-    run_id: Uuid,
+    run_id: Id,
     reason: &str,
 ) -> Result<AgentRun, RunError> {
     let pool = state

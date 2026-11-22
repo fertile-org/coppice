@@ -1,9 +1,8 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
-use uuid::Uuid;
-
 #[tokio::test]
 async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -44,7 +43,7 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
 
     let other_sha = "0000000000000000000000000000000000000000";
     sqlx::query("UPDATE ticket_reviewer_briefs SET commit_sha = $2 WHERE ticket_id = $1")
-        .bind(Uuid::parse_str(&with_brief).unwrap())
+        .bind(Id::parse_str(&with_brief).unwrap())
         .bind(other_sha)
         .execute(&pool)
         .await
@@ -53,7 +52,7 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
     assert!(hidden.get("reviewerBrief").is_none());
 
     sqlx::query("UPDATE ticket_reviewer_briefs SET commit_sha = $2 WHERE ticket_id = $1")
-        .bind(Uuid::parse_str(&with_brief).unwrap())
+        .bind(Id::parse_str(&with_brief).unwrap())
         .bind(&commit_sha)
         .execute(&pool)
         .await
@@ -90,7 +89,7 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 
-async fn start_run(app: &axum::Router, ticket_id: &str, cookie: &str, csrf: &str) -> Uuid {
+async fn start_run(app: &axum::Router, ticket_id: &str, cookie: &str, csrf: &str) -> Id {
     let res = app
         .clone()
         .oneshot(common::json_request(
@@ -107,7 +106,7 @@ async fn start_run(app: &axum::Router, ticket_id: &str, cookie: &str, csrf: &str
     body["run"]["id"].as_str().unwrap().parse().unwrap()
 }
 
-async fn wait_succeeded(pool: &sqlx::PgPool, run_id: Uuid) {
+async fn wait_succeeded(pool: &sqlx::PgPool, run_id: Id) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")

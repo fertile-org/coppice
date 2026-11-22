@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use std::path::Path;
 
 use crate::domain::repo::{
@@ -7,8 +8,6 @@ use crate::services::repo_verifier::verify_local_path;
 use sqlx::PgPool;
 use sqlx::Row;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 const REPO_COLUMNS: &str = r#"
     id, name, local_path, remote_url, default_branch,
     verification_status, verification_error, last_verified_at,
@@ -49,7 +48,7 @@ impl<'a> RepoService<'a> {
         Ok(rows.iter().map(row_to_repo).collect())
     }
 
-    pub async fn get(&self, id: Uuid) -> Result<Repo, RepoError> {
+    pub async fn get(&self, id: Id) -> Result<Repo, RepoError> {
         let query = format!("SELECT {REPO_COLUMNS} FROM repos WHERE id = $1");
         let row = sqlx::query(&query)
             .bind(id)
@@ -75,7 +74,7 @@ impl<'a> RepoService<'a> {
         let now = OffsetDateTime::now_utc();
         let status_str = verification_status_to_str(verify_result.status);
 
-        let id = Uuid::new_v4();
+        let id = Id::new();
         let query = format!(
             r#"
             INSERT INTO repos (
@@ -104,7 +103,7 @@ impl<'a> RepoService<'a> {
 
     pub async fn update(
         &self,
-        id: Uuid,
+        id: Id,
         name: Option<&str>,
         local_path: Option<&str>,
         remote_url: Option<Option<&str>>,
@@ -185,7 +184,7 @@ impl<'a> RepoService<'a> {
     /// Set the per-repo git-flow switches; `None` leaves a switch unchanged.
     pub async fn set_git_flow(
         &self,
-        id: Uuid,
+        id: Id,
         merge_after_accept: Option<bool>,
         push_after_merge: Option<bool>,
     ) -> Result<Repo, RepoError> {
@@ -209,7 +208,7 @@ impl<'a> RepoService<'a> {
         Ok(row_to_repo(&row))
     }
 
-    pub async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
+    pub async fn delete(&self, id: Id) -> Result<(), RepoError> {
         let in_use: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tickets WHERE repo_id = $1)")
                 .bind(id)
@@ -234,8 +233,8 @@ impl<'a> RepoService<'a> {
 
     pub async fn set_forge_token_secret(
         &self,
-        id: Uuid,
-        secret_id: Option<Uuid>,
+        id: Id,
+        secret_id: Option<Id>,
     ) -> Result<Repo, RepoError> {
         let _ = self.get(id).await?;
         let query = format!(
@@ -255,7 +254,7 @@ impl<'a> RepoService<'a> {
         Ok(row_to_repo(&row))
     }
 
-    pub async fn verify(&self, id: Uuid) -> Result<Repo, RepoError> {
+    pub async fn verify(&self, id: Id) -> Result<Repo, RepoError> {
         let current = self.get(id).await?;
         let verify_result = verify_local_path(Path::new(&current.local_path));
         let now = OffsetDateTime::now_utc();

@@ -2,6 +2,7 @@
 //!
 //! Connector choice reads the cached free sign-in check. This module does not
 //! spawn a CLI, send a prompt, or call a model.
+use crate::domain::Id;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,8 +10,6 @@ use std::path::Path;
 use coppice_connectors::sign_in::Readiness;
 use coppice_connectors::MOCK;
 use sqlx::{PgPool, Row};
-use uuid::Uuid;
-
 use crate::domain::repo::verification_status_to_str;
 use crate::domain::repo::VerificationStatus;
 use crate::services::board_service::slugify;
@@ -91,15 +90,15 @@ pub struct TeamMemberView {
 
 #[derive(Debug)]
 pub struct CreatedAgent {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     pub preset_key: String,
 }
 
 #[derive(Debug)]
 pub struct CreatedInit {
-    pub board_id: Uuid,
-    pub repository_id: Uuid,
+    pub board_id: Id,
+    pub repository_id: Id,
     pub agents: Vec<CreatedAgent>,
 }
 
@@ -220,7 +219,7 @@ impl<'a> InitWizardService<'a> {
         let mut tx = self.pool.begin().await?;
 
         let repository_id =
-            match sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos WHERE local_path = $1")
+            match sqlx::query_scalar::<_, Id>("SELECT id FROM repos WHERE local_path = $1")
                 .bind(workspace.local_path)
                 .fetch_optional(&mut *tx)
                 .await
@@ -228,7 +227,7 @@ impl<'a> InitWizardService<'a> {
             {
                 Some(id) => id,
                 None => {
-                    let repository_id = Uuid::new_v4();
+                    let repository_id = Id::new();
                     let now = OffsetDateTime::now_utc();
                     sqlx::query(
                         r#"
@@ -254,7 +253,7 @@ impl<'a> InitWizardService<'a> {
                 }
             };
 
-        let board_id = Uuid::new_v4();
+        let board_id = Id::new();
         let slug = slugify(workspace.board_name);
         sqlx::query(
             r#"
@@ -271,7 +270,7 @@ impl<'a> InitWizardService<'a> {
 
         let mut agents = Vec::with_capacity(workspace.members.len());
         for member in workspace.members {
-            let agent_id = Uuid::new_v4();
+            let agent_id = Id::new();
             sqlx::query(
                 r#"
                 INSERT INTO agents (

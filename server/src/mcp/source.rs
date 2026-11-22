@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::catalog::{core_tools_for, CoreTool};
 use crate::mcp::protocol::ToolDefinition;
@@ -6,8 +7,6 @@ use crate::mcp::token::RunToolScope;
 use crate::mcp::tools::{self, skills, ToolCtx, ToolError};
 use async_trait::async_trait;
 use serde_json::Value;
-use uuid::Uuid;
-
 /// Stored as `run_tool_calls.source`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
@@ -31,7 +30,7 @@ pub struct SourcedTool {
     pub def: ToolDefinition,
     pub source: SourceKind,
     /// Set only for plugin-owned tools.
-    pub plugin_id: Option<Uuid>,
+    pub plugin_id: Option<Id>,
     /// Source-private handle (e.g. the core tool name or `<server>/<tool>`).
     pub key: String,
 }
@@ -40,7 +39,7 @@ pub struct SourcedTool {
 /// server is down.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnlistedClaim {
-    pub plugin_id: Option<Uuid>,
+    pub plugin_id: Option<Id>,
     /// Tool error shown to the agent and logged.
     pub message: String,
 }

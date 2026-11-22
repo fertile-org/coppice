@@ -1,6 +1,7 @@
 //! One info line per API request: method, path, status, duration, request id.
 //! The query string is omitted. Bodies, cookies, and auth headers are not read.
 //! `run_id` is set when the path names an agent run.
+use crate::domain::Id;
 
 use std::time::Instant;
 
@@ -12,7 +13,7 @@ use axum::response::Response;
 pub async fn log_request(request: Request<Body>, next: Next) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
-    let request_id = uuid::Uuid::new_v4();
+    let request_id = Id::new();
     let run_id = run_id_from_path(&path);
     let started = Instant::now();
     let response = next.run(request).await;
@@ -36,7 +37,7 @@ fn run_id_from_path(path: &str) -> Option<&str> {
         .strip_prefix("/api/agent-runs/")
         .or_else(|| path.strip_prefix("/ws/agent-runs/"))?;
     let id = rest.split('/').next().filter(|id| !id.is_empty())?;
-    uuid::Uuid::parse_str(id).ok()?;
+    Id::parse_str(id).ok()?;
     Some(id)
 }
 
@@ -248,7 +249,7 @@ mod tests {
         assert_eq!(http["fields"]["status"], 200);
         assert!(http["fields"]["duration_ms"].as_u64().is_some(), "{http}");
         let request_id = http["fields"]["request_id"].as_str().expect("request id");
-        uuid::Uuid::parse_str(request_id).expect("request id is a uuid");
+        Id::parse_str(request_id).expect("request id is a uuid");
         assert!(http["fields"].get("run_id").is_none(), "{http}");
         let timestamp = http["timestamp"].as_str().expect("timestamp");
         assert!(

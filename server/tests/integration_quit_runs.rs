@@ -1,5 +1,7 @@
-//! Quitting Coppice mid-run must not leave the ticket In Progress.
 #![cfg(feature = "embedded-test-db")]
+
+//! Quitting Coppice mid-run must not leave the ticket In Progress.
+use coppice_server::domain::Id;
 
 mod common;
 
@@ -18,8 +20,6 @@ use coppice_server::services::run_service::RunService;
 use coppice_server::services::ticket_service::TicketService;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use uuid::Uuid;
-
 static QUIT_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Past `TERM_GRACE` (3s) and the 2s death wait, so a process that is still
@@ -44,8 +44,8 @@ impl Drop for KillGroup {
     }
 }
 
-async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid) {
-    let board_id = Uuid::new_v4();
+async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Id, Id) {
+    let board_id = Id::new();
     sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
         .bind(board_id)
         .bind("quit board")
@@ -54,7 +54,7 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
         .await
         .expect("insert board");
 
-    let agent_id = Uuid::new_v4();
+    let agent_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agents (
@@ -69,7 +69,7 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
     .await
     .expect("insert agent");
 
-    let ticket_id = Uuid::new_v4();
+    let ticket_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO tickets (
@@ -86,7 +86,7 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
     .await
     .expect("insert ticket");
 
-    let run_id = Uuid::new_v4();
+    let run_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -105,7 +105,7 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
     (ticket_id, run_id)
 }
 
-async fn spawn_tracked_sleeper(dir: &Path, run_id: Uuid) -> (u32, u32) {
+async fn spawn_tracked_sleeper(dir: &Path, run_id: Id) -> (u32, u32) {
     let pid_file = dir.join("child.pid");
     let script = format!(
         "sleep {STUB_SLEEP_SECS} >/dev/null 2>&1 & echo $! > '{}'; wait",
@@ -164,8 +164,8 @@ async fn wait_dead(pid: u32) -> bool {
 
 async fn assert_blocked_with_comment(
     pool: &sqlx::PgPool,
-    ticket_id: Uuid,
-    run_id: Uuid,
+    ticket_id: Id,
+    run_id: Id,
     reason: &str,
     body: &str,
 ) {

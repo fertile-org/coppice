@@ -263,6 +263,8 @@ pub(crate) fn is_github_shorthand(url: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::Id;
+
     use super::*;
     use crate::plugins::capability::{MARKETPLACE_JSON, PLUGIN_JSON};
     use crate::plugins::discover::discover;
@@ -537,7 +539,7 @@ mod tests {
         let manifest = rows[0].result.as_ref().unwrap();
         assert_eq!(manifest.name, "foo");
         let root = std::fs::canonicalize(folder.join("p")).unwrap();
-        let set = PluginSkillSet::from_manifest(uuid::Uuid::new_v4(), &root, manifest, &[]);
+        let set = PluginSkillSet::from_manifest(Id::new(), &root, manifest, &[]);
         let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["foo:s"]);
     }
@@ -557,7 +559,7 @@ mod tests {
         let manifest = rows[0].result.as_ref().unwrap();
         assert_eq!(manifest.name, "good");
         let root = std::fs::canonicalize(folder.join("Bad Folder")).unwrap();
-        let set = PluginSkillSet::from_manifest(uuid::Uuid::new_v4(), &root, manifest, &[]);
+        let set = PluginSkillSet::from_manifest(Id::new(), &root, manifest, &[]);
         let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["good:s"]);
     }

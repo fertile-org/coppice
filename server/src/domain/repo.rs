@@ -1,6 +1,5 @@
+use crate::domain::Id;
 use time::OffsetDateTime;
-use uuid::Uuid;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationStatus {
     Ready,
@@ -11,7 +10,7 @@ pub enum VerificationStatus {
 
 #[derive(Debug, Clone)]
 pub struct Repo {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     pub local_path: String,
     pub remote_url: Option<String>,
@@ -19,7 +18,7 @@ pub struct Repo {
     pub verification_status: VerificationStatus,
     pub verification_error: Option<String>,
     pub last_verified_at: Option<OffsetDateTime>,
-    pub forge_token_secret_id: Option<Uuid>,
+    pub forge_token_secret_id: Option<Id>,
     pub forge_token_needs_reentry: bool,
     pub merge_after_accept: bool,
     pub push_after_merge: bool,

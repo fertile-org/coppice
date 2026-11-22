@@ -1,3 +1,4 @@
+use crate::domain::Id;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::comment::{intent_from_str, AuthorType, Comment, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
@@ -18,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
-use uuid::Uuid;
-
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route(
         "/api/tickets/{ticket_id}/comments",
@@ -30,7 +29,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AttachmentSummary {
-    id: Uuid,
+    id: Id,
     filename: String,
     content_type: String,
     size_bytes: i64,
@@ -39,14 +38,14 @@ struct AttachmentSummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CommentResponse {
-    id: Uuid,
-    ticket_id: Uuid,
+    id: Id,
+    ticket_id: Id,
     author_type: String,
-    author_id: Option<Uuid>,
+    author_id: Option<Id>,
     body: String,
     intent: String,
     mentions: serde_json::Value,
-    attachment_ids: Vec<Uuid>,
+    attachment_ids: Vec<Id>,
     attachments: Vec<AttachmentSummary>,
     created_at: String,
 }
@@ -56,7 +55,7 @@ struct CommentResponse {
 struct CreateCommentBody {
     body: String,
     intent: Option<String>,
-    attachment_ids: Option<Vec<Uuid>>,
+    attachment_ids: Option<Vec<Id>>,
     mentions: Option<Vec<String>>,
     mention_mode: Option<String>,
 }
@@ -64,8 +63,8 @@ struct CreateCommentBody {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StartedRunSummary {
-    run_id: Uuid,
-    agent_id: Uuid,
+    run_id: Id,
+    agent_id: Id,
     agent_key: String,
     job_type: String,
 }
@@ -104,7 +103,7 @@ fn attachment_to_summary(attachment: &crate::domain::attachment::Attachment) -> 
 
 fn comment_to_response(
     comment: Comment,
-    attachments_by_id: &HashMap<Uuid, crate::domain::attachment::Attachment>,
+    attachments_by_id: &HashMap<Id, crate::domain::attachment::Attachment>,
 ) -> CommentResponse {
     let attachments = comment
         .attachment_ids
@@ -136,8 +135,8 @@ fn comment_to_response(
 async fn attachments_for_comments(
     service: &CommentService<'_>,
     comments: &[Comment],
-) -> Result<HashMap<Uuid, crate::domain::attachment::Attachment>, CommentError> {
-    let mut ids: Vec<Uuid> = comments
+) -> Result<HashMap<Id, crate::domain::attachment::Attachment>, CommentError> {
+    let mut ids: Vec<Id> = comments
         .iter()
         .flat_map(|comment| comment.attachment_ids.clone())
         .collect();
@@ -206,14 +205,14 @@ struct ListCommentsQuery {
     #[serde(default)]
     limit: Option<i64>,
     #[serde(default)]
-    before: Option<Uuid>,
+    before: Option<Id>,
 }
 
 /// Newest first, one page at a time.
 async fn list_comments(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     axum::extract::Query(query): axum::extract::Query<ListCommentsQuery>,
 ) -> Result<impl axum::response::IntoResponse, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -234,7 +233,7 @@ async fn list_comments(
         .map_err(map_error)?;
     let mut headers = axum::http::HeaderMap::new();
     if let Some(id) = next_before {
-        if let Ok(value) = axum::http::HeaderValue::from_str(&id.to_string()) {
+        if let Ok(value) = axum::http::HeaderValue::from_str(id.as_ref()) {
             headers.insert(NEXT_BEFORE_HEADER, value);
         }
     }
@@ -252,7 +251,7 @@ async fn list_comments(
 async fn create_comment(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(ticket_id): Path<Uuid>,
+    Path(ticket_id): Path<Id>,
     Json(body): Json<CreateCommentBody>,
 ) -> Result<(StatusCode, Json<CreateCommentResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -404,7 +403,7 @@ async fn create_comment(
     ))
 }
 
-fn agent_key_for_agent(agent_id: Uuid, agents: &[crate::domain::agent::Agent]) -> String {
+fn agent_key_for_agent(agent_id: Id, agents: &[crate::domain::agent::Agent]) -> String {
     use crate::domain::slug::slugify;
 
     agents

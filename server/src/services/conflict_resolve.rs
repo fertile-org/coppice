@@ -4,11 +4,10 @@
 //! (`is_implementer && !is_qc && !tech lead`). The run is a normal
 //! `work_on_ticket` run for the chosen agent. A merge conflict on a Done
 //! ticket changes nothing until a person asks; see [`start_resolve`].
+use crate::domain::Id;
 
 use serde::Serialize;
 use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::copy::conflict::{
     ask_to_resolve_label, conflict_message, connector_not_ready_reason,
     merge_conflict_reopen_comment, other_agent_active_reason, resolve_prompt, AGENT_NOT_ELIGIBLE,
@@ -33,7 +32,7 @@ const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictAgentJson {
-    pub id: Uuid,
+    pub id: Id,
     pub name: String,
     pub ask_label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,7 +51,7 @@ pub struct ConflictOfferJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unavailable_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_agent_id: Option<Uuid>,
+    pub default_agent_id: Option<Id>,
     pub agents: Vec<ConflictAgentJson>,
     pub rereview_note: &'static str,
 }
@@ -66,7 +65,7 @@ pub struct GitConflictHttp {
 
 pub struct ResolveConflictOutcome {
     pub run: AgentRun,
-    pub new_comment_id: Option<Uuid>,
+    pub new_comment_id: Option<Id>,
     /// The ticket moved from Done to In Progress.
     pub reopened: bool,
 }
@@ -109,7 +108,7 @@ pub fn agent_not_eligible_message() -> &'static str {
 
 struct ResolverOffer {
     agents: Vec<Agent>,
-    default_id: Option<Uuid>,
+    default_id: Option<Id>,
 }
 
 impl ResolverOffer {
@@ -118,7 +117,7 @@ impl ResolverOffer {
             .and_then(|id| self.agents.iter().find(|agent| agent.id == id))
     }
 
-    fn get(&self, id: Uuid) -> Option<&Agent> {
+    fn get(&self, id: Id) -> Option<&Agent> {
         self.agents.iter().find(|agent| agent.id == id)
     }
 }
@@ -149,9 +148,9 @@ fn is_eligible_resolver(agent: &Agent) -> bool {
 /// then the first eligible agent.
 fn preselect_agent_id(
     eligible: &[&Agent],
-    assignee_id: Option<Uuid>,
-    work_run_agent_ids_newest_first: &[Uuid],
-) -> Option<Uuid> {
+    assignee_id: Option<Id>,
+    work_run_agent_ids_newest_first: &[Id],
+) -> Option<Id> {
     if let Some(id) = assignee_id {
         if eligible.iter().any(|agent| agent.id == id) {
             return Some(id);
@@ -227,9 +226,9 @@ fn offer_json(
 
 async fn implementer_work_run_agent_ids(
     pool: &PgPool,
-    ticket_id: Uuid,
-) -> Result<Vec<Uuid>, sqlx::Error> {
-    let rows: Vec<(Uuid,)> = sqlx::query_as(
+    ticket_id: Id,
+) -> Result<Vec<Id>, sqlx::Error> {
+    let rows: Vec<(Id,)> = sqlx::query_as(
         r#"
         SELECT agent_id
         FROM agent_runs
@@ -247,7 +246,7 @@ async fn implementer_work_run_agent_ids(
 
 async fn load_resolver_offer(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
 ) -> Result<ResolverOffer, ConflictResolveError> {
     let ticket = TicketService::new(pool).get(ticket_id).await?;
     let agents = AgentService::new(pool).list_agents().await?;
@@ -266,7 +265,7 @@ async fn load_resolver_offer(
 
 pub async fn build_git_conflict_response(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     kind: GitConflictKind,
     base_branch: String,
     files: Vec<String>,
@@ -302,11 +301,11 @@ pub async fn build_git_conflict_response(
 /// resolve run and leaves the status and assignee.
 pub async fn start_resolve(
     pool: &PgPool,
-    ticket_id: Uuid,
+    ticket_id: Id,
     kind: GitConflictKind,
     base_branch: &str,
     files: &[String],
-    requested_agent_id: Option<Uuid>,
+    requested_agent_id: Option<Id>,
     connector_ready: &(dyn Fn(&str) -> bool + Sync),
 ) -> Result<ResolveConflictOutcome, ConflictResolveError> {
     let base_branch = base_branch.trim();
@@ -426,7 +425,7 @@ pub async fn start_resolve(
 
 /// The run did not start, so its trigger comment would describe something
 /// that did not happen.
-async fn discard_comment(comments: &CommentService<'_>, comment_id: Uuid) {
+async fn discard_comment(comments: &CommentService<'_>, comment_id: Id) {
     if let Err(err) = comments.delete(comment_id).await {
         tracing::error!(error = %err, %comment_id, "could not remove the resolve comment");
     }
@@ -470,7 +469,7 @@ mod tests {
         created: i64,
     ) -> Agent {
         Agent {
-            id: Uuid::from_u128(id),
+            id: Id::from_u128(id),
             name: name.to_string(),
             role: role.to_string(),
             responsibilities: vec![],

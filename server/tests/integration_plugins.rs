@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -290,7 +291,7 @@ async fn add_dir_rejects_relative_missing_and_duplicate() {
         &app,
         "POST",
         "/api/plugin-dirs",
-        json!({ "path": format!("/nonexistent-{}", uuid::Uuid::new_v4()) }),
+        json!({ "path": format!("/nonexistent-{}", Id::new()) }),
         &cookie,
         &csrf,
     )
@@ -323,7 +324,7 @@ async fn rescan_keeps_marketplace_origin() {
         .unwrap()
         .to_string();
     let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
-    let plugin_uuid: uuid::Uuid = plugin_id.parse().unwrap();
+    let plugin_uuid: Id = plugin_id.parse().unwrap();
     sqlx::query(
         "UPDATE plugins SET origin_entry = 'sample-plugin', origin_commit = 'abc123' WHERE id = $1",
     )
@@ -498,7 +499,7 @@ async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(enabled["enabled"], true);
-    let a_uuid: uuid::Uuid = a_plugin.parse().unwrap();
+    let a_uuid: Id = a_plugin.parse().unwrap();
     assert!(state.skills.get(&[a_uuid], "sample-plugin:hello").is_some());
 
     let (status, dirs) = send(
@@ -592,7 +593,7 @@ async fn settings_put_marks_configured() {
             { "key": "ROOT", "configured": false, "needsReentry": false, "source": "missing" },
         ])
     );
-    let plugin_uuid: uuid::Uuid = id.parse().unwrap();
+    let plugin_uuid: Id = id.parse().unwrap();
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_settings WHERE plugin_id = $1")
         .bind(plugin_uuid)
         .fetch_one(&pool)
@@ -691,7 +692,7 @@ async fn deleting_plugin_deletes_its_setting_secrets() {
     assert_eq!(count(&pool, secrets, &pattern).await, 2);
 
     sqlx::query("DELETE FROM plugins WHERE id = $1")
-        .bind(id.parse::<uuid::Uuid>().unwrap())
+        .bind(id.parse::<Id>().unwrap())
         .execute(&pool)
         .await
         .unwrap();
@@ -732,7 +733,7 @@ async fn rescan(app: &Router, cookie: &str, csrf: &str) {
     assert_eq!(status, StatusCode::OK, "rescan: {body}");
 }
 
-async fn run_plugin_ids(state: &coppice_server::AppState, agent_id: &str) -> Vec<uuid::Uuid> {
+async fn run_plugin_ids(state: &coppice_server::AppState, agent_id: &str) -> Vec<Id> {
     let pool = state.db.as_ref().unwrap();
     coppice_server::services::plugin_service::PluginService::new(pool)
         .run_plugin_ids(agent_id.parse().unwrap())
@@ -788,7 +789,7 @@ async fn set_agent_plugins_accepts_only_enabled_ok_plugins() {
         json!({ "pluginIds": [plugin_id] })
     );
 
-    let missing = format!("/api/agents/{}/plugins", uuid::Uuid::new_v4());
+    let missing = format!("/api/agents/{}/plugins", Id::new());
     let (status, _) = send(&app, "GET", &missing, Value::Null, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _) = send(
@@ -827,7 +828,7 @@ async fn missing_plugin_keeps_assignment_and_returns() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let expected: uuid::Uuid = plugin_id.parse().unwrap();
+    let expected: Id = plugin_id.parse().unwrap();
     assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![expected]);
 
     std::fs::remove_dir_all(dir.path().join("sample-plugin")).unwrap();
@@ -861,7 +862,7 @@ async fn preset_default_plugins_applied_when_enabled() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let presets = get(&app, "/api/agent-presets", &cookie, &csrf).await;
-    let preset_id: uuid::Uuid = presets["items"][0]["id"].as_str().unwrap().parse().unwrap();
+    let preset_id: Id = presets["items"][0]["id"].as_str().unwrap().parse().unwrap();
     sqlx::query("UPDATE agent_presets SET default_plugins = '{sample-plugin}' WHERE id = $1")
         .bind(preset_id)
         .execute(&pool)
@@ -933,7 +934,7 @@ async fn disabling_assigned_plugin_stops_serving_its_skills() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let id: Id = plugin_id.parse().unwrap();
     let served = |state: &coppice_server::AppState| {
         state
             .skills
@@ -967,7 +968,7 @@ async fn repointing_default_dir_forgets_old_plugins() {
     sqlx::query(
         "UPDATE plugins SET source = 'git', git_url = 'https://example.com/x.git', git_commit = 'abc' WHERE id = $1",
     )
-    .bind(old_plugin.parse::<uuid::Uuid>().unwrap())
+    .bind(old_plugin.parse::<Id>().unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -1260,7 +1261,7 @@ async fn update_pulls_new_commit() {
     let plugin_id = installed["pluginId"].as_str().unwrap().to_string();
     let first_commit = repo.head();
     set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
-    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let id: Id = plugin_id.parse().unwrap();
     assert!(state.skills.get(&[id], "sample-plugin:goodbye").is_none());
 
     repo.push_new_skill("goodbye");
@@ -1298,12 +1299,12 @@ async fn stale_running_install_failed_on_startup() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
-    let install_id = uuid::Uuid::new_v4();
+    let install_id = Id::new();
     sqlx::query(
         "INSERT INTO plugin_installs (id, plugin_dir_id, kind, git_url, status) VALUES ($1, $2, 'install', 'https://h/a/b.git', 'running')",
     )
     .bind(install_id)
-    .bind(dir_id.parse::<uuid::Uuid>().unwrap())
+    .bind(dir_id.parse::<Id>().unwrap())
     .execute(&pool)
     .await
     .unwrap();
@@ -1524,7 +1525,7 @@ async fn test_unknown_plugin_404_and_not_ok_409() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (status, _) = post_test(&app, &uuid::Uuid::new_v4().to_string(), &cookie, &csrf).await;
+    let (status, _) = post_test(&app, &Id::new().to_string(), &cookie, &csrf).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let (dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
@@ -1853,7 +1854,7 @@ async fn single_skill_plugin_is_served_to_assigned_agent() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let id: Id = plugin_id.parse().unwrap();
     assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![id]);
     let listed: Vec<String> = state
         .skills
@@ -2181,7 +2182,7 @@ async fn start_agent_run(
     agent_id: &str,
     cookie: &str,
     csrf: &str,
-) -> (tempfile::TempDir, uuid::Uuid) {
+) -> (tempfile::TempDir, Id) {
     let (git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(app, &local_path.display().to_string(), cookie, csrf).await;
@@ -2255,7 +2256,7 @@ async fn skill_switch_hides_skill_from_agents() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let id: Id = plugin_id.parse().unwrap();
     let (_git, run_id) = start_agent_run(&state, &app, &agent_id, &cookie, &csrf).await;
     let token = common::mint_test_token_with_plugins(
         &state,
@@ -2305,7 +2306,7 @@ async fn disabled_skills_survive_rescan_and_prune_removed() {
     let uri = format!("/api/plugins/{plugin_id}");
     let disabled = || async {
         sqlx::query_scalar::<_, Vec<String>>("SELECT disabled_skills FROM plugins WHERE id = $1")
-            .bind(plugin_id.parse::<uuid::Uuid>().unwrap())
+            .bind(plugin_id.parse::<Id>().unwrap())
             .fetch_one(&pool)
             .await
             .unwrap()
@@ -2457,7 +2458,7 @@ async fn local_mcp_plugin_defaults_to_no_agents() {
     );
     assert_eq!(
         run_plugin_ids(&state, &agent_id).await,
-        vec![design_id.parse::<uuid::Uuid>().unwrap()]
+        vec![design_id.parse::<Id>().unwrap()]
     );
 }
 
@@ -3002,7 +3003,7 @@ async fn marketplace_git_source_refresh_install_update_and_remove() {
         .await
         .expect("remove");
     assert!(!root.exists());
-    let origin: Option<uuid::Uuid> =
+    let origin: Option<Id> =
         sqlx::query_scalar("SELECT origin_source_id FROM plugins WHERE id = $1")
             .bind(installed.id)
             .fetch_one(&pool)
@@ -3050,7 +3051,7 @@ async fn marketplace_path_entry_installs_one_row_with_origin() {
     let catalog = state.skills.clone();
     let market = tempfile::tempdir().unwrap();
     marketplace_fixture(market.path(), "sample-plugin", "sample-plugin");
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, position) VALUES ($1, 'test-market', 'builtin', 0)",
     )
@@ -3084,7 +3085,7 @@ async fn marketplace_path_entry_installs_one_row_with_origin() {
         .join("sample-plugin/.claude-plugin/plugin.json")
         .is_file());
 
-    let origin: (Option<uuid::Uuid>, Option<String>, Option<String>) = sqlx::query_as(
+    let origin: (Option<Id>, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT origin_source_id, origin_entry, origin_commit FROM plugins WHERE id = $1",
     )
     .bind(installed.id)
@@ -3121,7 +3122,7 @@ async fn marketplace_install_entry_resolves_path_and_refuses_unsupported_sources
     let pool = state.db.clone().unwrap();
     let catalog = state.skills.clone();
     let cache = tempfile::tempdir().unwrap();
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'test-market', 'git', 'file:///unused', 'abc123', 1)",
     )
@@ -3260,7 +3261,7 @@ async fn marketplace_git_entries_install_update_and_conflict() {
     assert_eq!(installed.status, "succeeded", "{installed:?}");
     let plugin_id = installed.plugin_id.expect("plugin recorded");
     let (origin_source, origin_entry, origin_commit, rel_path): (
-        Option<uuid::Uuid>,
+        Option<Id>,
         Option<String>,
         Option<String>,
         String,
@@ -3334,7 +3335,7 @@ async fn marketplace_git_entries_install_update_and_conflict() {
     assert!(default_path
         .join("remote-url/skills/extra/SKILL.md")
         .is_file());
-    let after: (Option<String>, uuid::Uuid) =
+    let after: (Option<String>, Id) =
         sqlx::query_as("SELECT origin_commit, id FROM plugins WHERE id = $1")
             .bind(plugin_id)
             .fetch_one(&pool)
@@ -3381,7 +3382,7 @@ async fn marketplace_path_update_replaces_folder_and_keeps_row() {
     let pool = state.db.clone().unwrap();
     let catalog = state.skills.clone();
     let cache = tempfile::tempdir().unwrap();
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'test-market', 'git', 'file:///unused', 'abc123', 1)",
     )
@@ -3475,7 +3476,7 @@ async fn marketplace_path_entry_rolls_back_plugin_json_name_clash() {
         json!({ "name": "sample-plugin", "version": "0.1.0" }).to_string(),
     )
     .unwrap();
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, position) VALUES ($1, 'test-market', 'builtin', 0)",
     )
@@ -3668,7 +3669,7 @@ async fn marketplace_plugin_is_served_to_assigned_agents_only() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'test-market', 'git', 'file:///unused', 'abc123', 1)",
     )
@@ -3915,7 +3916,7 @@ async fn marketplace_root_entry_installs_without_git_and_serves_skill() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let source_id = uuid::Uuid::new_v4();
+    let source_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'ponytail-fix', 'git', 'file:///unused', 'abc123', 1)",
     )
@@ -4122,8 +4123,8 @@ async fn marketplace_entry_from_other_source_is_not_installable() {
     let pool = state.db.clone().unwrap();
     let catalog = state.skills.clone();
     let cache = tempfile::tempdir().unwrap();
-    let first_id = uuid::Uuid::new_v4();
-    let second_id = uuid::Uuid::new_v4();
+    let first_id = Id::new();
+    let second_id = Id::new();
     sqlx::query(
         "INSERT INTO marketplace_sources (id, name, kind, git_url, commit_sha, position) VALUES ($1, 'first-market', 'git', 'file:///unused', 'aaa', 1), ($2, 'second-market', 'git', 'file:///unused2', 'bbb', 2)",
     )

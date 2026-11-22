@@ -1,3 +1,4 @@
+use coppice_server::domain::Id;
 mod common;
 
 use axum::http::StatusCode;
@@ -239,8 +240,8 @@ async fn a_large_board_lists_quickly_without_descriptions() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let board = uuid::Uuid::parse_str(&board_id).unwrap();
-    let agent_id = uuid::Uuid::parse_str(
+    let board = Id::parse_str(&board_id).unwrap();
+    let agent_id = Id::parse_str(
         &common::create_agent_with_preset_key(&app, "backend_engineer", "Builder", &cookie, &csrf)
             .await,
     )
@@ -389,8 +390,8 @@ async fn existing_ticket_without_priority_still_returns_null() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.clone().unwrap();
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let board = uuid::Uuid::parse_str(&board_id).unwrap();
-    let ticket_id = uuid::Uuid::new_v4();
+    let board = Id::parse_str(&board_id).unwrap();
+    let ticket_id = Id::new();
     sqlx::query(
         r#"
         INSERT INTO tickets (id, board_id, title, description, status, created_by)
