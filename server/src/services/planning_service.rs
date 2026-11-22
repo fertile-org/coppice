@@ -313,6 +313,51 @@ impl<'a> PlanningService<'a> {
         .await
     }
 
+    /// Markers validated at submit can still go stale before finish; drop those with a log.
+    async fn filter_live_marker_ids(
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Id,
+        run_id: Option<Id>,
+        markers: Vec<Id>,
+    ) -> Result<Vec<Id>, sqlx::Error> {
+        let mut live = Vec::with_capacity(markers.len());
+        for id in markers {
+            let published: bool = sqlx::query_scalar(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1 FROM design_sets
+                    WHERE id = $1
+                      AND ticket_id = $2
+                      AND published_at IS NOT NULL
+                      AND retired_at IS NULL
+                      AND superseded_by IS NULL
+                )
+                "#,
+            )
+            .bind(id)
+            .bind(ticket_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if published {
+                live.push(id);
+            } else if let Some(run_id) = run_id {
+                tracing::warn!(
+                    %ticket_id,
+                    %run_id,
+                    marker_set_id = %id,
+                    "ignoring design marker with no live published set at plan finish"
+                );
+            } else {
+                tracing::warn!(
+                    %ticket_id,
+                    marker_set_id = %id,
+                    "ignoring design marker with no live published set at plan finish"
+                );
+            }
+        }
+        Ok(live)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn insert_plan_body(
         &self,
@@ -366,7 +411,13 @@ impl<'a> PlanningService<'a> {
         } else {
             // Technical sets follow plan markers, not kind. A set whose id is
             // absent from this plan is replaced (or retired when no markers).
-            let markers = crate::services::design_markers::design_marker_ids(body);
+            let markers = Self::filter_live_marker_ids(
+                &mut tx,
+                ticket_id,
+                run_id,
+                crate::services::design_markers::design_marker_ids(body),
+            )
+            .await?;
             if markers.is_empty() {
                 sqlx::query(
                     r#"

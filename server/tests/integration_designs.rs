@@ -3084,6 +3084,56 @@ async fn approve_refuses_unpicked_technical_set() {
 }
 
 #[tokio::test]
+async fn insert_plan_ignores_stale_marker_with_warning() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+
+    let fx = unplanned_with_pm().await;
+    let plans = planning(&fx);
+    plans
+        .insert_plan(fx.ticket_id, fx.agent_id, PICK_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(fx.ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(fx.ticket_id, "Show options.")
+        .await
+        .expect("ask");
+    let run_id = active_plan_run(&fx).await;
+    let set_id = publish_technical(&fx, run_id, fx.agent_id, DesignKind::Architecture).await;
+    let stale = Id::new();
+    let body = format!(
+        "{}\n\n{{{{design:{stale}}}}}",
+        plan_with_design_marker(set_id)
+    );
+    let plan = plans
+        .insert_plan(
+            fx.ticket_id,
+            fx.agent_id,
+            &body,
+            Some(run_id),
+            false,
+            false,
+        )
+        .await
+        .expect("plan with stale marker");
+    assert!(
+        plan.design_picks.contains_key(set_id.as_ref()),
+        "{:?}",
+        plan.design_picks
+    );
+    assert!(!plan.design_picks.contains_key(stale.as_ref()));
+    let still_live: Option<Id> = sqlx::query_scalar(
+        "SELECT superseded_by FROM design_sets WHERE id = $1",
+    )
+    .bind(set_id)
+    .fetch_one(&fx.pool)
+    .await
+    .expect("load set");
+    assert!(still_live.is_none());
+}
+
+#[tokio::test]
 async fn plan_without_markers_retires_technical_sets() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
