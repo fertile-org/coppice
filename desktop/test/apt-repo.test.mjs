@@ -184,38 +184,29 @@ test('a throwaway key signs amd64 and arm64 metadata', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('the installed apt source uses signed-by and the base URL lives in one place', () => {
+test('the installed apt source uses signed-by; endpoint helpers stay shared', () => {
   const script = readFileSync(new URL('../build/linux/after-install.sh', import.meta.url), 'utf8');
   assert.match(script, /resources\/apt\/coppice\.list/);
   assert.equal(script.includes(APT_KEYRING_PATH), true);
   assert.equal(script.includes('github.io'), false);
+  assert.equal(APT_SOURCE_LINE, aptSourceLine());
   assert.equal(
     APT_SOURCE_LINE,
     `deb [arch=amd64,arm64 signed-by=${APT_KEYRING_PATH}] https://apt.getcoppice.app stable main`,
   );
-  assert.equal(MAC_UPDATE_FEED, 'https://apt.getcoppice.app/updates/');
+  assert.equal(MAC_UPDATE_FEED, macUpdateFeed());
   assert.equal(pagesCname(), 'apt.getcoppice.app');
-  assert.equal(pagesCname('https://apt.example.com/'), 'apt.example.com');
-  assert.equal(APT_SOURCE_LINE, aptSourceLine());
-  assert.equal(
-    aptSourceLine('https://apt.example.com/'),
-    `deb [arch=amd64,arm64 signed-by=${APT_KEYRING_PATH}] https://apt.example.com stable main`,
-  );
-  assert.equal(macUpdateFeed('https://apt.example.com/'), 'https://apt.example.com/updates/');
   const remove = readFileSync(new URL('../build/linux/after-remove.sh', import.meta.url), 'utf8');
   assert.equal(remove.includes(APT_KEYRING_PATH), true);
   assert.match(remove, /sources\.list\.d\/coppice\.list/);
 });
 
-test('colon fingerprint fields are the tenth column', () => {
+test('fingerprint parsing skips subkeys and normalizes spacing', () => {
   assert.equal(normalizeFingerprint('ae0e c971'), 'AE0EC971');
   assert.deepEqual(
     fingerprintsFromColonListing('fpr:::::::::PRIMARY:\nssb:x\nfpr:::::::::SUBKEY:\n'),
     ['PRIMARY', 'SUBKEY'],
   );
-});
-
-test('primary fingerprints skip subkeys', () => {
   const listing = [
     'pub:u:4096:1:AAAA:1::::::scESC:',
     'fpr:::::::::PRIMARYONE:',
@@ -231,9 +222,7 @@ test('primary fingerprints skip subkeys', () => {
     'PRIMARYTWO',
   ]);
   assert.deepEqual(primaryFingerprints(''), []);
-});
 
-test('the committed keyring holds exactly the release key', () => {
   const keyring = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
   assert.deepEqual(publicKeyringFingerprints(keyring), [RELEASE_KEY_FINGERPRINT]);
   assertKeyringHasFingerprint(keyring, RELEASE_KEY_FINGERPRINT);

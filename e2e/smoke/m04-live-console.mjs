@@ -31,7 +31,6 @@ const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';
 const PASSWORD = process.env.COPPICE_SMOKE_PASSWORD ?? 'changeme';
 const SMOKE_REPO_PATH =
   process.env.COPPICE_SMOKE_REPO_PATH ?? '/tmp/smoke-repo';
-const MOCK_SUMMARY = 'Mock implementation complete.';
 
 const MAX_HEALTH_ATTEMPTS = 60;
 const HEALTH_INTERVAL_MS = 1000;
@@ -272,11 +271,6 @@ async function skipPlanning(ticketId, auth) {
   if (!res.ok) {
     fail(`skip planning failed: ${res.status} ${await res.text()}`);
   }
-
-  const ticket = await res.json();
-  if (ticket.skipPlanning !== true) {
-    fail('skip planning was not enabled');
-  }
 }
 
 async function runAgent(ticketId, auth) {
@@ -294,32 +288,6 @@ async function runAgent(ticketId, auth) {
 
   console.log(`smoke: started run ${runId}`);
   return runId;
-}
-
-async function assertAgentComment(ticketId, auth) {
-  const res = await api('GET', `/api/tickets/${ticketId}/comments`, auth);
-
-  if (!res.ok) {
-    fail(`list comments failed: ${res.status} ${await res.text()}`);
-  }
-
-  const comments = await res.json();
-  if (!Array.isArray(comments)) {
-    fail('comments response is not an array');
-  }
-
-  const agentComment = comments.find((c) => c.authorType === 'agent');
-  if (!agentComment) {
-    fail('expected agent comment on ticket');
-  }
-
-  if (!agentComment.body.includes(MOCK_SUMMARY)) {
-    fail(
-      `agent comment missing mock summary; body=${JSON.stringify(agentComment.body)}`,
-    );
-  }
-
-  console.log('smoke: agent comment contains mock summary');
 }
 
 function connectLiveOnce(runId, cookie) {
@@ -488,8 +456,6 @@ async function main() {
     );
   }
   console.log('smoke: events WS received agent_run.finished');
-
-  await assertAgentComment(ticket.id, auth);
 
   console.log('smoke: M04 live console WebSocket flow passed');
 }

@@ -1,31 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { selectPublishedRelease } from '../scripts/select-published-release.mjs';
+import { selectForEvent, selectPublishedRelease } from '../scripts/select-published-release.mjs';
 
-test('manual dispatch follows the newest published release, including an rc', () => {
-  const chosen = selectPublishedRelease([
-    { tagName: 'v1.0.0', isDraft: false },
-    { tagName: 'v1.3.0-rc.1', isDraft: false },
-    { tagName: 'v9.0.0', isDraft: true },
-    { tagName: 'not-a-release', isDraft: false },
-  ]);
-  assert.deepEqual(chosen, { tag: 'v1.3.0-rc.1', version: '1.3.0-rc.1' });
-});
+test('selectPublishedRelease follows the newest published release', () => {
+  for (const [releases, expected] of [
+    [
+      [
+        { tagName: 'v1.0.0', isDraft: false },
+        { tagName: 'v1.3.0-rc.1', isDraft: false },
+        { tagName: 'v9.0.0', isDraft: true },
+        { tagName: 'not-a-release', isDraft: false },
+      ],
+      { tag: 'v1.3.0-rc.1', version: '1.3.0-rc.1' },
+    ],
+    [
+      [
+        { tag_name: 'v1.3.0-rc.4', draft: false },
+        { tag_name: 'v1.3.0', draft: false },
+      ],
+      { tag: 'v1.3.0', version: '1.3.0' },
+    ],
+  ]) {
+    assert.deepEqual(selectPublishedRelease(releases), expected);
+  }
 
-test('a final release beats an older rc', () => {
-  const chosen = selectPublishedRelease([
-    { tag_name: 'v1.3.0-rc.4', draft: false },
-    { tag_name: 'v1.3.0', draft: false },
-  ]);
-  assert.deepEqual(chosen, { tag: 'v1.3.0', version: '1.3.0' });
-});
-
-test('a published event for an older release still mirrors the newest one', async () => {
-  const { selectForEvent } = await import('../scripts/select-published-release.mjs');
-  const chosen = selectForEvent('v1.0.0-rc.2', [
-    { tagName: 'v1.0.0-rc.2', isDraft: false },
-    { tagName: 'v1.0.0', isDraft: false },
-  ]);
-  assert.deepEqual(chosen, { tag: 'v1.0.0', version: '1.0.0' });
+  // A published event for an older release still mirrors the newest one.
+  assert.deepEqual(
+    selectForEvent('v1.0.0-rc.2', [
+      { tagName: 'v1.0.0-rc.2', isDraft: false },
+      { tagName: 'v1.0.0', isDraft: false },
+    ]),
+    { tag: 'v1.0.0', version: '1.0.0' },
+  );
 });

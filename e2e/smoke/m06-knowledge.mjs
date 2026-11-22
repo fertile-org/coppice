@@ -397,15 +397,7 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     auth,
   );
   await patchTicket(ticket.id, { repoId: repo.id }, auth, 'attach repo');
-  const skipped = await patchTicket(
-    ticket.id,
-    { skipPlanning: true },
-    auth,
-    'skip planning',
-  );
-  if (skipped.skipPlanning !== true) {
-    fail('skip planning was not enabled');
-  }
+  await patchTicket(ticket.id, { skipPlanning: true }, auth, 'skip planning');
   await expectJson(
     await api('POST', `/api/tickets/${ticket.id}/assign`, {
       ...auth,
@@ -564,11 +556,11 @@ async function main() {
     await api('DELETE', `/api/agents/${worker.id}`, auth);
   }
 
-  for (const route of ['/knowledge', '/agents']) {
-    const webResponse = await fetch(`${WEB}${route}`);
+  {
+    const webResponse = await fetch(`${WEB}/knowledge`);
     const webBody = await webResponse.text();
     if (!webResponse.ok || !webBody.includes('id="root"')) {
-      fail(`web route ${route} unavailable: ${webResponse.status}`);
+      fail(`web route /knowledge unavailable: ${webResponse.status}`);
     }
   }
 

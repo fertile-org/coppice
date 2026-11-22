@@ -50,14 +50,15 @@ test('a downloaded update can restart the app', () => {
   assert.equal(updater.autoInstallOnAppQuit, false);
 });
 
-test('updater mode is on only when the package was signed', () => {
-  assert.equal(readUpdaterMode('{"macInPlaceUpdates":true}\n'), true);
-  assert.equal(readUpdaterMode('{"macInPlaceUpdates":false}\n'), false);
-  assert.equal(readUpdaterMode(''), false);
-  assert.equal(readUpdaterMode('{'), false);
-});
-
-test('a packaged update base overrides the default feed host', () => {
+test('updater mode and packaged update base come from updater-mode.json', () => {
+  for (const [raw, expected] of [
+    ['{"macInPlaceUpdates":true}\n', true],
+    ['{"macInPlaceUpdates":false}\n', false],
+    ['', false],
+    ['{', false],
+  ]) {
+    assert.equal(readUpdaterMode(raw), expected, raw);
+  }
   assert.equal(readUpdateBase('{"updateBase":"https://apt.example.com"}'), 'https://apt.example.com');
   assert.equal(readUpdateBase('{"updateBase":"  "}'), null);
   assert.equal(readUpdateBase(''), null);
