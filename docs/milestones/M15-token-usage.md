@@ -36,8 +36,9 @@ Verified against Claude Code 2.1.318 on 2026-11-05: `fixtures/claude-code/claude
 | Claude Code | `stream_event` → `message_delta.usage` (needs `--include-partial-messages`); `assistant.message.usage` without it | `result.usage` (main thread), `result.modelUsage` (main + subagents, per model) | Agent `tool_result` → `tool_use_result.usage`, `system/task_notification.usage` | **yes** |
 | Codex | `turn.completed.usage` (per turn: `input_tokens` includes `cached_input_tokens`; also `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`). Captures: `fixtures/codex/codex-0.163.0-usage.jsonl`, `...-usage-resume.jsonl` (0.163.0, 2026-11-19) | sum of turns | — (none in capture) | **yes** |
 | Cursor | — | `result.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`; `reasoningTokens` ignored). Capture: `fixtures/cursor/cursor-agent-2026.11.13-eacade1-usage.jsonl` (2026.11.13-eacade1) | — | **yes** |
-| OpenCode (CLI) | `step_finish` part, likely `tokens` (input, output, reasoning, cache read/write) | sum of steps | unknown | no |
-| ACP connectors (OpenCode, Copilot, Qwen Code, Kimi, Grok) and Kilo | ACP `usage_update` (`used` / `size`, context window); session messages likely carry `tokens` | prompt response or sum | unknown | no |
+| OpenCode (CLI JSON) | `step_finish.part.tokens` (`input`, `output`, `reasoning`, `cache.read` / `cache.write`). Captures: `fixtures/opencode-cli/opencode-2.0.20-usage.jsonl`, `...-usage-resume.jsonl` (2.0.20, 2026-11-22; model `opencode-go/kimi-k2.7-code`) | sum of `step_finish` rows this process emitted | — (subagent tool has no usage; child session id only) | **yes** |
+| OpenCode (ACP) | `session/prompt` result `usage` (`inputTokens`, `outputTokens`, `cachedReadTokens`, optional `thoughtTokens`; `totalTokens` = their sum) plus `usage_update` (`used` / `size`). Captures: `fixtures/opencode-acp/opencode-2.0.20-usage.jsonl`, `...-usage-resume.jsonl` (2.0.20, 2026-11-22; model `opencode/big-pickle`). Fixtures are full JSON-RPC stdout; `AcpConsole` observes unwrapped `session/update` payloads and the prompt result | per prompt (billable fields); `used`/`totalTokens` is context fill, not a sum of earlier prompts | child tools carry `_meta.opencode/child-session`; no separate usage | **yes** |
+| Other ACP (Copilot, Qwen Code, Kimi, Grok) and Kilo | same ACP shapes expected; not captured here | — | — | no |
 
 ### Codex findings
 
@@ -47,6 +48,32 @@ Checked on Codex CLI 0.163.0 on 2026-11-19 (`codex-0.163.0-usage.jsonl`, shell c
 2. **`turn.completed.usage` is per turn, including on resume.** The resumed process reported output 48 only; it did not include the earlier turn's 41. The reader sums the turns it sees and needs no resume subtraction.
 3. **No model** appears on `turn.completed` or elsewhere in the `--json` stream.
 4. **No subagent usage** appeared in the standard capture. `cache_write_input_tokens` and `reasoning_output_tokens` are present (both 0 on these runs); `output_tokens` includes reasoning (session `total_tokens` is input + output).
+
+### OpenCode findings
+
+Checked on OpenCode 2.0.20 on 2026-11-22. Two live transports on the same major version (chosen by model in `opencode.rs`, not by version alone):
+
+**2.x ACP** (`opencode acp`; `fixtures/opencode-acp/opencode-2.0.20-usage.jsonl` shell + subagent, `...-usage-resume.jsonl`):
+
+1. **Per-prompt usage sits on the `session/prompt` result**, not on message parts. Fields: `inputTokens`, `outputTokens`, `cachedReadTokens`, optional `thoughtTokens`, and `totalTokens`. `totalTokens` equals the sum of those four (thought omitted when 0 / absent). Example: 230 + 4 + 8704 = 8938.
+2. **`thoughtTokens` are outside `outputTokens`.** When present, add them into Coppice `output`. The older read-only fixture (`opencode-2.0.20-read-only-turn.jsonl`) had thought 17 with output 14; the shell+subagent capture omitted `thoughtTokens` while still streaming `agent_thought_chunk` text.
+3. **`cachedReadTokens` are outside `inputTokens`.** Uncached input is `inputTokens` as reported; do not subtract cache from input.
+4. **`usage_update` is the context-window meter** (`used` matches that prompt's `totalTokens`, `size` 200000 on these runs). Treat `used`/`totalTokens` as fill, not a run total to sum across prompts.
+5. **Resume does not re-count earlier prompts' billable tokens.** A resumed process's prompt result reports that turn only (output 5 vs earlier 4; input 258 vs 230). No resume subtraction.
+6. **No model** on the usage payload or `usage_update`.
+7. **Subagents appear; they report no usage.** Handshake advertises `_meta.opencode/child-session-updates`. A `subagent` tool (`kind: think`, `agent: general`) streams child shell calls on the parent session with `_meta.opencode/child-session` (`id`, `parentID`, `depth`, `title`). The parent prompt `usage` is the only token block; there is no child usage field to nest.
+
+**2.x CLI JSON** (`opencode run --standalone --format json --auto`; `fixtures/opencode-cli/opencode-2.0.20-usage.jsonl` shell + subagent, `...-usage-resume.jsonl`; model outside the ACP catalog):
+
+1. **Usage is on `step_finish.part.tokens`:** `input`, `output`, `reasoning`, `cache.read`, `cache.write`. Also `part.cost` (store only; do not serve money).
+2. **`input` does not include `cache.read`.** Resume showed `input` 275 with `cache.read` 9472, so cache is separate (unlike Codex).
+3. **`reasoning` is outside `output`.** Fresh capture: output 62, reasoning 128. Add reasoning into Coppice `output`.
+4. **Granularity is per step** (one LLM round that ends in `step_finish`, often `reason: "tool-calls"`). A following text-only step may emit `text` without a trailing `step_finish` before the process exits; a reader that only sums `step_finish` can miss that last step and should mark the run `partial` unless another total appears (none did in these captures).
+5. **Resume emits only this process's steps.** Resume `input` 275 / `output` 18 did not include the earlier step's 8601 / 62. Sum what you see; no resume subtraction.
+6. **No model** on the JSON lines. **No context-window size** on this transport.
+7. **Subagent tool has no tokens.** `tool: "subagent"` completes with a child `sessionID` in metadata; only the parent `step_finish` carries `tokens`.
+
+**1.x HTTP/SSE (`opencode serve`)** is **not tracked.** The serve path has no `UsageHook`. Fresh installs are 2.x. Capturing 1.x needs a pinned 1.x binary beside the 2.0.20 used above; none was available without replacing it. Leave 1.x out until a capture justifies a third reader and a hook on the serve client.
 
 ### Claude Code findings
 
@@ -145,7 +172,7 @@ The remaining work is split into deliverables. Each one merges on its own and ha
 | D9 | **Done.** **Slices and summary API.** The `usage_slices` view and `GET /api/usage/summary`. ([Slices](#slices)) | D5, D6 | DB tests with MockProvider fixtures at each level of detail (per request, per turn, run total only, subagent total only): each run's slices add up to its total. One test per `groupBy`. Day grouping is checked in two timezones around midnight. Untracked runs appear only in the coverage counts. Workspace runs are excluded by the board filter. Deleting a ticket leaves the totals unchanged. Tokens per Done ticket matches a hand-computed median over a split ticket tree. |
 | D10 | **Done.** **Settings → Usage page.** Tiles, chart, grouped table, filters and the coverage line. ([Page](#page)) | D4, D9 | Web tests: for every group, the table rows add up to the Total tile. The coverage line names untracked connectors. "—" and "not reported" appear in the right cells. Filters change the query. Manual: a workspace with runs from two connectors. |
 | D11 | **Done.** **Chat-session totals.** `GET /api/chat/sessions/{id}/usage` and the total in the chat header. | — | Integration test with MockProvider chat runs, where untracked runs are not counted. Web test for the header. |
-| D12+ | **Cursor done** (run totals from `result.usage`, real capture `cursor-agent-2026.11.13-eacade1`). **Deferred. One deliverable per further connector:** OpenCode CLI, Kilo Code, and one ACP reader covering every ACP connector. Each follows the [checklist](#checklist-for-a-new-connector). | D2, D3, D4, that connector's captures ([deferred](#deferred)) | The same checks as D7, for that connector. |
+| D12+ | **Cursor done** (run totals from `result.usage`, real capture `cursor-agent-2026.11.13-eacade1`). **OpenCode captures done** (2.0.20 ACP + CLI JSON under `fixtures/opencode-acp/` and `fixtures/opencode-cli/`; see [OpenCode findings](#opencode-findings)). **Deferred. One deliverable per further connector:** OpenCode readers (launch-site format selection), Kilo Code, and one ACP reader covering every ACP connector. Each follows the [checklist](#checklist-for-a-new-connector). | D2, D3, D4, that connector's captures ([deferred](#deferred)) | The same checks as D7, for that connector. |
 
 D0, D1, D3, D5 and D11 can start now and run in parallel. D2 follows D1, D4 follows D3, and D6 follows D5. D8, D9 and D10 need only Claude Code and MockProvider, so none of them waits on the deferred readers.
 
@@ -325,10 +352,10 @@ Settled questions are in [Decisions (phase 2)](#decisions-phase-2). Two were set
 
 ### Deferred
 
-These need connector CLIs that are not available yet. They block only D12+.
+These need connector CLIs that are not available yet, or a follow-up that only adds a reader. They block only D12+.
 
-- **ACP captures beyond OpenCode (blocks the ACP reader).** In the real `fixtures/opencode-acp` capture, the prompt response's `totalTokens` (7897) is `inputTokens` 58 + `outputTokens` 14 + `cachedReadTokens` 7808 + `thoughtTokens` 17. Thought tokens are therefore outside `outputTokens`, and the reader must add them to `output`. `usage_update` reports `used` 7897 and `size` 200000. That capture has no subagent or resumed turn, so it is not the full standard capture. Copilot, Qwen Code, Kimi and Grok need their own captures before one ACP reader can claim to cover them.
-- **OpenCode speaks two wire formats.** OpenCode 2.0+ runs over ACP and older versions print `--format json` events, but one descriptor serves both, and `ConnectorDescriptor::usage` names one format. Its reader must pick the format per launch (the version is in the `ProcessContext`), or the descriptor must name one format per transport.
+- **ACP captures beyond OpenCode (blocks a shared ACP reader claiming every ACP connector).** OpenCode 2.0.20 now has the standard capture (shell + subagent + resume) under `fixtures/opencode-acp/`. Prompt-result `totalTokens` is `inputTokens` + `outputTokens` + `cachedReadTokens` + optional `thoughtTokens`; thought is outside output; `usage_update` is the context meter (`used` / `size`). Copilot, Qwen Code, Kimi and Grok still need their own captures before one ACP reader can claim to cover them.
+- **OpenCode format routing (blocks turning descriptor `usage` on).** On 2.x, **both** ACP and `opencode run --format json` are live: `opencode.rs` picks ACP when the model is in the ACP catalog, and CLI JSON when it is not (for example `opencode-go/*`). `UsageHook::for_connector` takes one `UsageFormat` from the descriptor, and OpenCode's descriptor stays `None` until readers land. **Choose launch-site format selection:** each path in `opencode.rs` passes an explicit `UsageFormat` into `UsageHook` (`UsageHook::new` or an override on `for_connector`). Do **not** derive the format from `ProcessContext.cli_version` alone — both wire formats exist on the same 2.x binary. A shared ACP reader (once other ACP connectors are captured) covers the ACP path; CLI JSON needs its own format if it stays distinct from Codex/Claude. 1.x serve/SSE stays untracked until a pinned 1.x capture exists (no `UsageHook` on that path today).
 
 ## Testing (phase 1)
 
