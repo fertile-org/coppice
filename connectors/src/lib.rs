@@ -237,6 +237,11 @@ pub enum UsageFormat {
     CursorStreamJson,
     /// Codex `codex exec --json` `turn.completed.usage`.
     CodexJson,
+    /// OpenCode ACP: `session/prompt` result `usage` plus `usage_update`.
+    /// OpenCode-scoped until other ACP connectors opt in with their own captures.
+    OpenCodeAcp,
+    /// OpenCode `run --format json` `step_finish.part.tokens`.
+    OpenCodeCliJson,
     /// Events already in Coppice's own usage shape (MockProvider fixtures).
     Normalized,
     /// No reader yet. Runs record no usage.
@@ -279,6 +284,33 @@ impl UsageFormat {
             // cached reads (checked on 0.163.0); the stream names no model
             // and no subagent usage.
             UsageFormat::CodexJson => Some(UsageCoverage {
+                granularity: CoverageGranularity::Turn,
+                model: ModelSource::None,
+                fields: TokenFields::ALL,
+                subagents: SubagentSource::None,
+                context_window: ContextWindowSource::None,
+            }),
+            // One prompt-result `usage` per turn. `inputTokens` excludes
+            // cache; optional `thoughtTokens` sit outside `outputTokens`.
+            // `usage_update` carries used/size. No cache write, model, or
+            // subagent token block (checked on OpenCode 2.0.20).
+            UsageFormat::OpenCodeAcp => Some(UsageCoverage {
+                granularity: CoverageGranularity::Turn,
+                model: ModelSource::None,
+                fields: TokenFields {
+                    input: true,
+                    cache_read: true,
+                    cache_write: false,
+                    output: true,
+                    reasoning: true,
+                },
+                subagents: SubagentSource::None,
+                context_window: ContextWindowSource::WithSize,
+            }),
+            // One `step_finish.part.tokens` per step. Cache is separate from
+            // input; reasoning sits outside output. No model, context window,
+            // or subagent tokens (checked on OpenCode 2.0.20).
+            UsageFormat::OpenCodeCliJson => Some(UsageCoverage {
                 granularity: CoverageGranularity::Turn,
                 model: ModelSource::None,
                 fields: TokenFields::ALL,
@@ -562,7 +594,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_wiring: McpWiring::OpenCodeJson,
         mcp_tool_names: ToolNameStyle::Underscore,
         console: ConsoleKind::OpenCodeSession,
-        usage: UsageFormat::None,
+        // ACP coverage (descriptor default). CLI JSON runs override the hook
+        // at the launch site with OpenCodeCliJson.
+        usage: UsageFormat::OpenCodeAcp,
         caps: Capabilities {
             // Chat denies `edit`, `write`, and `bash` in the per-run config
             // and sets OPENCODE_DISABLE_PROJECT_CONFIG. Verified with OpenCode
@@ -783,12 +817,14 @@ mod tests {
             id == CLAUDE_CODE,
             "{id} thinking level"
         );
-        // Claude Code, Cursor and Codex have usage readers; the mock
-        // replays normalized events.
+        // Claude Code, Cursor, Codex and OpenCode (ACP) have usage readers;
+        // the mock replays normalized events. OpenCode CLI JSON overrides
+        // the hook at its launch site.
         let usage = match id {
             CLAUDE_CODE => UsageFormat::ClaudeStreamJson,
             CURSOR => UsageFormat::CursorStreamJson,
             CODEX => UsageFormat::CodexJson,
+            OPENCODE => UsageFormat::OpenCodeAcp,
             MOCK => UsageFormat::Normalized,
             _ => UsageFormat::None,
         };
