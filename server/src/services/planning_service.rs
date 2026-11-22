@@ -660,6 +660,19 @@ impl<'a> PlanningService<'a> {
         accept_recommended: bool,
     ) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+
+        // Old bug left Ready parents with children (or pending) but no
+        // ticket_plan_splits. Resume that stuck state without manual SQL.
+        if ticket.ticket.status == TicketStatus::Ready {
+            if self
+                .resume_stuck_plan_split(ticket_id, &ticket.ticket, workflow, skip_human_review)
+                .await?
+            {
+                return Ok(());
+            }
+            return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
         }
@@ -685,27 +698,6 @@ impl<'a> PlanningService<'a> {
         self.refuse_unready_designs(ticket_id, &plan, accept_recommended)
             .await?;
 
-        sqlx::query(
-            r#"
-            UPDATE tickets
-            SET approved_plan_id = $2,
-                approved_plan_content_version = $3,
-                skip_human_review = COALESCE($4, skip_human_review),
-                updated_at = now()
-            WHERE id = $1
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(plan.id)
-        .bind(ticket.ticket.content_version)
-        .bind(skip_human_review)
-        .execute(self.pool)
-        .await?;
-
-        TicketService::new(self.pool)
-            .update_status(ticket_id, TicketStatus::Ready, None, None)
-            .await?;
-
         let plan_split = ticket
             .ticket
             .pending_split_recommendation
@@ -715,14 +707,65 @@ impl<'a> PlanningService<'a> {
                     .ok()
             })
             .filter(|pending| pending.from_plan && !pending.splits.is_empty());
+
+        // Plan splits: children + split row while still in Plan Review, then
+        // stamp → Ready → autopilot. A mid-create failure leaves the parent
+        // here with no orphans so Approve works again.
         if let Some(pending) = plan_split {
             let count = self
                 .create_planned_children(&ticket.ticket, &pending, plan.id, workflow)
+                .await?;
+            self.stamp_plan_approval(
+                ticket_id,
+                plan.id,
+                ticket.ticket.content_version,
+                skip_human_review,
+            )
+            .await?;
+            TicketService::new(self.pool)
+                .update_status(ticket_id, TicketStatus::Ready, None, None)
+                .await?;
+            crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+                .on_split_approved(ticket_id)
                 .await?;
             self.note(ticket_id, &plan::split_approved_note(count))
                 .await?;
             return Ok(());
         }
+
+        // Resume: split row exists (prior attempt died after insert) but the
+        // parent never left Plan Review.
+        if self.is_split_parent(ticket_id).await? {
+            let count = self.split_child_count(ticket_id).await?;
+            self.stamp_plan_approval(
+                ticket_id,
+                plan.id,
+                ticket.ticket.content_version,
+                skip_human_review,
+            )
+            .await?;
+            TicketService::new(self.pool)
+                .update_status(ticket_id, TicketStatus::Ready, None, None)
+                .await?;
+            crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+                .on_split_approved(ticket_id)
+                .await?;
+            self.note(ticket_id, &plan::split_approved_note(count))
+                .await?;
+            return Ok(());
+        }
+
+        self.stamp_plan_approval(
+            ticket_id,
+            plan.id,
+            ticket.ticket.content_version,
+            skip_human_review,
+        )
+        .await?;
+
+        TicketService::new(self.pool)
+            .update_status(ticket_id, TicketStatus::Ready, None, None)
+            .await?;
 
         self.write_plan_into_description(ticket_id, &ticket.ticket.description, &plan.body)
             .await?;
@@ -741,6 +784,94 @@ impl<'a> PlanningService<'a> {
 
         self.start_tech_lead(ticket_id).await?;
         Ok(())
+    }
+
+    async fn stamp_plan_approval(
+        &self,
+        ticket_id: Id,
+        plan_id: Id,
+        content_version: i32,
+        skip_human_review: Option<bool>,
+    ) -> Result<(), PlanError> {
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET approved_plan_id = $2,
+                approved_plan_content_version = $3,
+                skip_human_review = COALESCE($4, skip_human_review),
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(plan_id)
+        .bind(content_version)
+        .bind(skip_human_review)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Finish a Ready parent that already has a split row, or rebuild the
+    /// split record from children / pending when the old approve path died
+    /// after leaving Plan Review.
+    async fn resume_stuck_plan_split(
+        &self,
+        ticket_id: Id,
+        ticket: &Ticket,
+        workflow: &crate::config::WorkflowConfig,
+        skip_human_review: Option<bool>,
+    ) -> Result<bool, PlanError> {
+        if self.is_split_parent(ticket_id).await? {
+            crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+                .on_split_approved(ticket_id)
+                .await?;
+            return Ok(true);
+        }
+
+        let pending = ticket
+            .pending_split_recommendation
+            .clone()
+            .and_then(|value| {
+                serde_json::from_value::<crate::domain::workflow::PendingSplitRecommendation>(value)
+                    .ok()
+            })
+            .filter(|pending| pending.from_plan && !pending.splits.is_empty());
+
+        let child_ids = self.live_child_ids(ticket_id).await?;
+        if pending.is_none() && child_ids.is_empty() {
+            return Ok(false);
+        }
+
+        let Some(plan) = self.latest_plan(ticket_id).await? else {
+            return Err(PlanError::Validation(NO_PLAN_YET.into()));
+        };
+
+        let count = if let Some(pending) = pending {
+            self.create_planned_children(ticket, &pending, plan.id, workflow)
+                .await?
+        } else {
+            self.record_plan_split(ticket_id, plan.id, &child_ids)
+                .await?;
+            child_ids.len()
+        };
+
+        if ticket.approved_plan_id.is_none() {
+            self.stamp_plan_approval(
+                ticket_id,
+                plan.id,
+                ticket.content_version,
+                skip_human_review,
+            )
+            .await?;
+        }
+
+        crate::services::split_autopilot::SplitAutopilot::new(self.pool)
+            .on_split_approved(ticket_id)
+            .await?;
+        self.note(ticket_id, &plan::split_approved_note(count))
+            .await?;
+        Ok(true)
     }
 
     /// Keep the original description and put the approved plan under its own
@@ -819,7 +950,8 @@ impl<'a> PlanningService<'a> {
     }
 
     /// Create the sub-tickets an approved plan proposed, each in Backlog with
-    /// its own approved plan, and record the parent as split.
+    /// its own approved plan, and record the parent as split. Does not leave
+    /// Plan Review or start autopilot — the caller stamps approval next.
     async fn create_planned_children(
         &self,
         parent: &crate::domain::ticket::Ticket,
@@ -827,14 +959,45 @@ impl<'a> PlanningService<'a> {
         plan_id: Id,
         workflow: &crate::config::WorkflowConfig,
     ) -> Result<usize, PlanError> {
-        let children = crate::services::split_service::SplitService::new(self.pool, workflow)
-            .create_child_tickets(parent, &pending.splits, pending.recommended_by_agent_id)
-            .await
-            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        if let Some(existing) = self.split_child_ids(parent.id).await? {
+            return Ok(existing.len());
+        }
+
+        // Drop orphans from a prior failed attempt so retry is clean.
+        self.delete_orphan_children(parent.id).await?;
+
+        let children =
+            match crate::services::split_service::SplitService::new(self.pool, workflow)
+                .create_child_tickets(parent, &pending.splits, pending.recommended_by_agent_id)
+                .await
+            {
+                Ok(children) => children,
+                Err(err) => {
+                    let _ = self.delete_orphan_children(parent.id).await;
+                    return Err(PlanError::Validation(err.to_string()));
+                }
+            };
+        let child_ids: Vec<Id> = children.iter().map(|child| child.id).collect();
+        if let Err(err) = self.record_plan_split(parent.id, plan_id, &child_ids).await {
+            let _ = self.delete_orphan_children(parent.id).await;
+            // Surface the real failure to Plan Review (not a bare 500).
+            return Err(match err {
+                PlanError::Database(db) => PlanError::Validation(db.to_string()),
+                other => other,
+            });
+        }
         TicketService::new(self.pool)
             .clear_pending_split_recommendation(parent.id)
             .await?;
-        let child_ids: Vec<Id> = children.iter().map(|child| child.id).collect();
+        Ok(children.len())
+    }
+
+    async fn record_plan_split(
+        &self,
+        parent_id: Id,
+        plan_id: Id,
+        child_ids: &[Id],
+    ) -> Result<(), PlanError> {
         sqlx::query(
             r#"
             INSERT INTO ticket_plan_splits (parent_ticket_id, plan_id, child_order)
@@ -844,15 +1007,70 @@ impl<'a> PlanningService<'a> {
                     child_order = EXCLUDED.child_order
             "#,
         )
-        .bind(parent.id)
+        .bind(parent_id)
         .bind(plan_id)
-        .bind(&child_ids)
+        .bind(child_ids)
         .execute(self.pool)
         .await?;
-        crate::services::split_autopilot::SplitAutopilot::new(self.pool)
-            .on_split_approved(parent.id)
-            .await?;
-        Ok(children.len())
+        Ok(())
+    }
+
+    async fn split_child_ids(&self, parent_id: Id) -> Result<Option<Vec<Id>>, PlanError> {
+        let row: Option<Vec<Id>> = sqlx::query_scalar(
+            "SELECT child_order FROM ticket_plan_splits WHERE parent_ticket_id = $1",
+        )
+        .bind(parent_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn split_child_count(&self, parent_id: Id) -> Result<usize, PlanError> {
+        Ok(self
+            .split_child_ids(parent_id)
+            .await?
+            .map(|ids| ids.len())
+            .unwrap_or(0))
+    }
+
+    async fn live_child_ids(&self, parent_id: Id) -> Result<Vec<Id>, PlanError> {
+        let ids: Vec<Id> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM tickets
+            WHERE parent_ticket_id = $1 AND archived_at IS NULL
+            ORDER BY created_at, id
+            "#,
+        )
+        .bind(parent_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(ids)
+    }
+
+    /// Hard-delete live children of a plan-split attempt that never recorded
+    /// `ticket_plan_splits`. Clears `approved_plan_id` first so the plan FK
+    /// does not block the delete.
+    async fn delete_orphan_children(&self, parent_id: Id) -> Result<(), PlanError> {
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET approved_plan_id = NULL, updated_at = now()
+            WHERE parent_ticket_id = $1 AND archived_at IS NULL
+            "#,
+        )
+        .bind(parent_id)
+        .execute(self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM tickets
+            WHERE parent_ticket_id = $1 AND archived_at IS NULL
+            "#,
+        )
+        .bind(parent_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
     }
 
     /// True when the split parent can be verified: every sub-ticket that is
