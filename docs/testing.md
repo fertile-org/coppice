@@ -23,8 +23,8 @@ Largest Rust integration binaries by case count: `integration_plugins` (85), `in
 | Command | Wall | Notes |
 |---------|------|-------|
 | `make web-test` | **54 s** | 151 files / 1110 tests passed; Vitest reported Duration 52.51 s |
-| `make test` (default fail-fast) | *(re-measure after 077 renumber)* | Duplicate version **077** was fixed by moving `design_set_kind_and_picks` to **082**; re-run for a fresh wall time. |
-| `cargo nextest run --features embedded-test-db --workspace --no-fail-fast` | **406 s** wall / **359 s** test execution | Historical measurement while 077 was duplicated (embedded migrate failed). Re-measure after the **082** renumber for a green baseline. |
+| `make test` (default fail-fast) | *(re-measure after 077 renumber)* | Duplicate version **077** was fixed by moving `design_set_kind_and_picks` to **083** (idempotent); re-run for a fresh wall time. |
+| `cargo nextest run --features embedded-test-db --workspace --no-fail-fast` | **406 s** wall / **359 s** test execution | Historical measurement while 077 was duplicated (embedded migrate failed). Re-measure after the **083** renumber for a green baseline. |
 
 After measurement, reclaim disk with `make clean` (see [AGENTS.md](../AGENTS.md) rule 6).
 
