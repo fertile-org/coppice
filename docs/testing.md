@@ -1,5 +1,105 @@
 # Testing
 
+## Suite baseline and cleanup rubric
+
+Measured on **2026-11-21** on `hung-nguyen-thinkpad` (Linux x86_64, 16 cores, 29 GiB RAM). Rust and web runs used a **warm** build (binaries and `node_modules` already present). Counts come from runners (`cargo nextest list`, `yarn vitest list` / `vitest run`, desktop `node:test`), not from grep of `#[test]` / `it(` alone — those under-count `rstest` / `.each` expansions.
+
+### Counts
+
+| Layer | How counted | Cases | Files / binaries |
+|-------|-------------|------:|------------------|
+| Rust unit (workspace libs + CLI/server bin tests + migrations lib) | `cargo nextest list --workspace --features embedded-test-db` (non-integration binaries) | 1580 | `coppice-server` 1396, `coppice-config` 103, `coppice-connectors` 53, `coppice-cli` 25, `coppice-server` bin 2, `coppice-migrations` 1 |
+| Rust integration (`server/tests`) | same list, `coppice-server::integration_*` / `health` / `migration_*` / `real_*` | 752 | 64 test binaries under `server/tests/` |
+| Rust workspace total | nextest list | **2332** | — |
+| Web (Vitest) | `yarn vitest list` / `vitest run` | **1110** | 151 files under `web/src/**/*.test.*` |
+| Desktop (Node) | `cd desktop && yarn test` | **169** | 29 files under `desktop/test/` (+ root smoke) |
+| E2E smoke | scripts on disk | **9** | `e2e/smoke/*.mjs` (`e2e/full/` empty) |
+| **Suite total (approx.)** | sum of layers above | **~3620** | — |
+
+Largest Rust integration binaries by case count: `integration_plugins` (85), `integration_mcp` (80), `integration_designs` (49), `integration_knowledge` (39), `integration_git_flow` (38). Largest web files: `TicketDrawer.test.tsx` (41), `PluginDetails.test.tsx` (34), `MarketplaceSection.test.tsx` (29), `ChatPage.test.tsx` (28), `AppShell.test.tsx` (26).
+
+### Timings (warm)
+
+| Command | Wall | Notes |
+|---------|------|-------|
+| `make web-test` | **54 s** | 151 files / 1110 tests passed; Vitest reported Duration 52.51 s |
+| `make test` (default fail-fast) | **~49 s** then abort | Stops on `coppice-migrations::tests::migration_versions_are_unique` — duplicate version **077** (`077_design_set_kind_and_picks.sql` and `077_plugin_builds.sql`) |
+| `cargo nextest run --features embedded-test-db --workspace --no-fail-fast` | **406 s** wall / **359 s** test execution | 2332 run: 2193 passed, 139 failed, 10 skipped. Most failures are fallout from the duplicate migration (embedded Postgres cannot apply a unique migration set). Treat the wall time as suite size, not a green CI signal until 077 is renumbered. |
+
+After measurement, reclaim disk with `make clean` (see [AGENTS.md](../AGENTS.md) rule 6).
+
+### Coverage
+
+| Layer | Result |
+|-------|--------|
+| Rust (`cargo llvm-cov`) | **Not measured** — `cargo-llvm-cov` is not installed on this machine; installing it and a full coverage rebuild was out of scope for a docs-only baseline (no coverage config committed). |
+| Web (`vitest --coverage`) | **Not measured** — `@vitest/coverage-v8` is not a dependency; adding it would change `package.json` / lockfile, which this ticket does not do. |
+
+### Cleanup rubric
+
+Use this when deleting or merging tests in follow-on cleanup tickets. Prefer fewer cases that still pin behavior over a large suite that pins wording.
+
+**Delete**
+
+- Assertions that only pin UI copy, button labels, or CSS class names.
+- Snapshot tests that fail on harmless markup churn.
+- Duplicated schema-default or “parses the default config” cases once one canonical table-driven test remains.
+
+**Merge**
+
+- The same domain rule covered once in a unit test and again in an HTTP integration test — keep the layer that owns the rule (domain → unit; wire/auth/CSRF → integration).
+- Per-connector, per-route, or per-status copies of the same path — collapse into one table-driven test.
+- Clusters such as `ready_tech_lead_*`, `pick_is_refused_*`, or per-tool MCP happy paths that differ only by a parameter.
+
+**Keep**
+
+- Domain rules (status transitions, permission checks, validation).
+- Bug-regression tests that name the failure they catch.
+- The last remaining test of a behavior after merges — do not delete the only pin.
+
+### Cleanup candidates (estimated cuts)
+
+No test is deleted in this ticket. Estimates are judgment calls for later tickets; percentages are of that file’s current case count.
+
+**Ticket-named starters**
+
+| File | Cases | Action | Est. cut | Why |
+|------|------:|--------|--------:|-----|
+| `server/tests/integration_plugins.rs` | 85 | merge | 21 | Table-drive plugin-dir / enable / MCP-proxy HTTP paths; keep discovery and security regressions |
+| `server/tests/integration_mcp.rs` | 80 | merge | 24 | Merge per-tool auth/token happy paths; keep `result_submit` and auth failures |
+| `server/tests/integration_designs.rs` | 49 | merge | 10 | Table-drive `pick_is_refused_*` and publish/list copies; keep `selectedDesign` / artifact path rules |
+| `server/src/services/workflow_service.rs` | 48 | merge | 12 | Collapse `ready_tech_lead_*` and overlap with `integration_workflow`; keep one test per unique edge |
+| `server/src/services/run_orchestrator.rs` | 41 | merge | 8 | Table-drive `successful_work_request_*` and spawn/env wiring; keep finalize/git and failure classes |
+| `server/src/providers/claude_code.rs` | 31 | merge | 8 | Table-drive CLI flag/env matrices; keep `mcp_unavailable` and resume regressions |
+| `web/src/features/tickets/TicketDrawer.test.tsx` | 41 | delete | 14 | Drop pure copy/CSS pins; keep status actions and git/conflict flows |
+| `web/src/features/plugins/PluginDetails.test.tsx` | 34 | delete | 12 | Drop enablement label/copy pins; keep Test button and MCP tool listing |
+| `web/src/features/plugins/MarketplaceSection.test.tsx` | 29 | delete | 10 | Drop install-state text pins; keep install/enable error paths |
+| **Subtotal** | | | **~119** | **~3% of ~3620** |
+
+**Additional high-yield files** (same rubric)
+
+| File | Cases | Action | Est. cut |
+|------|------:|--------|--------:|
+| `server/src/copy/plan.rs` | 22 | delete | 10 |
+| `server/src/services/result_contract.rs` | 31 | merge | 6 |
+| `server/src/services/context_builder.rs` | 16 | delete | 6 |
+| `server/tests/integration_knowledge.rs` | 39 | merge | 6 |
+| `server/tests/integration_git_flow.rs` | 38 | merge | 6 |
+| `server/tests/integration_chat.rs` | 27 | merge | 4 |
+| `web/src/components/AppShell.test.tsx` | 26 | delete | 9 |
+| `web/src/features/tools/ConnectorsTab.test.tsx` | 23 | merge | 7 |
+| `web/src/features/chat/ChatPage.test.tsx` | 28 | delete | 7 |
+| `web/src/features/agents/AgentForm.test.tsx` | 23 | delete | 7 |
+| `web/src/features/board/BoardPage.test.tsx` | 20 | delete | 6 |
+| `web/src/features/board/TicketCard.test.tsx` | 20 | delete | 6 |
+| `web/src/features/plugins/PluginsPage.test.tsx` | 22 | delete | 7 |
+| `web/src/features/knowledge/KnowledgePage.test.tsx` | 19 | delete | 6 |
+| `web/src/features/plan/PlanReviewActions.test.tsx` | 19 | delete | 6 |
+| `config/src/lib.rs` | 47 | merge | 7 |
+| **Named + additional** | | | **~225 (~6%)** |
+
+**Why this is not ~30% yet.** Thirty percent of ~3620 is ~1086 cases. The largest files alone only yield a low-single-digit percent under conservative Delete/Merge rates that still keep domain pins. A suite-wide pass that applies the rubric at plausible layer rates can approach the target in follow-on tickets — for example web ~35% (~390), integration ~25% (~190), unit ~15% (~240), desktop ~10% (~17) ≈ **~840 (~23%)**; pushing web toward ~40% and unit toward ~20% lands near **~30%**. Tickets 2–4 should keep walking medium-sized files with the same Delete/Merge/Keep rules rather than only the nine starters above. Fix the duplicate migration **077** before trusting a green `make test` wall time.
+
 ## CI (`.github/workflows/ci.yml`)
 
 Jobs on every push/PR to `main` (Rust, Web, and Desktop below, plus a Docker toolchain check):
@@ -74,7 +174,7 @@ make test
 | **Password hashing** | Argon2 is unusably slow unoptimized and every integration test logs in, so the root `Cargo.toml` builds `argon2`/`blake2` at `opt-level = 3` in the dev profile |
 | **Git-heavy tests** (`integration_plugins`, `integration_repo_git`) | Create and clone real repos, ~1 s each |
 
-**Typical wall times** (warm build, 16 cores, default 8 nextest threads): `make test` ~2.5 min wall / ~2 min of test execution; serial fallback ~6 min.
+**Typical wall times** (warm build, 16 cores, default 8 nextest threads): see [Suite baseline and cleanup rubric](#suite-baseline-and-cleanup-rubric) for a dated measurement. Historically ~2.5 min wall / ~2 min of test execution when green; serial fallback ~6 min.
 
 ### Memory caps (16 GB default)
 
