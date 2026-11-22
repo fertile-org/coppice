@@ -3072,10 +3072,10 @@ fn tech_option(id: &str) -> DesignOption {
 
 async fn publish_technical(
     fx: &TicketHttp,
-    run_id: Uuid,
-    agent_id: Uuid,
+    run_id: Id,
+    agent_id: Id,
     kind: DesignKind,
-) -> Uuid {
+) -> Id {
     let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
     let svc = DesignService::new(&fx.pool, &artifacts);
     let created = svc
@@ -3103,7 +3103,7 @@ async fn publish_technical(
     created.id
 }
 
-fn plan_with_design_marker(set_id: Uuid) -> String {
+fn plan_with_design_marker(set_id: Id) -> String {
     format!(
         "## Plan\n\n### Approach\nShip it.\n\n## Architecture\n\n{{{{design:{set_id}}}}}\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n"
     )
@@ -3142,7 +3142,7 @@ async fn result_submit_rejects_a_third_technical_set() {
         publish_technical(&fx, run_id, fx.agent_id, kind).await;
     }
 
-    let design_id: Uuid =
+    let design_id: Id =
         sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'design' AND enabled")
             .fetch_one(&fx.pool)
             .await
@@ -3353,7 +3353,7 @@ async fn plan_marker_supersedes_unmarked_technical_set() {
         .await
         .expect("plan with new set");
 
-    let superseded_by: Option<Uuid> =
+    let superseded_by: Option<Id> =
         sqlx::query_scalar("SELECT superseded_by FROM design_sets WHERE id = $1")
             .bind(old_set)
             .fetch_one(&fx.pool)
