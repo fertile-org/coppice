@@ -317,7 +317,7 @@ async function seedSupporting(auth, agentIds, boardId) {
     }
     if (ticket.status === 'done') {
       // Accepting needs a real branch, and this card is only set dressing.
-      await psql(`UPDATE tickets SET status = 'done' WHERE id = ${sqlQuote(created.id)}::uuid;`);
+      await psql(`UPDATE tickets SET status = 'done' WHERE id = ${sqlQuote(created.id)};`);
     } else if (ticket.status !== 'backlog') {
       await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
         status: ticket.status,
@@ -334,9 +334,9 @@ async function seedSupporting(auth, agentIds, boardId) {
       id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
       context_profile, started_at
     ) VALUES (
-      gen_random_uuid(),
-      ${sqlQuote(liveTicketId)}::uuid,
-      ${sqlQuote(agentIds.Frontend)}::uuid,
+      gen_random_uuid()::text,
+      ${sqlQuote(liveTicketId)},
+      ${sqlQuote(agentIds.Frontend)},
       'work_on_ticket',
       'running',
       'permissive-default',
@@ -400,9 +400,9 @@ async function attachPlan(ticketId, agentId) {
       id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
       context_profile, started_at, ended_at
     ) VALUES (
-      ${sqlQuote(runId)}::uuid,
-      ${sqlQuote(ticketId)}::uuid,
-      ${sqlQuote(agentId)}::uuid,
+      ${sqlQuote(runId)},
+      ${sqlQuote(ticketId)},
+      ${sqlQuote(agentId)},
       'plan_ticket',
       'succeeded',
       'permissive-default',
@@ -414,11 +414,11 @@ async function attachPlan(ticketId, agentId) {
       id, title, ticket_id, run_id, agent_id, dir, options,
       recommended_option_id, published_at
     ) VALUES (
-      ${sqlQuote(setId)}::uuid,
+      ${sqlQuote(setId)},
       ${sqlQuote(DESIGN_SET_TITLE)},
-      ${sqlQuote(ticketId)}::uuid,
-      ${sqlQuote(runId)}::uuid,
-      ${sqlQuote(agentId)}::uuid,
+      ${sqlQuote(ticketId)},
+      ${sqlQuote(runId)},
+      ${sqlQuote(agentId)},
       ${sqlQuote(dir)},
       ${sqlQuote(JSON.stringify(options))}::jsonb,
       ${sqlQuote(RECOMMENDED_OPTION_ID)},
@@ -428,14 +428,14 @@ async function attachPlan(ticketId, agentId) {
       id, ticket_id, run_id, agent_id, revision, body, content_version,
       design_set_id, design_option_id
     ) VALUES (
-      gen_random_uuid(),
-      ${sqlQuote(ticketId)}::uuid,
-      ${sqlQuote(runId)}::uuid,
-      ${sqlQuote(agentId)}::uuid,
+      gen_random_uuid()::text,
+      ${sqlQuote(ticketId)},
+      ${sqlQuote(runId)},
+      ${sqlQuote(agentId)},
       1,
       $plan$${PLAN_BODY}$plan$,
-      (SELECT content_version FROM tickets WHERE id = ${sqlQuote(ticketId)}::uuid),
-      ${sqlQuote(setId)}::uuid,
+      (SELECT content_version FROM tickets WHERE id = ${sqlQuote(ticketId)}),
+      ${sqlQuote(setId)},
       ${sqlQuote(RECOMMENDED_OPTION_ID)}
     );
   `);
@@ -1911,7 +1911,7 @@ async function record(scene) {
       await psql(`
         UPDATE tickets
         SET branch_name = ${sqlQuote(`agent/${short}-theme-toggle`)}
-        WHERE id = ${sqlQuote(ticket.id)}::uuid;
+        WHERE id = ${sqlQuote(ticket.id)};
       `);
       await reloadBoard();
       const waiting = storyCard('Wait for Human Review');

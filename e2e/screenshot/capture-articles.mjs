@@ -516,7 +516,7 @@ async function captureDone(page, scene) {
   await psql(`
     UPDATE tickets
     SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
-    WHERE id = ${sqlQuote(scene.ticket.id)}::uuid;
+    WHERE id = ${sqlQuote(scene.ticket.id)};
   `);
   await api('PATCH', `/api/tickets/${scene.ticket.id}/status`, scene.auth, {
     status: 'wait_for_final_review',

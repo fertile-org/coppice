@@ -308,6 +308,8 @@ mod tests {
         assert!(Id::parse("not-an-id").is_err());
         assert!(Id::parse("ABC123XYZ789").is_err()); // short must be lowercase
         assert!(Id::parse("550e8400-e29b-41d4-a716-44665544000").is_err());
+        // Shared parse error for API path extractors, MCP args, and any CLI that uses Id.
+        assert_eq!(Id::parse("nope").unwrap_err().to_string(), "invalid id");
     }
 
     #[test]
