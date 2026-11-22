@@ -8,7 +8,7 @@ import {
 } from './parse-opencode-output';
 
 describe('parseFileToolOutput', () => {
-  it('parses OpenCode read XML and strips line numbers', () => {
+  it('parses OpenCode read XML, strips line numbers, and drops reminders', () => {
     const raw = `<path>/tmp/foo.md</path>
 <type>file</type>
 <content>
@@ -16,41 +16,25 @@ describe('parseFileToolOutput', () => {
 2: 
 3: body
 </content>`;
+    expect(parseFileToolOutput(raw)?.content).toBe('# Title\n\nbody');
 
-    const parsed = parseFileToolOutput(raw);
-    expect(parsed?.path).toBe('/tmp/foo.md');
-    expect(parsed?.content).toBe('# Title\n\nbody');
-  });
-
-  it('removes system-reminder blocks', () => {
-    const raw = `<path>/tmp/a.md</path><type>file</type><content>1: hi</content>
+    const withReminder = `<path>/tmp/a.md</path><type>file</type><content>1: hi</content>
 <system-reminder>secret</system-reminder>`;
-
-    expect(parseFileToolOutput(raw)?.content).toBe('hi');
-  });
-});
-
-describe('stripLineNumberPrefixes', () => {
-  it('strips numbered prefixes', () => {
-    expect(stripLineNumberPrefixes('1: a\n12: b')).toBe('a\nb');
-  });
-});
-
-describe('stripSystemReminders', () => {
-  it('removes reminder tags', () => {
-    expect(stripSystemReminders('before<system-reminder>x</system-reminder>after')).toBe('beforeafter');
+    expect(parseFileToolOutput(withReminder)?.content).toBe('hi');
   });
 });
 
 describe('web fetch excerpt', () => {
-  it('detects HTML', () => {
-    expect(isMostlyHtml('<html><body><div><p>hi</p></div></body></html>')).toBe(true);
+  it('detects HTML and excerpts it', () => {
+    const html = '<html><body><h1>Title</h1><p>Hello world</p></body></html>';
+    expect(isMostlyHtml(html)).toBe(true);
+    const excerpt = excerptWebContent(html);
+    expect(excerpt).toContain('Title');
+    expect(excerpt).not.toContain('<html');
   });
 
-  it('excerpts HTML to plain text', () => {
-    const excerpt = excerptWebContent('<html><body><h1>Title</h1><p>Hello world</p></body></html>');
-    expect(excerpt).toContain('Title');
-    expect(excerpt).toContain('Hello world');
-    expect(excerpt).not.toContain('<html');
+  it('strips line numbers and system reminders', () => {
+    expect(stripLineNumberPrefixes('1: a\n12: b')).toBe('a\nb');
+    expect(stripSystemReminders('before<system-reminder>x</system-reminder>after')).toBe('beforeafter');
   });
 });

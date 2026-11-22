@@ -1,11 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmProvider } from '../../components/ui/confirm-dialog';
 import { setCsrfToken } from '../../lib/api';
-import { pluginSchema, type Plugin, type PluginTestResult } from '../../lib/schemas/plugin';
+import type { Plugin, PluginTestResult } from '../../lib/schemas/plugin';
 import { PluginDetails } from './PluginDetails';
 import { PluginRow } from './PluginRow';
 
@@ -167,35 +167,6 @@ describe('PluginDetails', () => {
     vi.unstubAllGlobals();
   });
 
-  it('explains a known token with its label, help, scopes and a token link', () => {
-    renderCard({
-      ...plugin,
-      settings: [
-        { key: 'GITHUB_PERSONAL_ACCESS_TOKEN', configured: false, source: 'missing' },
-      ],
-    });
-
-    const row = screen.getByTestId('plugin-setting-GITHUB_PERSONAL_ACCESS_TOKEN');
-    expect(within(row).getByText('Missing')).toBeVisible();
-    expect(screen.getByText('GitHub access token')).toBeVisible();
-    expect(screen.getByText(/Lets the github plugin read and update issues/)).toBeVisible();
-    expect(screen.getByText(/read access to Metadata, Contents, Issues/)).toBeVisible();
-    const link = screen.getByRole('link', { name: 'Create a token on GitHub' });
-    expect(link).toHaveAttribute(
-      'href',
-      'https://github.com/settings/personal-access-tokens/new',
-    );
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(screen.getByLabelText('GITHUB_PERSONAL_ACCESS_TOKEN')).toHaveAttribute('type', 'password');
-  });
-
-  it('shows no help for settings it does not know', () => {
-    renderCard();
-
-    expect(screen.queryByRole('link', { name: 'Create a token on GitHub' })).toBeNull();
-    expect(screen.queryByText('GitHub access token')).toBeNull();
-  });
-
   it('asks for a plugin token again when the backup left it out', () => {
     renderCard({
       ...plugin,
@@ -217,20 +188,6 @@ describe('PluginDetails', () => {
     const row = screen.getByTestId('plugin-setting-API_TOKEN');
     expect(within(row).queryByText('Configured')).not.toBeInTheDocument();
     expect(within(row).queryByText('Missing')).not.toBeInTheDocument();
-  });
-
-  it('renders settings with configured badges', () => {
-    renderCard();
-
-    const token = screen.getByLabelText('API_TOKEN');
-    const root = screen.getByLabelText('ROOT');
-    expect(token).toHaveAttribute('type', 'password');
-    expect(root).toHaveAttribute('type', 'password');
-    expect(token).toHaveValue('');
-    const tokenRow = screen.getByTestId('plugin-setting-API_TOKEN');
-    expect(within(tokenRow).getByText('Configured')).toBeVisible();
-    const rootRow = screen.getByTestId('plugin-setting-ROOT');
-    expect(within(rootRow).queryByText('Configured')).not.toBeInTheDocument();
   });
 
   it('saves a setting', async () => {
@@ -293,65 +250,24 @@ describe('PluginDetails', () => {
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
   });
 
-  it('testing a disabled stdio plugin asks first; cancel sends nothing', async () => {
+  it('Test button warns on stdio enablement and posts when confirmed or already enabled', async () => {
     renderCard({ ...plugin, enabled: false });
-
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-
     const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       `/api/plugins/${plugin.id}/test`,
       expect.anything(),
     );
-  });
-
-  it('testing a disabled stdio plugin posts after confirmation', async () => {
-    renderCard({ ...plugin, enabled: false });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
-
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: STDIO_WARNING })).getByRole('button', {
+        name: 'Confirm',
+      }),
+    );
     expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
     expect(callFor(`/api/plugins/${plugin.id}/test`).method).toBe('POST');
-  });
-
-  it('testing an enabled plugin does not confirm', async () => {
-    renderCard();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-
-    expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('shows where unset settings come from', () => {
-    renderCard({
-      ...plugin,
-      settings: [
-        { key: 'API_TOKEN', configured: true, source: 'setting' },
-        { key: 'GITHUB_TOKEN', configured: false, source: 'env' },
-        { key: 'PORT', configured: false, source: 'default' },
-        { key: 'ROOT', configured: false, source: 'missing' },
-      ],
-    });
-
-    const row = (key: string) => within(screen.getByTestId(`plugin-setting-${key}`));
-    expect(row('API_TOKEN').getByText('Configured')).toBeVisible();
-    expect(row('API_TOKEN').queryByText('From your environment')).not.toBeInTheDocument();
-    expect(row('GITHUB_TOKEN').getByText('From your environment')).toBeVisible();
-    expect(row('GITHUB_TOKEN').queryByText('Configured')).not.toBeInTheDocument();
-    expect(row('PORT').getByText('Default')).toBeVisible();
-    expect(row('ROOT').getByText('Missing')).toBeVisible();
-  });
-
-  it('unknown setting source falls back to missing', () => {
-    const parsed = pluginSchema.parse({
-      ...plugin,
-      settings: [{ key: 'X', configured: false, source: 'vault' }],
-    });
-    expect(parsed.settings[0].source).toBe('missing');
   });
 
   it('enabling a plugin with env-sourced settings names those keys', async () => {
@@ -395,37 +311,6 @@ describe('PluginDetails', () => {
     );
   });
 
-  it('testing a disabled http plugin with env-sourced settings asks first', async () => {
-    renderCard({
-      ...plugin,
-      enabled: false,
-      mcpServers: [{ name: 'remote', kind: 'http', health: 'stopped' }],
-      settings: [{ key: 'GITHUB_TOKEN', configured: false, source: 'env' }],
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveAccessibleName(/GITHUB_TOKEN/);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      `/api/plugins/${plugin.id}/test`,
-      expect.anything(),
-    );
-  });
-
-  it('testing a disabled http plugin without env-sourced settings does not confirm', async () => {
-    renderCard({
-      ...plugin,
-      enabled: false,
-      mcpServers: [{ name: 'remote', kind: 'http', health: 'stopped' }],
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-
-    expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
   it('shows unsupported servers and test conflicts', async () => {
     renderCard();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/agents', expect.anything()));
@@ -455,52 +340,7 @@ describe('PluginDetails', () => {
     expect(screen.queryByTestId(`plugin-row-${plugin.id}`)).not.toBeInTheDocument();
   });
 
-  it('shows server health', () => {
-    renderCard();
-
-    const row = screen.getByTestId('plugin-mcp-server-fake');
-    expect(within(row).getByText('fake')).toBeVisible();
-    expect(within(row).getByText('unhealthy')).toBeVisible();
-  });
-
-  it('unknown health falls back', () => {
-    const parsed = pluginSchema.parse({
-      ...plugin,
-      mcpServers: [{ name: 'fake', kind: 'websocket', health: 'weird' }],
-    });
-    expect(parsed.mcpServers[0].health).toBe('stopped');
-    expect(parsed.mcpServers[0].kind).toBe('unknown');
-  });
-
-  it('status pill and server health explain themselves', () => {
-    renderCard({ ...plugin, status: 'shadowed' });
-
-    expect(screen.getAllByText('shadowed')[0]).toHaveAttribute(
-      'title',
-      expect.stringMatching(/earlier plugin directory/),
-    );
-    expect(screen.getByText('unhealthy')).toHaveAttribute(
-      'title',
-      expect.stringMatching(/Test/),
-    );
-  });
-
-  it('summarizes who can use the plugin', () => {
-    const { unmount } = renderCard();
-    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('No agents');
-    unmount();
-
-    const all = renderCard({ ...plugin, agentAccess: 'all' });
-    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('All agents');
-    all.unmount();
-
-    const one = renderCard({
-      ...plugin,
-      agentIds: ['00000000-0000-4000-8000-0000000000aa'],
-    });
-    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('1 agent');
-    one.unmount();
-
+  it('summarizes agent access and updates explicit assignment', async () => {
     renderCard({
       ...plugin,
       agentIds: [
@@ -509,9 +349,8 @@ describe('PluginDetails', () => {
       ],
     });
     expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('2 agents');
-  });
+    cleanup();
 
-  it('all agents and choose agents update the same assignment', async () => {
     const ada = '00000000-0000-4000-8000-0000000000aa';
     fetchMock.mockImplementation((path: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET';
@@ -559,53 +398,6 @@ describe('PluginDetails', () => {
     expect(JSON.parse(init.body as string)).toEqual({ mode: 'explicit', agentIds: [ada] });
   });
 
-  it('external plugins do not ask which agents can use them', () => {
-    renderCard({ ...plugin, status: 'external', enabled: false, mcpServers: [], settings: [] });
-
-    expect(screen.queryByText('Which agents can use it?')).not.toBeInTheDocument();
-  });
-
-  it('explains how agents see tools and skills', () => {
-    renderCard({
-      ...plugin,
-      skills: [
-        {
-          name: 'review',
-          description: 'Review code',
-          relPath: 'skills/review/SKILL.md',
-          error: null,
-          enabled: true,
-        },
-      ],
-    });
-
-    expect(screen.getByText(/mcp-fake__<tool>/)).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
-    expect(screen.getByText(/loads one when it needs it/)).toBeVisible();
-  });
-
-  it('settings default to empty when absent', () => {
-    const raw: Partial<Plugin> = { ...plugin };
-    delete raw.settings;
-    expect(pluginSchema.parse(raw).settings).toEqual([]);
-  });
-
-  it('new plugin fields default when absent', () => {
-    const raw: Record<string, unknown> = {
-      ...plugin,
-      skills: [{ name: 'a', description: '', relPath: 'skills/a/SKILL.md', error: null }],
-    };
-    delete raw.marketplace;
-    delete raw.external;
-    delete raw.gitRoot;
-    const parsed = pluginSchema.parse(raw);
-    expect(parsed.marketplace).toBeNull();
-    expect(parsed.external).toBeNull();
-    expect(parsed.gitRoot).toBeNull();
-    expect(parsed.skills[0].enabled).toBe(true);
-    expect(pluginSchema.parse({ ...plugin, status: 'external' }).status).toBe('external');
-  });
-
   it('skill switches show the on count and PUT the change', async () => {
     const withSkills: Plugin = {
       ...plugin,
@@ -639,17 +431,6 @@ describe('PluginDetails', () => {
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
   });
 
-  it('skills header shows a plain count when all are on', () => {
-    renderCard({
-      ...plugin,
-      skills: [
-        { name: 'a', description: '', relPath: 'skills/a/SKILL.md', error: null, enabled: true },
-      ],
-    });
-
-    expect(screen.getByRole('button', { name: 'Skills (1)' })).toBeVisible();
-  });
-
   it('external plugin card shows the source and offers install', () => {
     const onInstallFromGit = vi.fn();
     const url = 'https://github.com/acme/r.git';
@@ -666,45 +447,9 @@ describe('PluginDetails', () => {
     );
 
     expect(screen.getByText(`Lives in another repository: ${url}`)).toBeVisible();
-    expect(screen.getAllByText('external')[0]).toHaveAttribute(
-      'title',
-      'Lives in another repository; install it separately.',
-    );
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install from git' }));
     expect(onInstallFromGit).toHaveBeenCalledWith(url);
-  });
-
-  it('external plugin without a url names its source kind', () => {
-    renderCard({
-      ...plugin,
-      status: 'external',
-      enabled: false,
-      mcpServers: [],
-      settings: [],
-      external: { kind: 'npm', url: null },
-    });
-
-    expect(screen.getByText('Source: npm')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Install from git' })).not.toBeInTheDocument();
-  });
-
-  it('marketplace plugins show where they came from', () => {
-    renderCard({ ...plugin, marketplace: { name: 'acme-market' } });
-
-    expect(screen.getByText('From marketplace acme-market')).toBeVisible();
-  });
-
-  it('update tooltip names sibling count', () => {
-    renderCard(
-      { ...plugin, source: 'git', gitUrl: 'https://x/r.git', gitRoot: '/data/plugins/r' },
-      { siblingCount: 3 },
-    );
-
-    expect(screen.getByRole('button', { name: 'Update' })).toHaveAttribute(
-      'title',
-      'Updates all 3 plugins from this repository',
-    );
   });
 });

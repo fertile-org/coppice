@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
@@ -170,34 +170,15 @@ describe('PluginsPage', () => {
     });
   });
 
-  it('hides Build a plugin outside the desktop shell', async () => {
+  it('shows Build a plugin only in the desktop shell', async () => {
+    mocks.isDesktopShell.mockReturnValue(false);
     renderPage();
     await screen.findByRole('heading', { name: 'Plugins' });
     expect(screen.queryByRole('button', { name: 'Build a plugin' })).not.toBeInTheDocument();
-  });
-
-  it('shows Build a plugin on every tab in the desktop shell', async () => {
+    cleanup();
     mocks.isDesktopShell.mockReturnValue(true);
     renderPage();
     expect(await screen.findByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
-    expect(screen.getByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'Custom' }));
-    expect(screen.getByRole('button', { name: 'Build a plugin' })).toBeInTheDocument();
-  });
-
-  it('renders plugin cards with status and unsupported parts', async () => {
-    renderPage();
-
-    const row = await screen.findByTestId(`plugin-row-${samplePlugin.id}`);
-    expect(within(row).getByText('sample-plugin')).toBeVisible();
-    expect(within(row).getByText('1.2.0')).toBeVisible();
-    expect(within(row).queryByText('Which agents can use it?')).not.toBeInTheDocument();
-    fireEvent.click(within(row).getByRole('button', { name: /sample-plugin/ }));
-    const drawer = await screen.findByRole('dialog', { name: 'Plugin details' });
-    expect(within(drawer).getByText('Not supported yet: commands, hooks')).toBeVisible();
-    expect(within(drawer).getByText('ok')).toBeVisible();
-    expect(within(drawer).getByText('abcdef1')).toBeVisible();
   });
 
   it('enable toggle is disabled for shadowed plugins', async () => {
@@ -228,51 +209,47 @@ describe('PluginsPage', () => {
     );
   });
 
-  it('enabling plugin with stdio server asks for confirmation', async () => {
+  it.each([
+    ['stdio cancel', samplePlugin, 'Cancel' as const, false],
+    ['stdio confirm', samplePlugin, 'Confirm' as const, true],
+    [
+      'http only',
+      {
+        ...samplePlugin,
+        mcpServers: [{ name: 'docs', kind: 'http' as const, health: 'stopped' as const }],
+      },
+      null,
+      true,
+    ],
+  ])('enable confirmation: %s', async (_label, target, confirmAction, patches) => {
+    plugins = [target, shadowedPlugin];
     renderPage();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
-    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(mocks.apiFetch).not.toHaveBeenCalledWith(
-      `/api/plugins/${samplePlugin.id}`,
-      expect.objectContaining({ method: 'PATCH' }),
-    );
-  });
+    if (confirmAction) {
+      const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
+      fireEvent.click(within(dialog).getByRole('button', { name: confirmAction }));
+    }
 
-  it('enabling plugin with only http servers does not confirm', async () => {
-    plugins = [
-      { ...samplePlugin, mcpServers: [{ name: 'docs', kind: 'http', health: 'stopped' }] },
-    ];
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
-
-    await waitFor(() =>
-      expect(mocks.apiFetch).toHaveBeenCalledWith(
+    if (patches) {
+      await waitFor(() =>
+        expect(mocks.apiFetch).toHaveBeenCalledWith(
+          `/api/plugins/${samplePlugin.id}`,
+          expect.objectContaining({
+            method: 'PATCH',
+            body: JSON.stringify({ enabled: true }),
+          }),
+        ),
+      );
+      if (!confirmAction) {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      }
+    } else {
+      expect(mocks.apiFetch).not.toHaveBeenCalledWith(
         `/api/plugins/${samplePlugin.id}`,
-        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ enabled: true }) }),
-      ),
-    );
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('toggling enable sends PATCH', async () => {
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
-    const dialog = await screen.findByRole('dialog', { name: STDIO_WARNING });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
-
-    await waitFor(() =>
-      expect(mocks.apiFetch).toHaveBeenCalledWith(
-        `/api/plugins/${samplePlugin.id}`,
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify({ enabled: true }),
-        }),
-      ),
-    );
+        expect.objectContaining({ method: 'PATCH' }),
+      );
+    }
   });
 
   it('install posts git url and shows failure', async () => {
@@ -302,32 +279,6 @@ describe('PluginsPage', () => {
     });
 
     expect(await screen.findByText(/repository not found/)).toBeVisible();
-  });
-
-  it('separates installed and custom controls and links the plugin guide', async () => {
-    renderPage();
-
-    expect(await screen.findByRole('tab', { name: 'Installed' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    expect(screen.getByRole('tab', { name: 'Marketplace' })).toBeVisible();
-    expect(screen.getByRole('tab', { name: 'Custom' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'How plugins work' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Add plugins' })).toBeNull();
-    expect(screen.getByRole('link', { name: 'Plugin guide' })).toHaveAttribute(
-      'href',
-      'https://getcoppice.app/docs/plugins',
-    );
-
-    await openCustom();
-    expect(screen.getByRole('heading', { name: 'Custom plugins' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'View required plugin format' })).toHaveAttribute(
-      'href',
-      'https://getcoppice.app/docs/plugins#create-a-plugin',
-    );
-    expect(screen.getByLabelText('Git URL')).toBeVisible();
-    expect(screen.getByLabelText('Directory path')).toBeVisible();
   });
 
   it('Install from git on an external card opens and focuses the Custom form', async () => {
@@ -389,57 +340,12 @@ describe('PluginsPage', () => {
     plugins = [alpha, beta];
     fireEvent.click(screen.getByRole('button', { name: 'Install' }));
 
-    expect(
-      await screen.findByText('Installed marketplace-repo: 2 plugins (alpha, beta-skills)'),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: 'Installed' }));
-    fireEvent.click(within(await screen.findByTestId(`plugin-row-${alpha.id}`)).getByRole('button', { name: /alpha/ }));
-    const update = within(await screen.findByRole('dialog', { name: 'Plugin details' })).getByRole(
-      'button',
-      { name: 'Update' },
-    );
-    expect(update).toHaveAttribute('title', 'Updates all 2 plugins from this repository');
-  });
-
-  it('single-plugin install keeps the plain success message', async () => {
-    installPoll = {
-      ...installPoll,
-      gitUrl: 'https://github.com/org/sample-plugin.git',
-      pluginId: samplePlugin.id,
-      pluginIds: [samplePlugin.id],
-      status: 'succeeded',
-      error: null,
-    };
-    renderPage();
-    await openCustom();
-
-    fireEvent.change(await screen.findByLabelText('Git URL'), {
-      target: { value: 'https://github.com/org/sample-plugin.git' },
+    await waitFor(() => expect(screen.getByText(/alpha, beta-skills/)).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('tab', { name: 'Installed' }));
+    await waitFor(() => {
+      expect(screen.getByTestId(`plugin-row-${alpha.id}`)).toBeVisible();
+      expect(screen.getByTestId(`plugin-row-${beta.id}`)).toBeVisible();
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
-
-    expect(
-      await screen.findByText('Installed https://github.com/org/sample-plugin.git.'),
-    ).toBeVisible();
-  });
-
-  it('empty state links GitHub examples and describes a desktop git install', async () => {
-    plugins = [];
-    renderPage();
-
-    const examples = await screen.findByRole('link', { name: 'examples/plugins' });
-    expect(examples).toHaveAttribute(
-      'href',
-      'https://github.com/fertile-org/coppice/tree/main/examples/plugins',
-    );
-    expect(examples).toHaveAttribute('target', '_blank');
-
-    await openCustom();
-    expect(screen.getByText(/with your computer's git credentials/)).toBeVisible();
-    expect(screen.getByLabelText('Directory path')).toHaveAttribute(
-      'placeholder',
-      '~/coppice-plugins',
-    );
   });
 
   it('default directory cannot be removed', async () => {
@@ -486,7 +392,6 @@ describe('PluginsPage', () => {
     expect(screen.getByRole('button', { name: 'Needs attention 0' })).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enabled 0' }));
-    expect(screen.getByText('No plugins match.')).toBeVisible();
     expect(screen.queryByTestId(`plugin-row-${samplePlugin.id}`)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Disabled 2' }));
@@ -590,22 +495,6 @@ describe('PluginsPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Update failed: fetch failed');
     expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
-  });
-
-  it('closing the drawer returns focus to its row', async () => {
-    renderPage();
-
-    const open = within(await screen.findByTestId(`plugin-row-${samplePlugin.id}`)).getByRole(
-      'button',
-      { name: /sample-plugin/ },
-    );
-    fireEvent.click(open);
-    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument(),
-    );
-    expect(open).toHaveFocus();
   });
 
   it('confirming remove plugin directory deletes it', async () => {

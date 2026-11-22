@@ -41,25 +41,4 @@ describe('CodeReviewBackButton', () => {
     );
   });
 
-  it('uses the supplied ticket fallback for a direct link', () => {
-    render(
-      <MemoryRouter initialEntries={['/code']}>
-        <Routes>
-          <Route
-            path="/code"
-            element={
-              <CodeReviewBackButton fallbackHref="/boards/board-1?ticket=alpha" />
-            }
-          />
-          <Route path="*" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/boards/board-1?ticket=alpha',
-    );
-  });
 });

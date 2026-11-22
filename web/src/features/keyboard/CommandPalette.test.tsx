@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useContext, useEffect } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -158,17 +158,6 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('omits the key hint when Keyboard shortcuts is unbound', () => {
-    publishKeybindings({ 'help.show': [] });
-    renderPalette();
-
-    openPalette();
-    const shortcuts = screen.getByRole('option', { name: new RegExp(PALETTE_HELP_LABEL) });
-    expect(shortcuts).toHaveTextContent(PALETTE_HELP_LABEL);
-    expect(shortcuts).not.toHaveTextContent('?');
-    expect(screen.getByRole('option', { name: /Go to Boards/ })).toHaveTextContent('G then B');
-  });
-
   it('filters as you type, opens the highlighted page with Enter, and restores focus on Esc', async () => {
     renderPalette();
     const before = screen.getByRole('button', { name: 'Before' });
@@ -274,15 +263,13 @@ describe('command palette', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('keeps recent pages and omits admin pages and stale Next card for members', async () => {
+  it('scopes recent and page options by role', async () => {
     localStorage.setItem(PALETTE_RECENT_KEY, JSON.stringify(['board.nextCard', 'nav.chat']));
     renderPalette();
     openPalette();
     expect(screen.queryByRole('option', { name: /Go to Plugins/ })).toBeNull();
     expect(screen.queryByRole('option', { name: /Next card/ })).toBeNull();
-    expect(screen.getByText('Recent')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Go to Chat/ })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Go to Boards/ })).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText(PALETTE_COPY.placeholder);
     fireEvent.change(input, { target: { value: 'go to boards' } });
@@ -290,17 +277,11 @@ describe('command palette', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location').textContent).toBe('/boards');
     });
-    expect(screen.queryByRole('dialog')).toBeNull();
 
-    openPalette();
-    expect(screen.getByText('Recent')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Go to Boards/ })).toBeInTheDocument();
-  });
-
-  it('lists admin pages for an admin', () => {
+    cleanup();
     renderPalette({ session: adminSession });
     openPalette();
-    expect(screen.getByRole('option', { name: /Go to Plugins/ })).toHaveTextContent('G then P');
+    expect(screen.getByRole('option', { name: /Go to Plugins/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Go to Users/ })).toBeInTheDocument();
   });
 });

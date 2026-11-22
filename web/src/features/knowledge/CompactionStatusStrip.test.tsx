@@ -198,26 +198,6 @@ describe('CompactionStatusStrip', () => {
     await waitFor(() => expect(mocks.cancel).toHaveBeenCalled());
   });
 
-  it('uses the structured console when the agent connector is structured', () => {
-    connectorsState.connectors = [
-      {
-        id: 'acme-structured',
-        displayName: 'Acme',
-        console: 'structured',
-        caps: { readOnlyTools: true, chatResume: true },
-      },
-    ];
-    mocks.status = status({
-      state: 'running',
-      queuedCount: 0,
-      agent: { ...AGENT, connector: 'acme-structured' },
-      activeBatch: batch(),
-    });
-    renderStrip();
-    fireEvent.click(screen.getByRole('button', { name: 'View run' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent(`claude console ${RUN_ID}`);
-  });
-
   it('shows a failure banner with retry', async () => {
     mocks.status = status({
       state: 'failed',

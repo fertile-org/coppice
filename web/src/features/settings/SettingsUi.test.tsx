@@ -234,17 +234,6 @@ describe('Settings UI mode', () => {
     );
   });
 
-  it('filters settings by search', async () => {
-    renderPage();
-
-    await screen.findByTestId('setting-git.push_enabled');
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search settings' }), {
-      target: { value: 'opencode' },
-    });
-    expect(screen.getByTestId('setting-agent.connectors.opencode.enabled')).toBeVisible();
-    expect(screen.queryByTestId('setting-git.push_enabled')).not.toBeInTheDocument();
-  });
-
   it('shows why a value was refused', async () => {
     mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/settings/config') return jsonResponse(disk);

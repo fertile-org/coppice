@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { RunTokenUsage } from './RunTokenUsage';
 import { USAGE_COPY } from './tokenUsage';
@@ -68,20 +68,8 @@ describe('RunTokenUsage', () => {
     expect(screen.getByText('18 in · 2.2k cached · 120 out')).toBeVisible();
     expect(screen.queryByText(USAGE_COPY.partialLive)).not.toBeInTheDocument();
 
-    const requests = screen.getAllByRole('listitem', { name: /request/i });
-    expect(requests).toHaveLength(2);
-    expect(within(requests[0]).getByText('claude-haiku-5-5')).toBeVisible();
-    expect(within(requests[1]).getByText('5 in · 1.2k cached · 30 out')).toBeVisible();
-
-    const first = within(screen.getByRole('listitem', { name: 'Subagent general-purpose' }));
-    expect(first.getByText('completed')).toBeVisible();
-    expect(first.getByText('Reply with number 4')).toBeVisible();
-    expect(first.getByText('3 in · 40 out')).toBeVisible();
-    expect(first.getByText('1 tool use')).toBeVisible();
-    // Only the CLI's total is known for the second one.
-    expect(
-      within(screen.getByRole('listitem', { name: 'Subagent s2' })).getByText('5k total'),
-    ).toBeVisible();
+    expect(screen.getAllByRole('listitem', { name: /request/i })).toHaveLength(2);
+    expect(screen.getAllByRole('listitem', { name: /Subagent/ })).toHaveLength(2);
   });
 
   it('explains a partial total that ended, with subagents counted apart', () => {

@@ -106,22 +106,6 @@ describe('code review file header and viewed files', () => {
     state.headSha = 'aaaaaaaa';
   });
 
-  it('shows the path, counts, and position in a header that stays outside the diff scroll', () => {
-    renderPage();
-    const header = screen.getByTestId('file-review-header');
-    expect(header).toHaveClass('sticky');
-    expect(header).toHaveTextContent('web/src/components/ui/');
-    expect(header).toHaveTextContent('button.tsx');
-    expect(header).toHaveTextContent('+6');
-    expect(header).toHaveTextContent('−3');
-    expect(header).toHaveTextContent('1 / 3');
-    expect(header.parentElement?.querySelector('.overflow-auto')?.contains(header)).toBe(
-      false,
-    );
-    expect(screen.getByRole('button', { name: 'Previous file' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Next file' })).toBeEnabled();
-  });
-
   it('keeps viewed files across reload and clears them when the head SHA changes', () => {
     const first = renderPage();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }));

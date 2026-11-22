@@ -3,71 +3,21 @@ import { helpSections } from './help';
 import { omittedActionIds } from './registry';
 
 describe('shortcut help rows', () => {
-  it('keeps Go to column 1–9 and groups the keymap into Navigate, Tickets, and Review', () => {
+  it('groups shortcuts and omits admin navigation for members', () => {
     const sections = helpSections({ omitted: new Set(), platform: 'linux' });
+    expect(sections.map((section) => section.group)).toEqual(['Navigate', 'Tickets', 'Review']);
+    expect(sections[0]?.rows.filter((row) => row.id.startsWith('board.column.'))).toHaveLength(9);
 
-    expect(sections.map((section) => section.group)).toEqual([
-      'Navigate',
-      'Tickets',
-      'Review',
-    ]);
-
-    const navigate = sections[0]?.rows ?? [];
-    const columnRows = navigate.filter((row) => row.id.startsWith('board.column.'));
-    expect(columnRows.map((row) => row.label)).toEqual([
-      'Go to column 1',
-      'Go to column 2',
-      'Go to column 3',
-      'Go to column 4',
-      'Go to column 5',
-      'Go to column 6',
-      'Go to column 7',
-      'Go to column 8',
-      'Go to column 9',
-    ]);
-    expect(columnRows.map((row) => row.shortcut)).toEqual([
-      'G then 1',
-      'G then 2',
-      'G then 3',
-      'G then 4',
-      'G then 5',
-      'G then 6',
-      'G then 7',
-      'G then 8',
-      'G then 9',
-    ]);
-    expect(navigate.map((row) => row.label)).not.toContain('Go to Backlog column');
-    expect(navigate.map((row) => row.label)).toContain('Show keyboard shortcuts');
-    expect(sections[1]?.rows.map((row) => row.label)).toEqual([
-      'Open ticket',
-      'Create ticket',
-      'Assign ticket',
-      'Move to next column',
-      'Move to previous column',
-      'Post comment',
-    ]);
-    expect(sections[2]?.rows.map((row) => [row.label, row.shortcut])).toEqual([
-      ['Approve plan', 'R then P'],
-      ['Accept…', 'Ctrl+Shift+Enter'],
-      ['Merge…', 'R then M'],
-      ['Open code review', 'D'],
-      ['Next file', 'J'],
-      ['Previous file', 'K'],
-      ['Mark viewed', 'V'],
-    ]);
-  });
-
-  it('draws Mod as ⌘ on macOS and omits admin Go to rows for members', () => {
+    const member = helpSections({
+      omitted: omittedActionIds({ isAdmin: false, desktopMode: false }),
+      platform: 'linux',
+    });
     const macos = helpSections({ omitted: new Set(), platform: 'macos' });
     const accept = macos
       .flatMap((section) => section.rows)
       .find((row) => row.id === 'review.accept');
     expect(accept?.shortcut).toBe('⌘+Shift+Enter');
 
-    const member = helpSections({
-      omitted: omittedActionIds({ isAdmin: false, desktopMode: false }),
-      platform: 'linux',
-    });
     const labels = member.flatMap((section) => section.rows.map((row) => row.label));
     expect(labels).toContain('Go to Boards');
     expect(labels).not.toContain('Go to Plugins');

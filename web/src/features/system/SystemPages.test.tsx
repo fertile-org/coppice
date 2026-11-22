@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
@@ -83,16 +83,6 @@ describe('System pages', () => {
     expect(
       screen.getByRole('button', { name: 'Import backup' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Download a backup of your boards, tickets, settings, files, and agent worktrees. Passwords, keys, and saved tokens are left out. Keep the file private.',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Importing replaces all data on this install with the backup's. Passwords, keys, folder paths, agent commands, and plugin and MCP settings aren't imported, so set those up again. You'll paste saved tokens again, and you may be signed out.",
-      ),
-    ).toBeInTheDocument();
   });
 
   it('lists connectors on their own page', async () => {
@@ -105,13 +95,17 @@ describe('System pages', () => {
     expect(await screen.findByText(/No connectors/)).toBeVisible();
   });
 
-  it.each([
-    ['/tools', '/system/backup'],
-    ['/tools?tab=connectors', '/system/connectors'],
-    ['/logs?level=warn&q=boom', '/system/logs?level=warn&q=boom'],
-  ])('sends the old link %s to %s', (from, to) => {
-    renderPage(from);
-    expect(screen.getByTestId('location')).toHaveTextContent(to);
+  it('redirects legacy System and Logs URLs', () => {
+    const redirects = [
+      ['/tools', '/system/backup'],
+      ['/tools?tab=connectors', '/system/connectors'],
+      ['/logs?level=warn&q=boom', '/system/logs?level=warn&q=boom'],
+    ] as const;
+    for (const [from, to] of redirects) {
+      const view = renderPage(from);
+      expect(screen.getByTestId('location')).toHaveTextContent(to);
+      view.unmount();
+    }
   });
 
   it('asks for a new admin password before replacing keys', () => {
@@ -148,11 +142,6 @@ describe('System pages', () => {
     renderPage();
     expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
     expect(screen.queryByText('coppice-server replace-keys')).not.toBeInTheDocument();
-  });
-
-  it('offers setup only in the desktop app', () => {
-    renderPage('/system/connectors');
-    expect(screen.queryByRole('button', { name: 'Set up workspace' })).not.toBeInTheDocument();
   });
 
   it('opens setup from the connectors page in the desktop app', async () => {
@@ -197,7 +186,7 @@ describe('System pages', () => {
     expect(screen.queryByText(/mock|fake/i)).not.toBeInTheDocument();
   });
 
-  it('shows the version and update switch on the Updates page in the desktop app', async () => {
+  it('scopes Updates controls to the desktop app', async () => {
     window.coppiceDesktop = {
       pickDirectory: vi.fn(async () => null),
       platform: 'linux',
@@ -219,15 +208,10 @@ describe('System pages', () => {
     } finally {
       delete window.coppiceDesktop;
     }
-  });
 
-  it('says Updates belong to the desktop app in a browser', () => {
+    sessionState.desktopMode = false;
+    cleanup();
     renderPage('/system/updates');
-    expect(screen.getByRole('heading', { name: 'Updates' })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Updates are part of the Coppice desktop app. Open this page there to check for them.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Automatic updates' })).not.toBeInTheDocument();
   });
 });

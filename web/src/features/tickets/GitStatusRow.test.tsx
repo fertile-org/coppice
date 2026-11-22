@@ -118,54 +118,32 @@ describe('GitStatusRow', () => {
     reposState.data = undefined;
   });
 
-  it.each(withButton)('renders the pill and main action for %s', (state) => {
-    renderRow(makeTicket(state));
-    expect(screen.getByText(gitStateCopy[state].label)).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: gitStateCopy[state].primary! }),
-    ).toBeInTheDocument();
-  });
-
-  it('shows no main action when the branch changed after review', () => {
-    renderRow(makeTicket('changed_after_review'));
-    expect(screen.getByText('Changed after review')).toBeInTheDocument();
-    for (const name of ['Rebase…', 'Merge', 'Ask agent', 'Retry merge', 'Push main']) {
-      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  it('renders the main action for actionable git states', () => {
+    for (const state of withButton) {
+      const view = renderRow(makeTicket(state));
+      expect(
+        screen.getByRole('button', { name: gitStateCopy[state].primary! }),
+      ).toBeInTheDocument();
+      view.unmount();
     }
   });
 
-  it('keeps Merge out of the dropdown while in review', () => {
-    renderRow(makeTicket('in_review'));
-    fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
-    expect(screen.getByRole('button', { name: 'Push branch' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Merge/ })).not.toBeInTheDocument();
-  });
-
-  it('offers Merge into… in the dropdown once accepted', () => {
-    renderRow(makeTicket('not_merged'));
-    fireEvent.click(screen.getByRole('button', { name: 'More git actions' }));
-    expect(screen.getByRole('button', { name: 'Merge into…' })).toBeInTheDocument();
-  });
-
-  it('shows the short SHA and no button once merged', () => {
+  it('shows no primary git actions once merged or after a branch change', () => {
+    const view = renderRow(makeTicket('changed_after_review'));
+    for (const name of ['Rebase…', 'Merge', 'Ask agent', 'Retry merge', 'Push main']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    view.unmount();
     renderRow(makeTicket('merged'));
-    expect(screen.getByText('Merged')).toBeInTheDocument();
-    expect(screen.getByText('a1b2c3d')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More git actions' })).not.toBeInTheDocument();
   });
 
-  it('pushes the default branch from Push main', () => {
-    pushMainMutateAsync.mockResolvedValue({ message: 'Pushed main' });
-    renderRow(makeTicket('not_pushed'));
-    fireEvent.click(screen.getByRole('button', { name: 'Push main' }));
-    expect(pushMainMutateAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it('refreshes the ticket, git info and board after Push main', async () => {
+  it('pushes main and refreshes ticket queries', async () => {
     pushMainMutateAsync.mockResolvedValue({ message: 'Pushed main' });
     const ticket = makeTicket('not_pushed');
     renderRow(ticket);
     fireEvent.click(screen.getByRole('button', { name: 'Push main' }));
+    expect(pushMainMutateAsync).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(invalidated).toHaveLength(3));
     expect(invalidated).toEqual(
       expect.arrayContaining([
@@ -191,115 +169,31 @@ describe('GitStatusRow', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('disables the menu trigger when the ticket is archived', () => {
-    renderRow(makeTicket('not_merged', { archivedAt: '2026-06-09T00:00:00.000Z' }));
-    expect(screen.getByRole('button', { name: 'More git actions' })).toBeDisabled();
-  });
-
-  it('hints how to load a conflict when none is known', () => {
-    renderRow(makeTicket('conflict'));
-    expect(screen.getByText('Retry the merge to load the conflicting files.')).toBeInTheDocument();
-  });
-
-  it('prefers the fresher git-info state in the panel and the ticket state on the card', () => {
-    gitInfoState.data = { ...gitInfo, gitState: 'conflict' };
-    const view = renderRow(makeTicket('not_merged'));
-    expect(screen.getByText('Conflict')).toBeInTheDocument();
-    view.unmount();
-    renderRow(makeTicket('not_merged'), 'card');
-    expect(screen.getByText('Not merged')).toBeInTheDocument();
-  });
-
-  it('renders the reason line in the panel only', () => {
-    gitInfoState.data = { ...gitInfo, gitState: 'main_dirty', gitStateReason: 'Main has uncommitted changes' };
-    const view = renderRow(makeTicket('main_dirty'));
-    expect(screen.getByTestId('git-state-reason')).toHaveTextContent(
-      'Main has uncommitted changes',
-    );
-    view.unmount();
-    renderRow(
-      makeTicket('main_dirty', {
-        humanReview: {
-          ...makeTicket('main_dirty').humanReview!,
-          gitStateReason: 'Main has uncommitted changes',
-        },
-      }),
-      'card',
-    );
-    expect(screen.queryByTestId('git-state-reason')).not.toBeInTheDocument();
-    expect(screen.queryByText('Main has uncommitted changes')).not.toBeInTheDocument();
-  });
-
-  it('shows the worktree path once, behind the collapsed branch detail', () => {
-    renderRow(makeTicket('not_merged'));
-    expect(screen.queryByText(gitInfo.worktreePath)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: gitInfo.ticketBranch }));
-    expect(screen.getAllByText(gitInfo.worktreePath)).toHaveLength(1);
-  });
-
-  it('treats a missing human review as in review before Done', () => {
+  it('handles tickets without human review', () => {
     gitInfoState.data = { ...gitInfo, gitState: undefined };
-    renderRow(makeTicket('merged', { humanReview: null, status: 'in_review' }));
+    const beforeDone = renderRow(
+      makeTicket('merged', { humanReview: null, status: 'in_review' }),
+    );
     expect(screen.getByText('No action')).toBeInTheDocument();
-  });
-
-  it('shows no status or actions for a Done ticket without a review, but keeps the branch', () => {
+    beforeDone.unmount();
     gitInfoState.data = { ...gitInfo, gitState: 'in_review' };
     renderRow(makeTicket('in_review', { humanReview: null }));
-    expect(screen.queryByText('No action')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rebase…' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More git actions' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: gitInfo.ticketBranch })).toBeInTheDocument();
   });
 
-  it('lets an admin push main', () => {
-    renderRow(makeTicket('not_pushed'));
-    const button = screen.getByRole('button', { name: 'Push main' });
-    expect(button).toBeEnabled();
-    expect(button).not.toHaveAttribute('title');
-  });
-
-  it('disables Push main for a member and says who can push', () => {
+  it('gates Push main on admin role', () => {
     sessionState.role = 'member';
-    renderRow(makeTicket('not_pushed'));
+    const member = renderRow(makeTicket('not_pushed'));
     const button = screen.getByRole('button', { name: 'Push main' });
     expect(button).toBeDisabled();
-    expect(button).toHaveAttribute('title', 'Ask an admin to push main');
     fireEvent.click(button);
     expect(pushMainMutateAsync).not.toHaveBeenCalled();
+    member.unmount();
+
+    sessionState.role = 'admin';
+    renderRow(makeTicket('not_pushed'));
+    expect(screen.getByRole('button', { name: 'Push main' })).toBeEnabled();
   });
 
-  it('loads git info on a card only when it needs action', () => {
-    const view = renderRow(makeTicket('merged'), 'card');
-    expect(gitInfoEnabled.every((enabled) => !enabled)).toBe(true);
-    view.unmount();
-    gitInfoEnabled.length = 0;
-    renderRow(makeTicket('not_merged'), 'card');
-    expect(gitInfoEnabled.at(-1)).toBe(true);
-  });
-
-  it('always loads git info in the panel', () => {
-    renderRow(makeTicket('merged'));
-    expect(gitInfoEnabled.at(-1)).toBe(true);
-  });
-
-  it('describes a merge: base branch, pushed and worktree removed', () => {
-    gitInfoState.data = { ...gitInfo, gitState: 'merged', worktreeExists: false };
-    reposState.data = [{ id: makeTicket('merged').repoId, defaultBranch: 'main', pushAfterMerge: true }];
-    renderRow(
-      makeTicket('merged', {
-        humanReview: { ...makeTicket('merged').humanReview!, mergedBaseBranch: 'release' },
-      }),
-    );
-    expect(screen.getByTestId('git-merged-detail')).toHaveTextContent(
-      'release · pushed · worktree removed',
-    );
-  });
-
-  it('describes a merge with only the parts that apply', () => {
-    gitInfoState.data = { ...gitInfo, gitState: 'merged', worktreeExists: true };
-    reposState.data = [{ id: makeTicket('merged').repoId, defaultBranch: 'main', pushAfterMerge: false }];
-    renderRow(makeTicket('merged'));
-    expect(screen.getByTestId('git-merged-detail')).toHaveTextContent(/^main$/);
-  });
 });

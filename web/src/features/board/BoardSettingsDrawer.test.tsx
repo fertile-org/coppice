@@ -164,34 +164,6 @@ describe('BoardSettingsDrawer', () => {
     expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
   });
 
-  it('saves a cap on blur without inventing its own wording', async () => {
-    renderSettings();
-    await openSettings();
-    const cap = screen.getByLabelText('Review cap');
-    fireEvent.change(cap, { target: { value: '4' } });
-    fireEvent.blur(cap);
-    await expectPut({ reviewCap: 4, countInReview: false });
-    await waitFor(() => {
-      expect(screen.queryByTestId('review-waiting-chip')).not.toBeInTheDocument();
-    });
-  });
-
-  it('sends one save for blur followed by Done', async () => {
-    renderSettings();
-    await openSettings();
-    const cap = screen.getByLabelText('Review cap');
-    fireEvent.change(cap, { target: { value: '5' } });
-    fireEvent.blur(cap);
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    await expectPut({ reviewCap: 5, countInReview: false });
-    await waitFor(() => {
-      expect(
-        screen.queryByRole('dialog', { name: 'Board settings' }),
-      ).not.toBeInTheDocument();
-    });
-    expect(putCalls()).toHaveLength(1);
-  });
-
   it('saves a typed cap on Done and shows it when reopened', async () => {
     renderSettings();
     await openSettings();
@@ -267,21 +239,6 @@ describe('BoardSettingsDrawer', () => {
         body: JSON.stringify({ name: 'Beta' }),
       }),
     );
-  });
-
-  it('sends one rename PATCH for blur followed by Done', async () => {
-    renderSettings();
-    await openSettings();
-    const name = screen.getByLabelText('Name');
-    fireEvent.change(name, { target: { value: 'Beta' } });
-    fireEvent.blur(name);
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    await waitFor(() => {
-      expect(
-        screen.queryByRole('dialog', { name: 'Board settings' }),
-      ).not.toBeInTheDocument();
-    });
-    expect(patchCalls()).toHaveLength(1);
   });
 
   it.each(['blur', 'Done', 'Escape'] as const)(

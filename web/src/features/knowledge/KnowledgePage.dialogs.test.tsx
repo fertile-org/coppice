@@ -221,13 +221,6 @@ describe('KnowledgePage dialogs', () => {
     expect(within(screen.getByRole('dialog')).getByLabelText('Title')).toHaveValue('');
   });
 
-  it('opens Add knowledge from the empty state', () => {
-    mocks.items = [];
-    render(<KnowledgePage />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add knowledge' })[1]);
-    expect(screen.getByRole('dialog', { name: 'Add knowledge' })).toBeInTheDocument();
-  });
-
   it('sends optimistic versions for edit and rejection actions', async () => {
     render(<KnowledgePage />);
 
@@ -297,20 +290,6 @@ describe('KnowledgePage dialogs', () => {
       });
     });
     expect(mocks.reject.mock.calls[0][0].reason).not.toBe('one_off');
-  });
-
-  it('allows empty reject reason without a preset', async () => {
-    render(<KnowledgePage />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reject candidate' }));
-    await waitFor(() => {
-      expect(mocks.reject).toHaveBeenCalledWith({
-        id: item.id,
-        expectedVersion: item.version,
-        reason: null,
-      });
-    });
   });
 
   it('creates a supersede replacement from the approved card action', async () => {

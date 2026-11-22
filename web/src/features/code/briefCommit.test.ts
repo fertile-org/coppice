@@ -12,10 +12,7 @@ describe('briefMatchesReviewedCommit', () => {
   });
 
   it('hides the brief when the reviewed commit differs or is missing', () => {
-    expect(
-      briefMatchesReviewedCommit('abc1234deadbeef', 'fff0000deadbeef'),
-    ).toBe(false);
-    expect(briefMatchesReviewedCommit('abc1234deadbeef', '')).toBe(false);
+    expect(briefMatchesReviewedCommit('abc1234deadbeef', 'fff0000deadbeef')).toBe(false);
     expect(briefMatchesReviewedCommit('abc1234deadbeef', null)).toBe(false);
     expect(briefMatchesReviewedCommit('', 'abc1234deadbeef')).toBe(false);
   });

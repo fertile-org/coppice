@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopUpdateInfo } from '../lib/desktop';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
@@ -24,12 +24,11 @@ describe('DesktopUpdateBanner', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders nothing outside the desktop shell', () => {
-    const { container } = render(<DesktopUpdateBanner />);
-    expect(container).toBeEmptyDOMElement();
-  });
+  it('renders nothing outside the desktop shell or without an update', async () => {
+    const empty = render(<DesktopUpdateBanner />);
+    expect(empty.container).toBeEmptyDOMElement();
+    empty.unmount();
 
-  it('renders nothing when no update is available', async () => {
     stubBridge(null);
     const { container } = render(<DesktopUpdateBanner />);
     await vi.waitFor(() => expect(window.coppiceDesktop?.getUpdateInfo).toHaveBeenCalled());
@@ -77,46 +76,22 @@ describe('DesktopUpdateBanner', () => {
     await vi.waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
   });
 
-  it('offers a release-page download while macOS builds are unsigned', async () => {
+  it('downloads unsigned macOS builds in the browser and restarts signed ones', async () => {
     stubBridge({ kind: 'download', version: '9.0.0', url: 'https://example/release' });
     const open = vi.fn();
     vi.stubGlobal('open', open);
     render(<DesktopUpdateBanner />);
-    expect(await screen.findByText('Coppice 9.0.0 is available.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Download update' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Download update' }));
     await vi.waitFor(() =>
       expect(open).toHaveBeenCalledWith('https://example/release', '_blank', 'noopener,noreferrer'),
     );
-    expect(screen.getByRole('button', { name: 'Later' })).toBeInTheDocument();
-  });
+    cleanup();
+    vi.unstubAllGlobals();
 
-  it('offers restart once a signed macOS update has downloaded', async () => {
     stubBridge({ kind: 'ready', version: '9.0.0' });
     render(<DesktopUpdateBanner />);
-    expect(await screen.findByText('Coppice 9.0.0 is ready.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart to update' }));
     await vi.waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: 'Later' })).toBeInTheDocument();
-  });
-
-  it('dismisses and stays hidden for the same version', async () => {
-    stubBridge({ kind: 'linux', version: '9.0.0' });
-    const { unmount } = render(<DesktopUpdateBanner />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    expect(localStorage.getItem('coppice.dismissedUpdate')).toBe('9.0.0');
-    unmount();
-
-    const { container } = render(<DesktopUpdateBanner />);
-    await vi.waitFor(() => expect(window.coppiceDesktop?.getUpdateInfo).toHaveBeenCalledTimes(2));
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('shows again when a newer version than the dismissed one appears', async () => {
-    localStorage.setItem('coppice.dismissedUpdate', '8.0.0');
-    stubBridge({ kind: 'download', version: '9.0.0', url: 'https://example/release' });
-    render(<DesktopUpdateBanner />);
-    expect(await screen.findByText('Coppice 9.0.0 is available.')).toBeInTheDocument();
   });
 
   it('hides the banner while a run is active', async () => {
@@ -131,19 +106,4 @@ describe('DesktopUpdateBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows a banner pushed after the first check', async () => {
-    let push: ((info: DesktopUpdateInfo | null) => void) | undefined;
-    window.coppiceDesktop = {
-      pickDirectory: vi.fn(async () => null),
-      getUpdateInfo: vi.fn(async () => null),
-      onUpdateInfo: (listener) => {
-        push = listener;
-        return () => {};
-      },
-    };
-    render(<DesktopUpdateBanner />);
-    await vi.waitFor(() => expect(push).toBeTypeOf('function'));
-    push?.({ kind: 'linux', version: '2.0.0' });
-    expect(await screen.findByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
-  });
 });

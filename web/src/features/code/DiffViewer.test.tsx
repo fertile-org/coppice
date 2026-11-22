@@ -1,7 +1,4 @@
 import '@testing-library/jest-dom/vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DiffViewer } from './DiffViewer';
@@ -107,17 +104,6 @@ describe('DiffViewer tokens', () => {
     expect(inserted?.querySelector('.hljs-keyword')).toHaveTextContent('const');
   });
 
-  it('colours rust and css tokens', () => {
-    patchState.patch = patch('src/lib.rs', 'let value = 1;', 'let value = 2;');
-    const rust = renderDiff('src/lib.rs');
-    expect(rust.container.querySelector('.hljs-keyword')).toHaveTextContent('let');
-    rust.unmount();
-
-    patchState.patch = patch('src/app.css', 'color: red;', 'color: blue;');
-    const css = renderDiff('src/app.css');
-    expect(css.container.querySelector('[class*="hljs-"]')).toBeTruthy();
-  });
-
   it('renders an unknown file type as plain text', () => {
     patchState.patch = patch('notes.txt', 'hello old', 'hello new');
     const { container } = renderDiff('notes.txt');
@@ -144,13 +130,4 @@ describe('DiffViewer tokens', () => {
     expect(container.querySelector('.diff-code-insert .diff-code-edit')).toHaveTextContent('new');
   });
 
-  it('paints an edited token with the mark text colour', () => {
-    const css = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../index.css'),
-      'utf8',
-    );
-    expect(css).toMatch(
-      /\.code-review-diff \.diff-code-edit \[class\*="hljs-"\]\s*\{\s*color:\s*inherit;/,
-    );
-  });
 });

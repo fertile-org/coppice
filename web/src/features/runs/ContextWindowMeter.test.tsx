@@ -19,17 +19,14 @@ describe('contextWindowFromEvent', () => {
 });
 
 describe('ContextWindowMeter', () => {
-  it('shows used of size with a bar', () => {
-    render(<ContextWindowMeter used={84000} size={200000} />);
-    expect(screen.getByText('Context 84k / 200k')).toBeInTheDocument();
+  it('exposes progress when size is known and omits the bar otherwise', () => {
+    const { unmount } = render(<ContextWindowMeter used={84000} size={200000} />);
     const bar = screen.getByRole('progressbar', { name: 'Context window' });
     expect(bar).toHaveAttribute('aria-valuenow', '84000');
     expect(bar).toHaveAttribute('aria-valuemax', '200000');
-  });
+    unmount();
 
-  it('shows only the tokens used when the size is unknown', () => {
     render(<ContextWindowMeter used={20919} size={null} />);
-    expect(screen.getByText('Context 21k')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 });

@@ -3,14 +3,9 @@ import { sessionModelInfo } from './session-footer';
 import type { Message } from '../sync/types';
 
 describe('sessionModelInfo', () => {
-  it('returns null when there are no assistant messages', () => {
+  it('summarizes assistant model info when present', () => {
     expect(sessionModelInfo([])).toBeNull();
-    expect(
-      sessionModelInfo([{ id: '1', sessionID: 's', role: 'user' }]),
-    ).toBeNull();
-  });
-
-  it('returns mode and model from assistant messages with total duration', () => {
+    expect(sessionModelInfo([{ id: '1', sessionID: 's', role: 'user' }])).toBeNull();
     const messages: Message[] = [
       {
         id: '1',

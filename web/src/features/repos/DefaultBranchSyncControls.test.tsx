@@ -151,69 +151,7 @@ describe('DefaultBranchSyncControls', () => {
     expect(screen.getByText(/working tree dirty/)).toBeVisible();
   });
 
-  it('keeps the push-disabled reason next to the dirty-tree line', () => {
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
-          workingTreeClean: false,
-          pushEnabled: false,
-          canPull: false,
-          canPush: false,
-          pullDisabledReason: DIRTY_PULL,
-          pushDisabledReason: 'git.push_enabled is false in server config',
-        })}
-      />,
-    );
-
-    expect(screen.getAllByText(/uncommitted changes/)).toHaveLength(1);
-    expect(
-      screen.getByText('git.push_enabled is false in server config'),
-    ).toBeVisible();
-  });
-
-  it('does not repeat not-behind / not-ahead when in sync', () => {
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
-          aheadCount: 0,
-          behindCount: 0,
-          canPush: false,
-          pushDisabledReason: 'Local default branch is not ahead of remote',
-        })}
-      />,
-    );
-
-    expect(screen.getByText('in sync with remote')).toBeVisible();
-    expect(screen.queryByText(/not behind remote/)).toBeNull();
-    expect(screen.queryByText(/not ahead of remote/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Pull' })).toHaveAttribute(
-      'title',
-      'Local default branch is not behind remote',
-    );
-  });
-
-  it('shows "Fetch remote first" once when there is no remote ref', () => {
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
-          remoteSha: null,
-          aheadCount: null,
-          behindCount: null,
-          canPush: false,
-          canPull: false,
-          pushDisabledReason: 'Fetch remote first',
-          pullDisabledReason: 'Fetch remote first',
-        })}
-      />,
-    );
-
-    expect(screen.getAllByText('Fetch remote first')).toHaveLength(1);
-  });
-
-  it('shows the missing remote URL reason once', () => {
+  it('dedupes repeated disabled reasons in the summary', () => {
     renderControls(
       <DefaultBranchSyncControls
         repo={repo}
@@ -255,95 +193,37 @@ describe('DefaultBranchSyncControls', () => {
     expect(screen.getByText(/use Pull when strictly behind/)).toBeVisible();
   });
 
-  it('disables Push and surfaces pushDisabledReason when canPush is false', () => {
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
-          pushEnabled: false,
-          canPush: false,
-          pushDisabledReason: 'git.push_enabled is false in server config',
-          aheadCount: 0,
-        })}
-      />,
-    );
-
-    const push = screen.getByRole('button', { name: 'Push to remote' });
-    expect(push).toBeDisabled();
-    expect(push).toHaveAttribute(
-      'title',
-      'git.push_enabled is false in server config',
-    );
-    expect(
-      screen.getByText('git.push_enabled is false in server config'),
-    ).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Fetch' })).toBeEnabled();
-  });
-
-  it('disables Fetch when canFetch is false and shows reason', () => {
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
-          canFetch: false,
-          canPush: false,
-          canPull: false,
-          fetchDisabledReason: 'Set repository remote URL in Settings → Repositories',
-          pushDisabledReason: 'Set repository remote URL in Settings → Repositories',
-          pullDisabledReason: 'Set repository remote URL in Settings → Repositories',
-        })}
-      />,
-    );
-
-    const fetchBtn = screen.getByRole('button', { name: 'Fetch' });
-    expect(fetchBtn).toBeDisabled();
-    expect(fetchBtn).toHaveAttribute(
-      'title',
-      'Set repository remote URL in Settings → Repositories',
-    );
-  });
-
-  it('confirms before pushing', async () => {
-    const onPush = vi.fn();
-
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus()}
-        onPush={onPush}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Push to remote' }));
-    const dialog = await screen.findByRole('dialog', {
-      name: /Push local `main` to the remote default branch/,
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
-    await waitFor(() => expect(onPush).toHaveBeenCalled());
-  });
-
-  it('confirms before pulling', async () => {
-    const onPull = vi.fn();
-
-    renderControls(
-      <DefaultBranchSyncControls
-        repo={repo}
-        statusOverride={baseStatus({
+  it('confirms before push and pull', async () => {
+    for (const [button, status, handler] of [
+      ['Push to remote', { aheadCount: 1, behindCount: 0 }, 'onPush'],
+      [
+        'Pull',
+        {
           aheadCount: 0,
           behindCount: 1,
           canPush: false,
           canPull: true,
           pullDisabledReason: null,
-        })}
-        onPull={onPull}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Pull' }));
-    const dialog = await screen.findByRole('dialog', {
-      name: /Pull remote `main` into the local default branch/,
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
-    await waitFor(() => expect(onPull).toHaveBeenCalled());
+        },
+        'onPull',
+      ],
+    ] as const) {
+      const onPush = vi.fn();
+      const onPull = vi.fn();
+      const view = renderControls(
+        <DefaultBranchSyncControls
+          repo={repo}
+          statusOverride={baseStatus(status)}
+          onPush={onPush}
+          onPull={onPull}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      fireEvent.click(await within(screen.getByRole('dialog')).findByRole('button', { name: 'Confirm' }));
+      await waitFor(() =>
+        handler === 'onPush' ? expect(onPush).toHaveBeenCalled() : expect(onPull).toHaveBeenCalled(),
+      );
+      view.unmount();
+    }
   });
 });

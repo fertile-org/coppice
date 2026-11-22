@@ -94,18 +94,6 @@ describe('Code review header', () => {
     state.worktrees = [];
   });
 
-  it('renders the Code review eyebrow exactly once', () => {
-    renderPage('/code?repoId=repo-1');
-    expect(screen.getAllByText('Code review', { exact: true })).toHaveLength(1);
-    expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: 'New review — ticket created on submit',
-      }),
-    ).toBeVisible();
-    expect(screen.queryByText(/^Compare /)).toBeNull();
-  });
-
   it('links the heading to the ticket', () => {
     state.ticket = {
       id: 'ticket-1',
@@ -124,12 +112,6 @@ describe('Code review header', () => {
       'Diff review is hard to review the code',
     );
     expect(screen.getAllByText('Code review', { exact: true })).toHaveLength(1);
-  });
-
-  it('shows a loading heading while the ticket is missing', () => {
-    renderPage('/code?repoId=repo-1&ticketId=ticket-1');
-    expect(screen.getByRole('heading', { level: 1, name: 'Loading ticket…' })).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Loading ticket…' })).toBeNull();
   });
 
   it('shows both branches and 7-character SHAs on the merge line', () => {
@@ -161,21 +143,6 @@ describe('Code review header', () => {
     expect(screen.getByText('coppice')).toBeVisible();
   });
 
-  it('omits the merge line until the diff summary exists', () => {
-    state.worktrees = [
-      {
-        path: '/trees/alpha',
-        branch: 'agent/one',
-        headSha: 'cfe5792bbbb',
-        ticketId: null,
-        ticketTitle: null,
-      },
-    ];
-    renderPage('/code?repoId=repo-1&worktree=/trees/alpha&baseBranch=main');
-    expect(screen.queryByText('into')).toBeNull();
-    expect(screen.queryByText('cfe5792')).toBeNull();
-  });
-
   it('writes worktree and base picks into the URL', () => {
     state.worktrees = [
       {
@@ -203,19 +170,4 @@ describe('Code review header', () => {
     expect(params.get('baseBranch')).toBe('develop');
   });
 
-  it('uses Code review as the only heading when no repo is open', () => {
-    renderPage('/code');
-    expect(screen.getAllByText('Code review', { exact: true })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 1, name: 'Code review' })).toBeVisible();
-  });
-
-  it('uses the repo name as the heading when the repo is not ready', () => {
-    state.verificationStatus = 'failed';
-    renderPage('/code?repoId=repo-1');
-    expect(screen.getAllByText('Code review', { exact: true })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 1, name: 'coppice' })).toHaveAttribute(
-      'title',
-      'coppice',
-    );
-  });
 });

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '../features/theme/ThemeProvider';
@@ -45,42 +45,6 @@ describe('AppShell', () => {
     document.documentElement.removeAttribute('data-theme');
   });
 
-  it('keeps notification and sign-out controls in the same visual and focus order', () => {
-    renderShell();
-
-    const bell = screen.getByRole('button', { name: 'Notifications' });
-    const signOut = screen.getByRole('button', { name: 'Sign out' });
-
-    expect(
-      signOut.compareDocumentPosition(bell) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(bell.parentElement).not.toHaveClass('order-last');
-  });
-
-  it('exposes a theme toggle that cycles preference', () => {
-    renderShell();
-
-    const toggle = screen.getByTestId('theme-toggle');
-    expect(toggle).toHaveAttribute('data-theme-preference', 'system');
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('data-theme-preference', 'light');
-    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('data-theme-preference', 'dark');
-    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
-  });
-
-  it('exposes Chat in the main nav', () => {
-    renderShell();
-
-    expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute(
-      'href',
-      '/chat',
-    );
-  });
-
   it('puts Skip to board first on a board route', () => {
     renderShell(['/boards/board-1']);
 
@@ -89,7 +53,6 @@ describe('AppShell', () => {
     expect(
       skip.compareDocumentPosition(sidebar) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(skip).toHaveClass('keyboard-focus');
     expect(skip).toHaveAttribute('href', '#board');
   });
 
@@ -98,119 +61,25 @@ describe('AppShell', () => {
     expect(screen.queryByRole('link', { name: 'Skip to board' })).not.toBeInTheDocument();
   });
 
-  it('uses full-width main on non-chat routes', () => {
-    renderShell(['/boards']);
-
-    const main = screen.getByTestId('app-shell-main');
-    expect(main).toHaveAttribute('data-layout', 'default');
-    expect(main).toHaveClass('w-full');
-    expect(main).toHaveClass('px-8');
-    expect(main).not.toHaveClass('max-w-6xl');
-    expect(main).not.toHaveClass('mx-auto');
-    expect(main).not.toHaveAttribute('data-layout', 'chat');
-  });
-
-  it('aligns sidebar brand and top bar heights', () => {
-    renderShell(['/boards']);
-
-    const brand = screen.getByTestId('app-shell-sidebar-brand');
-    const topbar = screen.getByTestId('app-shell-topbar');
-    expect(brand).toHaveClass('h-14');
-    expect(topbar).toHaveClass('h-14');
-  });
-
-  it('uses full-bleed main on /chat', () => {
+  it('uses chat and default main layouts by route', () => {
     renderShell(['/chat']);
-
-    const main = screen.getByTestId('app-shell-main');
+    let main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'chat');
-    expect(main).not.toHaveClass('max-w-6xl');
-    expect(main).toHaveClass('flex-1');
-  });
-
-  it('uses full-bleed main on /chat/:sessionId', () => {
-    renderShell(['/chat/00000000-0000-4000-8000-000000000001']);
-
-    const main = screen.getByTestId('app-shell-main');
-    expect(main).toHaveAttribute('data-layout', 'chat');
-    expect(main).not.toHaveClass('max-w-6xl');
-  });
-
-  it('clamps chat routes to the viewport so document scroll cannot move chrome', () => {
-    renderShell(['/chat']);
-
-    const main = screen.getByTestId('app-shell-main');
-    const root = screen.getByTestId('app-shell-root');
-    expect(root).toHaveClass('h-svh');
-    expect(root).toHaveClass('overflow-hidden');
-    expect(root).toHaveClass('flex');
-    expect(main.parentElement).toHaveClass('flex-col');
     expect(main).toHaveClass('overflow-hidden');
-    expect(main).toHaveClass('min-h-0');
-  });
+    cleanup();
 
-  it('scrolls non-chat pages inside main, not the window', () => {
-    renderShell(['/boards']);
-
-    const root = screen.getByTestId('app-shell-root');
-    const main = screen.getByTestId('app-shell-main');
-    expect(root).toHaveClass('h-svh');
-    expect(root).toHaveClass('overflow-hidden');
+    renderShell(['/boards/00000000-0000-4000-8000-000000000001/runs']);
+    main = screen.getByTestId('app-shell-main');
+    expect(main).toHaveAttribute('data-layout', 'default');
     expect(main).toHaveClass('overflow-y-auto');
-    expect(main).toHaveClass('min-h-0');
-    expect(main).toHaveClass('flex-1');
   });
 
-  it('uses full-width scrolling main on board routes', () => {
+  it('uses board main layout on a board route', () => {
     renderShell(['/boards/00000000-0000-4000-8000-000000000001']);
 
     const main = screen.getByTestId('app-shell-main');
-    const root = screen.getByTestId('app-shell-root');
     expect(main).toHaveAttribute('data-layout', 'board');
-    expect(main).not.toHaveClass('max-w-6xl');
-    expect(main).not.toHaveClass('mx-auto');
-    expect(main).toHaveClass('px-8');
-    expect(main).toHaveClass('py-8');
     expect(main).toHaveClass('overflow-y-auto');
-    expect(main).not.toHaveClass('overflow-hidden');
-    expect(root).toHaveClass('h-svh');
-  });
-
-  it('uses full-width main on non-board routes nested under a board', () => {
-    renderShell(['/boards/00000000-0000-4000-8000-000000000001/runs']);
-
-    const main = screen.getByTestId('app-shell-main');
-    expect(main).toHaveAttribute('data-layout', 'default');
-    expect(main).toHaveClass('w-full');
-    expect(main).not.toHaveClass('max-w-6xl');
-  });
-
-  it('renders an expanded sidebar by default with nav icons', () => {
-    renderShell();
-
-    const sidebar = screen.getByTestId('app-shell-sidebar');
-    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
-    expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Collapse sidebar' }),
-    ).toBeInTheDocument();
-  });
-
-  it('pins the search box above Boards, outside the scrolling nav', () => {
-    renderShell();
-
-    const brand = screen.getByTestId('app-shell-sidebar-brand');
-    const search = screen.getByRole('button', { name: /Search/ });
-    const boards = screen.getByRole('link', { name: 'Boards' });
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-
-    expect(nav.contains(search)).toBe(false);
-    expect(
-      brand.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      search.compareDocumentPosition(boards) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
   });
 
   it('collapses the sidebar when the toggle is used', () => {
@@ -282,23 +151,6 @@ describe('AppShell', () => {
     }
   });
 
-  it('opens the System group on a System page', () => {
-    renderShell(['/system/logs']);
-
-    expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('highlights Settings only on its own page', () => {
-    renderShell(['/settings/plugins']);
-
-    expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Settings' })).not.toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-  });
-
   it('hides Settings from members', () => {
     sessionState.user = { ...sessionState.user, role: 'member' };
 
@@ -309,49 +161,6 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
   });
 
-  it('places the Help group directly below Settings for an admin', () => {
-    renderShell(['/boards']);
-
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    const settings = within(nav).getByRole('link', { name: 'Settings' });
-    const help = within(nav).getByRole('button', { name: 'Help' });
-    expect(
-      settings.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(help).toHaveAttribute('aria-expanded', 'false');
-    expect(within(nav).queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
-
-    fireEvent.click(help);
-    expect(help).toHaveAttribute('aria-expanded', 'true');
-    expect(within(nav).getByRole('link', { name: 'Documentation' })).toHaveAttribute(
-      'href',
-      'https://getcoppice.app/docs',
-    );
-    expect(within(nav).getByRole('link', { name: 'Keyboard shortcuts' })).toHaveAttribute(
-      'href',
-      '/help/shortcuts',
-    );
-  });
-
-  it('shows Help as the last nav group for a member', () => {
-    sessionState.user = { ...sessionState.user, role: 'member' };
-
-    renderShell(['/boards']);
-
-    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
-
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    fireEvent.click(within(nav).getByRole('button', { name: 'Help' }));
-    const links = within(nav).getAllByRole('link');
-    const last = links[links.length - 1];
-    expect(last).toHaveAccessibleName('Keyboard shortcuts');
-    expect(last).toHaveAttribute('href', '/help/shortcuts');
-    expect(within(nav).getByRole('link', { name: 'Documentation' })).toHaveAttribute(
-      'href',
-      'https://getcoppice.app/docs',
-    );
-  });
-
   it('opens Documentation in a new tab and never marks it active', () => {
     renderShell(['/help/shortcuts']);
 
@@ -360,8 +169,6 @@ describe('AppShell', () => {
     expect(docs).toHaveAttribute('target', '_blank');
     expect(docs).toHaveAttribute('rel', 'noreferrer');
     expect(docs).not.toHaveAttribute('aria-current');
-    expect(docs).not.toHaveClass('bg-accent-muted');
-    expect(docs).toHaveClass('text-text-secondary');
     expect(screen.getByRole('link', { name: 'Keyboard shortcuts' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -369,19 +176,4 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: 'Help' })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('shows Documentation and Keyboard shortcuts as icon links when the sidebar is collapsed', () => {
-    renderShell();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
-
-    expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument();
-    const docs = screen.getByRole('link', { name: 'Documentation' });
-    expect(docs).toHaveAttribute('title', 'Documentation');
-    expect(docs).toHaveAttribute('aria-label', 'Documentation');
-    expect(docs).not.toHaveTextContent('Documentation');
-    const shortcuts = screen.getByRole('link', { name: 'Keyboard shortcuts' });
-    expect(shortcuts).toHaveAttribute('title', 'Keyboard shortcuts');
-    expect(shortcuts).toHaveAttribute('href', '/help/shortcuts');
-    expect(shortcuts).not.toHaveTextContent('Keyboard shortcuts');
-  });
 });

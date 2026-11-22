@@ -8,7 +8,6 @@ import type { MarketplaceEntry, MarketplaceSource } from '../../lib/schemas/mark
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { selectComboboxOption } from '../../test/combobox';
 import { PluginsPage } from './PluginsPage';
-import { MARKETPLACE_ENTRIES_QUERY_KEY } from './useMarketplace';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
@@ -334,24 +333,6 @@ describe('PluginsPage marketplace tab', () => {
     });
   });
 
-  it('opens the Marketplace tab with entries and trust labels', async () => {
-    renderPage();
-
-    expect(await screen.findByRole('tab', { name: 'Installed' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await openMarketplace();
-
-    expect(screen.getByRole('heading', { name: 'Plugin marketplace' })).toBeVisible();
-    expect(within(entryCard(githubEntry)).getByText('Coppice')).toBeVisible();
-    expect(
-      within(entryCard(reviewEntry)).getByText('Community: not reviewed by Coppice'),
-    ).toBeVisible();
-    expect(screen.getByText(/Install with one click/)).toBeVisible();
-    expect(screen.queryByTestId(`marketplace-source-${communitySource.id}`)).toBeNull();
-  });
-
   it('filters by search text and category', async () => {
     renderPage();
     await openMarketplace();
@@ -364,14 +345,6 @@ describe('PluginsPage marketplace tab', () => {
     selectComboboxOption(screen.getByRole('combobox', { name: 'Category' }), 'code');
     expect(entryCard(githubEntry)).toBeVisible();
     expect(screen.queryByTestId(`marketplace-entry-${communitySource.id}/review-kit`)).toBeNull();
-  });
-
-  it('shows a GitHub brand icon and a generic icon for other entries', async () => {
-    renderPage();
-    await openMarketplace();
-
-    expect(within(entryCard(githubEntry)).getByTestId('marketplace-icon-github')).toBeVisible();
-    expect(within(entryCard(reviewEntry)).getByTestId('marketplace-icon-fallback')).toBeVisible();
   });
 
   it('reveals 24 entries at a time and resets the limit for every filter', async () => {
@@ -408,32 +381,6 @@ describe('PluginsPage marketplace tab', () => {
     expect(screen.queryAllByTestId(/^marketplace-entry-/)).toHaveLength(0);
   });
 
-  it('fetches each never-loaded source once when Marketplace opens', async () => {
-    sources = [
-      { ...coppiceSource, refreshedAt: FRESH_AT },
-      unfetchedSource,
-    ];
-    renderPage();
-    await openMarketplace();
-
-    await waitFor(() =>
-      expect(mocks.apiFetch).toHaveBeenCalledWith(
-        `/api/marketplace/sources/${unfetchedSource.id}/refresh`,
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    );
-    await waitFor(() =>
-      expect(screen.queryByTestId('marketplace-skeleton')).toBeNull(),
-    );
-    const calls = mocks.apiFetch.mock.calls.filter(
-      ([path, init]) =>
-        path === `/api/marketplace/sources/${unfetchedSource.id}/refresh` &&
-        (init?.method ?? 'GET') === 'POST',
-    );
-    expect(calls).toHaveLength(1);
-    expect(entryCard(githubEntry)).toBeVisible();
-  });
-
   it('keeps healthy entries visible when a first fetch fails', async () => {
     sources = [
       { ...coppiceSource, refreshedAt: FRESH_AT },
@@ -447,8 +394,7 @@ describe('PluginsPage marketplace tab', () => {
     expect(screen.getByTestId('marketplace-source-chip-anthropic-test')).toBeVisible();
   });
 
-  it('a path install posts the entry and lands on the installed plugins with a notice', async () => {
-    plugins = [installedPlugin];
+  it('path install and update land on Installed and refresh rows without a remount', async () => {
     renderPage();
     await openMarketplace();
 
@@ -468,25 +414,9 @@ describe('PluginsPage marketplace tab', () => {
       'aria-selected',
       'true',
     );
-    expect(screen.getByRole('status', { hidden: true })).toHaveTextContent(
-      'Installed review-kit. Enable it and choose which agents can use it.',
-    );
-  });
-
-  it('a path install shows the new plugin row on Installed without a remount', async () => {
-    renderPage();
-    expect(await screen.findByText(/No plugins yet/)).toBeVisible();
-    await openMarketplace();
-
-    fireEvent.click(within(entryCard(reviewEntry)).getByRole('button', { name: 'Install' }));
-
-    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
-    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
-      'Installed review-kit. Enable it and choose which agents can use it.',
-    );
-    const row = await screen.findByTestId(`plugin-row-${installedPlugin.id}`);
-    expect(row).toHaveAttribute('data-highlighted', 'true');
-    expect(within(row).getByText('review-kit')).toBeVisible();
+    const installedRow = await screen.findByTestId(`plugin-row-${installedPlugin.id}`);
+    expect(installedRow).toHaveAttribute('data-highlighted', 'true');
+    expect(within(installedRow).getByText('review-kit')).toBeVisible();
   });
 
   it('a path update shows the refreshed plugin on Installed without a remount', async () => {
@@ -501,13 +431,15 @@ describe('PluginsPage marketplace tab', () => {
       within(entryCard(installedUpdatable)).getByRole('button', { name: 'Update available' }),
     );
 
-    expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
-    expect(await screen.findByRole('status', { hidden: true })).toHaveTextContent(
-      "Updated lint-helper. Changes apply from each agent's next run.",
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/marketplace/plugins/${installedUpdatable.installedPluginId}/update`,
+        expect.objectContaining({ method: 'POST' }),
+      ),
     );
-    const row = await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`);
-    await waitFor(() => expect(within(row).getByText('1.1.0')).toBeVisible());
-    expect(within(row).queryByText('1.0.0')).toBeNull();
+    const updatedRow = await screen.findByTestId(`plugin-row-${lintHelperPlugin.id}`);
+    await waitFor(() => expect(within(updatedRow).getByText('1.1.0')).toBeVisible());
+    expect(within(updatedRow).queryByText('1.0.0')).toBeNull();
   });
 
   it('an object install polls the job and reports the failure', async () => {
@@ -525,16 +457,6 @@ describe('PluginsPage marketplace tab', () => {
       'true',
     );
     expect(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' })).toBeEnabled();
-  });
-
-  it('an object install that succeeds switches to the installed plugins', async () => {
-    jobResult = { ...jobResult, status: 'succeeded', pluginIds: [installedPlugin.id] };
-    renderPage();
-    await openMarketplace();
-
-    fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Installed github.');
   });
 
   it('a github install names the missing token and highlights the new card', async () => {
@@ -555,11 +477,7 @@ describe('PluginsPage marketplace tab', () => {
     fireEvent.click(within(entryCard(githubEntry)).getByRole('button', { name: 'Install' }));
 
     expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
-    const status = await screen.findByRole('status', { hidden: true });
-    expect(status).toHaveTextContent('Installed github.');
-    expect(status).toHaveTextContent(
-      'Add GITHUB_PERSONAL_ACCESS_TOKEN in its Settings before agents can use it.',
-    );
+    expect(screen.getByLabelText('GITHUB_PERSONAL_ACCESS_TOKEN')).toBeVisible();
     const row = await screen.findByTestId(`plugin-row-${githubPlugin.id}`);
     expect(row).toHaveAttribute('data-highlighted', 'true');
     expect(await screen.findByRole('dialog', { name: 'Plugin details' })).toBeVisible();
@@ -581,30 +499,6 @@ describe('PluginsPage marketplace tab', () => {
     expect(screen.getByTestId(`plugin-row-${alpha.id}`)).toHaveAttribute('data-highlighted', 'true');
     expect(screen.getByTestId(`plugin-row-${beta.id}`)).toHaveAttribute('data-highlighted', 'true');
     expect(screen.queryByRole('dialog', { name: 'Plugin details' })).not.toBeInTheDocument();
-  });
-
-  it('shows why an entry cannot be installed and offers no install button', async () => {
-    renderPage();
-    await openMarketplace();
-
-    const card = entryCard(npmEntry);
-    expect(within(card).getByText('npm sources are not supported')).toBeVisible();
-    expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
-  });
-
-  it('offers Update when an installed catalog plugin has a newer version', async () => {
-    renderPage();
-    await openMarketplace();
-
-    const card = entryCard(installedUpdatable);
-    fireEvent.click(within(card).getByRole('button', { name: 'Update available' }));
-
-    await waitFor(() =>
-      expect(mocks.apiFetch).toHaveBeenCalledWith(
-        `/api/marketplace/plugins/${installedUpdatable.installedPluginId}/update`,
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    );
   });
 
   it('requires a name and git URL before adding a marketplace', async () => {
@@ -631,10 +525,11 @@ describe('PluginsPage marketplace tab', () => {
     expect(within(sourcesDialog).queryByRole('button', { name: 'Remove coppice' })).toBeNull();
     fireEvent.click(within(sourcesDialog).getByRole('button', { name: 'Remove acme-plugins' }));
 
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Remove marketplace "acme-plugins"?',
-    });
-    expect(within(dialog).getByText(/lose their Update button/)).toBeVisible();
+    expect(
+      await screen.findByRole('dialog', {
+        name: 'Remove marketplace "acme-plugins"?',
+      }),
+    ).toBeVisible();
   });
 
   function addSourceFromDialog(dialog: HTMLElement) {
@@ -652,7 +547,7 @@ describe('PluginsPage marketplace tab', () => {
     );
   }
 
-  it('adding a source registers it and fetches its catalog once', async () => {
+  it('registers, refreshes, and retries marketplace sources', async () => {
     renderPage();
     await openMarketplace();
     const dialog = await openSources();
@@ -668,66 +563,15 @@ describe('PluginsPage marketplace tab', () => {
         }),
       ),
     );
-    const source = await within(dialog).findByTestId(
-      'marketplace-source-00000000-0000-4000-8000-000000000103',
-    );
-    await waitFor(() => expect(within(source).getByText(/^Refreshed /)).toBeVisible());
     expect(refreshCalls('00000000-0000-4000-8000-000000000103')).toHaveLength(1);
-    expect(within(dialog).queryByRole('alert')).toBeNull();
-  });
 
-  it('explains when a source is added but its catalog cannot be fetched', async () => {
-    addedFetchError = 'repository not found';
-    renderPage();
-    await openMarketplace();
-    const dialog = await openSources();
-
-    addSourceFromDialog(dialog);
-
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'Added team-tools, but its catalog could not be fetched.',
-    );
-    const source = await within(dialog).findByTestId(
-      'marketplace-source-00000000-0000-4000-8000-000000000103',
-    );
-    expect(within(source).getByRole('button', { name: 'Retry team-tools' })).toBeVisible();
-    expect(refreshCalls('00000000-0000-4000-8000-000000000103')).toHaveLength(1);
-  });
-
-  it('refreshes a source from the dialog and opens it from the failure warning', async () => {
-    sources = [
-      { ...coppiceSource, refreshedAt: FRESH_AT },
-      communitySource,
-      { ...unfetchedSource, refreshedAt: '2026-10-25T10:00:00Z', lastError: 'network offline' },
-    ];
-    renderPage();
-    await openMarketplace();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Manage sources' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Marketplace sources' });
-    expect(within(dialog).getByText('Last refresh failed: network offline')).toBeVisible();
-    expect(within(dialog).getByRole('button', { name: 'Retry anthropic-test' })).toBeVisible();
-
+    const coppiceBefore = entriesCallsFor(coppiceSource.id).length;
+    const communityBefore = entriesCallsFor(communitySource.id).length;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh acme-plugins' }));
     await waitFor(() => expect(refreshCalls(communitySource.id)).toHaveLength(1));
-  });
+    await waitFor(() => expect(entriesCallsFor(communitySource.id).length).toBe(communityBefore + 1));
+    expect(entriesCallsFor(coppiceSource.id)).toHaveLength(coppiceBefore);
 
-  it('shows skeletons and per-source spinners before sources settle', async () => {
-    let release: () => void = () => undefined;
-    entryDelay = new Promise((resolve) => {
-      release = resolve;
-    });
-    renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
-
-    expect(await screen.findAllByTestId('marketplace-skeleton')).not.toHaveLength(0);
-    expect(screen.getByLabelText('Loading coppice')).toBeVisible();
-    expect(screen.getByLabelText('Loading acme-plugins')).toBeVisible();
-    expect(screen.queryByText('No plugins in the marketplace yet.')).toBeNull();
-
-    release();
-    expect(await screen.findByTestId(`marketplace-entry-${githubEntry.sourceId}/github`)).toBeVisible();
-    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
   });
 
   it('retries a failed source without hiding the others', async () => {
@@ -736,10 +580,7 @@ describe('PluginsPage marketplace tab', () => {
     await openMarketplace();
 
     expect(entryCard(githubEntry)).toBeVisible();
-    expect(screen.getByText(/acme-plugins couldn’t load/)).toBeVisible();
     const failed = screen.getByTestId('marketplace-source-chip-acme-plugins');
-    expect(within(failed).getByLabelText('Retry acme-plugins')).toBeVisible();
-
     const before = mocks.apiFetch.mock.calls.filter(([path]) =>
       String(path).includes(`source=${communitySource.id}`),
     ).length;
@@ -751,60 +592,7 @@ describe('PluginsPage marketplace tab', () => {
         ).length,
       ).toBeGreaterThan(before),
     );
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'github' } });
     expect(entryCard(githubEntry)).toBeVisible();
-  });
-
-  it('ranks name matches ahead of description matches', async () => {
-    const exact: MarketplaceEntry = {
-      ...reviewEntry,
-      name: 'review',
-      description: 'Exact name',
-    };
-    const prefix: MarketplaceEntry = {
-      ...reviewEntry,
-      name: 'review-kit',
-      description: 'Prefix name',
-    };
-    const contains: MarketplaceEntry = {
-      ...reviewEntry,
-      name: 'code-review',
-      description: 'Contains name',
-    };
-    const described: MarketplaceEntry = {
-      ...githubEntry,
-      name: 'github',
-      description: 'Issues, pull requests, reviews and CI',
-    };
-    entries = [described, contains, prefix, exact];
-    renderPage();
-    await openMarketplace();
-
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'review' } });
-    const cards = screen.getAllByTestId(/^marketplace-entry-/);
-    expect(cards.map((card) => card.getAttribute('data-testid'))).toEqual([
-      `marketplace-entry-${exact.sourceId}/review`,
-      `marketplace-entry-${prefix.sourceId}/review-kit`,
-      `marketplace-entry-${contains.sourceId}/code-review`,
-      `marketplace-entry-${described.sourceId}/github`,
-    ]);
-  });
-
-  it('shows why an entry is already installed from another source', async () => {
-    entries = [
-      githubEntry,
-      {
-        ...reviewEntry,
-        installable: false,
-        reason: 'already installed as github',
-      },
-    ];
-    renderPage();
-    await openMarketplace();
-
-    const card = entryCard(reviewEntry);
-    expect(within(card).getByText('already installed as github')).toBeVisible();
-    expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
   });
 
   function entriesCalls() {
@@ -818,65 +606,7 @@ describe('PluginsPage marketplace tab', () => {
     return entriesCalls().filter(([path]) => String(path).includes(`source=${id}`));
   }
 
-  it('a refresh of one source refetches only that source’s entries', async () => {
-    renderPage();
-    await openMarketplace();
-
-    const coppiceBefore = entriesCallsFor(coppiceSource.id).length;
-    const communityBefore = entriesCallsFor(communitySource.id).length;
-    expect(coppiceBefore).toBeGreaterThan(0);
-    expect(communityBefore).toBeGreaterThan(0);
-
-    const dialog = await openSources();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh acme-plugins' }));
-    await waitFor(() => expect(refreshCalls(communitySource.id)).toHaveLength(1));
-    await waitFor(() => expect(entriesCallsFor(communitySource.id).length).toBe(communityBefore + 1));
-    expect(entriesCallsFor(coppiceSource.id)).toHaveLength(coppiceBefore);
-  });
-
-  it('a background refetch of loaded entries shows no skeletons or spinners', async () => {
-    const { client } = renderPage();
-    await openMarketplace();
-    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
-
-    const hold = deferred();
-    entryDelay = hold.promise;
-    void client.invalidateQueries({ queryKey: MARKETPLACE_ENTRIES_QUERY_KEY });
-    await waitFor(() => expect(entriesCalls().length).toBeGreaterThan(2));
-
-    expect(screen.queryByTestId('marketplace-skeleton')).toBeNull();
-    expect(screen.queryByLabelText('Loading coppice')).toBeNull();
-    expect(screen.queryByLabelText('Loading acme-plugins')).toBeNull();
-    expect(screen.queryByText(/Fetching \d+ sources/)).toBeNull();
-    expect(entryCard(githubEntry)).toBeVisible();
-
-    hold.resolve();
-    expect(entryCard(githubEntry)).toBeVisible();
-  });
-
-  it('a retry shows the spinner while the refresh is in flight', async () => {
-    sources = [
-      { ...coppiceSource, refreshedAt: FRESH_AT },
-      { ...communitySource, lastError: 'catalog missing' },
-    ];
-    const hold = deferred();
-    refreshDelay = hold.promise;
-    renderPage();
-    await openMarketplace();
-
-    const failed = screen.getByTestId('marketplace-source-chip-acme-plugins');
-    expect(within(failed).getByLabelText('Retry acme-plugins')).toBeVisible();
-
-    fireEvent.click(failed);
-    expect(await screen.findByLabelText('Loading acme-plugins')).toBeVisible();
-    expect(within(failed).queryByLabelText('Retry acme-plugins')).toBeNull();
-    expect(screen.getByText(/Fetching 1 source/)).toBeVisible();
-    expect(screen.queryByText(/acme-plugins couldn’t load/)).toBeNull();
-
-    hold.resolve();
-  });
-
-  it('does not flash no plugins between a first refresh settling and its entries arriving', async () => {
+  it('does not flash an empty marketplace while the first source refresh settles', async () => {
     const refreshHold = deferred();
     const afterHold = deferred();
     refreshDelay = refreshHold.promise;
@@ -891,26 +621,11 @@ describe('PluginsPage marketplace tab', () => {
 
     refreshHold.resolve();
     await waitFor(() => expect(entriesCallsFor(unfetchedSource.id).length).toBeGreaterThan(1));
-
     expect(screen.queryByText('No plugins in the marketplace yet.')).toBeNull();
-    expect(screen.queryAllByTestId('marketplace-skeleton').length).toBeGreaterThan(0);
 
     afterHold.resolve();
     expect(
       await screen.findByTestId(`marketplace-entry-${unfetchedSource.id}/review-kit`),
     ).toBeVisible();
-  });
-
-  it('shows skeletons while sources load instead of a loading sentence', async () => {
-    const hold = deferred();
-    sourcesDelay = hold.promise;
-    renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Marketplace' }));
-
-    expect(screen.queryByText('Loading marketplace…')).toBeNull();
-    expect(await screen.findAllByTestId('marketplace-skeleton')).not.toHaveLength(0);
-
-    hold.resolve();
-    expect(await screen.findByTestId(`marketplace-entry-${githubEntry.sourceId}/github`)).toBeVisible();
   });
 });

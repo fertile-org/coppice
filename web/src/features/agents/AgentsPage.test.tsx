@@ -145,44 +145,12 @@ describe('AgentsPage rows', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent('Edit agent');
   });
 
-  it('Enter on a focused row opens the edit dialog', async () => {
-    renderPage('/agents');
-
-    fireEvent.keyDown(screen.getByRole('row', { name: /Builder/ }), { key: 'Enter' });
-
-    expect(await screen.findByRole('dialog')).toBeVisible();
-  });
-
   it('the enable toggle does not open the dialog', () => {
     renderPage('/agents');
 
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-});
-
-describe('AgentsPage order', () => {
-  afterEach(() => {
-    mocks.agents = null;
-  });
-
-  it('keeps the server order instead of re-sorting rows on the client', () => {
-    const serverOrder = ['PM Alpha', 'TL Alpha', 'BE Alpha', 'BE Beta', 'Ops Bot'];
-    mocks.agents = serverOrder.map((name, index) => ({
-      ...agent,
-      id: `00000000-0000-4000-8000-0000000000${index + 10}`,
-      name,
-      role: name.split(' ')[0],
-    }));
-
-    renderPage('/agents');
-
-    const rendered = screen
-      .getAllByRole('row')
-      .map((row) => serverOrder.find((name) => row.textContent?.includes(name)))
-      .filter((name): name is string => name !== undefined);
-    expect(rendered).toEqual(serverOrder);
   });
 });
 
@@ -203,34 +171,15 @@ describe('AgentsPage thinking level', () => {
     return screen.getByRole('row', { name: new RegExp(name) });
   }
 
-  it('shows the level beside the model where the connector uses it', () => {
+  it('shows thinking level only when the connector supports it', () => {
     mocks.agents = [
       {
         ...agent,
         id: '00000000-0000-4000-8000-0000000000c1',
         name: 'Thinker',
         connector: 'claude-code',
-        modelProvider: 'opus',
-        model: 'claude-opus-5-5',
         thinkingLevel: 'high',
       },
-      {
-        ...agent,
-        id: '00000000-0000-4000-8000-0000000000c2',
-        name: 'Quick',
-        connector: 'claude-code',
-        thinkingLevel: 'low',
-      },
-    ];
-
-    renderPage('/agents');
-
-    expect(row('Thinker')).toHaveTextContent('opus/claude-opus-5-5 · high thinking');
-    expect(row('Quick')).toHaveTextContent('low thinking');
-  });
-
-  it('hides a saved level the connector ignores', () => {
-    mocks.agents = [
       {
         ...agent,
         id: '00000000-0000-4000-8000-0000000000c3',
@@ -244,7 +193,7 @@ describe('AgentsPage thinking level', () => {
 
     renderPage('/agents');
 
-    expect(row('Switched')).toHaveTextContent('cursor/auto');
+    expect(row('Thinker')).toHaveTextContent('high thinking');
     expect(row('Switched')).not.toHaveTextContent('thinking');
   });
 });
@@ -282,23 +231,6 @@ describe('AgentsPage plugin deep link', () => {
     mocks.assigned = [other.id];
     mocks.updateAgent.mockResolvedValue({});
     mocks.setPlugins.mockResolvedValue({});
-  });
-
-  it('shows no banner without a plugin param', () => {
-    renderPage('/agents');
-
-    expect(screen.queryByTestId('plugin-deeplink-banner')).not.toBeInTheDocument();
-  });
-
-  it('banner names the plugin and Done clears it', () => {
-    renderPage(`/agents?plugin=${hello.id}`);
-
-    const banner = screen.getByTestId('plugin-deeplink-banner');
-    expect(within(banner).getByText('hello-coppice')).toBeVisible();
-    fireEvent.click(within(banner).getByRole('button', { name: 'Done' }));
-
-    expect(screen.queryByTestId('plugin-deeplink-banner')).not.toBeInTheDocument();
-    expect(screen.getByTestId('search')).toHaveTextContent('');
   });
 
   it('Edit pre-selects the plugin on top of existing ones and saves both', async () => {

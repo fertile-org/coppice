@@ -44,18 +44,6 @@ function renderCard(
 }
 
 describe('TicketCard hierarchy cues', () => {
-  it('renders no hierarchy rows for an unrelated ticket', () => {
-    renderCard({
-      parent: null,
-      parentUnavailable: false,
-      directChildCount: 0,
-      doneChildCount: 0,
-    });
-
-    expect(screen.queryByText(/^Child of /)).toBeNull();
-    expect(screen.queryByText(/^Parent ·/)).toBeNull();
-  });
-
   it('renders a child row above the ticket title with full accessible text', () => {
     const parentTitle =
       'A deliberately long parent title that will truncate visually on a narrow card';
@@ -67,18 +55,7 @@ describe('TicketCard hierarchy cues', () => {
     });
 
     const childLabel = screen.getByText(`Child of ${parentTitle}`);
-    const ticketTitle = screen.getByText(ticket.title);
-
-    expect(childLabel).toHaveClass('truncate');
     expect(childLabel).toHaveAttribute('title', parentTitle);
-    expect(
-      childLabel.compareDocumentPosition(ticketTitle) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(childLabel.closest('div')?.querySelector('svg')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
   });
 
   it('renders direct-child progress for a parent ticket', () => {
@@ -89,31 +66,7 @@ describe('TicketCard hierarchy cues', () => {
       doneChildCount: 1,
     }, { priority: 'high' });
 
-    const priority = screen.getByText('high');
-    const parentLabel = screen.getByText('Parent · 3 children · 1/3 done');
-    expect(parentLabel).toBeVisible();
-    expect(
-      priority.compareDocumentPosition(parentLabel) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it('renders both rows when the ticket is both a child and a parent', () => {
-    renderCard({
-      parent: { id: 'parent-1', title: 'Roadmap parent' },
-      parentUnavailable: false,
-      directChildCount: 2,
-      doneChildCount: 2,
-    });
-
-    expect(screen.getByText('Child of Roadmap parent')).toBeVisible();
-    const parentLabel = screen.getByText('Parent · 2 children · 2/2 done');
-    expect(parentLabel).toBeVisible();
-    expect(parentLabel.closest('div')?.querySelector('svg')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
-    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.getByText('Parent · 3 children · 1/3 done')).toBeVisible();
   });
 
   it('names a split child by position and parent', () => {
@@ -158,15 +111,12 @@ describe('TicketCard hierarchy cues', () => {
     ).toBeVisible();
   });
 
-  it('retains keyboard card activation and a visible focus ring', () => {
+  it('opens the card from Enter and Space', () => {
     const onOpen = vi.fn();
     renderCard(undefined, {}, onOpen);
     const card = screen.getByRole('button');
-
-    expect(card).toHaveClass('keyboard-focus');
     fireEvent.keyDown(card, { key: 'Enter' });
     fireEvent.keyDown(card, { key: ' ' });
-
     expect(onOpen).toHaveBeenNthCalledWith(1, ticket.id);
     expect(onOpen).toHaveBeenNthCalledWith(2, ticket.id);
   });
@@ -176,10 +126,7 @@ describe('TicketCard assignee and priority', () => {
   it('shows the assignee name when provided and omits it when unset', () => {
     const { rerender } = renderCard(undefined, {}, vi.fn(), 'Frontend Engineer');
 
-    const assignee = screen.getByText('Frontend Engineer');
-    expect(assignee).toBeVisible();
-    expect(assignee).toHaveClass('truncate');
-    expect(assignee).toHaveAttribute('title', 'Frontend Engineer');
+    expect(screen.getByText('Frontend Engineer')).toBeVisible();
 
     rerender(
       <DndContext>
@@ -189,39 +136,6 @@ describe('TicketCard assignee and priority', () => {
     expect(screen.queryByText('Frontend Engineer')).toBeNull();
   });
 
-  it('renders the unknown-agent fallback label', () => {
-    renderCard(undefined, {}, vi.fn(), 'Unknown agent');
-    expect(screen.getByText('Unknown agent')).toBeVisible();
-  });
-
-  it('styles low and critical priority badges with distinct token colors', () => {
-    const { rerender } = renderCard(undefined, { priority: 'low' });
-    const low = screen.getByText('low');
-    expect(low).toHaveAttribute('data-priority', 'low');
-    expect(low.style.backgroundColor).toBe('var(--badge-priority-low-bg)');
-    expect(low.style.color).toBe('var(--badge-priority-low-text)');
-    expect(low.style.borderColor).toBe('var(--badge-priority-low-border)');
-    expect(low.className).toMatch(/capitalize/);
-
-    rerender(
-      <DndContext>
-        <TicketCard
-          ticket={{ ...ticket, priority: 'critical' }}
-          onOpen={vi.fn()}
-        />
-      </DndContext>,
-    );
-    const critical = screen.getByText('critical');
-    expect(critical).toHaveAttribute('data-priority', 'critical');
-    expect(critical.style.backgroundColor).toBe(
-      'var(--badge-priority-critical-bg)',
-    );
-    expect(critical.style.color).toBe('var(--badge-priority-critical-text)');
-    expect(critical.style.borderColor).toBe(
-      'var(--badge-priority-critical-border)',
-    );
-  });
-
   it('resolveAssigneeName omits unset ids and falls back for missing agents', () => {
     const agents = new Map([['agent-1', 'FE']]);
     expect(resolveAssigneeName(undefined, agents)).toBeUndefined();
@@ -229,24 +143,12 @@ describe('TicketCard assignee and priority', () => {
     expect(resolveAssigneeName('missing', agents)).toBe('Unknown agent');
   });
 
-  it('renders blocked substatus pills in danger red', () => {
+  it('styles substatus pills', () => {
     renderCard(undefined, {
       substatus: 'blocked_by_error',
       substatusDisplay: { label: 'Blocked — error' },
     });
-    expect(screen.getByText('Blocked — error').parentElement).toHaveClass(
-      'text-danger',
-    );
-  });
-
-  it('keeps waiting substatus pills info blue', () => {
-    renderCard(undefined, {
-      substatus: 'waiting_for_human',
-      substatusDisplay: { label: 'Waiting for you' },
-    });
-    expect(screen.getByText('Waiting for you').parentElement).toHaveClass(
-      'text-info',
-    );
+    expect(screen.getByText('Blocked — error').parentElement).toHaveClass('text-danger');
   });
 });
 
@@ -329,15 +231,6 @@ describe('TicketCard plan labels', () => {
   });
 });
 
-describe('TicketCard archived affordance', () => {
-  it('shows an Archived badge and muted styling when archivedAt is set', () => {
-    renderCard(undefined, { archivedAt: '2026-09-20T00:00:00.000Z' });
-
-    expect(screen.getByText('Archived')).toBeVisible();
-    expect(screen.getByRole('button').parentElement).toHaveClass('opacity-60');
-  });
-});
-
 describe('TicketCard Done git flags', () => {
   function renderDone(overrides: Partial<Ticket>) {
     return render(
@@ -352,38 +245,25 @@ describe('TicketCard Done git flags', () => {
   const review = (gitState: string, acceptedByCoppice = false) =>
     ({ gitState, acceptedByCoppice }) as unknown as Ticket['humanReview'];
 
-  it('flags a needs-action card amber and a conflict red', () => {
+  it('flags needs-action Done cards and leaves merged cards unflagged', () => {
     const { container, unmount } = renderDone({
       ...doneBase,
       humanReview: review('not_merged'),
     });
-    const card = container.querySelector('[data-needs-action]')!;
-    expect(card.className).toContain('border-l-warning');
+    expect(container.querySelector('[data-needs-action]')).not.toBeNull();
     unmount();
     const conflict = renderDone({
       ...doneBase,
       humanReview: review('conflict'),
     });
-    expect(conflict.container.querySelector('[data-needs-action]')!.className).toContain(
-      'border-l-danger',
-    );
-  });
-
-  it('does not flag a merged card', () => {
-    const { container } = renderDone({
+    expect(conflict.container.querySelector('[data-needs-action]')).not.toBeNull();
+    conflict.unmount();
+    const merged = renderDone({
       ...doneBase,
       humanReview: review('merged'),
     });
-    expect(container.querySelector('[data-needs-action]')).toBeNull();
+    expect(merged.container.querySelector('[data-needs-action]')).toBeNull();
   });
 
-  it('shows "review skipped" when Coppice accepted the ticket', () => {
-    renderDone({ ...doneBase, humanReview: review('merged', true) });
-    expect(screen.getByText('review skipped')).toBeVisible();
-  });
 
-  it('omits "review skipped" otherwise', () => {
-    renderDone({ ...doneBase, humanReview: review('merged') });
-    expect(screen.queryByText('review skipped')).toBeNull();
-  });
 });

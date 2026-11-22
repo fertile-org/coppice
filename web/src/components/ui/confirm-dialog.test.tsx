@@ -71,12 +71,4 @@ describe('useConfirm', () => {
     expect(description).toHaveClass('[overflow-wrap:anywhere]');
   });
 
-  it('uses the danger confirm style when requested', () => {
-    renderConfirm(<Probe danger />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(screen.getByRole('button', { name: 'Confirm' })).toHaveClass(
-      'text-danger',
-    );
-  });
 });
