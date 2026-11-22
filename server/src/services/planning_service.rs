@@ -419,6 +419,7 @@ impl<'a> PlanningService<'a> {
         Ok(plan)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_plan_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
