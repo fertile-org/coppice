@@ -35,14 +35,20 @@ test('a downloaded update can restart the app', () => {
   };
   const seen = [];
   const errors = [];
+  const logs = [];
   const controller = attachMacUpdater(updater, {
     onDownloaded: (info) => seen.push(info),
     onError: (error) => errors.push(error.message),
+    onLog: (line) => logs.push(line),
   });
+  updater.emit('checking-for-update');
   updater.emit('update-downloaded', { version: '1.2.0-rc.3' });
   updater.emit('error', new Error('offline'));
   assert.deepEqual(seen, [{ version: '1.2.0-rc.3' }]);
   assert.deepEqual(errors, ['offline']);
+  assert.ok(logs.includes('checking-for-update'));
+  assert.ok(logs.some((line) => line.startsWith('update-downloaded: 1.2.0-rc.3')));
+  assert.ok(logs.some((line) => line.startsWith('error: offline')));
   assert.equal(controller.check(), 'checking');
   controller.install();
   assert.deepEqual(installed, [false, true]);

@@ -153,19 +153,30 @@ export function DesktopUpdateBanner() {
     });
   };
 
+  const moveToApplications = () => {
+    void runIsActive().then((active) => {
+      if (active) {
+        setUpdate(null);
+        return;
+      }
+      void window.coppiceDesktop?.moveToApplications?.();
+    });
+  };
+
+  const statusText =
+    update.kind === 'ready'
+      ? `Coppice ${update.version} is ready.`
+      : update.kind === 'move'
+        ? `Coppice ${update.version} is available. Move Coppice to Applications to update.`
+        : `Coppice ${update.version} is available.`;
+
   return (
     <div
       role="status"
       data-testid="desktop-update-banner"
       className="flex shrink-0 flex-wrap items-center gap-3 border-b border-moss-500/30 bg-moss-500/10 px-4 py-2 sm:px-6"
     >
-      <span className="font-body text-sm text-text-primary">
-        {update.kind === 'ready' ? (
-          <>Coppice {update.version} is ready.</>
-        ) : (
-          <>Coppice {update.version} is available.</>
-        )}
-      </span>
+      <span className="font-body text-sm text-text-primary">{statusText}</span>
       {update.kind === 'ready' ? (
         <button
           type="button"
@@ -191,6 +202,15 @@ export function DesktopUpdateBanner() {
           className="font-body text-sm font-medium text-accent hover:underline"
         >
           Download update
+        </button>
+      ) : null}
+      {update.kind === 'move' ? (
+        <button
+          type="button"
+          onClick={moveToApplications}
+          className="font-body text-sm font-medium text-accent hover:underline"
+        >
+          Move to Applications
         </button>
       ) : null}
       <button

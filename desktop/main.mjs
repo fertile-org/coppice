@@ -6,12 +6,19 @@ import { desktopServerArgs, resolveAppLogsDir } from './src/logsDir.mjs';
 import { startServer } from './src/serverProcess.mjs';
 import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
+import { macInstallBlocked } from './src/macInstallLocation.mjs';
 import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
 import { macUpdateFeed, updateBase } from './src/updateEndpoints.mjs';
 import { readUpdateBase, readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
 import { watchLinuxInstall } from './src/linuxInstall.mjs';
-import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
+import {
+  bannerForUpdate,
+  macInPlaceCheckResult,
+  startUpdateLoop,
+  UPDATE_INTERVAL_MS,
+} from './src/updatePlan.mjs';
+import { appendUpdaterLog } from './src/updaterLog.mjs';
 import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
 import { disposeWindow } from './src/disposeWindow.mjs';
@@ -74,6 +81,21 @@ let linuxInstalled = null;
 let linuxInstallWatch = null;
 let checkGeneration = 0;
 
+function logUpdater(message) {
+  try {
+    appendUpdaterLog(appLogsDir, message);
+  } catch {
+    /* logging must not break updates */
+  }
+}
+
+function currentMacInstallBlocked() {
+  if (process.platform !== 'darwin' || !app.isPackaged) return false;
+  const inApps =
+    typeof app.isInApplicationsFolder === 'function' ? app.isInApplicationsFolder() : undefined;
+  return macInstallBlocked({ execPath: process.execPath, isInApplicationsFolder: inApps });
+}
+
 function resourcesDir() {
   return app.isPackaged ? process.resourcesPath : path.join(__dirname, 'resources');
 }
@@ -128,8 +150,16 @@ function publishBanner() {
       availability: updateAvailability,
       download: downloadState,
       linuxInstalled,
+      installBlocked: currentMacInstallBlocked(),
     }),
   );
+}
+
+function markInPlaceFailed(reason) {
+  const version = downloadState?.version ?? updateAvailability?.version ?? '';
+  downloadState = { phase: 'failed', version, reason: reason || 'Update download failed.' };
+  logUpdater(`in-place failed: ${downloadState.reason}`);
+  publishBanner();
 }
 
 // apt installs outside the app. While a newer release is out, watch dpkg so the
@@ -162,21 +192,40 @@ async function ensureMacUpdater() {
         configureMacFeed(autoUpdater, packagedMacFeed());
         autoUpdater.autoInstallOnAppQuit = automaticUpdatesEnabled();
         macUpdater = attachMacUpdater(autoUpdater, {
+          onLog: logUpdater,
           onDownloaded(info) {
             downloadState = { phase: 'downloaded', version: info.version };
+            logUpdater(`ready to install: ${info.version}`);
             publishBanner();
           },
-          onError() {
-            if (downloadState?.phase === 'downloading') downloadState = null;
+          onError(error) {
+            const reason = error?.message || String(error || 'Update download failed.');
+            if (downloadState?.phase === 'downloading' || downloadState?.phase === 'downloaded') {
+              markInPlaceFailed(reason);
+            } else {
+              logUpdater(`updater error: ${reason}`);
+            }
           },
         });
-      } catch {
+      } catch (error) {
         macInPlaceReady = false;
         macUpdater = null;
+        logUpdater(`mac updater load failed: ${error?.message || error}`);
       }
     })();
   }
   await macUpdaterLoading;
+}
+
+async function startInPlaceDownload(version, { awaitCheck = false } = {}) {
+  if (!macUpdater) return;
+  const already = downloadState?.phase === 'downloaded' && downloadState.version === version;
+  if (already) return;
+  downloadState = { phase: 'downloading', version };
+  const pending = macUpdater.check().catch((error) => {
+    markInPlaceFailed(error?.message || String(error || 'Update check failed.'));
+  });
+  if (awaitCheck) await pending;
 }
 
 async function runUpdateCheck({ manual = false } = {}) {
@@ -190,12 +239,12 @@ async function runUpdateCheck({ manual = false } = {}) {
   if (!manual && generation !== checkGeneration) return result;
   if (result.status === 'available') {
     updateAvailability = { version: result.version, url: result.url };
-    if (macInPlaceReady && macUpdater) {
-      const already = downloadState?.phase === 'downloaded' && downloadState.version === result.version;
-      if (!already) {
-        downloadState = { phase: 'downloading', version: result.version };
-        void macUpdater.check().catch(() => {});
-      }
+    const blocked = currentMacInstallBlocked();
+    if (macInPlaceReady && macUpdater && !blocked) {
+      await startInPlaceDownload(result.version, { awaitCheck: manual });
+    } else if (blocked) {
+      logUpdater(`install blocked; skipping in-place update for ${result.version}`);
+      if (downloadState?.phase === 'downloading') downloadState = null;
     }
     publishBanner();
   } else if (result.status === 'up-to-date' && downloadState?.phase !== 'downloaded') {
@@ -239,9 +288,25 @@ ipcMain.handle('coppice:update-settings-set', (_event, value) => {
 
 ipcMain.handle('coppice:check-for-updates', async () => {
   const result = await runUpdateCheck({ manual: true });
+  if (macInPlaceReady) {
+    return macInPlaceCheckResult({
+      download: downloadState,
+      installBlocked: currentMacInstallBlocked(),
+      latest: result,
+    });
+  }
   if (result.status === 'available') return { status: 'available', version: result.version };
   if (result.status === 'up-to-date') return { status: 'up-to-date' };
   return { status: 'error' };
+});
+
+ipcMain.handle('coppice:move-to-applications', () => {
+  if (process.platform !== 'darwin' || typeof app.moveToApplicationsFolder !== 'function') {
+    return { moved: false };
+  }
+  logUpdater('move-to-applications requested');
+  const moved = app.moveToApplicationsFolder();
+  return { moved: moved === true };
 });
 
 ipcMain.handle('coppice:restart-to-update', async () => {
