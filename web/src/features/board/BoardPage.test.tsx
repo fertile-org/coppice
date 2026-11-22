@@ -136,12 +136,18 @@ vi.mock('../repos/useRepos', () => ({
 vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
     open,
+    ticketId,
     parentTicket,
   }: {
     open: boolean;
+    ticketId?: string | null;
     parentTicket?: { id: string; title: string } | null;
   }) => (
-    <div data-testid="ticket-drawer-parent" data-open={String(open)}>
+    <div
+      data-testid="ticket-drawer-parent"
+      data-open={String(open)}
+      data-ticket-id={ticketId ?? ''}
+    >
       {parentTicket?.title ?? 'No parent'}
     </div>
   ),
@@ -602,17 +608,29 @@ describe('BoardPage split swimlanes', () => {
     ];
   });
 
-  it('renders the parent and its children in one row, under their own columns', () => {
+  it('renders the parent in the lane header and children only in the columns', () => {
+    ticketsState.active = ticketsState.active.map((ticket) =>
+      ticket.id === 'parent'
+        ? {
+            ...ticket,
+            priority: 'medium',
+            assigneeAgentId: 'agent-fe',
+          }
+        : ticket,
+    );
     renderBoard();
 
     const lane = screen.getByRole('region', { name: 'Ship the gate' });
+    expect(within(lane).getByText('Parent')).toBeVisible();
+    expect(within(lane).getByText('In Progress')).toBeVisible();
+    expect(within(lane).getByText('Frontend Engineer')).toBeVisible();
+    expect(within(lane).getByText('medium')).toBeVisible();
     expect(within(lane).getByText('1/3 merged')).toBeVisible();
     expect(within(lane).getByText('Needs review')).toBeVisible();
+    expect(within(lane).getByRole('button', { name: 'Open parent →' })).toBeVisible();
 
     const row = within(lane).getByTestId('swimlane-row');
-    expect(within(row).getByTestId('swimlane-cell-in_progress')).toHaveTextContent(
-      'Ship the gate',
-    );
+    expect(within(row).getByTestId('swimlane-cell-in_progress')).toBeEmptyDOMElement();
     expect(within(row).getByTestId('swimlane-cell-ready')).toHaveTextContent(
       'Open the gate',
     );
@@ -622,9 +640,10 @@ describe('BoardPage split swimlanes', () => {
     expect(within(row).getByTestId('swimlane-cell-done')).toHaveTextContent(
       'Survey the site',
     );
-    expect(within(row).getByText('↳ 2/3 · Ship the gate')).toBeVisible();
-    expect(within(row).getByText('↳ 1/3 · Ship the gate')).toBeVisible();
-    expect(within(row).getByText('↳ 3/3 · Ship the gate')).toBeVisible();
+    expect(within(row).getByText('↳ 2 of 3')).toBeVisible();
+    expect(within(row).getByText('↳ 1 of 3')).toBeVisible();
+    expect(within(row).getByText('↳ 3 of 3')).toBeVisible();
+    expect(within(row).queryByText('Ship the gate')).toBeNull();
 
     const backlog = screen.getByRole('region', { name: 'Backlog' });
     expect(within(backlog).getByText('Plain ticket')).toBeVisible();
@@ -636,6 +655,33 @@ describe('BoardPage split swimlanes', () => {
     expect(
       within(screen.getByRole('region', { name: 'Done' })).queryByText('Survey the site'),
     ).toBeNull();
+  });
+
+  it('opens the parent from the header without collapsing the lane', () => {
+    renderBoard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open parent →' }));
+
+    const drawer = screen.getByTestId('ticket-drawer-parent');
+    expect(drawer).toHaveAttribute('data-open', 'true');
+    expect(drawer).toHaveAttribute('data-ticket-id', 'parent');
+    expect(screen.getByTestId('swimlane-row')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Collapse Ship the gate' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('shows the parent status from the live parent ticket in the header', () => {
+    ticketsState.active = ticketsState.active.map((ticket) =>
+      ticket.id === 'parent' ? { ...ticket, status: 'plan_review' } : ticket,
+    );
+    renderBoard();
+
+    expect(
+      within(screen.getByRole('region', { name: 'Ship the gate' })).getByText(
+        'Plan Review',
+      ),
+    ).toBeVisible();
   });
 
   it('keeps status headers above the swimlane inside the same board grid', () => {

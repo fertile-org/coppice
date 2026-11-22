@@ -1,5 +1,7 @@
 import { useDroppable } from '@dnd-kit/core';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import { TicketStatusBadge } from '../tickets/TicketStatusBadge';
 import { boardFocusDomId } from './boardFocus';
 import { BOARD_COLUMNS, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
@@ -11,6 +13,17 @@ import {
   ticketsInLaneColumn,
   type SplitLane,
 } from './swimlanes';
+
+const PRIORITY_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
+
+function priorityBadgeStyle(priority: string): CSSProperties | undefined {
+  if (!PRIORITY_LEVELS.has(priority)) return undefined;
+  return {
+    backgroundColor: `var(--badge-priority-${priority}-bg)`,
+    color: `var(--badge-priority-${priority}-text)`,
+    borderColor: `var(--badge-priority-${priority}-border)`,
+  };
+}
 
 interface SplitLaneRowProps {
   lane: SplitLane;
@@ -44,6 +57,8 @@ export function SplitLaneRow({
   onCardFocus,
 }: SplitLaneRowProps) {
   const needsReview = splitNeedsReview(lane.progress);
+  const parent = lane.parent;
+  const assigneeName = resolveAssigneeName(parent.assigneeAgentId, agentsById);
 
   return (
     <section
@@ -54,17 +69,48 @@ export function SplitLaneRow({
         <button
           type="button"
           aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${lane.title}` : `Collapse ${lane.title}`}
           onClick={() => onToggle(lane.parentId)}
-          className="keyboard-focus flex min-w-0 items-center gap-2 rounded-sm font-display text-sm font-semibold text-text-primary"
+          className="keyboard-focus flex shrink-0 items-center rounded-sm text-text-primary"
         >
           {collapsed ? (
-            <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
           ) : (
-            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
           )}
-          <span className="sr-only">{collapsed ? 'Expand' : 'Collapse'}</span>
-          <span className="truncate">{lane.title}</span>
         </button>
+        <span className="shrink-0 font-body text-[0.65rem] font-medium uppercase tracking-wide text-text-muted">
+          Parent
+        </span>
+        <span
+          className="min-w-0 truncate font-display text-sm font-semibold text-text-primary"
+          title={lane.title}
+        >
+          {lane.title}
+        </span>
+        <TicketStatusBadge status={parent.status} className="shrink-0" />
+        {assigneeName && (
+          <span className="flex min-w-0 items-center gap-1.5 font-body text-xs text-text-secondary">
+            <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate" title={assigneeName}>
+              {assigneeName}
+            </span>
+          </span>
+        )}
+        {parent.priority && (
+          <span
+            className={[
+              'shrink-0 rounded-full border px-2 py-0.5 font-body text-xs capitalize',
+              PRIORITY_LEVELS.has(parent.priority)
+                ? ''
+                : 'border-border bg-paper-200 text-text-secondary',
+            ].join(' ')}
+            style={priorityBadgeStyle(parent.priority)}
+            data-priority={parent.priority}
+          >
+            {parent.priority}
+          </span>
+        )}
         <span className="shrink-0 font-body text-xs text-text-secondary">
           {lane.progress.mergedCount}/{lane.progress.count} merged
         </span>
@@ -73,6 +119,13 @@ export function SplitLaneRow({
             Needs review
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => onOpenTicket(lane.parentId)}
+          className="keyboard-focus ml-auto shrink-0 rounded-sm font-body text-xs font-medium text-accent hover:text-accent-hover"
+        >
+          Open parent →
+        </button>
       </header>
       {!collapsed && (
         <div data-testid="swimlane-row" className="contents">

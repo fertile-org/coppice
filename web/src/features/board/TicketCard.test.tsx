@@ -138,7 +138,7 @@ describe('TicketCard hierarchy cues', () => {
       },
     );
 
-    const label = screen.getByText('↳ 2/3 · Ship the gate');
+    const label = screen.getByText('↳ 2 of 3');
     expect(label).toBeVisible();
     expect(label).toHaveAttribute('title', 'Ship the gate');
     expect(screen.queryByText('Child of Ship the gate')).toBeNull();
