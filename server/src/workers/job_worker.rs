@@ -170,7 +170,7 @@ async fn process_one(state: &Arc<AppState>, worker_id: &str) -> anyhow::Result<(
     // cancellation branches here only reconcile the durable job state.
     let executed = match too_old {
         Some(message) => Err(anyhow::anyhow!(message)),
-        None => execute_job(state, pool, &run_svc, &run).await,
+        None => execute_job_catching_panic(state, pool, &run_svc, &run, job.id).await,
     };
     match executed {
         Ok(()) => job_svc.mark_done(job.id).await?,
@@ -315,6 +315,44 @@ async fn revert_plugin_build_on_fail(
     };
     if let Err(err) = builds.on_run_terminal(build_id, job_type, false).await {
         tracing::warn!(%run_id, %build_id, error = %err, "failed to revert plugin build status");
+    }
+}
+
+async fn execute_job_catching_panic(
+    state: &Arc<AppState>,
+    pool: &PgPool,
+    _run_svc: &RunService<'_>,
+    run: &crate::domain::run::AgentRun,
+    job_id: Id,
+) -> anyhow::Result<()> {
+    let state = state.clone();
+    let pool = pool.clone();
+    let run = run.clone();
+    let run_id = run.id;
+    let handle = tokio::spawn(async move {
+        let run_svc = RunService::new(&pool);
+        execute_job(&state, &pool, &run_svc, &run).await
+    });
+    match handle.await {
+        Ok(result) => result,
+        Err(join_err) if join_err.is_panic() => {
+            let payload = join_err.into_panic();
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "internal panic".to_string());
+            tracing::error!(
+                %run_id,
+                %job_id,
+                panic = %message,
+                "job worker panic"
+            );
+            Err(anyhow::anyhow!(
+                "the server hit an internal error finishing this run: {message}"
+            ))
+        }
+        Err(join_err) => Err(anyhow::anyhow!("job worker task failed: {join_err}")),
     }
 }
 
