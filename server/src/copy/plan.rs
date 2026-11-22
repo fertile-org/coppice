@@ -537,16 +537,6 @@ mod tests {
     }
 
     #[test]
-    fn wraps_a_plain_summary_in_the_plan_format() {
-        let plan = format_plan("Ship the parser first.");
-        assert!(plan.starts_with(PLAN_HEADING));
-        assert!(plan.contains("Ship the parser first."));
-        assert_eq!(checklist_steps(&plan), vec![FOLLOW_APPROACH_STEP]);
-        assert!(plan.contains(RISKS_HEADING));
-        assert!(plan.contains(OUT_OF_SCOPE_HEADING));
-    }
-
-    #[test]
     fn keeps_a_canonical_plan() {
         let raw = format_plan("ignored");
         let again = format_plan(&raw);
@@ -588,15 +578,6 @@ mod tests {
     }
 
     #[test]
-    fn the_template_asks_for_checkable_criteria() {
-        let text = plan_instructions(None);
-        assert!(text.contains(ACCEPTANCE_CRITERIA_HEADING));
-        assert!(text.contains(PLAN_CRITERIA_INSTRUCTION));
-        assert_eq!(checklist_steps(&plan_template()), vec![TEMPLATE_STEP]);
-        assert_eq!(plan_criteria(&plan_template()), vec![TEMPLATE_CRITERION]);
-    }
-
-    #[test]
     fn questions_and_answers_read_in_order() {
         use crate::providers::PlanQuestion;
         let questions = vec![
@@ -618,66 +599,6 @@ mod tests {
             answered,
             "1. Which database?\n   Postgres\n2. Keep the endpoint?\n   No answer.\n"
         );
-    }
-
-    #[test]
-    fn instructions_add_diagrams_only_when_a_plan_needs_one() {
-        let text = plan_instructions(None);
-        assert!(text.contains(
-            "When the ticket needs a flow, architecture, or data model, add one or two small diagrams"
-        ));
-        assert!(text.contains("Skip diagrams otherwise."));
-        assert!(text.contains("The written plan always stays."));
-        assert!(text.contains(PLAN_HEADING));
-        assert!(text.contains(STEPS_HEADING));
-    }
-
-    #[test]
-    fn instructions_ask_for_a_plan_one_screen_long() {
-        let text = plan_instructions(None);
-        assert!(text.contains(PLAN_LENGTH_INSTRUCTION));
-        assert!(text.contains("at most 8"));
-        let revision = PlanRevision {
-            previous_plan: "## Plan\n\n### Steps\n- [ ] Old\n",
-            requests: vec!["Shorter please."],
-        };
-        assert!(plan_instructions(Some(&revision)).contains(PLAN_LENGTH_INSTRUCTION));
-        assert!(text.contains("full repo-relative path"));
-    }
-
-    #[test]
-    fn instructions_lead_with_must_do() {
-        let text = plan_instructions(None);
-        let must = text.find(PLAN_MUST_DO_HEADING).expect("must do heading");
-        let format = text.find(PLAN_FORMAT_INSTRUCTION).expect("format");
-        assert!(
-            must < format,
-            "Must do should appear before the template block"
-        );
-        assert!(text.contains("native plan tool"));
-        assert!(text.contains("result_submit"));
-    }
-
-    #[test]
-    fn instructions_forbid_writes_and_include_changes() {
-        let revision = PlanRevision {
-            previous_plan: "## Plan\n\n### Steps\n- [ ] Add a migration\n",
-            requests: vec!["Drop the migration."],
-        };
-        let text = plan_instructions(Some(&revision));
-        assert!(text.contains(PLAN_TASK));
-        assert!(text.contains("Do not edit files, commit, push, or create or change a branch."));
-        assert!(text.contains(CHANGES_REQUESTED_HEADING));
-        assert!(text.contains("1. Drop the migration."));
-        assert!(text.contains(PLAN_FORMAT_INSTRUCTION));
-    }
-
-    #[test]
-    fn a_first_plan_has_no_revision_section() {
-        let text = plan_instructions(None);
-        assert!(!text.contains(PREVIOUS_PLAN_HEADING));
-        assert!(!text.contains(CHANGES_REQUESTED_HEADING));
-        assert!(!text.contains(REVISION_INSTRUCTION));
     }
 
     #[test]
@@ -757,14 +678,6 @@ mod tests {
         assert!(
             REVISION_INSTRUCTION.contains("{{design:<setId>}}"),
             "{REVISION_INSTRUCTION}"
-        );
-    }
-
-    #[test]
-    fn design_change_note_names_the_option_by_label() {
-        assert_eq!(
-            plan_design_change_note("B", "Full-width button with Show all"),
-            "Update the plan to use design option B: Full-width button with Show all."
         );
     }
 

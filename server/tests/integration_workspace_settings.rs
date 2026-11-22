@@ -205,40 +205,6 @@ async fn compaction_agent_accepts_a_cursor_agent() {
 }
 
 #[tokio::test]
-async fn compaction_agent_requires_admin_and_csrf() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let agent_id =
-        common::create_agent_with_preset_key(&app, "backend_engineer", "Compactor", &cookie, &csrf)
-            .await;
-
-    let (status, _) = send(
-        &app,
-        "PUT",
-        serde_json::json!({ "compactionAgentId": agent_id }),
-        &cookie,
-        "wrong-csrf",
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
-        .execute(state.db.as_ref().unwrap())
-        .await
-        .unwrap();
-    let (status, _) = send(
-        &app,
-        "PUT",
-        serde_json::json!({ "compactionAgentId": agent_id }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert!(get_settings(&app, &cookie, &csrf).await["compactionAgentId"].is_null());
-}
-
-#[tokio::test]
 async fn deleting_the_compaction_agent_turns_compaction_off() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;

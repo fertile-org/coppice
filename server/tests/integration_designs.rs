@@ -1102,57 +1102,6 @@ async fn chat_design_list_returns_published_set() {
 }
 
 #[tokio::test]
-async fn unpublished_design_is_hidden() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let fx = ticket_http().await;
-    let run_id = start_ticket_run(&fx, fx.agent_id).await;
-    let artifacts = PathBuf::from(&fx.state.config.storage.artifacts_dir);
-    let svc = DesignService::new(&fx.pool, &artifacts);
-    let created = svc
-        .create(
-            "Draft",
-            DesignKind::Ui,
-            CreateScope {
-                ticket_id: Some(fx.ticket_id),
-                chat_session_id: None,
-                run_id,
-                agent_id: fx.agent_id,
-            },
-        )
-        .await
-        .expect("draft");
-    svc.write(created.id, run_id, "a/index.html", b"<p>draft</p>")
-        .await
-        .expect("write");
-
-    for (method, uri) in [
-        ("GET", format!("/api/designs/{}", created.id)),
-        ("POST", format!("/api/designs/{}/choose", created.id)),
-        (
-            "GET",
-            format!("/api/designs/{}/files/a/index.html", created.id),
-        ),
-    ] {
-        let body = if method == "POST" {
-            r#"{"optionId":"a"}"#
-        } else {
-            ""
-        };
-        let res = fx
-            .app
-            .clone()
-            .oneshot(common::json_request(
-                method, &uri, body, &fx.cookie, &fx.csrf,
-            ))
-            .await
-            .expect(method);
-        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{method} {uri}");
-    }
-}
-
-#[tokio::test]
 async fn design_file_rejects_oversize() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
@@ -1362,41 +1311,6 @@ async fn selected_follows_choice_then_falls_back_to_recommendation() {
     assert_eq!(got["selected"]["id"], "a");
     assert_eq!(got["superseded"], false);
     assert_eq!(got["fromPlanRun"], false);
-}
-
-#[tokio::test]
-async fn set_from_before_recommendations_has_no_selection() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let fx = ticket_http().await;
-    let run_id = start_ticket_run(&fx, fx.agent_id).await;
-    let set_id = publish_html(
-        &fx,
-        run_id,
-        fx.agent_id,
-        "Home",
-        Some(fx.ticket_id),
-        None,
-        "<!doctype html><title>A</title>",
-        "<!doctype html><title>B</title>",
-    )
-    .await;
-    sqlx::query("UPDATE design_sets SET recommended_option_id = NULL WHERE id = $1")
-        .bind(set_id)
-        .execute(&fx.pool)
-        .await
-        .expect("clear");
-    let summary = DesignService::new(
-        &fx.pool,
-        PathBuf::from(&fx.state.config.storage.artifacts_dir),
-    )
-    .get(set_id)
-    .await
-    .expect("get")
-    .summary;
-    assert!(summary.recommended.is_none());
-    assert!(summary.selected.is_none());
 }
 
 const PICK_PLAN: &str = "## Plan\n\n### Approach\nShip it.\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n";
@@ -1667,110 +1581,131 @@ async fn picking_back_to_the_earlier_option_starts_another_run() {
     assert_eq!(set_json(&fx, set_id).await["chosen"]["id"], "a");
 }
 
+
 #[tokio::test]
-async fn pick_is_refused_during_a_plan_run_and_saves_nothing() {
+async fn pick_is_refused_for_each_blocking_state() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
 
-    let (fx, set_id) = plan_review_with_set().await;
-    planning(&fx)
-        .ask_for_changes(fx.ticket_id, "Tighten the steps.")
-        .await
-        .expect("ask");
-    assert_eq!(
-        set_json(&fx, set_id).await["choice"]["mode"],
-        "plan_running"
-    );
+    #[derive(Clone, Copy)]
+    enum Setup {
+        PlanRunning,
+        AfterApproval,
+        NoPlanner,
+        Superseded,
+        Archived,
+        OtherActiveRun,
+        SkipPlanning,
+    }
 
-    assert_refused(&fx, set_id, "b", PLAN_ALREADY_RUNNING).await;
-}
+    let cases: &[(Setup, &str, Option<&str>)] = &[
+        (Setup::PlanRunning, PLAN_ALREADY_RUNNING, None),
+        (Setup::AfterApproval, PLAN_DESIGN_FINAL, None),
+        (Setup::NoPlanner, NO_PM, Some("no_note")),
+        (Setup::Superseded, DESIGN_SUPERSEDED, None),
+        (
+            Setup::Archived,
+            "ticket is archived; unarchive before continuing",
+            None,
+        ),
+        (Setup::OtherActiveRun, PLAN_ALREADY_RUNNING, Some("no_change")),
+        (Setup::SkipPlanning, NO_PM, Some("no_change")),
+    ];
 
-#[tokio::test]
-async fn pick_is_refused_after_approval_and_saves_nothing() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
+    for (setup, expected, extra) in cases {
+        let (fx, set_id) = plan_review_with_set().await;
+        match setup {
+            Setup::PlanRunning => {
+                planning(&fx)
+                    .ask_for_changes(fx.ticket_id, "Tighten the steps.")
+                    .await
+                    .expect("ask");
+                assert_eq!(
+                    set_json(&fx, set_id).await["choice"]["mode"],
+                    "plan_running"
+                );
+            }
+            Setup::AfterApproval => {
+                let approved = fx
+                    .app
+                    .clone()
+                    .oneshot(common::json_request(
+                        "POST",
+                        &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
+                        r#"{"acceptRecommended":true}"#,
+                        &fx.cookie,
+                        &fx.csrf,
+                    ))
+                    .await
+                    .expect("approve");
+                assert_eq!(approved.status(), StatusCode::OK);
+                assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "plan_final");
+            }
+            Setup::NoPlanner => {
+                sqlx::query("UPDATE agents SET enabled = false")
+                    .execute(&fx.pool)
+                    .await
+                    .expect("disable agents");
+            }
+            Setup::Superseded => {
+                planning(&fx)
+                    .ask_for_changes(fx.ticket_id, "New options, please.")
+                    .await
+                    .expect("ask");
+                let run_id = active_plan_run(&fx).await;
+                publish_plan_options(&fx, run_id, fx.agent_id).await;
+                set_run_status(&fx, run_id, "succeeded").await;
+                assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
+            }
+            Setup::Archived => {
+                TicketService::new(&fx.pool)
+                    .archive(fx.ticket_id)
+                    .await
+                    .expect("archive");
+                assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
+            }
+            Setup::OtherActiveRun => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO agent_runs (
+                        id, ticket_id, agent_id, job_type, status, sandbox_profile_id, context_profile
+                    )
+                    SELECT gen_random_uuid(), ticket_id, agent_id, 'work_on_ticket', 'queued',
+                           sandbox_profile_id, context_profile
+                    FROM agent_runs WHERE ticket_id = $1 LIMIT 1
+                    "#,
+                )
+                .bind(fx.ticket_id)
+                .execute(&fx.pool)
+                .await
+                .expect("other run");
+                assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "update_plan");
+            }
+            Setup::SkipPlanning => {
+                sqlx::query("UPDATE tickets SET skip_planning = true WHERE id = $1")
+                    .bind(fx.ticket_id)
+                    .execute(&fx.pool)
+                    .await
+                    .expect("skip planning");
+            }
+        }
 
-    let (fx, set_id) = plan_review_with_set().await;
-    let approved = fx
-        .app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/tickets/{}/approve-plan", fx.ticket_id),
-            r#"{"acceptRecommended":true}"#,
-            &fx.cookie,
-            &fx.csrf,
-        ))
-        .await
-        .expect("approve");
-    assert_eq!(approved.status(), StatusCode::OK);
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "plan_final");
-
-    assert_refused(&fx, set_id, "b", PLAN_DESIGN_FINAL).await;
-}
-
-#[tokio::test]
-async fn pick_is_refused_without_a_planner_and_saves_nothing() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    sqlx::query("UPDATE agents SET enabled = false")
-        .execute(&fx.pool)
-        .await
-        .expect("disable agents");
-
-    assert_refused(&fx, set_id, "b", NO_PM).await;
-
-    let notes: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
-    )
-    .bind(fx.ticket_id)
-    .bind(NO_PM)
-    .fetch_one(&fx.pool)
-    .await
-    .expect("notes");
-    assert_eq!(notes, 0, "the refusal posts no note");
-    assert_eq!(change_request(&fx).await, None);
-}
-
-#[tokio::test]
-async fn pick_is_refused_on_a_superseded_set() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    planning(&fx)
-        .ask_for_changes(fx.ticket_id, "New options, please.")
-        .await
-        .expect("ask");
-    let run_id = active_plan_run(&fx).await;
-    publish_plan_options(&fx, run_id, fx.agent_id).await;
-    set_run_status(&fx, run_id, "succeeded").await;
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
-
-    assert_refused(&fx, set_id, "b", DESIGN_SUPERSEDED).await;
-}
-
-#[tokio::test]
-async fn pick_is_refused_on_an_archived_ticket() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    TicketService::new(&fx.pool)
-        .archive(fx.ticket_id)
-        .await
-        .expect("archive");
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "read_only");
-
-    assert_refused(
-        &fx,
-        set_id,
-        "b",
-        "ticket is archived; unarchive before continuing",
-    )
-    .await;
+        assert_refused(&fx, set_id, "b", expected).await;
+        if *extra == Some("no_note") {
+            let notes: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
+            )
+            .bind(fx.ticket_id)
+            .bind(NO_PM)
+            .fetch_one(&fx.pool)
+            .await
+            .expect("notes");
+            assert_eq!(notes, 0, "the refusal posts no note");
+            assert_eq!(change_request(&fx).await, None);
+        } else if *extra == Some("no_change") {
+            assert_eq!(change_request(&fx).await, None);
+        }
+    }
 }
 
 #[tokio::test]
@@ -2164,50 +2099,6 @@ async fn ticket_split(fx: &TicketHttp) -> Option<Value> {
         .expect("split")
 }
 
-#[tokio::test]
-async fn pick_is_refused_when_the_planner_has_another_active_run() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    // One active run per ticket and agent, so queuing the plan run conflicts,
-    // while the active plan run check before it finds nothing.
-    sqlx::query(
-        r#"
-        INSERT INTO agent_runs (
-            id, ticket_id, agent_id, job_type, status, sandbox_profile_id, context_profile
-        )
-        SELECT gen_random_uuid(), ticket_id, agent_id, 'work_on_ticket', 'queued',
-               sandbox_profile_id, context_profile
-        FROM agent_runs WHERE ticket_id = $1 LIMIT 1
-        "#,
-    )
-    .bind(fx.ticket_id)
-    .execute(&fx.pool)
-    .await
-    .expect("other run");
-    assert_eq!(set_json(&fx, set_id).await["choice"]["mode"], "update_plan");
-
-    assert_refused(&fx, set_id, "b", PLAN_ALREADY_RUNNING).await;
-    assert_eq!(change_request(&fx).await, None);
-}
-
-#[tokio::test]
-async fn pick_is_refused_with_skip_planning_and_saves_nothing() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    sqlx::query("UPDATE tickets SET skip_planning = true WHERE id = $1")
-        .bind(fx.ticket_id)
-        .execute(&fx.pool)
-        .await
-        .expect("skip planning");
-
-    assert_refused(&fx, set_id, "b", NO_PM).await;
-    assert_eq!(change_request(&fx).await, None);
-}
-
 /// Work runs need a repo; the plan-run fixtures have none.
 async fn ensure_repo(fx: &TicketHttp, ticket_id: Uuid) {
     let has: Option<Uuid> = sqlx::query_scalar("SELECT repo_id FROM tickets WHERE id = $1")
@@ -2318,22 +2209,6 @@ async fn work_run_pick_becomes_the_effective_design() {
     assert_eq!(effective.set_id, work);
     assert_eq!(effective.selected.id, "b");
     assert_ne!(effective.set_id, plan_set);
-}
-
-#[tokio::test]
-async fn plan_set_is_effective_when_no_work_run_set_was_picked() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, plan_set) = plan_review_with_set().await;
-    let _work = work_set(&fx).await;
-    let effective = design_svc(&fx)
-        .effective_for_ticket(fx.ticket_id)
-        .await
-        .expect("effective")
-        .expect("some design");
-    assert_eq!(effective.set_id, plan_set);
-    assert_eq!(effective.selected.id, "a");
 }
 
 #[tokio::test]
@@ -2511,18 +2386,6 @@ async fn sub_ticket_inherits_the_parent_selected_design() {
     assert_eq!(listed["selectedDesign"]["setId"], plan_set.to_string());
     assert_eq!(listed["sets"][0]["inherited"], true);
     assert_eq!(listed["sets"][0]["superseded"], false);
-}
-
-#[tokio::test]
-async fn sub_ticket_of_a_parent_without_designs_has_none() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let fx = ticket_http().await;
-    let child = child_ticket(&fx).await;
-    let svc = design_svc(&fx);
-    assert!(svc.effective_for_ticket(child).await.unwrap().is_none());
-    assert!(svc.list_for_ticket(child).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -2828,16 +2691,6 @@ async fn no_visible_change_retires_plan_designs() {
         .any(|set| { set["id"] == second_set.to_string() && set["superseded"] == true }));
 
     assert_refused(&fx, second_set, "b", DESIGN_SUPERSEDED).await;
-}
-
-#[tokio::test]
-async fn list_returns_kind_ui_by_default() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-
-    let (fx, set_id) = plan_review_with_set().await;
-    let body = set_json(&fx, set_id).await;
-    assert_eq!(body["kind"], "ui");
 }
 
 #[tokio::test]

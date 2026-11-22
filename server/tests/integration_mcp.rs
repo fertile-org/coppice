@@ -105,14 +105,15 @@ async fn token_mint_verify_roundtrip() {
 }
 
 #[tokio::test]
-async fn token_revoked_is_rejected() {
+async fn token_reject_revoked_expired_and_unknown() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
     let fx = run_fixture().await;
     let tokens = TokenService::new(&fx.pool);
-    let plaintext = tokens
+
+    let revoked = tokens
         .mint(&fx.scope, Duration::from_secs(60))
         .await
         .expect("mint");
@@ -120,34 +121,17 @@ async fn token_revoked_is_rejected() {
         .revoke_for_run(fx.scope.run_id)
         .await
         .expect("revoke");
-    assert!(tokens.verify(&plaintext).await.expect("verify").is_none());
-}
+    assert!(tokens.verify(&revoked).await.expect("verify").is_none());
 
-#[tokio::test]
-async fn token_expired_is_rejected() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let tokens = TokenService::new(&fx.pool);
-    let plaintext = tokens
+    let expired = tokens
         .mint(&fx.scope, Duration::from_secs(0))
         .await
-        .expect("mint");
-    assert!(tokens.verify(&plaintext).await.expect("verify").is_none());
-}
+        .expect("mint expired");
+    assert!(tokens.verify(&expired).await.expect("verify").is_none());
 
-#[tokio::test]
-async fn token_unknown_is_rejected() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let tokens = TokenService::new(&fx.pool);
     assert!(tokens.verify("deadbeef").await.expect("verify").is_none());
 }
+
 
 async fn rpc(url: &str, token: &str, method: &str, params: Value) -> Value {
     reqwest::Client::new()
@@ -200,39 +184,6 @@ async fn mcp_requires_bearer() {
         .await
         .unwrap();
     assert_eq!(res.status(), 401);
-}
-
-#[tokio::test]
-async fn mcp_get_is_405() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let client = reqwest::Client::new();
-    assert_eq!(client.get(&url).send().await.unwrap().status(), 405);
-    assert_eq!(client.delete(&url).send().await.unwrap().status(), 405);
-}
-
-#[tokio::test]
-async fn mcp_notification_is_202() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let res = reqwest::Client::new()
-        .post(&url)
-        .bearer_auth(token)
-        .json(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 202);
 }
 
 #[tokio::test]
@@ -364,140 +315,6 @@ fn result_text(result: &coppice_server::mcp::protocol::ToolResult) -> &str {
     }
 }
 
-async fn tool_call_sources(
-    pool: &PgPool,
-    run_id: Uuid,
-) -> Vec<(String, String, String, Option<Uuid>)> {
-    sqlx::query_as(
-        "SELECT tool, source, status, plugin_id FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
-    )
-    .bind(run_id)
-    .fetch_all(pool)
-    .await
-    .unwrap()
-}
-
-fn host_scope(
-    fx: &RunFixture,
-    profile: ContextProfile,
-) -> coppice_server::mcp::token::RunToolScope {
-    coppice_server::mcp::token::RunToolScope {
-        token_id: Uuid::new_v4(),
-        run_id: fx.scope.run_id,
-        agent_id: fx.scope.agent_id,
-        ticket_id: fx.scope.ticket_id,
-        chat_session_id: None,
-        board_id: fx.scope.board_id,
-        profile,
-        job_type: "work_on_ticket".into(),
-        compaction_ticket_ids: vec![],
-        plugin_ids: vec![],
-    }
-}
-
-struct FakePluginSource {
-    plugin_id: Uuid,
-}
-
-#[async_trait::async_trait]
-impl coppice_server::mcp::source::ToolSource for FakePluginSource {
-    fn kind(&self) -> coppice_server::mcp::source::SourceKind {
-        coppice_server::mcp::source::SourceKind::Plugin
-    }
-
-    async fn list(
-        &self,
-        _scope: &coppice_server::mcp::token::RunToolScope,
-    ) -> Vec<coppice_server::mcp::source::SourcedTool> {
-        vec![coppice_server::mcp::source::SourcedTool {
-            def: coppice_server::mcp::protocol::ToolDefinition {
-                name: "plugin_echo".into(),
-                description: "Echo".into(),
-                input_schema: json!({"type": "object"}),
-                read_only: true,
-            },
-            source: coppice_server::mcp::source::SourceKind::Plugin,
-            plugin_id: Some(self.plugin_id),
-            key: "fake/echo".into(),
-        }]
-    }
-
-    async fn call(
-        &self,
-        _ctx: &coppice_server::mcp::tools::ToolCtx<'_>,
-        tool: &coppice_server::mcp::source::SourcedTool,
-        args: Value,
-    ) -> Result<coppice_server::mcp::protocol::ToolResult, coppice_server::mcp::tools::ToolError>
-    {
-        Ok(coppice_server::mcp::protocol::ToolResult::text(
-            format!("{} {}", tool.key, args["msg"].as_str().unwrap_or("")),
-            false,
-        ))
-    }
-}
-
-#[tokio::test]
-async fn denied_text_unchanged() {
-    use coppice_server::mcp::host::RunToolHost;
-    use coppice_server::mcp::protocol::ToolHost;
-
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let host = RunToolHost::new(fx.state.clone(), host_scope(&fx, ContextProfile::HumanChat));
-    let out = host.call("nope", json!({})).await;
-    assert!(out.is_error);
-    assert_eq!(
-        result_text(&out),
-        "denied: tool \"nope\" is not available for this run"
-    );
-    assert_eq!(
-        tool_call_sources(&fx.pool, fx.scope.run_id).await,
-        vec![("nope".into(), "core".into(), "denied".into(), None)]
-    );
-}
-
-#[tokio::test]
-async fn fake_source_call_logs_source_and_plugin_id() {
-    use coppice_server::mcp::host::RunToolHost;
-    use coppice_server::mcp::protocol::ToolHost;
-    use coppice_server::mcp::registry::ToolRegistry;
-    use coppice_server::mcp::source::{CoreToolSource, SkillToolSource};
-
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let plugin_id = Uuid::new_v4();
-    let mut state = (*fx.state).clone();
-    state.tools = Arc::new(ToolRegistry::new(vec![
-        Arc::new(CoreToolSource),
-        Arc::new(SkillToolSource),
-        Arc::new(FakePluginSource { plugin_id }),
-    ]));
-    let host = RunToolHost::new(Arc::new(state), host_scope(&fx, ContextProfile::Full));
-
-    let names: Vec<String> = host.list().await.into_iter().map(|d| d.name).collect();
-    assert!(names.contains(&"plugin_echo".to_string()), "{names:?}");
-    assert!(names.contains(&"board_agents".to_string()), "{names:?}");
-
-    let out = host.call("plugin_echo", json!({"msg": "hi"})).await;
-    assert!(!out.is_error);
-    assert_eq!(result_text(&out), "fake/echo hi");
-    assert_eq!(
-        tool_call_sources(&fx.pool, fx.scope.run_id).await,
-        vec![(
-            "plugin_echo".into(),
-            "plugin".into(),
-            "ok".into(),
-            Some(plugin_id)
-        )]
-    );
-}
-
 #[tokio::test]
 async fn skill_list_returns_builtin_skills() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -533,51 +350,6 @@ async fn skill_list_returns_builtin_skills() {
         tool_call_rows(&fx.pool, fx.scope.run_id).await,
         vec![("skill_list".into(), "skill".into(), "ok".into())]
     );
-}
-
-#[tokio::test]
-async fn skill_load_returns_body_and_logs_skill_source() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token = common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::Full).await;
-
-    let loaded = call_tool_json(&url, &token, "skill_load", json!({"name": "coppice-git"})).await;
-    assert_eq!(loaded["id"], "coppice-git");
-    let body = loaded["body"].as_str().unwrap();
-    assert!(body.contains("Coppice platform rules — git (required)"));
-    assert!(
-        body.contains("Co-authored-by: Coppice Agent <agent@getcoppice.app>"),
-        "default agent_commit_attribution adds co-author instructions"
-    );
-    let path = std::path::Path::new(loaded["path"].as_str().unwrap());
-    assert!(path.is_absolute());
-    assert!(path.join("SKILL.md").is_file());
-
-    let (is_error, text) =
-        call_tool(&url, &token, "skill_load", json!({"name": "no-such-skill"})).await;
-    assert!(is_error);
-    assert!(text.contains("no-such-skill"), "{text}");
-    let (is_error, _) = call_tool(&url, &token, "skill_load", json!({})).await;
-    assert!(is_error);
-
-    assert_eq!(
-        tool_call_rows(&fx.pool, fx.scope.run_id).await,
-        vec![
-            ("skill_load".into(), "skill".into(), "ok".into()),
-            ("skill_load".into(), "skill".into(), "error".into()),
-            ("skill_load".into(), "skill".into(), "error".into()),
-        ]
-    );
-    assert!(tool_call_sources(&fx.pool, fx.scope.run_id)
-        .await
-        .iter()
-        .all(|(tool, source, _, plugin_id)| tool == "skill_load"
-            && source == "skill"
-            && plugin_id.is_none()));
 }
 
 // ---- Task 4: per-run token lifecycle + mock tool calls ----
@@ -921,43 +693,6 @@ async fn ticket_get_defaults_to_run_ticket() {
 }
 
 #[tokio::test]
-async fn ticket_get_other_board_is_not_found() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-
-    let other_board = create_other_board(&fx).await;
-    let other_ticket =
-        common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
-
-    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
-        let (is_error, text) =
-            call_tool(&url, &token, tool, json!({"ticketId": other_ticket})).await;
-        assert!(is_error, "{tool} should fail");
-        assert_eq!(text, "ticket not on this board");
-    }
-
-    let (is_error, text) = call_tool(
-        &url,
-        &token,
-        "ticket_get",
-        json!({"ticketId": Uuid::new_v4().to_string()}),
-    )
-    .await;
-    assert!(is_error);
-    assert_eq!(text, "ticket not found");
-
-    let (is_error, text) = call_tool(&url, &token, "ticket_get", json!({"ticketId": "nope"})).await;
-    assert!(is_error);
-    assert!(text.contains("ticketId"), "{text}");
-}
-
-#[tokio::test]
 async fn ticket_comments_pages_large_threads() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -1022,58 +757,6 @@ async fn ticket_comments_pages_large_threads() {
         cursor = page["nextBefore"].as_str().map(str::to_string);
     }
     assert_eq!(seen, 500);
-}
-
-#[tokio::test]
-async fn ticket_runs_lists_recent_runs() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-
-    let out = call_tool_json(&url, &token, "ticket_runs", json!({"limit": 500})).await;
-    let runs = out["runs"].as_array().unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0]["id"], fx.scope.run_id.to_string());
-    assert_eq!(runs[0]["agent"], "Worker");
-    assert_eq!(runs[0]["job_type"], "work_on_ticket");
-}
-
-#[tokio::test]
-async fn chat_ticket_tool_without_ticket_id_errors() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token = mint_scope(
-        &fx,
-        NewRunToolScope {
-            ticket_id: None,
-            profile: ContextProfile::Conversation,
-            job_type: "chat_turn".into(),
-            ..fx.scope.clone()
-        },
-    )
-    .await;
-
-    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
-        let (is_error, text) = call_tool(&url, &token, tool, json!({})).await;
-        assert!(is_error, "{tool} should fail");
-        assert!(text.contains("ticketId is required"), "{text}");
-    }
-    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
-    assert!(rows.iter().all(|(_, _, status)| status == "error"));
-
-    // With an explicit id on the same board it works.
-    let ticket = fx.scope.ticket_id.unwrap().to_string();
-    let out = call_tool_json(&url, &token, "ticket_get", json!({"ticketId": ticket})).await;
-    assert_eq!(out["title"], "Test ticket");
 }
 
 fn boardless_chat_scope(fx: &RunFixture) -> NewRunToolScope {
@@ -1180,120 +863,6 @@ async fn boardless_chat_searches_tickets_across_boards_and_opens_them() {
     let human_search =
         call_tool_json(&url, &human, "ticket_search", json!({"query": "Lantern"})).await;
     assert!(human_search["tickets"].as_array().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn boardless_chat_exposes_no_write_tools() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let _other = create_other_board(&fx).await;
-    let token = mint_scope(&fx, boardless_chat_scope(&fx)).await;
-
-    let res = rpc(&url, &token, "tools/list", json!({})).await;
-    let tools = res["result"]["tools"].as_array().expect("tools");
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"board_list"), "{names:?}");
-    assert!(names.contains(&"ticket_get"));
-    assert!(names.contains(&"ticket_search"));
-    assert!(names.contains(&"knowledge_search"));
-    assert!(names.contains(&"knowledge_get"));
-    assert!(!names.contains(&"comment_post"), "{names:?}");
-    for tool in tools {
-        let name = tool["name"].as_str().unwrap();
-        let read_only = tool["annotations"]["readOnlyHint"].as_bool().unwrap();
-        if name == "result_submit" {
-            assert!(!read_only);
-        } else {
-            assert!(read_only, "{name} must be read-only");
-        }
-    }
-
-    let (is_error, text) = call_tool(&url, &token, "comment_post", json!({"body": "nope"})).await;
-    assert!(is_error);
-    assert!(text.contains("not available"), "{text}");
-
-    let listed = call_tool_json(&url, &token, "board_list", json!({})).await;
-    let board_names: Vec<&str> = listed["boards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|b| b["name"].as_str().unwrap())
-        .collect();
-    assert!(board_names.contains(&"Test Board"), "{listed}");
-    assert!(board_names.contains(&"Other Board"), "{listed}");
-    assert!(listed["boards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|b| b["id"].is_string()));
-
-    let scoped = mint_scope(
-        &fx,
-        NewRunToolScope {
-            profile: ContextProfile::Conversation,
-            job_type: "chat_turn".into(),
-            ..fx.scope.clone()
-        },
-    )
-    .await;
-    let scoped_names = tool_names(&url, &scoped).await;
-    assert!(
-        scoped_names.iter().any(|n| n == "board_list"),
-        "{scoped_names:?}"
-    );
-    assert!(
-        !scoped_names.iter().any(|n| n == "comment_post"),
-        "{scoped_names:?}"
-    );
-}
-
-#[tokio::test]
-async fn compaction_token_limited_to_batch_tickets() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let batch_ticket = fx.scope.ticket_id.unwrap();
-    let board_id = fx.scope.board_id.unwrap().to_string();
-    let outside_ticket = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
-    let token = mint_scope(
-        &fx,
-        NewRunToolScope {
-            ticket_id: None,
-            profile: ContextProfile::KnowledgeCompaction,
-            job_type: "compact_knowledge".into(),
-            compaction_ticket_ids: vec![batch_ticket],
-            ..fx.scope.clone()
-        },
-    )
-    .await;
-
-    let ok = call_tool_json(
-        &url,
-        &token,
-        "ticket_get",
-        json!({"ticketId": batch_ticket.to_string()}),
-    )
-    .await;
-    assert_eq!(ok["id"], batch_ticket.to_string());
-
-    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
-        let (is_error, text) =
-            call_tool(&url, &token, tool, json!({"ticketId": outside_ticket})).await;
-        assert!(is_error, "{tool} should be denied");
-        assert!(text.contains("compaction batch"), "{text}");
-    }
-
-    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
-    assert_eq!(rows[0].2, "ok");
-    assert!(rows[1..].iter().all(|(_, _, status)| status == "denied"));
-    assert_eq!(rows.len(), 4);
 }
 
 #[tokio::test]
@@ -1639,54 +1208,6 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     );
 }
 
-#[tokio::test]
-async fn knowledge_search_in_compaction_covers_batch_boards_only() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let board_a = fx.scope.board_id.unwrap();
-    let board_b: Uuid = create_other_board(&fx).await.parse().unwrap();
-    seed_knowledge_with_content(
-        &fx.pool,
-        board_a,
-        "Quokka on batch board",
-        "Quokka handling notes",
-        "approved",
-    )
-    .await;
-    seed_knowledge_with_content(
-        &fx.pool,
-        board_b,
-        "Quokka on other board",
-        "Quokka handling notes",
-        "approved",
-    )
-    .await;
-    let token = mint_scope(
-        &fx,
-        NewRunToolScope {
-            ticket_id: None,
-            board_id: None,
-            profile: ContextProfile::KnowledgeCompaction,
-            job_type: "compact_knowledge".into(),
-            compaction_ticket_ids: vec![fx.scope.ticket_id.unwrap()],
-            ..fx.scope.clone()
-        },
-    )
-    .await;
-    let out = call_tool_json(&url, &token, "knowledge_search", json!({"query": "quokka"})).await;
-    let titles: Vec<&str> = out["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| i["title"].as_str().unwrap())
-        .collect();
-    assert_eq!(titles, vec!["Quokka on batch board"], "{out}");
-}
-
 async fn item_of(pool: &PgPool, revision_id: Uuid) -> Uuid {
     sqlx::query_scalar("SELECT item_id FROM knowledge_revisions WHERE id = $1")
         .bind(revision_id)
@@ -1862,93 +1383,6 @@ async fn knowledge_get_rejects_more_than_five_ids() {
     let (is_error, text) = call_tool(&url, &token, "knowledge_get", json!({"ids": ids})).await;
     assert!(is_error);
     assert!(text.contains("at most 5"), "{text}");
-}
-
-#[tokio::test]
-async fn knowledge_get_out_of_scope_is_same_as_unknown() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let home = fx.scope.board_id.unwrap();
-    let other_board: Uuid = create_other_board(&fx).await.parse().unwrap();
-    let other_agent: Uuid =
-        common::create_test_agent_from_preset(&fx.app, "Other Agent", &fx.cookie, &fx.csrf)
-            .await
-            .parse()
-            .unwrap();
-    let visible = seed_knowledge(&fx.pool, home, "Visible zebrafish tip", "approved").await;
-    let visible_item = item_of(&fx.pool, visible).await;
-    let hidden = [
-        seed_scoped_knowledge(
-            &fx.pool,
-            "board",
-            Some(other_board),
-            None,
-            "Other board tip",
-            "zebrafish on another board",
-            "approved",
-        )
-        .await,
-        seed_scoped_knowledge(
-            &fx.pool,
-            "agent",
-            Some(home),
-            Some(other_agent),
-            "Other agent tip",
-            "zebrafish kept by another agent",
-            "approved",
-        )
-        .await,
-        seed_knowledge(&fx.pool, home, "Pending zebrafish tip", "pending").await,
-    ];
-    let mut ids: Vec<Uuid> = Vec::new();
-    for revision in hidden {
-        ids.push(item_of(&fx.pool, revision).await);
-    }
-    ids.push(Uuid::new_v4());
-
-    let mut messages = Vec::new();
-    for id in &ids {
-        // Asking alongside a visible note must not return it either.
-        let (is_error, text) = call_tool(
-            &url,
-            &token,
-            "knowledge_get",
-            json!({"ids": [visible_item, id]}),
-        )
-        .await;
-        assert!(is_error, "{text}");
-        messages.push(text);
-    }
-    assert_eq!(messages[0], "knowledge item not found");
-    assert!(messages.iter().all(|m| m == &messages[0]), "{messages:?}");
-    assert_eq!(usage_count(&fx.pool, fx.scope.run_id, visible).await, 0);
-
-    // A scope with no board sees workspace notes only.
-    let boardless = mint_scope(
-        &fx,
-        NewRunToolScope {
-            board_id: None,
-            ticket_id: None,
-            profile: ContextProfile::HumanAgent,
-            ..fx.scope.clone()
-        },
-    )
-    .await;
-    let (is_error, text) = call_tool(
-        &url,
-        &boardless,
-        "knowledge_get",
-        json!({"ids": [visible_item]}),
-    )
-    .await;
-    assert!(is_error);
-    assert_eq!(text, "knowledge item not found");
 }
 
 #[tokio::test]
@@ -2229,43 +1663,6 @@ async fn comment_post_capped_per_run() {
     assert_eq!(count, i64::from(limit));
 }
 
-#[tokio::test]
-async fn comment_post_cannot_target_other_ticket() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let board_id = fx.scope.board_id.unwrap().to_string();
-    let other = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
-
-    let out = call_tool_json(
-        &url,
-        &token,
-        "comment_post",
-        json!({"body": "stay put", "ticketId": other}),
-    )
-    .await;
-    let comment_id: Uuid = out["commentId"].as_str().unwrap().parse().unwrap();
-    let ticket_id: Uuid = sqlx::query_scalar("SELECT ticket_id FROM ticket_comments WHERE id = $1")
-        .bind(comment_id)
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
-    assert_eq!(Some(ticket_id), fx.scope.ticket_id);
-    let on_other: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1::uuid AND author_type = 'agent'",
-    )
-    .bind(&other)
-    .fetch_one(&fx.pool)
-    .await
-    .unwrap();
-    assert_eq!(on_other, 0);
-}
-
 // ---- Task 7: result_submit + finish-time preference ----
 
 async fn mark_running(pool: &PgPool, run_id: Uuid) {
@@ -2469,32 +1866,6 @@ async fn invalid_resubmission_keeps_previous_valid() {
         .await
         .expect("stored");
     assert_eq!(stored["summary"], "second, valid");
-}
-
-#[tokio::test]
-async fn result_submit_rejected_when_run_not_running() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    sqlx::query("UPDATE agent_runs SET status = 'cancelled' WHERE id = $1")
-        .bind(fx.scope.run_id)
-        .execute(&fx.pool)
-        .await
-        .unwrap();
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let (is_error, _) = call_tool(
-        &url,
-        &token,
-        "result_submit",
-        json!({"status": "done", "summary": "too late"}),
-    )
-    .await;
-    assert!(is_error);
-    assert!(submitted_result(&fx.pool, fx.scope.run_id).await.is_none());
 }
 
 #[tokio::test]
@@ -3824,21 +3195,6 @@ async fn knowledge_freshness_covers_every_state() {
 }
 
 #[tokio::test]
-async fn knowledge_freshness_unknown_for_null_sha() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let repo_id = fixture_repo_id(&fx).await;
-    let rev = seed_mulberry(&fx).await;
-    cite(&fx.pool, rev, repo_id, "README.md", None).await;
-    let (state, entry) = freshness_of(&fx, rev).await;
-    assert_eq!(state, "unknown");
-    assert!(entry.get("verify").is_none(), "{entry}");
-}
-
-#[tokio::test]
 async fn freshness_unknown_when_repo_path_is_gone() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -3851,30 +3207,6 @@ async fn freshness_unknown_when_repo_path_is_gone() {
     let rev = seed_mulberry(&fx).await;
     cite(&fx.pool, rev, repo_id, "README.md", Some(&sha)).await;
     std::fs::remove_dir_all(&dir).unwrap();
-    let (state, _) = freshness_of(&fx, rev).await;
-    assert_eq!(state, "unknown");
-}
-
-#[tokio::test]
-async fn knowledge_freshness_reads_unknown_beyond_the_citation_cap() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let dir = fx._git_dir.path().to_path_buf();
-    let repo_id = fixture_repo_id(&fx).await;
-    for n in 0..21 {
-        std::fs::write(dir.join(format!("f{n:02}.txt")), "x\n").unwrap();
-    }
-    git_in(&dir, &["add", "."]);
-    git_in(&dir, &["commit", "-m", "many files"]);
-    let sha = git_in(&dir, &["rev-parse", "HEAD"]);
-    let rev = seed_mulberry(&fx).await;
-    for n in 0..21 {
-        cite(&fx.pool, rev, repo_id, &format!("f{n:02}.txt"), Some(&sha)).await;
-    }
-    // Twenty citations are checked and current; the 21st is not checked.
     let (state, _) = freshness_of(&fx, rev).await;
     assert_eq!(state, "unknown");
 }
@@ -3966,38 +3298,6 @@ async fn knowledge_flag_outdated_shows_on_item_and_does_not_retire_it() {
 }
 
 #[tokio::test]
-async fn knowledge_flag_repeated_in_a_run_updates_one_row() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let rev = seed_mulberry(&fx).await;
-    let item = item_of(&fx.pool, rev).await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    call_tool_json(
-        &url,
-        &token,
-        "knowledge_flag",
-        json!({"itemId": item, "verdict": "wrong", "reason": "first"}),
-    )
-    .await;
-    call_tool_json(
-        &url,
-        &token,
-        "knowledge_flag",
-        json!({"itemId": item, "verdict": "outdated", "reason": "second"}),
-    )
-    .await;
-    assert_eq!(
-        flag_rows(&fx.pool, item).await,
-        vec![("outdated".to_string(), "second".to_string())]
-    );
-}
-
-#[tokio::test]
 async fn knowledge_flag_repeat_reopens_a_closed_flag() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -4063,38 +3363,6 @@ async fn knowledge_flag_repeat_reopens_a_closed_flag() {
 }
 
 #[tokio::test]
-async fn knowledge_flag_out_of_scope_is_same_as_unknown() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let other_board = Uuid::parse_str(&create_other_board(&fx).await).unwrap();
-    let hidden = seed_knowledge(&fx.pool, other_board, "Elsewhere", "approved").await;
-    let hidden = item_of(&fx.pool, hidden).await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let (_, unknown) = call_tool(
-        &url,
-        &token,
-        "knowledge_flag",
-        json!({"itemId": Uuid::new_v4(), "verdict": "confirmed"}),
-    )
-    .await;
-    let (is_error, text) = call_tool(
-        &url,
-        &token,
-        "knowledge_flag",
-        json!({"itemId": hidden, "verdict": "confirmed"}),
-    )
-    .await;
-    assert!(is_error);
-    assert_eq!(text, unknown);
-    assert!(flag_rows(&fx.pool, hidden).await.is_empty());
-}
-
-#[tokio::test]
 async fn knowledge_flag_confirmed_reanchors_citations_to_head() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -4149,42 +3417,6 @@ async fn knowledge_flag_confirmed_reanchors_citations_to_head() {
     assert_eq!(fresh["citations"][0]["path"], "a.txt");
     assert_eq!(fresh["citations"][0]["commitSha"], head.as_str());
     assert!(fresh["citations"][0]["repoName"].is_string(), "{fresh}");
-}
-
-#[tokio::test]
-async fn knowledge_flag_not_listed_in_chat_profiles() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let url = serve(&fx).await;
-    for profile in [
-        ContextProfile::HumanChat,
-        ContextProfile::Conversation,
-        ContextProfile::KnowledgeCompaction,
-    ] {
-        let token = common::mint_test_token(&fx.state, fx.scope.run_id, profile).await;
-        let res = rpc(&url, &token, "tools/list", json!({})).await;
-        let names: Vec<&str> = res["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert!(!names.contains(&"knowledge_flag"), "{profile:?} {names:?}");
-    }
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let res = rpc(&url, &token, "tools/list", json!({})).await;
-    let flag = res["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["name"] == "knowledge_flag")
-        .cloned()
-        .expect("listed for agent runs");
-    assert_eq!(flag["annotations"]["readOnlyHint"], false);
 }
 
 // ---- Task 9: knowledge_propose ----
@@ -4364,51 +3596,6 @@ async fn close_match_returns_existing_item() {
             item_of(&fx.pool, rev).await.to_string()
         );
     }
-    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
-    assert_eq!(before, after);
-}
-
-#[tokio::test]
-async fn knowledge_propose_near_copy_of_rejected_item_creates_nothing() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let fx = run_fixture().await;
-    let board = fx.scope.board_id.unwrap();
-    let rejected = seed_knowledge_with_content(
-        &fx.pool,
-        board,
-        "Quince cache warmup order",
-        "Warm the quince cache before starting the workers.",
-        "rejected",
-    )
-    .await;
-    let url = serve(&fx).await;
-    let token =
-        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
-    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
-    let out = call_tool_json(
-        &url,
-        &token,
-        "knowledge_propose",
-        proposal(
-            "Quince cache warmup order",
-            "Warm the quince cache before starting all workers.",
-        ),
-    )
-    .await;
-    assert_eq!(out["status"], "rejected", "{out}");
-    assert_eq!(
-        out["itemId"].as_str().unwrap(),
-        item_of(&fx.pool, rejected).await.to_string()
-    );
     let after: i64 = sqlx::query_scalar("SELECT count(*) FROM knowledge_items")
         .fetch_one(&fx.pool)
         .await

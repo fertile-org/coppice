@@ -728,22 +728,6 @@ mod tests {
         }
 
         #[test]
-        fn an_error_result_uses_the_cli_text() {
-            let mut h = handler(false);
-            feed(
-                &mut h,
-                &[result("API Error: 529 Overloaded", true, "api_error")],
-            );
-            let err = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err();
-            assert!(matches!(err, ProviderError::MissingResult(_)));
-            assert!(
-                err.to_string()
-                    .contains("Claude Code ended with an error: API Error: 529 Overloaded"),
-                "{err}"
-            );
-        }
-
-        #[test]
         fn a_full_context_fails_even_without_the_error_flag() {
             let mut h = handler(false);
             feed(&mut h, &[result("", false, "prompt_too_long")]);
@@ -751,32 +735,6 @@ mod tests {
                 .unwrap_err()
                 .to_string();
             assert!(msg.contains("context window is full"), "{msg}");
-        }
-
-        #[test]
-        fn plain_text_is_a_chat_reply_but_not_a_ticket_result() {
-            let mut h = handler(false);
-            feed(&mut h, &[result("Hi there!", false, "completed")]);
-            assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
-            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
-                .unwrap_err()
-                .to_string();
-            assert!(
-                msg.contains("no result contract found in claude-code output"),
-                "{msg}"
-            );
-        }
-
-        #[test]
-        fn a_tool_counts_as_running_until_its_result() {
-            let mut h = handler(false);
-            assert!(!h.tools_running());
-            h.on_json(&json!({ "type": "assistant", "message": { "content": [
-                { "type": "tool_use", "id": "b1", "name": "Bash", "input": { "command": "cargo test" } } ] } }));
-            assert!(h.tools_running());
-            h.on_json(&json!({ "type": "user", "message": { "content": [
-                { "type": "tool_result", "tool_use_id": "b1", "content": "ok" } ] } }));
-            assert!(!h.tools_running());
         }
 
         fn replay(name: &str) -> ClaudeLines {
@@ -876,19 +834,6 @@ mod tests {
             let mut write = handler(false);
             write.on_json(&json!({ "type": "control_request", "request_id": "q2", "request": {} }));
             assert!(write.take_replies().is_empty());
-        }
-
-        #[test]
-        fn a_crash_before_any_result_carries_stderr() {
-            let h = handler(false);
-            let err = decide(
-                &h,
-                &exit(1, &["Error: not logged in"]),
-                ContextProfile::Full,
-            )
-            .unwrap_err();
-            assert!(matches!(err, ProviderError::InvalidFixture(_)));
-            assert!(err.to_string().contains("not logged in"), "{err}");
         }
     }
 

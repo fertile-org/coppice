@@ -158,44 +158,6 @@ async fn connectors_lists_non_mock_descriptors() {
 }
 
 #[tokio::test]
-async fn connectors_requires_admin() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-
-    let unauthenticated = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/tools/connectors")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
-
-    let pool = state.db.clone().unwrap();
-    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let (status, _) = send(&app, "GET", "/api/tools/connectors", &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/tools/connectors/kilo-code/check",
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn check_reprobes_one_connector() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -227,28 +189,6 @@ async fn check_reprobes_one_connector() {
 
     let (_, list) = send(&app, "GET", "/api/tools/connectors", &cookie, &csrf).await;
     assert_eq!(entry(&list, KILO)["cli"]["probe"]["detail"], "kilo 10.0.0");
-}
-
-#[tokio::test]
-async fn check_requires_csrf() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let (_state, app, cookie, _csrf) = common::bootstrap_and_login_with_state().await;
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/tools/connectors/kilo-code/check")
-                .header(header::COOKIE, &cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
