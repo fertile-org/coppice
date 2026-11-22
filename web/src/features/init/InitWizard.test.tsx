@@ -137,7 +137,7 @@ describe('InitWizard', () => {
     });
   });
 
-  it('keeps Create off while no CLI is ready and does not send a prompt', async () => {
+  it('keeps Create off while no CLI is ready and lists each CLI status', async () => {
     fetchMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/repos/inspect-path') return jsonResponse(inspectedReady);
       if (path === '/api/init' && init?.method === 'POST') {
@@ -149,39 +149,132 @@ describe('InitWizard', () => {
       if (path === '/api/connectors') {
         return jsonResponse({
           items: [
-            {
+            connectorItem({
+              id: 'claude-code',
+              displayName: 'Claude Code',
+              readiness: 'found_not_signed_in',
+            }),
+            connectorItem({
+              id: 'codex',
+              displayName: 'Codex',
+              readiness: 'not_on_path',
+            }),
+            connectorItem({
               id: 'kilo-code',
               displayName: 'Kilo Code',
-              console: 'structured',
-              caps: { readOnlyTools: false, chatResume: false },
               readiness: 'found',
-            },
+            }),
+            connectorItem({
+              id: 'mock',
+              displayName: 'Mock',
+              readiness: 'ready',
+            }),
           ],
         });
       }
       return jsonResponse([]);
     });
-    renderWizard();
-    fireEvent.click(await screen.findByRole('button', { name: INIT_COPY.browse }));
-    const next = screen.getByRole('button', { name: INIT_COPY.next });
-    await waitFor(() => expect(next).toBeEnabled());
-    fireEvent.click(next);
-    fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
+    await goToTeamStep();
+    expect(await screen.findByText(INIT_COPY.noReady)).toBeInTheDocument();
+    expect(screen.getByText('Found, not signed in')).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        'No agent CLI is ready yet. Install one and sign in, then check it in System → Connectors.',
-      ),
+      screen.getByText('Sign in to Claude Code in your terminal before this agent runs a ticket.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Create stays off until a CLI shows Ready.')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Agent CLI')).not.toBeInTheDocument();
+    expect(screen.getByText('Not on your PATH')).toBeInTheDocument();
+    expect(screen.getByText('Installed')).toBeInTheDocument();
     expect(
-      await screen.findByText(
+      screen.getByText(
         "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Mock')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent CLI')).not.toBeInTheDocument();
+    const install = screen.getByRole('link', { name: INIT_COPY.installGuide });
+    expect(install).toHaveAttribute('href', 'https://getcoppice.app/docs/providers');
     expect(screen.getByRole('button', { name: INIT_COPY.create })).toBeDisabled();
     expect(postCount()).toBe(0);
-    expect(document.body.textContent).not.toMatch(/mock|fake/i);
+  });
+
+  it('Check again refreshes status and enables Create once a CLI is ready', async () => {
+    let previewStatus: 'none' | 'ready' = 'none';
+    let claudeReady = false;
+    const checkDeferred = deferredJson(
+      toolConnectorStatus({
+        id: 'claude-code',
+        displayName: 'Claude Code',
+        readiness: 'ready',
+        found: true,
+      }),
+    );
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/repos/inspect-path') return jsonResponse(inspectedReady);
+      if (path === '/api/init' && init?.method === 'POST') {
+        return jsonResponse({
+          boardId: '00000000-0000-4000-8000-0000000000b1',
+          repositoryId: '00000000-0000-4000-8000-0000000000b2',
+          connectorId: 'claude-code',
+          connectorDisplayName: 'Claude Code',
+          connectorTurnedOn: true,
+          agents: [],
+        });
+      }
+      if (path === '/api/init') {
+        if (previewStatus === 'ready') return jsonResponse(previewReady);
+        return jsonResponse({ ...previewReady, status: 'none', connectors: [] });
+      }
+      if (path === '/api/connectors') {
+        return jsonResponse({
+          items: [
+            connectorItem({
+              id: 'claude-code',
+              displayName: 'Claude Code',
+              readiness: claudeReady ? 'ready' : 'found_not_signed_in',
+            }),
+            connectorItem({
+              id: 'codex',
+              displayName: 'Codex',
+              readiness: 'not_on_path',
+            }),
+          ],
+        });
+      }
+      if (path === '/api/tools/connectors/claude-code/check' && init?.method === 'POST') {
+        return checkDeferred.promise;
+      }
+      if (path.startsWith('/api/tools/connectors/') && init?.method === 'POST') {
+        return jsonResponse(
+          toolConnectorStatus({
+            id: 'codex',
+            displayName: 'Codex',
+            readiness: 'not_on_path',
+            found: false,
+          }),
+        );
+      }
+      return jsonResponse([]);
+    });
+    const { onCreated } = await goToTeamStep();
+    expect(await screen.findByText('Claude Code')).toBeInTheDocument();
+    const checkAgain = screen.getByRole('button', { name: INIT_COPY.checkAgain });
+    fireEvent.click(checkAgain);
+    fireEvent.click(checkAgain);
+    expect(await screen.findByRole('button', { name: INIT_COPY.checkingAgain })).toBeDisabled();
+    await waitFor(() =>
+      expect(
+        fetchMockCalls().filter(
+          (call) =>
+            call[0] === '/api/tools/connectors/claude-code/check' && call[1]?.method === 'POST',
+        ),
+      ).toHaveLength(1),
+    );
+    claudeReady = true;
+    previewStatus = 'ready';
+    checkDeferred.resolve();
+    expect(await screen.findByLabelText('Agent CLI')).toHaveValue('claude-code');
+    const create = screen.getByRole('button', { name: INIT_COPY.create });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
   });
 
   it('refuses a folder that is not a git checkout', async () => {
@@ -250,6 +343,62 @@ describe('InitWizard', () => {
     expect(screen.queryByText('That folder is already registered.')).not.toBeInTheDocument();
   });
 });
+
+function connectorItem(overrides: {
+  id: string;
+  displayName: string;
+  readiness?: string | null;
+}) {
+  return {
+    id: overrides.id,
+    displayName: overrides.displayName,
+    console: 'structured',
+    caps: { readOnlyTools: false, chatResume: false },
+    readiness: overrides.readiness ?? null,
+  };
+}
+
+function toolConnectorStatus(overrides: {
+  id: string;
+  displayName: string;
+  readiness: string;
+  found: boolean;
+}) {
+  return {
+    id: overrides.id,
+    displayName: overrides.displayName,
+    enabled: true,
+    cli: {
+      found: overrides.found,
+      path: overrides.found ? `/usr/bin/${overrides.id}` : null,
+      probe: {
+        status: overrides.found ? 'ok' : 'not_run',
+        detail: overrides.found ? `${overrides.id} 1.0` : null,
+      },
+    },
+    auth: {
+      status: overrides.readiness === 'ready' ? 'detected' : 'not_found',
+      envSet: [],
+      pathsFound: [],
+    },
+    authHint: '',
+    docsUrl: '',
+    lastRun: null,
+    lastCheck: null,
+    probedAt: '2026-10-03T10:00:00Z',
+    readiness: overrides.readiness,
+  };
+}
+
+async function goToTeamStep() {
+  const result = renderWizard();
+  fireEvent.click(await screen.findByRole('button', { name: INIT_COPY.browse }));
+  const next = screen.getByRole('button', { name: INIT_COPY.next });
+  await waitFor(() => expect(next).toBeEnabled());
+  fireEvent.click(next);
+  fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
+  return result;
+}
 
 function postCount() {
   return fetchMockCalls().filter((call) => call[0] === '/api/init' && call[1]?.method === 'POST')
