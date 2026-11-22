@@ -4,13 +4,18 @@ mod common;
 use axum::Router;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
+use coppice_server::services::design_service::{
+    CreateScope, DesignKind, DesignOption, DesignService,
+};
 use coppice_server::services::knowledge_compaction_service::KnowledgeCompactionService;
+use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::run_service::RunService;
 use coppice_server::services::workspace_settings_service::WorkspaceSettingsService;
 use coppice_server::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -1822,6 +1827,130 @@ async fn result_submit_warns_on_a_long_plan_and_still_accepts_it() {
         .await
         .expect("stored");
     assert_eq!(stored["summary"], long);
+}
+
+const PLAN_MARKER_TEST_PLAN: &str = "## Plan\n\n### Approach\nShip it.\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n";
+
+#[tokio::test]
+async fn result_submit_rejects_unknown_design_marker() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let ticket_id: Id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let agent_id: Id = pm_id.parse().unwrap();
+    let pool = state.db.clone().expect("db");
+    let plans = PlanningService::new(&pool);
+    plans
+        .insert_plan(ticket_id, agent_id, PLAN_MARKER_TEST_PLAN, None, false, false)
+        .await
+        .expect("first plan");
+    plans.bind_latest_plan(ticket_id).await.expect("bind");
+    plans
+        .ask_for_changes(ticket_id, "Show architecture options.")
+        .await
+        .expect("ask");
+    let run_id = plans
+        .active_plan_run(ticket_id)
+        .await
+        .expect("active")
+        .expect("plan run");
+    mark_running(&pool, run_id).await;
+
+    let svc = DesignService::new(&pool, &PathBuf::from(&state.config.storage.artifacts_dir));
+    let created = svc
+        .create(
+            "arch",
+            DesignKind::Architecture,
+            CreateScope {
+                ticket_id: Some(ticket_id),
+                chat_session_id: None,
+                run_id,
+                agent_id,
+            },
+        )
+        .await
+        .expect("create");
+    let options = vec![
+        DesignOption {
+            id: "a".into(),
+            title: "A".into(),
+            changes: Some("server/src/x.rs".into()),
+            effort: Some("S".into()),
+            risk: Some("Low".into()),
+            reversibility: Some("Easy".into()),
+            rules_out: Some("Nothing".into()),
+            sketch: Some("flowchart LR\n  A --> B".into()),
+            ..Default::default()
+        },
+        DesignOption {
+            id: "b".into(),
+            title: "B".into(),
+            changes: Some("server/src/y.rs".into()),
+            effort: Some("S".into()),
+            risk: Some("Low".into()),
+            reversibility: Some("Easy".into()),
+            rules_out: Some("Nothing".into()),
+            sketch: Some("flowchart LR\n  A --> B".into()),
+            ..Default::default()
+        },
+    ];
+    svc.publish(created.id, run_id, options, "a", Some("fits"))
+        .await
+        .expect("publish");
+    let set_id = created.id;
+
+    let url = format!(
+        "http://{}/mcp",
+        common::spawn_test_server(app).await
+    );
+    let token = common::mint_test_token_with_plugins(&state, run_id, ContextProfile::Full, vec![])
+        .await;
+
+    let unknown = Id::new();
+    let bad = format!(
+        "## Plan\n\n### Approach\nShip it.\n\n## Architecture\n\n{{{{design:{unknown}}}}}\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n"
+    );
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": bad}),
+    )
+    .await;
+    assert!(is_error, "expected rejection, got: {text}");
+    assert!(
+        text.contains(&unknown.to_string()) && text.contains("design__list"),
+        "{text}"
+    );
+
+    let good = format!(
+        "## Plan\n\n### Approach\nShip it.\n\n## Architecture\n\n{{{{design:{set_id}}}}}\n\n### Steps\n- [ ] Add the button\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n"
+    );
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": good}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
+
+    mark_running(&pool, run_id).await;
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": PLAN_MARKER_TEST_PLAN}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
 }
 
 #[tokio::test]

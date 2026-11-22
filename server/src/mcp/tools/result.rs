@@ -31,6 +31,7 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     if let AgentRunResult::Done {
         plan_questions,
         no_visible_change,
+        summary,
         ..
     } = &result
     {
@@ -50,6 +51,7 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
             && plan_questions.is_empty()
         {
             refuse_too_many_technical_sets(ctx).await?;
+            refuse_unknown_design_markers(ctx, summary).await?;
         }
     }
 
@@ -102,6 +104,49 @@ fn plan_warnings(result: &AgentRunResult) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Each `{{design:<id>}}` marker in the plan must point at a live published set on this ticket.
+async fn refuse_unknown_design_markers(ctx: &ToolCtx<'_>, summary: &str) -> Result<(), ToolError> {
+    let ids = crate::services::design_markers::design_marker_ids(summary);
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let ticket_id = match ctx.scope.ticket_id {
+        Some(id) => id,
+        None => sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
+            .bind(ctx.scope.run_id)
+            .fetch_optional(ctx.pool)
+            .await?
+            .flatten()
+            .ok_or_else(|| {
+                ToolError::InvalidArgs("design markers need a ticket.".into())
+            })?,
+    };
+    for id in ids {
+        let live: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM design_sets
+                WHERE id = $1
+                  AND ticket_id = $2
+                  AND published_at IS NOT NULL
+                  AND retired_at IS NULL
+                  AND superseded_by IS NULL
+            )
+            "#,
+        )
+        .bind(id)
+        .bind(ticket_id)
+        .fetch_one(ctx.pool)
+        .await?;
+        if !live {
+            return Err(ToolError::InvalidArgs(format!(
+                "design marker {{design:{id}}} is not a live published set on this ticket; fix the id or call `design__list` to see available sets"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// At most two technical design sets may land on one planning run.
