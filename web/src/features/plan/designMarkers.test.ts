@@ -24,4 +24,12 @@ describe('designMarkers', () => {
       sectionForSet(`## Approach\n\n## UI design\n\n{{design:${SET}}}\n`, SET),
     ).toBe('UI design');
   });
+
+  it('accepts 12-char short design set ids', () => {
+    const short = 'abc123xyz789';
+    expect(splitPlanMarkers(`{{design:${short}}}`)).toEqual([
+      { type: 'design', setId: short },
+    ]);
+    expect(stripDesignMarkers(`keep {{design:${short}}} text`)).toBe('keep  text');
+  });
 });

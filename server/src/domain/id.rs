@@ -6,12 +6,17 @@
 use std::fmt;
 use std::str::FromStr;
 
+use rand::RngCore;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo, PgValueRef};
 use sqlx::{Decode, Encode, Postgres, Type};
 use uuid::Uuid;
+
+const SHORT_ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+/// Largest multiple of 36 that fits in a `u8` (252). Rejection sampling avoids modulo bias.
+const SHORT_REJECT_THRESHOLD: u8 = 252;
 
 /// Stable entity identifier. Always lowercase when generated or normalized from a UUID.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,9 +38,22 @@ impl fmt::Display for InvalidId {
 impl std::error::Error for InvalidId {}
 
 impl Id {
-    /// Fresh UUID v4, lowercase.
+    /// Fresh 12-char `[0-9a-z]` id from `OsRng` (rejection sampling, no modulo bias).
     pub fn new() -> Self {
-        Self::from_ascii(Uuid::new_v4().to_string().as_bytes())
+        let mut out = [0u8; 12];
+        let mut rng = rand::rngs::OsRng;
+        for slot in &mut out {
+            loop {
+                let mut byte = [0u8; 1];
+                rng.fill_bytes(&mut byte);
+                let b = byte[0];
+                if b < SHORT_REJECT_THRESHOLD {
+                    *slot = SHORT_ALPHABET[(b % 36) as usize];
+                    break;
+                }
+            }
+        }
+        Self::from_ascii(&out)
     }
 
     /// All-zero UUID string (test / placeholder sentinel).
@@ -254,13 +272,22 @@ fn is_short_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
-    fn new_is_lowercase_uuid() {
+    fn new_is_twelve_char_short_id() {
         let id = Id::new();
-        assert_eq!(id.as_str().len(), 36);
-        assert!(is_uuid_str(id.as_str()));
-        assert_eq!(id.as_str(), id.as_str().to_ascii_lowercase());
+        assert_eq!(id.as_str().len(), 12);
+        assert!(is_short_id(id.as_str()));
+        assert_eq!(Id::parse(id.as_str()).unwrap(), id);
+    }
+
+    #[test]
+    fn new_ids_are_unique_in_a_small_batch() {
+        let mut seen = HashSet::new();
+        for _ in 0..256 {
+            assert!(seen.insert(Id::new().into_string()));
+        }
     }
 
     #[test]
@@ -281,5 +308,13 @@ mod tests {
         assert!(Id::parse("not-an-id").is_err());
         assert!(Id::parse("ABC123XYZ789").is_err()); // short must be lowercase
         assert!(Id::parse("550e8400-e29b-41d4-a716-44665544000").is_err());
+        // Shared parse error for API path extractors, MCP args, and any CLI that uses Id.
+        assert_eq!(Id::parse("nope").unwrap_err().to_string(), "invalid id");
+    }
+
+    #[test]
+    fn nil_and_from_u128_stay_uuid_shaped() {
+        assert!(is_uuid_str(Id::nil().as_str()));
+        assert!(is_uuid_str(Id::from_u128(1).as_str()));
     }
 }

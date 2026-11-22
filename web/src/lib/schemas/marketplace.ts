@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const marketplaceSourceSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   name: z.string(),
   kind: z.enum(['builtin', 'git']),
   gitUrl: z.string().nullable(),
@@ -15,7 +16,7 @@ export const marketplaceSourceSchema = z.object({
 export type MarketplaceSource = z.infer<typeof marketplaceSourceSchema>;
 
 export const marketplaceEntrySchema = z.object({
-  sourceId: z.string().uuid(),
+  sourceId: idSchema,
   sourceName: z.string(),
   name: z.string(),
   description: z.string(),
@@ -24,7 +25,7 @@ export const marketplaceEntrySchema = z.object({
   installable: z.boolean(),
   reason: z.string().nullish(),
   category: z.string().nullish(),
-  installedPluginId: z.string().uuid().nullable(),
+  installedPluginId: idSchema.nullable(),
   updateAvailable: z.boolean(),
 });
 

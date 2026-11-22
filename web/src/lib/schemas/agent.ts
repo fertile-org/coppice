@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 /** One scale for every connector; each adapter maps it to its CLI's flag. */
 export const thinkingLevelSchema = z.enum(['low', 'medium', 'high', 'max']);
@@ -7,7 +8,7 @@ export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>;
 
 export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  presetId: z.string().uuid().optional(),
+  presetId: idSchema.optional(),
   role: z.string().optional(),
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),

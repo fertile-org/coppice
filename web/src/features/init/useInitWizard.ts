@@ -4,6 +4,7 @@ import { ApiError, apiFetch } from '../../lib/api';
 import { AGENTS_QUERY_KEY, CONNECTORS_QUERY_KEY } from '../agents/useAgents';
 import { BOARDS_QUERY_KEY } from '../boards/useBoards';
 import { REPOS_QUERY_KEY } from '../repos/useRepos';
+import { idSchema } from '../../lib/schemas/id';
 
 const memberSchema = z.object({
   presetKey: z.string(),
@@ -26,14 +27,14 @@ export const initPreviewSchema = z.object({
 export type InitPreview = z.infer<typeof initPreviewSchema>;
 
 const confirmResultSchema = z.object({
-  boardId: z.string().uuid(),
-  repositoryId: z.string().uuid(),
+  boardId: idSchema,
+  repositoryId: idSchema,
   connectorId: z.string(),
   connectorDisplayName: z.string(),
   connectorTurnedOn: z.boolean(),
   agents: z.array(
     z.object({
-      id: z.string().uuid(),
+      id: idSchema,
       name: z.string(),
       presetKey: z.string(),
     }),

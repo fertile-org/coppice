@@ -249,9 +249,9 @@ ${jsonl}END_JSONL
       id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
       context_profile, started_at, ended_at
     ) VALUES (
-      ${sqlQuote(runId)}::uuid,
-      ${sqlQuote(ticketId)}::uuid,
-      ${sqlQuote(agentId)}::uuid,
+      ${sqlQuote(runId)},
+      ${sqlQuote(ticketId)},
+      ${sqlQuote(agentId)},
       'work_on_ticket',
       'succeeded',
       'permissive-default',
@@ -308,7 +308,7 @@ async function seedChats(api, auth, agentIds, boardId) {
     const values = chat.messages
       .map(
         ([role, body], seq) =>
-          `(${sqlQuote(randomUUID())}::uuid, ${sqlQuote(session.id)}::uuid, ${seq + 1}, ${sqlQuote(role)}, ${sqlQuote(body)}, '{}')`,
+          `(${sqlQuote(randomUUID())}, ${sqlQuote(session.id)}, ${seq + 1}, ${sqlQuote(role)}, ${sqlQuote(body)}, '{}')`,
       )
       .join(',\n');
     const age = index === 0 ? '0 minutes' : '35 minutes';
@@ -317,7 +317,7 @@ async function seedChats(api, auth, agentIds, boardId) {
       VALUES ${values};
       UPDATE chat_sessions
       SET updated_at = now() - interval '${age}'
-      WHERE id = ${sqlQuote(session.id)}::uuid;
+      WHERE id = ${sqlQuote(session.id)};
     `);
   }
   return primaryId;

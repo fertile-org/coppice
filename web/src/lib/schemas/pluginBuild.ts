@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { pluginTestResultSchema } from './plugin';
+import { idSchema } from './id';
 
 export const pluginBuildStatusSchema = z.enum([
   'drafting',
@@ -67,7 +68,7 @@ export const pluginPublishResultSchema = z.object({
 export type PluginPublishResult = z.infer<typeof pluginPublishResultSchema>;
 
 export const pluginBuildSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   answers: z.record(z.string(), z.unknown()).default({}),
   plans: z.array(pluginBuildPlanSchema).default([]),
   status: z.string(),
@@ -77,10 +78,10 @@ export const pluginBuildSchema = z.object({
   planQuestions: z.array(pluginBuildPlanQuestionSchema).nullable().optional(),
   checkErrors: z.array(z.string()).nullable().optional(),
   formatRetries: z.number().int().optional().default(0),
-  pluginId: z.string().uuid().nullable().optional(),
+  pluginId: idSchema.nullable().optional(),
   testResult: pluginTestResultSchema.nullable().optional(),
-  activeRunId: z.string().uuid().nullable().optional(),
-  lastRunId: z.string().uuid().nullable().optional(),
+  activeRunId: idSchema.nullable().optional(),
+  lastRunId: idSchema.nullable().optional(),
   lastRunStatus: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -91,7 +92,7 @@ export type PluginBuild = z.infer<typeof pluginBuildSchema>;
 
 export const pluginBuildRunStartSchema = z.object({
   build: pluginBuildSchema,
-  runId: z.string().uuid(),
+  runId: idSchema,
 });
 
 export type PluginBuildRunStart = z.infer<typeof pluginBuildRunStartSchema>;

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { connectorConsoleSchema } from './connector';
+import { idSchema } from './id';
 
 export const runStatusSchema = z.enum([
   'queued',
@@ -13,9 +14,9 @@ export const runStatusSchema = z.enum([
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
 export const agentRunSchema = z.object({
-  id: z.string().uuid(),
-  ticketId: z.string().uuid(),
-  agentId: z.string().uuid(),
+  id: idSchema,
+  ticketId: idSchema,
+  agentId: idSchema,
   jobType: z.string(),
   status: runStatusSchema,
   sandboxProfileId: z.string(),

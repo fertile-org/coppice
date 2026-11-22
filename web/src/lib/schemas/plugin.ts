@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const pluginDirSchema = z.object({
-  id: z.string().uuid(),
+  id: idSchema,
   path: z.string(),
   position: z.number().int(),
   isDefault: z.boolean(),
@@ -63,8 +64,8 @@ export const pluginSettingSchema = z.object({
 export type PluginSetting = z.infer<typeof pluginSettingSchema>;
 
 export const pluginSchema = z.object({
-  id: z.string().uuid(),
-  pluginDirId: z.string().uuid(),
+  id: idSchema,
+  pluginDirId: idSchema,
   relPath: z.string(),
   name: z.string(),
   version: z.string(),
@@ -87,7 +88,7 @@ export const pluginSchema = z.object({
     .default(null),
   gitRoot: z.string().nullable().default(null),
   agentAccess: z.enum(['all', 'explicit']).default('explicit'),
-  agentIds: z.array(z.string().uuid()).default([]),
+  agentIds: z.array(idSchema).default([]),
   builderMade: z.boolean().optional().default(false),
   publishTarget: z.string().nullable().optional().default(null),
 });
@@ -122,13 +123,13 @@ export const pluginInstallStatusSchema = z.enum(['running', 'succeeded', 'failed
 export type PluginInstallStatus = z.infer<typeof pluginInstallStatusSchema>;
 
 export const pluginInstallSchema = z.object({
-  id: z.string().uuid(),
-  pluginDirId: z.string().uuid(),
+  id: idSchema,
+  pluginDirId: idSchema,
   kind: z.string(),
   gitUrl: z.string(),
   gitRef: z.string().nullable(),
-  pluginId: z.string().uuid().nullable(),
-  pluginIds: z.array(z.string().uuid()).default([]),
+  pluginId: idSchema.nullable(),
+  pluginIds: z.array(idSchema).default([]),
   status: pluginInstallStatusSchema,
   error: z.string().nullable(),
 });

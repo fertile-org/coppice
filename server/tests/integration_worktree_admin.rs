@@ -7,8 +7,7 @@ use std::process::Command;
 use tower::ServiceExt;
 
 fn branch_exists(repo: &Path, ticket_id: Id) -> bool {
-    let short = ticket_id.to_string().split('-').next().unwrap().to_string();
-    let branch = format!("agent/TICKET-{short}");
+    let branch = coppice_server::services::worktree_service::legacy_ticket_branch(ticket_id);
     let output = Command::new("git")
         .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
         .current_dir(repo)

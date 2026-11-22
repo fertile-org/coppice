@@ -141,19 +141,32 @@ pub async fn copy_citations(
     from_revision_id: Id,
     to_revision_id: Id,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let rows: Vec<(Option<Id>, String, Option<String>)> = sqlx::query_as(
         r#"
-        INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha)
-        SELECT gen_random_uuid(), $2, repo_id, path, commit_sha
+        SELECT repo_id, path, commit_sha
         FROM knowledge_citations
         WHERE revision_id = $1
-        ON CONFLICT DO NOTHING
         "#,
     )
     .bind(from_revision_id)
-    .bind(to_revision_id)
-    .execute(&mut **tx)
+    .fetch_all(&mut **tx)
     .await?;
+    for (repo_id, path, commit_sha) in rows {
+        sqlx::query(
+            r#"
+            INSERT INTO knowledge_citations (id, revision_id, repo_id, path, commit_sha)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(Id::new())
+        .bind(to_revision_id)
+        .bind(repo_id)
+        .bind(path)
+        .bind(commit_sha)
+        .execute(&mut **tx)
+        .await?;
+    }
     Ok(())
 }
 

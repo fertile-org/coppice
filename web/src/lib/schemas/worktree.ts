@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const worktreeAdminEntrySchema = z.object({
   folderName: z.string(),
   path: z.string(),
-  repoId: z.string().uuid().nullable(),
+  repoId: idSchema.nullable(),
   repoName: z.string().nullable(),
-  ticketId: z.string().uuid().nullable(),
+  ticketId: idSchema.nullable(),
   ticketTitle: z.string().nullable(),
   ticketStatus: z.string().nullable(),
   archived: z.boolean(),

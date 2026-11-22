@@ -482,10 +482,8 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
     common::set_ticket_repo(&app, &ticket_id, &_repo_id, &cookie, &csrf).await;
 
     // Create the ticket branch in the main checkout but no worktree.
-    let branch = format!(
-        "agent/TICKET-{}",
-        ticket_id.split('-').next().unwrap_or("ticket")
-    );
+    let ticket_uuid: Id = ticket_id.parse().expect("ticket id");
+    let branch = coppice_server::services::worktree_service::legacy_ticket_branch(ticket_uuid);
     let output = Command::new("git")
         .args(["branch", &branch, "main"])
         .current_dir(&local_path)

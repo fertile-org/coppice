@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { idSchema } from './id';
 
 export const worktreeSummarySchema = z.object({
   path: z.string(),
   branch: z.string(),
   headSha: z.string(),
-  ticketId: z.string().uuid().nullable(),
+  ticketId: idSchema.nullable(),
   ticketTitle: z.string().nullable(),
 });
 
@@ -66,14 +67,14 @@ export const inlineCommentSchema = z.object({
 export type InlineComment = z.infer<typeof inlineCommentSchema>;
 
 export const submitReviewSchema = z.object({
-  repoId: z.string().uuid(),
+  repoId: idSchema,
   worktreePath: z.string(),
   baseBranch: z.string(),
   headSha: z.string(),
-  ticketId: z.string().uuid().nullable().optional(),
+  ticketId: idSchema.nullable().optional(),
   newTicket: z
     .object({
-      boardId: z.string().uuid(),
+      boardId: idSchema,
       title: z.string().min(1),
       description: z.string().optional(),
     })
@@ -84,14 +85,14 @@ export const submitReviewSchema = z.object({
   workflowAction: z
     .enum(['none', 'move_to_in_progress', 'reassign_engineer'])
     .optional(),
-  reassignAgentId: z.string().uuid().optional(),
+  reassignAgentId: idSchema.optional(),
 });
 
 export type SubmitReviewInput = z.infer<typeof submitReviewSchema>;
 
 export const submitReviewResponseSchema = z.object({
-  ticketId: z.string().uuid(),
-  commentId: z.string().uuid(),
+  ticketId: idSchema,
+  commentId: idSchema,
   ticketCreated: z.boolean(),
 });
 
