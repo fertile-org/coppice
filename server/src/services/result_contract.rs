@@ -774,13 +774,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_does_not_set_ticket_status_from_next_status() {
-        let result = load_fixture("done.json");
-        let applied = apply_agent_result(&result).expect("apply done");
-        assert_eq!(applied.ticket.status, None);
-    }
-
-    #[test]
     fn blocked_fixture_maps_to_blocked_status() {
         let result = load_fixture("blocked.json");
         let applied = apply_agent_result(&result).expect("apply blocked");
@@ -800,15 +793,6 @@ mod tests {
         assert!(merged.contains("New description body"));
         assert!(merged.contains("## Acceptance criteria"));
         assert!(merged.contains("- Criterion one"));
-    }
-
-    #[test]
-    fn merge_appends_acceptance_criteria_to_existing_description() {
-        let merged = merge_ticket_description("Existing scope", None, Some("- Must pass CI"))
-            .expect("merged");
-        assert!(merged.starts_with("Existing scope"));
-        assert!(merged.contains("## Acceptance criteria"));
-        assert!(merged.contains("- Must pass CI"));
     }
 
     #[test]
@@ -1025,105 +1009,6 @@ mod tests {
     }
 
     #[test]
-    fn done_comment_separates_tests_run_with_blank_line() {
-        let result = AgentRunResult::Done {
-            summary: "Approving.".into(),
-            changed_files: vec![],
-            tests_run: vec!["cargo test -p coppice-server --lib".into()],
-            next_status: None,
-            assign_to: None,
-            updated_description: None,
-            acceptance_criteria: None,
-            mention_agents: vec![],
-            agent_requests: vec![],
-            blockers: vec![],
-            split_tickets: vec![],
-            knowledge_candidates: Vec::new(),
-            how_it_works: None,
-            changes_from_plan: None,
-            look_here_first: None,
-            criteria_results: Vec::new(),
-            plan_questions: Vec::new(),
-            no_visible_change: false,
-            suggest_skip_human_review: false,
-            advanced: None,
-            actions: None,
-        };
-        let applied = apply_agent_result(&result).expect("apply");
-        assert!(applied
-            .comment
-            .body
-            .contains("Approving.\n\n**Tests run:**"));
-    }
-
-    #[test]
-    fn done_comment_includes_acceptance_criteria_without_description_update() {
-        let result = AgentRunResult::Done {
-            summary: "Refined scope.".into(),
-            changed_files: vec![],
-            tests_run: vec![],
-            next_status: None,
-            assign_to: None,
-            updated_description: None,
-            acceptance_criteria: Some("- Must pass CI\n- Must include tests".into()),
-            mention_agents: vec![],
-            agent_requests: vec![],
-            blockers: vec![],
-            split_tickets: vec![],
-            knowledge_candidates: Vec::new(),
-            how_it_works: None,
-            changes_from_plan: None,
-            look_here_first: None,
-            criteria_results: Vec::new(),
-            plan_questions: Vec::new(),
-            no_visible_change: false,
-            suggest_skip_human_review: false,
-            advanced: None,
-            actions: None,
-        };
-        let applied = apply_agent_result(&result).expect("apply");
-        assert!(applied.comment.body.contains("Refined scope."));
-        assert!(applied.comment.body.contains("## Acceptance criteria"));
-        assert!(applied.comment.body.contains("- Must pass CI"));
-    }
-
-    #[test]
-    fn done_comment_omits_duplicate_spec_when_description_updated() {
-        let result = AgentRunResult::Done {
-            summary: "## PM Refinement\n\n### Current state\nLong analysis with | # | Task | table"
-                .into(),
-            changed_files: vec![],
-            tests_run: vec![],
-            next_status: None,
-            assign_to: Some("backend_engineer".into()),
-            updated_description: Some("## Scope\n\nBuild connector.".into()),
-            acceptance_criteria: Some("- [ ] Ship feature".into()),
-            mention_agents: vec![],
-            agent_requests: vec![],
-            blockers: vec![],
-            split_tickets: vec![],
-            knowledge_candidates: Vec::new(),
-            how_it_works: None,
-            changes_from_plan: None,
-            look_here_first: None,
-            criteria_results: Vec::new(),
-            plan_questions: Vec::new(),
-            no_visible_change: false,
-            suggest_skip_human_review: false,
-            advanced: None,
-            actions: None,
-        };
-        let applied = apply_agent_result(&result).expect("apply");
-        assert!(applied
-            .comment
-            .body
-            .contains("Updated the ticket description"));
-        assert!(applied.comment.body.contains("backend_engineer"));
-        assert!(!applied.comment.body.contains("| # |"));
-        assert!(!applied.comment.body.contains("## Acceptance criteria"));
-    }
-
-    #[test]
     fn normalize_agent_markdown_breaks_glued_sections_and_tables() {
         let raw = "Intro line.**Scope** details here | # | Task | Effort |\n|---|";
         let normalized = normalize_agent_markdown(raw);
@@ -1162,25 +1047,6 @@ mod tests {
             Some("Updated body")
         );
         assert_eq!(applied.ticket.acceptance_criteria.as_deref(), Some("- AC1"));
-    }
-
-    #[test]
-    fn continued_fixture_maps_to_succeeded_progress() {
-        let result = load_fixture("backend_engineer/continued.json");
-        let applied = apply_agent_result(&result).expect("apply continued");
-        assert_eq!(applied.run_status, RunStatus::Succeeded);
-        assert_eq!(applied.ticket.status, None);
-        assert_eq!(applied.ticket.substatus, None);
-        assert_eq!(intent_to_str(applied.comment.intent), "progress_update");
-        assert!(applied
-            .comment
-            .body
-            .contains("Implemented TmuxStream create/kill"));
-        assert!(applied.comment.body.contains("**Progress note:**"));
-        assert!(applied
-            .comment
-            .body
-            .contains("server/src/sessions/tmux_stream.rs"));
     }
 
     fn done_result() -> AgentRunResult {

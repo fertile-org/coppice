@@ -124,7 +124,6 @@ pub fn setup_worktree_with_commit(
     paths.worktree_dir
 }
 
-
 /// Worktree on `agent/<8hex>-test-ticket` with `tickets.branch_name` set to match
 /// (same title as create_test_ticket). Use when a later merge/ensure must find the branch.
 pub async fn setup_persisted_worktree(

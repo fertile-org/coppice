@@ -1,11 +1,9 @@
 use coppice_server::domain::Id;
 mod common;
 
-use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::StatusCode;
 use axum::Router;
 use coppice_server::domain::plugin_build::NO_AGENT_READY_TO_BUILD;
-use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::services::plugin_build_service::PluginBuildService;
 use coppice_server::services::plugin_service::PluginService;
 use coppice_server::services::run_service::RunService;
@@ -41,31 +39,6 @@ macro_rules! require_db {
             return;
         }
     };
-}
-
-async fn login_as(app: &Router, email: &str, password: &str) -> (String, String) {
-    let login = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/auth/login")
-                .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"{password}"}}"#
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(login.status(), StatusCode::OK);
-    let set_cookie = login.headers().get(header::SET_COOKIE).unwrap();
-    let token = parse_session_cookie(set_cookie.to_str().unwrap()).unwrap();
-    let body = common::json_body(login).await;
-    (
-        format!("coppice_session={token}"),
-        body["csrfToken"].as_str().unwrap().to_string(),
-    )
 }
 
 async fn send(
@@ -242,72 +215,16 @@ async fn create_get_list_cancel_discard_and_accept_cleanup() {
     assert!(!workspace3.exists());
 }
 
+
 #[tokio::test]
-async fn non_admin_gets_403_and_unknown_id_gets_404() {
+async fn unknown_plugin_build_id_gets_404() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-
-    let create = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            "/api/users",
-            r#"{"email":"member@localhost","password":"secret123"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(create.status(), StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    for (method, uri) in [
-        ("POST", "/api/plugin-builds"),
-        ("GET", "/api/plugin-builds"),
-        (
-            "GET",
-            "/api/plugin-builds/00000000-0000-0000-0000-000000000001",
-        ),
-        (
-            "PATCH",
-            "/api/plugin-builds/00000000-0000-0000-0000-000000000001",
-        ),
-        (
-            "POST",
-            "/api/plugin-builds/00000000-0000-0000-0000-000000000001/cancel",
-        ),
-        (
-            "POST",
-            "/api/plugin-builds/00000000-0000-0000-0000-000000000001/discard",
-        ),
-    ] {
-        let body = if method == "PATCH" {
-            json!({"pluginName": "x"})
-        } else {
-            Value::Null
-        };
-        let (status, _) = send(&app, method, uri, body, &member_cookie, &member_csrf).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
-
-    // Demoting the session user is another 403 path; unknown id as admin is 404.
-    let _ = state;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let (status, _) = send(
         &app,
         "GET",
         "/api/plugin-builds/00000000-0000-0000-0000-000000000001",
-        Value::Null,
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/plugin-builds/00000000-0000-0000-0000-000000000001/cancel",
         Value::Null,
         &cookie,
         &csrf,

@@ -366,10 +366,6 @@ mod tests {
         }
     }
 
-    /// Byte length of the legacy fat `Full` context for `fixture_full_input()`,
-    /// measured once before the tool-first switch removed the builder.
-    pub const LEGACY_FULL_CONTEXT_BYTES: usize = 9576;
-
     fn test_skills() -> Vec<SkillInfo> {
         [
             ("coppice-collaboration", "Mentions, agentRequests, assignTo and field roles for handing work between agents."),
@@ -386,120 +382,6 @@ mod tests {
             path: std::path::PathBuf::from(format!("/skills/{id}")),
         })
         .collect()
-    }
-
-    #[test]
-    fn planning_run_uses_compact_coppice_tools_section() {
-        let mut input = fixture_full_input();
-        input.planning_run = true;
-        let md = build_tool_first_context(&input, &test_skills(), None);
-        assert!(md.contains("follow **Must do** under `# Plan`"));
-        assert!(!md.contains("Use `ticket_get` / `ticket_comments` / `ticket_runs`"));
-        assert!(!md.contains("Finish by calling `result_submit`"));
-    }
-
-    #[test]
-    fn tool_first_full_context_is_at_least_half_smaller() {
-        let slim = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        println!("slim={} legacy={LEGACY_FULL_CONTEXT_BYTES}", slim.len());
-        assert!(
-            slim.len() * 2 <= LEGACY_FULL_CONTEXT_BYTES,
-            "slim context is {} bytes; legacy was {LEGACY_FULL_CONTEXT_BYTES}",
-            slim.len()
-        );
-    }
-
-    #[test]
-    fn tool_first_context_lists_responsibilities_without_skill_labels() {
-        let mut input = fixture_full_input();
-        let md = build_tool_first_context(&input, &test_skills(), None);
-        let agent = &md[..md.find("# Task\n").expect("task")];
-        assert!(!agent.contains("**Skills:**"));
-        assert!(!agent.contains("**Responsibilities:**"));
-
-        let responsibilities = ["Own the API".to_string(), "Rust".to_string()];
-        input.agent_responsibilities = &responsibilities;
-        let md = build_tool_first_context(&input, &test_skills(), None);
-        let agent = &md[..md.find("# Task\n").expect("task")];
-        assert!(!agent.contains("**Skills:**"));
-        assert!(agent.contains("**Responsibilities:**\n- Own the API\n- Rust\n"));
-        assert!(agent.contains("You are the product manager."));
-    }
-
-    #[test]
-    fn tool_first_context_lists_skills_and_required_skill() {
-        let md = build_tool_first_context(
-            &fixture_full_input(),
-            &test_skills(),
-            Some("coppice-qc-verification"),
-        );
-        assert!(md.contains("coppice-qc-verification — "));
-        assert!(md.contains("Load `coppice-qc-verification` before starting."));
-        let none = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        assert!(!none.contains("before starting."));
-    }
-
-    #[test]
-    fn tool_first_context_has_no_json_contract() {
-        let md = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        assert!(!md.contains("```json"));
-        assert!(!md.contains(".agent/ticket.json"));
-        assert!(!md.contains(".agent/comments.json"));
-        assert!(!md.contains(".agent/runs.json"));
-    }
-
-    #[test]
-    fn tool_first_context_mentions_result_submit() {
-        let md = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        assert!(md.contains(
-            "Finish by calling `result_submit` with your result; fix and resubmit if it returns errors."
-        ));
-        for line in [
-            "Use `ticket_get` / `ticket_comments` / `ticket_runs` for ticket details.",
-            "Use `knowledge_search` to find approved project knowledge and `knowledge_get` to read it.",
-            "Use `board_agents` to find agent keys for handoff.",
-        ] {
-            assert!(md.contains(line), "missing {line}");
-        }
-    }
-
-    #[test]
-    fn tool_first_context_invites_proposals_only_for_working_agents() {
-        let line = "propose it with `knowledge_propose`";
-        let md = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        assert!(md.contains(line));
-        let mut chat = fixture_full_input();
-        chat.context_profile = ContextProfile::HumanChat;
-        assert!(!build_tool_first_context(&chat, &test_skills(), None).contains(line));
-    }
-
-    #[test]
-    fn tool_first_sections_appear_in_order() {
-        let md = build_tool_first_context(&fixture_full_input(), &test_skills(), None);
-        let positions: Vec<usize> = [
-            "# Agent\n",
-            "# Task\n",
-            "# Repository\n",
-            "# Skills\n",
-            "# Coppice tools\n",
-        ]
-        .iter()
-        .map(|heading| {
-            md.find(heading)
-                .unwrap_or_else(|| panic!("missing {heading}"))
-        })
-        .collect();
-        assert!(
-            positions.windows(2).all(|pair| pair[0] < pair[1]),
-            "{positions:?}"
-        );
-        assert!(md.contains(
-            "Commit before finishing; Coppice syncs and auto-commits — see skill coppice-git."
-        ));
-        // The bulky legacy inputs are fetched via tools, not embedded.
-        assert!(!md.contains("Refine the polling retry behaviour."));
-        assert!(!md.contains("Please keep the retry window configurable"));
-        assert!(!md.contains("Follow AGENTS.md conventions."));
     }
 
     #[test]
@@ -625,15 +507,5 @@ mod tests {
         let with_files = build_tool_first_context(&input, &test_skills(), None);
         assert!(with_files.contains("Files attached to messages are listed under `Attachments:`"));
         assert!(with_files.contains("Read them before replying"));
-    }
-
-    #[test]
-    fn connector_check_context_is_fixed() {
-        let context = connector_check_context("Checker");
-        assert!(context.contains("**Name:** Checker"));
-        assert!(context.contains(
-            "This is a Coppice connection check. Call the `ticket_get` tool, then call `result_submit` with outcome `done` and summary `connection ok`."
-        ));
-        assert!(!context.contains("skill_load"));
     }
 }

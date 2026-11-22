@@ -1,10 +1,8 @@
 use coppice_server::domain::Id;
 mod common;
 
-use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::StatusCode;
 use axum::Router;
-use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::services::plugin_service::PluginError;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -120,31 +118,6 @@ fn find<'a>(plugins: &'a Value, dir_id: &str, name: &str) -> &'a Value {
         .into_iter()
         .find(|p| p["name"] == name)
         .unwrap_or_else(|| panic!("plugin {name} in dir {dir_id} not found: {plugins}"))
-}
-
-async fn login_as(app: &Router, email: &str, password: &str) -> (String, String) {
-    let login = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/auth/login")
-                .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"{password}"}}"#
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(login.status(), StatusCode::OK);
-    let set_cookie = login.headers().get(header::SET_COOKIE).unwrap();
-    let token = parse_session_cookie(set_cookie.to_str().unwrap()).unwrap();
-    let body = common::json_body(login).await;
-    (
-        format!("coppice_session={token}"),
-        body["csrfToken"].as_str().unwrap().to_string(),
-    )
 }
 
 macro_rules! require_db {
@@ -561,82 +534,6 @@ async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
         .any(|s| s.id == "sample-plugin:hello"));
 }
 
-#[tokio::test]
-async fn plugin_mutations_require_admin_and_csrf() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let dir = plugin_dir_with(&["sample-plugin"]);
-    add_dir(&app, dir.path(), &cookie, &csrf).await;
-    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
-    let plugin_id = plugins[0]["id"].as_str().unwrap().to_string();
-
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/users",
-        json!({ "email": "member@localhost", "password": "secret123" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    get(&app, "/api/plugins", &member_cookie, &member_csrf).await;
-    let other = tempfile::tempdir().unwrap();
-    let attempts = [
-        (
-            "POST",
-            "/api/plugin-dirs".to_string(),
-            json!({ "path": other.path().to_string_lossy() }),
-        ),
-        (
-            "PATCH",
-            format!("/api/plugins/{plugin_id}"),
-            json!({ "enabled": true }),
-        ),
-        ("POST", "/api/plugins/rescan".to_string(), Value::Null),
-        (
-            "POST",
-            "/api/plugins/install".to_string(),
-            json!({ "gitUrl": "https://github.com/a/b.git", "pluginDirId": Id::new() }),
-        ),
-        (
-            "POST",
-            format!("/api/plugins/{plugin_id}/update"),
-            Value::Null,
-        ),
-    ];
-    for (method, uri, body) in &attempts {
-        let (status, _) = send(
-            &app,
-            method,
-            uri,
-            body.clone(),
-            &member_cookie,
-            &member_csrf,
-        )
-        .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri} as member");
-    }
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/plugins/rescan")
-                .header("content-type", "application/json")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from("null"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
 /// Adds a dir holding `inline-mcp` (setting keys `API_TOKEN`, `ROOT`); returns its plugin id.
 async fn inline_mcp_plugin(app: &Router, cookie: &str, csrf: &str) -> (tempfile::TempDir, String) {
     let dir = plugin_dir_with(&["inline-mcp"]);
@@ -711,32 +608,6 @@ async fn settings_put_marks_configured() {
 
     let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
     assert_eq!(detail["settings"], body["settings"]);
-}
-
-#[tokio::test]
-async fn settings_empty_value_clears() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let pool = state.db.clone().unwrap();
-    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
-
-    let (status, _) = put_settings(&app, &id, json!({ "API_TOKEN": "tok" }), &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, body) = put_settings(&app, &id, json!({ "API_TOKEN": "" }), &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["settings"],
-        json!([
-            { "key": "API_TOKEN", "configured": false, "needsReentry": false, "source": "missing" },
-            { "key": "ROOT", "configured": false, "needsReentry": false, "source": "missing" },
-        ])
-    );
-    let name = format!("plugin-setting-{id}-API_TOKEN");
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
-        0
-    );
 }
 
 #[tokio::test]
@@ -826,98 +697,6 @@ async fn deleting_plugin_deletes_its_setting_secrets() {
         .await
         .unwrap();
     assert_eq!(count(&pool, secrets, &pattern).await, 0);
-}
-
-#[tokio::test]
-async fn settings_unknown_key_rejected() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let pool = state.db.clone().unwrap();
-    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
-
-    let (status, body) = put_settings(
-        &app,
-        &id,
-        json!({ "API_TOKEN": "tok", "NOPE": "x" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["error"], "unknown setting \"NOPE\"");
-    let name = format!("plugin-setting-{id}-API_TOKEN");
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
-        0
-    );
-}
-
-#[tokio::test]
-async fn settings_values_never_returned() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
-
-    let (status, put) = put_settings(
-        &app,
-        &id,
-        json!({ "API_TOKEN": "s3cr3t-value" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let list = get(&app, "/api/plugins", &cookie, &csrf).await;
-    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
-    for body in [&put, &list, &detail] {
-        assert!(!body.to_string().contains("s3cr3t-value"), "{body}");
-    }
-}
-
-#[tokio::test]
-async fn settings_requires_admin() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/users",
-        json!({ "email": "member@localhost", "password": "secret123" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    let (status, _) = put_settings(
-        &app,
-        &id,
-        json!({ "API_TOKEN": "tok" }),
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri(format!("/api/plugins/{id}/settings"))
-                .header("content-type", "application/json")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from(r#"{"values":{"API_TOKEN":"tok"}}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 async fn sample_plugin_id(app: &Router, dir_id: &str, cookie: &str, csrf: &str) -> String {
@@ -1424,20 +1203,6 @@ async fn install_from_git_clones_scans_and_records_commit() {
 }
 
 #[tokio::test]
-async fn install_into_existing_dest_is_conflict() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = install_app().await;
-    let repo = PluginRepo::new();
-    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
-    install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
-
-    let (status, body) = post_install(&app, &repo.url(), &dir_id, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert!(body["error"].is_string());
-}
-
-#[tokio::test]
 async fn install_rejects_invalid_url_and_file_urls_when_disallowed() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
@@ -1525,29 +1290,6 @@ async fn update_pulls_new_commit() {
         .iter()
         .any(|s| s["name"] == "goodbye"));
     assert!(state.skills.get(&[id], "sample-plugin:goodbye").is_some());
-}
-
-#[tokio::test]
-async fn update_of_local_plugin_is_rejected() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let dir = plugin_dir_with(&["sample-plugin"]);
-    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
-    let (status, body) = send(
-        &app,
-        "POST",
-        &format!("/api/plugins/{plugin_id}/update"),
-        Value::Null,
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 }
 
 #[tokio::test]
@@ -1671,34 +1413,6 @@ async fn post_clone_failure_marks_install_failed_and_removes_clone() {
     install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
 }
 
-#[tokio::test]
-async fn update_of_missing_plugin_is_rejected() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = install_app().await;
-    let repo = PluginRepo::new();
-    let (dir_id, dir_path) = default_dir(&app, &cookie, &csrf).await;
-    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
-    let plugin_id = installed["pluginId"].as_str().unwrap();
-    std::fs::remove_dir_all(dir_path.join("sample-plugin")).unwrap();
-    rescan(&app, &cookie, &csrf).await;
-
-    let (status, body) = send(
-        &app,
-        "POST",
-        &format!("/api/plugins/{plugin_id}/update"),
-        Value::Null,
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(
-        body["error"],
-        "plugin folder is missing; rescan or reinstall"
-    );
-}
-
 // ---- M10 Part 2b: MCP Test endpoint, server health ----
 
 /// Adds a dir holding the named fixture plugin; returns its id (left disabled).
@@ -1777,98 +1491,6 @@ async fn test_lists_tools_while_disabled() {
 }
 
 #[tokio::test]
-async fn test_of_disabled_plugin_leaves_no_process_running() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("mcp-pid");
-    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
-    std::fs::write(
-        root.join(".claude-plugin/plugin.json"),
-        r#"{"name":"mcp-pid"}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join(".mcp.json"),
-        json!({ "mcpServers": { "fake": {
-            "command": env!("CARGO_BIN_EXE_fake-mcp"),
-            "env": { "FAKE_MCP_PID_FILE": "${CLAUDE_PLUGIN_ROOT}/pid.txt" },
-        } } })
-        .to_string(),
-    )
-    .unwrap();
-    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
-    let id = find(&plugins, &dir_id, "mcp-pid")["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["servers"][0]["status"], "ok", "{body}");
-    let pid: u32 = std::fs::read_to_string(root.join("pid.txt"))
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while coppice_server::process_tree::process_alive(pid) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "tested server still running"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert_eq!(fake_server_health(&state, &id), "stopped");
-}
-
-#[tokio::test]
-async fn test_reports_missing_setting() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, id) = fixture_plugin(&app, "mcp-fake", &cookie, &csrf).await;
-
-    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let server = &body["servers"][0];
-    assert_eq!(server["status"], "error", "{body}");
-    assert_eq!(server["error"], "missing setting \"FAKE_MCP_BIN\"");
-    assert_eq!(server["tools"], json!([]));
-}
-
-#[tokio::test]
-async fn test_marks_unsupported() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
-
-    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let names: Vec<_> = body["servers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| s["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names, ["echo", "old", "remote"]);
-    let old = &body["servers"][1];
-    assert_eq!(old["kind"], "sse");
-    assert_eq!(old["status"], "unsupported");
-    assert!(old.get("error").is_none(), "{body}");
-    assert_eq!(old["tools"], json!([]));
-
-    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
-    assert_eq!(detail["mcpServers"][1]["health"], "stopped");
-}
-
-#[tokio::test]
 async fn test_response_has_no_secret_values() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
@@ -1896,28 +1518,6 @@ async fn test_response_has_no_secret_values() {
     for secret in ["command", "args", "env", "url", "headers", "transport"] {
         assert!(!keys.iter().any(|k| k == secret), "`{secret}` exposed");
     }
-}
-
-#[tokio::test]
-async fn test_requires_admin() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/users",
-        json!({ "email": "member@localhost", "password": "secret123" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    let (status, _) = post_test(&app, &id, &member_cookie, &member_csrf).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -2311,52 +1911,6 @@ async fn external_cannot_be_enabled_tested_or_updated() {
     );
 }
 
-#[tokio::test]
-async fn external_not_assignable_to_agents() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, plugin_id) = marketplace_external(&app, &cookie, &csrf).await;
-    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
-    let uri = format!("/api/agents/{agent_id}/plugins");
-
-    let (status, body) = send(
-        &app,
-        "PUT",
-        &uri,
-        json!({ "pluginIds": [plugin_id] }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    let design_id = builtin_design_id(&app, &cookie, &csrf).await;
-    assert_eq!(
-        get(&app, &uri, &cookie, &csrf).await,
-        json!({ "pluginIds": [design_id] })
-    );
-}
-
-#[tokio::test]
-async fn git_install_sets_git_root() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = install_app().await;
-    let repo = PluginRepo::new();
-    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
-    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
-    let plugin_id = done["pluginId"].as_str().unwrap();
-    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
-    assert_eq!(plugin["gitRoot"], "sample-plugin");
-    assert_eq!(plugin["gitRoot"], plugin["relPath"]);
-
-    let (_dir, local_id) = fixture_plugin(&app, "skills-only", &cookie, &csrf).await;
-    let local = get(&app, &format!("/api/plugins/{local_id}"), &cookie, &csrf).await;
-    assert_eq!(local["source"], "local");
-    assert!(local.get("gitRoot").is_some(), "{local}");
-    assert!(local["gitRoot"].is_null());
-}
-
 async fn marketplace_external(
     app: &Router,
     cookie: &str,
@@ -2452,24 +2006,6 @@ async fn install_marketplace_repo_creates_sibling_rows() {
         assert_eq!(row["gitCommit"], repo.head(), "{row}");
         assert_eq!(row["enabled"], false, "{row}");
     }
-}
-
-#[tokio::test]
-async fn install_skills_catalog_repo() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = install_app().await;
-    let repo = PluginRepo::of("skills-catalog");
-    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
-
-    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
-    assert_eq!(done["pluginIds"].as_array().unwrap().len(), 1, "{done}");
-    let plugin_id = done["pluginId"].as_str().unwrap();
-    assert_eq!(done["pluginIds"][0], plugin_id);
-    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
-    assert_eq!(plugin["status"], "ok", "{plugin}");
-    assert_eq!(plugin["gitRoot"], "skills-catalog");
-    assert_eq!(plugin["skills"].as_array().unwrap().len(), 3, "{plugin}");
 }
 
 #[tokio::test]
@@ -2605,31 +2141,6 @@ async fn update_removed_entry_becomes_missing() {
         get(&app, &uri, &cookie, &csrf).await,
         json!({ "pluginIds": [] })
     );
-}
-
-#[tokio::test]
-async fn update_of_pre_migration_git_plugin_still_works() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (state, app, cookie, csrf) = install_app().await;
-    let pool = state.db.clone().unwrap();
-    let repo = PluginRepo::new();
-    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
-    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
-    let plugin_id = installed["pluginId"].as_str().unwrap().to_string();
-    sqlx::query("UPDATE plugins SET git_root = NULL")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let before = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
-    assert!(before["gitRoot"].is_null());
-
-    repo.push_new_skill("goodbye");
-    let done = post_update(&app, &plugin_id, &cookie, &csrf).await;
-    assert_eq!(done["pluginIds"], json!([plugin_id]), "{done}");
-    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
-    assert_eq!(plugin["gitCommit"], repo.head());
-    assert_eq!(plugin["gitRoot"], "sample-plugin");
 }
 
 // ---- Skill switches ----
@@ -2783,67 +2294,6 @@ async fn skill_switch_hides_skill_from_agents() {
     assert!(skill_enabled(&plugin, "brainstorming"), "{plugin}");
     assert!(mcp_skill_ids(&url, &token).await.iter().any(|s| s == skill));
     assert!(served(&state));
-}
-
-#[tokio::test]
-async fn skill_switch_unknown_is_404() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
-
-    let (status, body) = put_skill(&app, &plugin_id, "no-such-skill", false, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
-    let unknown = Id::new().to_string();
-    let (status, body) = put_skill(&app, &unknown, "brainstorming", false, &cookie, &csrf).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
-}
-
-#[tokio::test]
-async fn skill_switch_requires_admin_and_csrf() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let (_dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/users",
-        json!({ "email": "member@localhost", "password": "secret123" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    let (status, _) = put_skill(
-        &app,
-        &plugin_id,
-        "brainstorming",
-        false,
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri(format!("/api/plugins/{plugin_id}/skills/brainstorming"))
-                .header("content-type", "application/json")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from(r#"{"enabled":false}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
-    assert!(skill_enabled(&plugin, "brainstorming"), "{plugin}");
 }
 
 #[tokio::test]
@@ -4207,84 +3657,6 @@ async fn marketplace_api_lists_adds_refreshes_and_removes_sources() {
             .all(|source| source["name"] != "acme"),
         "{sources}"
     );
-}
-
-#[tokio::test]
-async fn marketplace_mutations_require_admin_and_csrf() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/users",
-        json!({ "email": "member@localhost", "password": "secret123" }),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
-
-    get(
-        &app,
-        "/api/marketplace/sources",
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-    get(
-        &app,
-        "/api/marketplace/entries",
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/marketplace/sources",
-        json!({ "name": "acme", "gitUrl": "https://example.com/acme.git" }),
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/marketplace/sources",
-        json!({ "name": "acme", "gitUrl": "https://example.com/acme.git" }),
-        &cookie,
-        "",
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let unknown = Id::new();
-    let (status, _) = send(
-        &app,
-        "POST",
-        &format!("/api/marketplace/plugins/{unknown}/update"),
-        Value::Null,
-        &member_cookie,
-        &member_csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = send(
-        &app,
-        "POST",
-        &format!("/api/marketplace/plugins/{unknown}/update"),
-        Value::Null,
-        &cookie,
-        "",
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

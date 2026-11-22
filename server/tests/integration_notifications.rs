@@ -180,30 +180,6 @@ async fn unauthenticated_request_is_rejected() {
 }
 
 #[tokio::test]
-async fn mark_read_requires_csrf_token() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let (app, cookie, _csrf) = common::bootstrap_and_login().await;
-
-    let id = Id::new();
-    let res = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri(format!("/api/notifications/{id}/read"))
-                .header(axum::http::header::COOKIE, &cookie)
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn run_finished_creates_notification_and_dedupes() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

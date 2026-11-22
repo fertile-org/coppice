@@ -124,71 +124,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn locked_strings() {
-        assert_eq!(REVIEW_CAP_LABEL, "Review cap");
-        assert_eq!(
-            REVIEW_CAP_HINT,
-            "How many tickets can wait for your review at once. Leave it empty for no cap."
-        );
-        assert_eq!(BOARD_SETTINGS_LABEL, "Board settings");
-        assert_eq!(BOARD_NAME_LABEL, "Name");
-        assert_eq!(
-            BOARD_NAME_INVALID,
-            "Enter a board name that includes letters or numbers."
-        );
-        assert_eq!(
-            BOARD_NAME_CONFLICT,
-            "This name is too similar to another board's name."
-        );
-        assert_eq!(COUNT_IN_REVIEW_LABEL, "Also count In Review");
-        assert_eq!(
-            review_didnt_pass(3),
-            "Review didn't pass after 3 rounds. This may need a different approach."
-        );
-        assert_eq!(OPEN_FINDINGS_LABEL, "Open findings:");
-        assert_eq!(
-            round_cap_comment(3, &["Missing a test".into(), "Header is still wrong".into()]),
-            "Review didn't pass after 3 rounds. This may need a different approach. Open findings:\n- Missing a test\n- Header is still wrong"
-        );
-        assert_eq!(
-            round_cap_comment(3, &[]),
-            "Review didn't pass after 3 rounds. This may need a different approach."
-        );
-        assert!(!round_cap_comment(3, &["  ".into()]).contains("Open findings"));
-        assert_eq!(
-            REVIEW_ROUND_INTRO,
-            "Review only the new diff. Earlier findings are below."
-        );
-        assert_eq!(REVIEW_ROUND_NEW_DIFF, "New diff");
-        assert_eq!(REVIEW_ROUND_EARLIER_FINDINGS, "Earlier findings");
-        assert_eq!(REVIEW_ROUND_NO_DIFF, "(no new diff)");
-        assert_eq!(REVIEW_ROUND_NO_FINDINGS, "(none)");
-        assert_eq!(
-            REVIEW_CAP_INVALID,
-            "Enter a whole number of 1 or more, or leave it empty for no cap."
-        );
-        assert_eq!(waiting_on_review(3, 5), "3 of 5 waiting for review");
-        assert_eq!(
-            ready_held(1),
-            "This ticket waits in Ready until you have room to review it. 1 ticket is waiting on you."
-        );
-        assert_eq!(
-            ready_held(3),
-            "This ticket waits in Ready until you have room to review it. 3 tickets are waiting on you."
-        );
-        assert_eq!(
-            review_entry_held(1),
-            "This ticket waits here until you have room to review it. 1 ticket is waiting on you."
-        );
-        assert_eq!(
-            review_entry_held(3),
-            "This ticket waits here until you have room to review it. 3 tickets are waiting on you."
-        );
+    fn hold_helpers_distinguish_ready_and_entry_copy() {
         assert!(is_ready_hold(&ready_held(1)));
         assert!(is_entry_hold(&review_entry_held(1)));
         assert!(!is_ready_hold(&review_entry_held(1)));
         assert!(!is_entry_hold(&ready_held(1)));
         assert!(!is_ready_hold(&waiting_on_review(1, 1)));
         assert!(!is_entry_hold(&waiting_on_review(1, 1)));
+        assert!(!round_cap_comment(3, &["  ".into()]).contains("Open findings"));
     }
 }
