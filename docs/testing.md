@@ -23,8 +23,8 @@ Largest Rust integration binaries by case count: `integration_plugins` (85), `in
 | Command | Wall | Notes |
 |---------|------|-------|
 | `make web-test` | **54 s** | 151 files / 1110 tests passed; Vitest reported Duration 52.51 s |
-| `make test` (default fail-fast) | **~49 s** then abort | Stops on `coppice-migrations::tests::migration_versions_are_unique` — duplicate version **077** (`077_design_set_kind_and_picks.sql` and `077_plugin_builds.sql`) |
-| `cargo nextest run --features embedded-test-db --workspace --no-fail-fast` | **406 s** wall / **359 s** test execution | 2332 run: 2193 passed, 139 failed, 10 skipped. Most failures are fallout from the duplicate migration (embedded Postgres cannot apply a unique migration set). Treat the wall time as suite size, not a green CI signal until 077 is renumbered. |
+| `make test` (default fail-fast) | *(re-measure after 077 renumber)* | Duplicate version **077** was fixed by moving `design_set_kind_and_picks` to **083** (idempotent); re-run for a fresh wall time. |
+| `cargo nextest run --features embedded-test-db --workspace --no-fail-fast` | **406 s** wall / **359 s** test execution | Historical measurement while 077 was duplicated (embedded migrate failed). Re-measure after the **083** renumber for a green baseline. |
 
 After measurement, reclaim disk with `make clean` (see [AGENTS.md](../AGENTS.md) rule 6).
 
