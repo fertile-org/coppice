@@ -183,11 +183,25 @@ async function fetchTickets(
   return res.json() as Promise<Ticket[]>;
 }
 
-async function createTicket(boardId: string, title: string): Promise<Ticket> {
+export type CreateTicketInput = {
+  title: string;
+  description?: string;
+  repoId?: string | null;
+  priority?: string;
+};
+
+async function createTicket(
+  boardId: string,
+  input: CreateTicketInput,
+): Promise<Ticket> {
+  const body: Record<string, unknown> = { title: input.title };
+  if (input.description !== undefined) body.description = input.description;
+  if (input.repoId !== undefined) body.repoId = input.repoId;
+  if (input.priority !== undefined) body.priority = input.priority;
   const res = await apiFetch(`/api/boards/${boardId}/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(body),
   });
   return res.json() as Promise<Ticket>;
 }
@@ -220,7 +234,7 @@ export function useCreateTicket(boardId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ title }: { title: string }) => createTicket(boardId, title),
+    mutationFn: (input: CreateTicketInput) => createTicket(boardId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ticketsQueryKey(boardId),

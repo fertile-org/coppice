@@ -11,7 +11,11 @@ vi.mock('../../lib/api', async (importOriginal) => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }));
 
-import { ticketsQueryKey, useUpdateTicketStatus } from './useTickets';
+import {
+  ticketsQueryKey,
+  useCreateTicket,
+  useUpdateTicketStatus,
+} from './useTickets';
 
 const BOARD_ID = 'board-1';
 const NOW = '2026-10-31T15:00:00.000Z';
@@ -72,6 +76,72 @@ describe('useUpdateTicketStatus optimistic updatedAt', () => {
     expect(client.getQueryData<Ticket[]>(listKey)?.[0]).toMatchObject({
       status: 'done',
       updatedAt: NOW,
+    });
+  });
+});
+
+describe('useCreateTicket', () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+  });
+
+  it('posts optional description, repoId and priority and returns the ticket', async () => {
+    const created = ticket({
+      id: 'ticket-new',
+      title: 'New ticket',
+      status: 'backlog',
+      description: 'Body',
+      repoId: 'repo-1',
+      priority: 'high',
+    });
+    apiFetchMock.mockResolvedValue({
+      json: async () => created,
+    });
+    const client = newClient();
+    const { result } = renderHook(() => useCreateTicket(BOARD_ID), {
+      wrapper: wrapperFor(client),
+    });
+
+    let returned: Ticket | undefined;
+    await act(async () => {
+      returned = await result.current.mutateAsync({
+        title: 'New ticket',
+        description: 'Body',
+        repoId: 'repo-1',
+        priority: 'high',
+      });
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(`/api/boards/${BOARD_ID}/tickets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'New ticket',
+        description: 'Body',
+        repoId: 'repo-1',
+        priority: 'high',
+      }),
+    });
+    expect(returned).toEqual(created);
+  });
+
+  it('keeps title-only creates working', async () => {
+    apiFetchMock.mockResolvedValue({
+      json: async () => ticket({ id: 'ticket-2', title: 'Quick', status: 'backlog' }),
+    });
+    const client = newClient();
+    const { result } = renderHook(() => useCreateTicket(BOARD_ID), {
+      wrapper: wrapperFor(client),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ title: 'Quick' });
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(`/api/boards/${BOARD_ID}/tickets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Quick' }),
     });
   });
 });

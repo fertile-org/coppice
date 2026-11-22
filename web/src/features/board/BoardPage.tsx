@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
+import { Button } from '../../components/ui/button';
 import { useStableCallback } from '../../lib/useStableCallback';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
@@ -45,6 +46,7 @@ import {
   type BoardFocus,
 } from './boardFocus';
 import { BoardColumn, BoardColumnHeader } from './BoardColumn';
+import { NewTicketDialog } from './NewTicketDialog';
 import { SplitLaneRow } from './SplitLaneRow';
 import { useBoardKeyboard } from './useBoardKeyboard';
 import { useTicketShortcuts } from './useTicketShortcuts';
@@ -70,6 +72,7 @@ import {
   useStartPlanRun,
   useTickets,
   useUpdateTicketStatus,
+  type CreateTicketInput,
   type Ticket,
 } from './useTickets';
 
@@ -128,6 +131,7 @@ export function BoardPage() {
   const [focusGeneration, setFocusGeneration] = useState(0);
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
   const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
+  const [newTicketOpen, setNewTicketOpen] = useState(false);
   const [doneLimit, setDoneLimit] = useState(DONE_COLUMN_PAGE_SIZE);
   const [needsActionOnly, setNeedsActionOnly] = useState(false);
   const toggleNeedsAction = useCallback(() => {
@@ -458,6 +462,13 @@ export function BoardPage() {
     },
   );
 
+  const handleNewTicketCreate = useStableCallback(
+    async (input: CreateTicketInput) => {
+      const ticket = await createTicket.mutateAsync(input);
+      openTicket(ticket.id);
+    },
+  );
+
   const handleRunPlan = useStableCallback((ticketId: string) => {
     void startPlan.mutateAsync(ticketId).catch((err: unknown) => {
       toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
@@ -504,6 +515,9 @@ export function BoardPage() {
             activeCount={activeFilterCount}
             onClick={openFilters}
           />
+          <Button type="button" onClick={() => setNewTicketOpen(true)}>
+            + New ticket
+          </Button>
         </div>
       </div>
 
@@ -709,6 +723,14 @@ export function BoardPage() {
           onClose={() => setAcceptTicket(null)}
         />
       )}
+
+      <NewTicketDialog
+        open={newTicketOpen}
+        repos={repos ?? []}
+        isPending={createTicket.isPending}
+        onClose={() => setNewTicketOpen(false)}
+        onCreate={handleNewTicketCreate}
+      />
     </div>
   );
 }
