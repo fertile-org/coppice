@@ -264,7 +264,7 @@ export function BoardPickerPage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
       />
-      <InitWizardOffer boardsEmpty={!isLoading && !isError && boards?.length === 0} />
+      <InitWizardOffer />
     </div>
   );
 }
