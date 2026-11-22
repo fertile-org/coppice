@@ -47,6 +47,8 @@ export function NewTicketDialog({
   const repoIdField = useId();
   const priorityId = useId();
   const titleRef = useRef<HTMLInputElement>(null);
+  // Sync lock: parent isPending flips one render late; Mod+Enter calls submit directly.
+  const submittingRef = useRef(false);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -61,6 +63,7 @@ export function NewTicketDialog({
       setRepoId('');
       setPriority('medium');
       setError(null);
+      submittingRef.current = false;
     }
   }, [open]);
 
@@ -68,7 +71,8 @@ export function NewTicketDialog({
   const canSubmit = trimmedTitle.length > 0 && !isPending;
 
   async function submit() {
-    if (!canSubmit) return;
+    if (!trimmedTitle || isPending || submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     try {
       await onCreate({
@@ -80,6 +84,8 @@ export function NewTicketDialog({
       onClose();
     } catch (cause) {
       setError(parseApiErrorMessage(cause, 'Unable to create ticket.'));
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -100,11 +106,12 @@ export function NewTicketDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !isPending) onClose();
+        if (!next && !isPending && !submittingRef.current) onClose();
       }}
     >
       <DialogContent
-        className="max-w-lg"
+        className="z-[60] max-w-lg"
+        overlayClassName="z-[60]"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           titleRef.current?.focus();

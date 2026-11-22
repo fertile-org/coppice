@@ -113,6 +113,29 @@ describe('NewTicketDialog', () => {
     });
   });
 
+  it('ignores a second Mod+Enter while create is in flight', async () => {
+    let resolveCreate: ((value: unknown) => void) | undefined;
+    const onCreate = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const { onClose } = renderDialog({ onCreate });
+    const dialog = within(screen.getByRole('dialog', { name: 'New ticket' }));
+    const title = dialog.getByLabelText('Title');
+
+    fireEvent.change(title, { target: { value: 'Once only' } });
+    fireEvent.keyDown(title, { key: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(title, { key: 'Enter', ctrlKey: true });
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    resolveCreate?.({ id: 'ticket-new' });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
   it('keeps the form and shows an inline error when create fails', async () => {
     const onCreate = vi
       .fn()
