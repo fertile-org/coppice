@@ -6,62 +6,51 @@ import { UPDATE_INTERVAL_MS, bannerForUpdate, startUpdateLoop } from '../src/upd
 
 const available = { version: '1.4.0-rc.2', url: 'https://example/rc' };
 
-test('linux banner points at apt as soon as a release is newer', () => {
-  assert.deepEqual(
-    bannerForUpdate({ platform: 'linux', macInPlaceUpdates: false, availability: available, download: null }),
-    { kind: 'linux', version: '1.4.0-rc.2' },
-  );
+test('bannerForUpdate covers linux, mac download, ready, and quiet paths', () => {
+  for (const [input, expected] of [
+    [
+      { platform: 'linux', macInPlaceUpdates: false, availability: available, download: null },
+      { kind: 'linux', version: '1.4.0-rc.2' },
+    ],
+    [
+      {
+        platform: 'linux',
+        macInPlaceUpdates: false,
+        availability: available,
+        download: null,
+        linuxInstalled: '1.4.0-rc.2',
+      },
+      { kind: 'ready', version: '1.4.0-rc.2' },
+    ],
+    [
+      { platform: 'darwin', macInPlaceUpdates: false, availability: available, download: null },
+      { kind: 'download', version: '1.4.0-rc.2', url: DOWNLOAD_PAGE_URL },
+    ],
+    [
+      {
+        platform: 'darwin',
+        macInPlaceUpdates: true,
+        availability: available,
+        download: { phase: 'downloading', version: '1.4.0-rc.2' },
+      },
+      null,
+    ],
+    [
+      {
+        platform: 'darwin',
+        macInPlaceUpdates: true,
+        availability: available,
+        download: { phase: 'downloaded', version: '1.4.0-rc.2' },
+      },
+      { kind: 'ready', version: '1.4.0-rc.2' },
+    ],
+    [{ platform: 'linux', macInPlaceUpdates: false, availability: null, download: null }, null],
+  ]) {
+    assert.deepEqual(bannerForUpdate(input), expected);
+  }
 });
 
-test('linux offers restart once apt has installed the newer package', () => {
-  assert.deepEqual(
-    bannerForUpdate({
-      platform: 'linux',
-      macInPlaceUpdates: false,
-      availability: available,
-      download: null,
-      linuxInstalled: '1.4.0-rc.2',
-    }),
-    { kind: 'ready', version: '1.4.0-rc.2' },
-  );
-});
-
-test('unsigned macOS offers the website download page', () => {
-  assert.deepEqual(
-    bannerForUpdate({ platform: 'darwin', macInPlaceUpdates: false, availability: available, download: null }),
-    { kind: 'download', version: '1.4.0-rc.2', url: DOWNLOAD_PAGE_URL },
-  );
-});
-
-test('signed macOS stays quiet while the update downloads and then offers restart', () => {
-  assert.equal(
-    bannerForUpdate({
-      platform: 'darwin',
-      macInPlaceUpdates: true,
-      availability: available,
-      download: { phase: 'downloading', version: '1.4.0-rc.2' },
-    }),
-    null,
-  );
-  assert.deepEqual(
-    bannerForUpdate({
-      platform: 'darwin',
-      macInPlaceUpdates: true,
-      availability: available,
-      download: { phase: 'downloaded', version: '1.4.0-rc.2' },
-    }),
-    { kind: 'ready', version: '1.4.0-rc.2' },
-  );
-});
-
-test('no banner when nothing is newer', () => {
-  assert.equal(
-    bannerForUpdate({ platform: 'linux', macInPlaceUpdates: false, availability: null, download: null }),
-    null,
-  );
-});
-
-test('the update loop returns before the check finishes', async () => {
+test('the update loop returns before the check finishes and respects automaticUpdates', async () => {
   let release;
   let intervalMs;
   const check = () =>
@@ -81,16 +70,14 @@ test('the update loop returns before the check finishes', async () => {
   assert.equal(intervalMs, UPDATE_INTERVAL_MS);
   loop.stop();
   release();
-});
 
-test('automatic updates off does not check', () => {
   let calls = 0;
-  const loop = startUpdateLoop({
+  const off = startUpdateLoop({
     enabled: false,
     check: () => {
       calls += 1;
     },
   });
   assert.equal(calls, 0);
-  loop.stop();
+  off.stop();
 });

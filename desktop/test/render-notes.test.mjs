@@ -15,21 +15,16 @@ const template = [
 ].join('\n');
 
 describe('renderNotes', () => {
-  it('keeps the block and strips the marker lines when the mac build is unsigned', () => {
+  it('keeps, removes, and repeats MAC_UNSIGNED blocks', () => {
     assert.equal(
       renderNotes(template, { macUnsigned: true }),
       '## Install\n\nUnsigned: run xattr.\n\nLinux: apt install.\n',
     );
-  });
-
-  it('removes the block entirely when the mac build is signed', () => {
     assert.equal(renderNotes(template, { macUnsigned: false }), '## Install\n\nLinux: apt install.\n');
-  });
 
-  it('handles several blocks', () => {
-    const t = '{{MAC_UNSIGNED}}\na\n{{/MAC_UNSIGNED}}\nb\n{{MAC_UNSIGNED}}\nc\n{{/MAC_UNSIGNED}}\n';
-    assert.equal(renderNotes(t, { macUnsigned: true }), 'a\nb\nc\n');
-    assert.equal(renderNotes(t, { macUnsigned: false }), 'b\n');
+    const multi = '{{MAC_UNSIGNED}}\na\n{{/MAC_UNSIGNED}}\nb\n{{MAC_UNSIGNED}}\nc\n{{/MAC_UNSIGNED}}\n';
+    assert.equal(renderNotes(multi, { macUnsigned: true }), 'a\nb\nc\n');
+    assert.equal(renderNotes(multi, { macUnsigned: false }), 'b\n');
   });
 
   it('splices the install section onto generated notes and replaces it on the next run', () => {
@@ -47,11 +42,12 @@ describe('renderNotes', () => {
   });
 
   it('fails on an unclosed or stray marker', () => {
-    assert.throws(() => renderNotes('{{MAC_UNSIGNED}}\na\n', { macUnsigned: true }), /MAC_UNSIGNED/);
-    assert.throws(() => renderNotes('a\n{{/MAC_UNSIGNED}}\n', { macUnsigned: false }), /MAC_UNSIGNED/);
-    assert.throws(
-      () => renderNotes('{{MAC_UNSIGNED}}\n{{MAC_UNSIGNED}}\n{{/MAC_UNSIGNED}}\n', { macUnsigned: true }),
-      /MAC_UNSIGNED/,
-    );
+    for (const body of [
+      '{{MAC_UNSIGNED}}\na\n',
+      'a\n{{/MAC_UNSIGNED}}\n',
+      '{{MAC_UNSIGNED}}\n{{MAC_UNSIGNED}}\n{{/MAC_UNSIGNED}}\n',
+    ]) {
+      assert.throws(() => renderNotes(body, { macUnsigned: true }), /MAC_UNSIGNED/);
+    }
   });
 });

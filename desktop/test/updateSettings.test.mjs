@@ -6,18 +6,15 @@ import test from 'node:test';
 
 import { readUpdateSettings, writeUpdateSettings } from '../src/updateSettings.mjs';
 
-test('automatic updates default on when the file is missing or invalid', () => {
+test('automatic updates default on, and persist across reads', () => {
   const dir = mkdtempSync(join(tmpdir(), 'coppice-update-settings-'));
-  const file = join(dir, 'update-settings.json');
-  assert.deepEqual(readUpdateSettings(file), { automaticUpdates: true });
+  const missing = join(dir, 'update-settings.json');
+  assert.deepEqual(readUpdateSettings(missing), { automaticUpdates: true });
 
   const broken = join(dir, 'broken.json');
   writeFileSync(broken, '{');
   assert.deepEqual(readUpdateSettings(broken), { automaticUpdates: true });
-});
 
-test('automatic updates persists across reads', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'coppice-update-settings-'));
   const file = join(dir, 'nested', 'update-settings.json');
   assert.deepEqual(writeUpdateSettings(file, { automaticUpdates: false }), {
     automaticUpdates: false,

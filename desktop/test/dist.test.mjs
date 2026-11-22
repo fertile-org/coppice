@@ -69,8 +69,8 @@ describe('builderArgs', () => {
     assert.ok(args.includes('--publish=never'));
   });
 
-  for (const empty of ['', '   ', '\n']) {
-    it(`treats ${JSON.stringify(empty)} signing secrets as absent`, () => {
+  it('treats blank signing secrets as absent', () => {
+    for (const empty of ['', '   ', '\n']) {
       const secrets = {
         CSC_LINK: empty,
         CSC_KEY_PASSWORD: empty,
@@ -83,8 +83,8 @@ describe('builderArgs', () => {
       assert.equal(env.CSC_IDENTITY_AUTO_DISCOVERY, 'false');
       assert.equal(env.HOME, '/h');
       assert.ok(!args.includes('-c.mac.notarize=true'));
-    });
-  }
+    }
+  });
 
   it('notarizes only when both APPLE_API_KEY and CSC_LINK are set', () => {
     const notarize = (env) =>

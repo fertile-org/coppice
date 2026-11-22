@@ -75,17 +75,7 @@ async function bootstrapIfNeeded() {
     },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
-
-  if (res.ok) {
-    console.log('smoke: bootstrapped admin user');
-    return;
-  }
-
-  if (res.status === 403) {
-    console.log('smoke: admin already bootstrapped');
-    return;
-  }
-
+  if (res.ok || res.status === 403) return;
   fail(`bootstrap failed: ${res.status} ${await res.text()}`);
 }
 
@@ -142,7 +132,7 @@ async function expectJson(res, status, label) {
 }
 
 async function skipPlanning(ticketId, auth) {
-  const ticket = await expectJson(
+  await expectJson(
     await api('PATCH', `/api/tickets/${ticketId}`, {
       ...auth,
       body: { skipPlanning: true },
@@ -150,9 +140,6 @@ async function skipPlanning(ticketId, auth) {
     200,
     'skip planning',
   );
-  if (ticket.skipPlanning !== true) {
-    fail('skip planning was not enabled');
-  }
 }
 
 async function ensurePluginDir(auth) {

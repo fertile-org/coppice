@@ -7,56 +7,52 @@ import { describe, it } from 'node:test';
 import { debianPackageVersion, parseReleaseTag, setPackageVersion } from '../scripts/release-version.mjs';
 
 describe('parseReleaseTag', () => {
-  it('accepts a stable tag', () => {
-    assert.deepEqual(parseReleaseTag('v1.2.3'), { version: '1.2.3', prerelease: false });
+  it('parses stable and prerelease tags', () => {
+    for (const [tag, expected] of [
+      ['v1.2.3', { version: '1.2.3', prerelease: false }],
+      ['v1.2.3-rc.4', { version: '1.2.3-rc.4', prerelease: true }],
+      ['v10.20.30', { version: '10.20.30', prerelease: false }],
+    ]) {
+      assert.deepEqual(parseReleaseTag(tag), expected, tag);
+    }
   });
 
-  it('accepts a release candidate as a prerelease', () => {
-    assert.deepEqual(parseReleaseTag('v1.2.3-rc.4'), { version: '1.2.3-rc.4', prerelease: true });
-  });
-
-  it('accepts multi-digit components', () => {
-    assert.deepEqual(parseReleaseTag('v10.20.30'), { version: '10.20.30', prerelease: false });
-  });
-
-  for (const tag of [
-    '1.2.3',
-    'v1.2',
-    'v1.2.3-beta',
-    'v1.2.3-rc',
-    'v1.2.3-rc.',
-    'v01.2.3',
-    'v1.2.3 ',
-    'refs/tags/v1.2.3',
-    '',
-  ]) {
-    it(`rejects ${JSON.stringify(tag)}`, () => {
-      assert.throws(() => parseReleaseTag(tag), /release tag/);
-    });
-  }
-
-  it('rejects non-strings', () => {
-    assert.throws(() => parseReleaseTag(undefined), /release tag/);
+  it('rejects invalid tags', () => {
+    for (const tag of [
+      '1.2.3',
+      'v1.2',
+      'v1.2.3-beta',
+      'v1.2.3-rc',
+      'v1.2.3-rc.',
+      'v01.2.3',
+      'v1.2.3 ',
+      'refs/tags/v1.2.3',
+      '',
+      undefined,
+    ]) {
+      assert.throws(() => parseReleaseTag(tag), /release tag/, String(tag));
+    }
   });
 });
 
 describe('debianPackageVersion', () => {
-  it('keeps a final release as upstream X.Y.Z', () => {
-    assert.equal(debianPackageVersion('0.1.0'), '0.1.0');
-    assert.equal(debianPackageVersion('10.20.30'), '10.20.30');
+  it('keeps finals and tilde-maps release candidates', () => {
+    for (const [version, expected] of [
+      ['0.1.0', '0.1.0'],
+      ['10.20.30', '10.20.30'],
+      ['0.1.0-rc.7', '0.1.0~rc.7'],
+      ['1.2.3-rc.4', '1.2.3~rc.4'],
+      ['10.20.30-rc.11', '10.20.30~rc.11'],
+    ]) {
+      assert.equal(debianPackageVersion(version), expected, version);
+    }
   });
 
-  it('uses a tilde so a release candidate sorts before the final version', () => {
-    assert.equal(debianPackageVersion('0.1.0-rc.7'), '0.1.0~rc.7');
-    assert.equal(debianPackageVersion('1.2.3-rc.4'), '1.2.3~rc.4');
-    assert.equal(debianPackageVersion('10.20.30-rc.11'), '10.20.30~rc.11');
+  it('rejects invalid app versions', () => {
+    for (const version of ['v0.1.0-rc.7', '0.1.0-rc', '0.1.0~rc.7', '0.1.0-beta.1', '01.2.3', '']) {
+      assert.throws(() => debianPackageVersion(version), /app version/, version);
+    }
   });
-
-  for (const version of ['v0.1.0-rc.7', '0.1.0-rc', '0.1.0~rc.7', '0.1.0-beta.1', '01.2.3', '']) {
-    it(`rejects ${JSON.stringify(version)}`, () => {
-      assert.throws(() => debianPackageVersion(version), /app version/);
-    });
-  }
 });
 
 describe('setPackageVersion', () => {

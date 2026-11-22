@@ -59,7 +59,7 @@ Use this when deleting or merging tests in follow-on cleanup tickets. Prefer few
 
 ### Cleanup candidates (estimated cuts)
 
-No test is deleted in this ticket. Estimates are judgment calls for later tickets; percentages are of that file’s current case count.
+Historical estimates from the baseline ticket (case counts below are from **2026-11-21**, before tickets 2–4). See [Cleanup done](#cleanup-done-tickets-24–44) for after counts. Percentages were of that file’s then-current case count.
 
 **Ticket-named starters**
 
@@ -99,6 +99,44 @@ No test is deleted in this ticket. Estimates are judgment calls for later ticket
 | **Named + additional** | | | **~225 (~6%)** |
 
 **Why this is not ~30% yet.** Thirty percent of ~3620 is ~1086 cases. The largest files alone only yield a low-single-digit percent under conservative Delete/Merge rates that still keep domain pins. A suite-wide pass that applies the rubric at plausible layer rates can approach the target in follow-on tickets — for example web ~35% (~390), integration ~25% (~190), unit ~15% (~240), desktop ~10% (~17) ≈ **~840 (~23%)**; pushing web toward ~40% and unit toward ~20% lands near **~30%**. Tickets 2–4 should keep walking medium-sized files with the same Delete/Merge/Keep rules rather than only the nine starters above. Fix the duplicate migration **077** before trusting a green `make test` wall time.
+
+### Cleanup done (tickets 2/4–4/4)
+
+Tickets 2–4 applied the rubric above. Baseline numbers in the tables stay as measured on **2026-11-21**; this section is the before/after report.
+
+#### Counts (before → after)
+
+| Layer | Before (baseline) | After | Δ |
+|-------|------------------:|------:|--:|
+| Rust (`cargo nextest list --workspace --features embedded-test-db`) | 2332 | **2251** (unitish ~1553 / integration ~698) | −81 |
+| Web (`make web-test` / Vitest) | 1110 (ticket 3/4 started from 1127) | **740** | −370 vs baseline (−387 vs 1127) |
+| Desktop (`cd desktop && yarn test`) | 169 | **123** | −46 (~27%) |
+| E2E smoke line count (`wc -l e2e/smoke/*.mjs`) | 3603 | **3486** | −117 |
+| E2E smoke scripts | 9 | 9 | 0 |
+| **Suite total (approx.)** | **~3620** | **~3114** | **≈ −506 (~14%)** |
+
+What changed in ticket 4/4 (this ticket):
+
+- **Desktop:** Folded release/version and update-path suites into table-driven cases (`release-version`, `stable-installer-name`, `select-published-release`, `render-notes`, `deb-version` left as-is for dpkg pins, `apt-repo` fingerprint merge, `updateCheck` / `updatePlan` / `updateSettings` / `macUpdater`, plus small collapses in `dist` / `logsDir` / `readyLine` / `startupError` / `userDataPath`). Behavior pins kept; per-row `it()` expansions merged into one case with an internal table.
+- **E2E:** No new helper (none existed). Trimmed duplicated bootstrap verbosity, skipPlanning echo checks, m03 post-poll `listRuns`, m04 agent-comment assert (owned by m03), m02 optional web ping, and m06-knowledge `/agents` SPA check. Unique board names in m02 so re-runs do not 500 on a fixed name.
+
+Tickets 2/4 and 3/4 already cut Rust (~81) and web (~370). Surviving owners for deleted/merged pins live in those commits (`a39e0335`, `3e5c1b15`) and in the desktop/e2e files listed above.
+
+#### Timings (warm, 2026-11-22)
+
+| Command | Before | After | Notes |
+|---------|--------|-------|-------|
+| `make web-test` | 54 s | **51 s** wall (Vitest Duration 46.15 s; 740 passed / 153 files) | Faster mainly from fewer cases |
+| `make desktop-test` | *(not in baseline)* | **8.5 s** wall (123 passed; Node duration ~1.5 s) | Includes `yarn install --frozen-lockfile` |
+| `make test` | *(invalid while 077 duplicated)* | **187 s** wall / **148 s** nextest Summary (2251 passed, 10 skipped) | First green measurement after the 083 renumber; not a delta against the failed historical run. One earlier fail-fast attempt hit a flaky `migration_082_upgrades_uuid_rows_fks_and_checks` embedded-DB race (`database … does not exist`); re-run was green. |
+
+#### Coverage
+
+Still **not measured**. `cargo-llvm-cov` is not installed; `@vitest/coverage-v8` is not a dependency. Adding either is out of scope for cleanup — this ticket kept pins by merging tables rather than claiming coverage %.
+
+#### Cleanup candidates — status
+
+The ticket-named starters and additional high-yield files in the estimate tables above were the targets for tickets 2/4 (Rust) and 3/4 (web). Ticket 4/4 covered desktop release/update suites and e2e duplicate assertions. Remaining estimate rows that still list high case counts are stale relative to the after table; re-list from `cargo nextest list` / `yarn vitest list` before another cleanup pass.
 
 ## CI (`.github/workflows/ci.yml`)
 

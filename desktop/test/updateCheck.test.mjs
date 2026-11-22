@@ -3,38 +3,43 @@ import assert from 'node:assert/strict';
 import { checkForUpdate, isNewer, selectNewerRelease } from '../src/updateCheck.mjs';
 
 test('isNewer compares semver with rc ordering', () => {
-  assert.equal(isNewer('v1.2.0', '1.1.9'), true);
-  assert.equal(isNewer('v1.2.0', '1.2.0'), false);
-  assert.equal(isNewer('v1.2.0', '1.2.0-rc.1'), true);
-  assert.equal(isNewer('v1.2.0-rc.2', '1.2.0'), false);
-  assert.equal(isNewer('v1.2.0-rc.2', '1.2.0-rc.1'), true);
-  assert.equal(isNewer('v1.10.0', '1.9.0'), true);
-  assert.equal(isNewer('garbage', '1.0.0'), false);
-  assert.equal(isNewer('v1.2.0-rc.3', '1.2.0-rc.3'), false);
+  for (const [left, right, expected] of [
+    ['v1.2.0', '1.1.9', true],
+    ['v1.2.0', '1.2.0', false],
+    ['v1.2.0', '1.2.0-rc.1', true],
+    ['v1.2.0-rc.2', '1.2.0', false],
+    ['v1.2.0-rc.2', '1.2.0-rc.1', true],
+    ['v1.10.0', '1.9.0', true],
+    ['garbage', '1.0.0', false],
+    ['v1.2.0-rc.3', '1.2.0-rc.3', false],
+  ]) {
+    assert.equal(isNewer(left, right), expected, `${left} vs ${right}`);
+  }
 });
 
-test('selectNewerRelease follows the newest tag and includes prereleases', () => {
-  const chosen = selectNewerRelease(
-    [
-      { tag_name: 'v1.0.0', html_url: 'https://example/stable', draft: false, prerelease: false },
-      { tag_name: 'v1.2.0-rc.1', html_url: 'https://example/rc1', draft: false, prerelease: true },
-      { tag_name: 'v1.2.0-rc.2', html_url: 'https://example/rc2', draft: false, prerelease: true },
-      { tag_name: 'v9.0.0', html_url: 'https://example/draft', draft: true, prerelease: false },
-    ],
-    '1.0.0',
+test('selectNewerRelease follows the newest tag, including prereleases', () => {
+  assert.deepEqual(
+    selectNewerRelease(
+      [
+        { tag_name: 'v1.0.0', html_url: 'https://example/stable', draft: false, prerelease: false },
+        { tag_name: 'v1.2.0-rc.1', html_url: 'https://example/rc1', draft: false, prerelease: true },
+        { tag_name: 'v1.2.0-rc.2', html_url: 'https://example/rc2', draft: false, prerelease: true },
+        { tag_name: 'v9.0.0', html_url: 'https://example/draft', draft: true, prerelease: false },
+      ],
+      '1.0.0',
+    ),
+    { version: '1.2.0-rc.2', url: 'https://example/rc2' },
   );
-  assert.deepEqual(chosen, { version: '1.2.0-rc.2', url: 'https://example/rc2' });
-});
-
-test('selectNewerRelease prefers a final release over an older rc', () => {
-  const chosen = selectNewerRelease(
-    [
-      { tag_name: 'v1.2.0-rc.4', html_url: 'https://example/rc', draft: false, prerelease: true },
-      { tag_name: 'v1.2.0', html_url: 'https://example/final', draft: false, prerelease: false },
-    ],
-    '1.1.0',
+  assert.deepEqual(
+    selectNewerRelease(
+      [
+        { tag_name: 'v1.2.0-rc.4', html_url: 'https://example/rc', draft: false, prerelease: true },
+        { tag_name: 'v1.2.0', html_url: 'https://example/final', draft: false, prerelease: false },
+      ],
+      '1.1.0',
+    ),
+    { version: '1.2.0', url: 'https://example/final' },
   );
-  assert.deepEqual(chosen, { version: '1.2.0', url: 'https://example/final' });
 });
 
 test('checkForUpdate reads the release list so prereleases are visible', async () => {
@@ -65,30 +70,25 @@ test('checkForUpdate reads the release list so prereleases are visible', async (
   assert.ok(options.signal instanceof AbortSignal, 'fetch is bounded by an abort signal');
 });
 
-test('checkForUpdate reports up to date when nothing newer is published', async () => {
-  const fetchImpl = async () => ({
+test('checkForUpdate reports up-to-date and fails quietly', async () => {
+  const same = async () => ({
     ok: true,
     json: async () => [{ tag_name: 'v1.0.0', html_url: 'https://example/same', draft: false }],
   });
-  assert.deepEqual(
-    await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl }),
-    { status: 'up-to-date' },
-  );
-});
+  assert.deepEqual(await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl: same }), {
+    status: 'up-to-date',
+  });
 
-test('checkForUpdate fails quietly on a non-200 or a network error', async () => {
   const notFound = async () => ({ ok: false, status: 404, json: async () => ({}) });
-  assert.deepEqual(
-    await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl: notFound }),
-    { status: 'error' },
-  );
+  assert.deepEqual(await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl: notFound }), {
+    status: 'error',
+  });
   const rejecting = async () => {
     throw new Error('offline');
   };
-  assert.deepEqual(
-    await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl: rejecting }),
-    { status: 'error' },
-  );
+  assert.deepEqual(await checkForUpdate({ repo: 'r/r', currentVersion: '1.0.0', fetchImpl: rejecting }), {
+    status: 'error',
+  });
 });
 
 test('checkForUpdate reads latest.json from the update host first', async () => {
@@ -117,7 +117,12 @@ test('checkForUpdate reads latest.json from the update host first', async () => 
   });
   assert.deepEqual(requested, ['https://apt.getcoppice.app/updates/latest.json']);
   assert.deepEqual(
-    await checkForUpdate({ repo: 'r/r', currentVersion: '1.4.0', updateBase: 'https://apt.getcoppice.app', fetchImpl }),
+    await checkForUpdate({
+      repo: 'r/r',
+      currentVersion: '1.4.0',
+      updateBase: 'https://apt.getcoppice.app',
+      fetchImpl,
+    }),
     { status: 'up-to-date' },
   );
 });

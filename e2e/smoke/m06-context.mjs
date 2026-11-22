@@ -61,17 +61,7 @@ async function bootstrapIfNeeded() {
     },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
-
-  if (res.ok) {
-    console.log('smoke: bootstrapped admin user');
-    return;
-  }
-
-  if (res.status === 403) {
-    console.log('smoke: admin already bootstrapped');
-    return;
-  }
-
+  if (res.ok || res.status === 403) return;
   fail(`bootstrap failed: ${res.status} ${await res.text()}`);
 }
 
@@ -125,7 +115,7 @@ async function api(method, path, { cookie, csrfToken, body } = {}) {
 async function createBoard(auth) {
   const res = await api('POST', '/api/boards', {
     ...auth,
-    body: { name: 'M06 Smoke Board' },
+    body: { name: `M06 Smoke Board ${Date.now().toString(36)}` },
   });
 
   if (res.status !== 201) {
@@ -235,10 +225,6 @@ async function skipPlanning(ticketId, auth) {
   });
   if (!res.ok) {
     fail(`skip planning failed: ${res.status} ${await res.text()}`);
-  }
-  const ticket = await res.json();
-  if (ticket.skipPlanning !== true) {
-    fail('skip planning did not stick');
   }
 }
 

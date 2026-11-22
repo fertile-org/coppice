@@ -8,14 +8,12 @@
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
- *   COPPICE_WEB_URL            optional http://localhost:5001 (reachability only)
  *   COPPICE_BOOTSTRAP_PASSWORD default changeme
  *   COPPICE_SMOKE_EMAIL        default admin@localhost
  *   COPPICE_SMOKE_PASSWORD     default changeme
  */
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
-const WEB = process.env.COPPICE_WEB_URL ?? 'http://localhost:5001';
 const BOOTSTRAP_PASSWORD =
   process.env.COPPICE_BOOTSTRAP_PASSWORD ?? 'changeme';
 const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';
@@ -58,17 +56,7 @@ async function bootstrapIfNeeded() {
     },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
-
-  if (res.ok) {
-    console.log('smoke: bootstrapped admin user');
-    return;
-  }
-
-  if (res.status === 403) {
-    console.log('smoke: admin already bootstrapped');
-    return;
-  }
-
+  if (res.ok || res.status === 403) return;
   fail(`bootstrap failed: ${res.status} ${await res.text()}`);
 }
 
@@ -122,7 +110,7 @@ async function api(method, path, { cookie, csrfToken, body } = {}) {
 async function createBoard(auth) {
   const res = await api('POST', '/api/boards', {
     ...auth,
-    body: { name: 'Smoke Test Board' },
+    body: { name: `Smoke Test Board ${Date.now().toString(36)}` },
   });
 
   if (res.status !== 201) {
@@ -172,19 +160,6 @@ async function listTickets(boardId, auth) {
   console.log(`smoke: listed ${tickets.length} ticket(s)`);
 }
 
-async function checkWebOptional() {
-  try {
-    const res = await fetch(WEB, { redirect: 'manual' });
-    if (res.ok || res.status === 304 || res.status === 302) {
-      console.log(`smoke: web reachable at ${WEB}`);
-      return;
-    }
-    console.log(`smoke: web at ${WEB} returned ${res.status} (non-fatal)`);
-  } catch {
-    console.log(`smoke: web at ${WEB} not reachable (non-fatal)`);
-  }
-}
-
 async function main() {
   console.log(`smoke: waiting for ${API}/health`);
   await waitForHealth();
@@ -194,7 +169,6 @@ async function main() {
   const board = await createBoard(auth);
   await createTicket(board.id, auth);
   await listTickets(board.id, auth);
-  await checkWebOptional();
 
   console.log('smoke: M02 board API flow passed');
 }
