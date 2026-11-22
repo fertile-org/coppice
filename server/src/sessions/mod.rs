@@ -1,3 +1,4 @@
+pub mod chat_partial_reply;
 pub mod live_message;
 pub mod opencode_client;
 pub mod opencode_events;

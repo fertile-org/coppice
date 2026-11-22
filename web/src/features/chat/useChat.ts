@@ -19,6 +19,7 @@ import type {
   KnowledgeType,
 } from '../../lib/schemas/knowledge';
 import { KNOWLEDGE_QUERY_KEY } from '../knowledge/useKnowledge';
+import { chatSessionUsageQueryKey } from './useChatSessionUsage';
 
 export const CHAT_SESSIONS_QUERY_KEY = ['chat-sessions'] as const;
 
@@ -213,6 +214,29 @@ export function usePostChatMessage(sessionId: string) {
         queryKey: chatMessagesQueryKey(input.sessionId ?? sessionId),
       });
       void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+    },
+  });
+}
+
+async function stopSession(sessionId: string): Promise<ChatSession> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/stop`, {
+    method: 'POST',
+  });
+  return chatSessionSchema.parse(await res.json());
+}
+
+export function useStopChatSession(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => stopSession(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: chatMessagesQueryKey(sessionId),
+      });
+      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: chatSessionUsageQueryKey(sessionId),
+      });
     },
   });
 }
