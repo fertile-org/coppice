@@ -313,6 +313,37 @@ impl<'a> PlanningService<'a> {
         .await
     }
 
+    /// Store the plan and move the ticket into Plan Review in one transaction.
+    pub async fn insert_plan_and_bind(
+        &self,
+        ticket_id: Id,
+        agent_id: Id,
+        summary: &str,
+        run_id: Option<Id>,
+        no_visible_change: bool,
+        suggest_skip_review: bool,
+    ) -> Result<TicketPlan, PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        let status_before = ticket.ticket.status;
+        let mut tx = self.pool.begin().await?;
+        let plan = self
+            .insert_plan_in_tx(
+                &mut tx,
+                ticket_id,
+                &ticket,
+                Some(agent_id),
+                run_id,
+                &format_plan(summary),
+                None,
+                no_visible_change,
+                suggest_skip_review,
+            )
+            .await?;
+        Self::bind_plan_in_tx(&mut tx, ticket_id, status_before).await?;
+        tx.commit().await?;
+        Ok(plan)
+    }
+
     /// Markers validated at submit can still go stale before finish; drop those with a log.
     async fn filter_live_marker_ids(
         tx: &mut Transaction<'_, Postgres>,
@@ -371,9 +402,38 @@ impl<'a> PlanningService<'a> {
     ) -> Result<TicketPlan, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         let mut tx = self.pool.begin().await?;
+        let plan = self
+            .insert_plan_in_tx(
+                &mut tx,
+                ticket_id,
+                &ticket,
+                agent_id,
+                run_id,
+                body,
+                revision,
+                no_visible_change,
+                suggest_skip_review,
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(plan)
+    }
+
+    async fn insert_plan_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Id,
+        ticket: &crate::services::ticket_service::TicketWithDisplay,
+        agent_id: Option<Id>,
+        run_id: Option<Id>,
+        body: &str,
+        revision: Option<i32>,
+        no_visible_change: bool,
+        suggest_skip_review: bool,
+    ) -> Result<TicketPlan, PlanError> {
         sqlx::query("SELECT id FROM tickets WHERE id = $1 FOR UPDATE")
             .bind(ticket_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         let next = match revision {
             Some(forced) => forced,
@@ -382,7 +442,7 @@ impl<'a> PlanningService<'a> {
                     "SELECT COALESCE(MAX(revision), 0) + 1 FROM ticket_plans WHERE ticket_id = $1",
                 )
                 .bind(ticket_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await?;
                 next
             }
@@ -405,14 +465,14 @@ impl<'a> PlanningService<'a> {
                 "#,
             )
             .bind(ticket_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
             (None, None, serde_json::Map::new())
         } else {
             // Technical sets follow plan markers, not kind. A set whose id is
             // absent from this plan is replaced (or retired when no markers).
             let markers = Self::filter_live_marker_ids(
-                &mut tx,
+                tx,
                 ticket_id,
                 run_id,
                 crate::services::design_markers::design_marker_ids(body),
@@ -435,7 +495,7 @@ impl<'a> PlanningService<'a> {
                     "#,
                 )
                 .bind(ticket_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             } else {
                 // superseded_by is only a tombstone pointer; markers[0] may be a
@@ -459,7 +519,7 @@ impl<'a> PlanningService<'a> {
                 .bind(ticket_id)
                 .bind(markers[0])
                 .bind(&markers)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             // Every live plan-run set → option (chosen or recommended). Legacy
@@ -480,7 +540,7 @@ impl<'a> PlanningService<'a> {
                 "#,
             )
             .bind(ticket_id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await?;
             let mut picks = serde_json::Map::new();
             for (set_id, option) in &designs {
@@ -518,10 +578,46 @@ impl<'a> PlanningService<'a> {
         .bind(design_option_id)
         .bind(&picks_json)
         .bind(suggest_skip_review)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(row_to_plan(&row))
+    }
+
+    async fn bind_plan_in_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        ticket_id: Id,
+        status_before: TicketStatus,
+    ) -> Result<(), PlanError> {
+        use crate::domain::ticket::status_to_str;
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET approved_plan_id = NULL,
+                approved_plan_content_version = NULL,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .execute(&mut **tx)
+        .await?;
+        if let Some(next) = status_after_planning_run(status_before) {
+            sqlx::query(
+                r#"
+                UPDATE tickets
+                SET status = $2,
+                    substatus = NULL,
+                    substatus_metadata = NULL,
+                    updated_at = now()
+                WHERE id = $1
+                "#,
+            )
+            .bind(ticket_id)
+            .bind(status_to_str(next))
+            .execute(&mut **tx)
+            .await?;
+        }
+        Ok(())
     }
 
     /// Clear approval and move Backlog/Ready into Plan Review.

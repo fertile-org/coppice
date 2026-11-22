@@ -553,6 +553,21 @@ async fn drive_plan_run(
     let orchestrator = RunOrchestrator::new(pool, &state.config.workflow)
         .with_event_bus(&state.event_bus)
         .with_app_state(state);
+    let plan_only = !verifying && questions.is_empty();
+    if plan_only {
+        PlanningService::new(pool)
+            .insert_plan_and_bind(
+                ticket_id,
+                run.agent_id,
+                &summary,
+                Some(run.id),
+                no_visible_change,
+                suggest_skip_review,
+            )
+            .await
+            .context("store plan")?;
+    }
+
     let finished = orchestrator
         .finish_run(run, &result, apply, None, None)
         .await
@@ -572,22 +587,7 @@ async fn drive_plan_run(
             )
             .await
             .context("move the parent to Human Review")?;
-    } else if questions.is_empty() {
-        PlanningService::new(pool)
-            .insert_plan(
-                ticket_id,
-                run.agent_id,
-                &summary,
-                Some(run.id),
-                no_visible_change,
-                suggest_skip_review,
-            )
-            .await
-            .context("insert plan")?;
-        PlanningService::new(pool)
-            .bind_latest_plan(ticket_id)
-            .await
-            .context("bind plan")?;
+    } else if plan_only {
         if let AgentRunResult::Done { split_tickets, .. } = &result {
             if !split_tickets.is_empty() {
                 crate::services::split_service::SplitService::new(pool, &state.config.workflow)
@@ -620,7 +620,6 @@ async fn drive_plan_run(
         .await
         .context("load ticket after plan")?;
     crate::events::publish_ticket_updated(&state.event_bus, &updated);
-    let plan_only = !verifying && questions.is_empty();
     if !plan_only {
         let comments = CommentService::new(pool)
             .list_by_ticket(ticket_id)
