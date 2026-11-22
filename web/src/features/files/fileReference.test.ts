@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   findProseFileReferences,
+  isMarkdownPreviewable,
   parseFileReference,
+  resolveRelativePath,
   ticketFileUrl,
 } from './fileReference';
 
@@ -22,6 +24,7 @@ describe('parseFileReference', () => {
       line: 3,
       endLine: 9,
     });
+    expect(parseFileReference('README.markdown')?.kind).toBe('text');
     expect(parseFileReference('docs/shot.PNG')).toEqual({ path: 'docs/shot.PNG', kind: 'image' });
     expect(parseFileReference('Makefile')?.kind).toBe('text');
   });
@@ -61,5 +64,31 @@ describe('ticketFileUrl', () => {
     expect(ticketFileUrl('t1', 'src/a b.rs')).toBe(
       '/api/tickets/t1/files/content?path=src%2Fa%20b.rs',
     );
+  });
+});
+
+describe('isMarkdownPreviewable', () => {
+  it('accepts md and markdown only', () => {
+    expect(isMarkdownPreviewable('docs/a.md')).toBe(true);
+    expect(isMarkdownPreviewable('README.markdown')).toBe(true);
+    expect(isMarkdownPreviewable('page.mdx')).toBe(false);
+    expect(isMarkdownPreviewable('src/a.rs')).toBe(false);
+  });
+});
+
+describe('resolveRelativePath', () => {
+  it('joins against the file directory and normalizes dots', () => {
+    expect(resolveRelativePath('docs/a.md', 'shot.png')).toBe('docs/shot.png');
+    expect(resolveRelativePath('docs/a.md', './ops.md')).toBe('docs/ops.md');
+    expect(resolveRelativePath('docs/guide/a.md', '../shot.png')).toBe('docs/shot.png');
+    expect(resolveRelativePath('docs/a.md', 'sub/./x.md')).toBe('docs/sub/x.md');
+    expect(resolveRelativePath('README.md', 'docs/a.md')).toBe('docs/a.md');
+  });
+
+  it('rejects escapes past the repo root and .git segments', () => {
+    expect(resolveRelativePath('docs/a.md', '../../secret.txt')).toBeNull();
+    expect(resolveRelativePath('a.md', '../x.md')).toBeNull();
+    expect(resolveRelativePath('docs/a.md', '../.git/config')).toBeNull();
+    expect(resolveRelativePath('docs/a.md', 'foo/.git/bar.md')).toBeNull();
   });
 });

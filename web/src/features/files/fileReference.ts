@@ -28,6 +28,7 @@ const TEXT_EXTENSIONS: Record<string, string | undefined> = {
   json: 'json',
   jsonc: 'json',
   md: 'markdown',
+  markdown: 'markdown',
   mdx: 'markdown',
   toml: 'ini',
   ini: 'ini',
@@ -157,4 +158,39 @@ export function ticketFileUrl(ticketId: string, path: string): string {
 export function formatFileReference(ref: FileReference): string {
   if (!ref.line) return ref.path;
   return ref.endLine ? `${ref.path}:${ref.line}-${ref.endLine}` : `${ref.path}:${ref.line}`;
+}
+
+/** True when the file viewer can offer a rendered Preview (not just Source). */
+export function isMarkdownPreviewable(path: string): boolean {
+  const ext = extension(path);
+  return ext === 'md' || ext === 'markdown';
+}
+
+function dirname(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i === -1 ? '' : path.slice(0, i);
+}
+
+/**
+ * Resolve `href` against the directory of `fromFile` (repo-relative).
+ * Returns null when the result would leave the repo root or include a `.git` segment.
+ */
+export function resolveRelativePath(fromFile: string, href: string): string | null {
+  const raw = href.trim();
+  if (!raw) return null;
+
+  const base = dirname(fromFile);
+  const joined = base ? `${base}/${raw}` : raw;
+  const parts: string[] = [];
+  for (const seg of joined.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (parts.length === 0) return null;
+      parts.pop();
+      continue;
+    }
+    if (seg === '.git') return null;
+    parts.push(seg);
+  }
+  return parts.length > 0 ? parts.join('/') : null;
 }

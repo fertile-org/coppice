@@ -2,7 +2,11 @@ import { Children, isValidElement, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { parseFileReference } from '../features/files/fileReference';
+import {
+  parseFileReference,
+  resolveRelativePath,
+  ticketFileUrl,
+} from '../features/files/fileReference';
 import { FileReferenceLink } from '../features/files/FileReferenceLink';
 import {
   FILE_REFERENCE_URL_PREFIX,
@@ -36,14 +40,28 @@ function mermaidFenceSource(children: ReactNode): string | null {
   return null;
 }
 
+/** Strip an optional `:line` / `#Lline` suffix so a relative path can be resolved. */
+function splitHrefPath(href: string): { path: string; suffix: string } {
+  const match =
+    /^(.*?)(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L(\d+))?)?$/.exec(href.trim()) ?? undefined;
+  if (!match?.[1]) return { path: href.trim(), suffix: '' };
+  return { path: match[1], suffix: href.trim().slice(match[1].length) };
+}
+
 /** A link to a repo file: one found in prose, or a relative markdown link. */
-function linkedFile(href: string | undefined) {
+function linkedFile(href: string | undefined, basePath?: string) {
   if (!href) return null;
   if (href.startsWith(FILE_REFERENCE_URL_PREFIX)) {
     return parseFileReference(decodeURIComponent(href.slice(FILE_REFERENCE_URL_PREFIX.length)));
   }
   // Absolute URLs, anchors and site paths keep their normal link behavior.
   if (/^[a-z][\w+.-]*:|^[#/?]/i.test(href)) return null;
+  if (basePath) {
+    const { path, suffix } = splitHrefPath(href);
+    const resolved = resolveRelativePath(basePath, path);
+    if (!resolved) return null;
+    return parseFileReference(resolved + suffix);
+  }
   return parseFileReference(href);
 }
 
@@ -51,7 +69,11 @@ function urlTransform(url: string): string {
   return url.startsWith(FILE_REFERENCE_URL_PREFIX) ? url : defaultUrlTransform(url);
 }
 
-function markdownComponents(options?: { mermaidAsCode?: boolean }): Components {
+function markdownComponents(options?: {
+  mermaidAsCode?: boolean;
+  basePath?: string;
+  ticketId?: string;
+}): Components {
   return {
     h1: ({ children }) => (
       <h1 className="mb-3 mt-5 font-display text-lg font-semibold text-text-primary first:mt-0">
@@ -88,7 +110,7 @@ function markdownComponents(options?: { mermaidAsCode?: boolean }): Components {
       <strong className="font-semibold text-text-primary">{children}</strong>
     ),
     a: ({ href, children }) => {
-      const file = linkedFile(href);
+      const file = linkedFile(href, options?.basePath);
       if (file) return <FileReferenceLink file={file}>{children}</FileReferenceLink>;
       if (href?.startsWith(FILE_REFERENCE_URL_PREFIX)) return <>{children}</>;
       const external = href != null && /^https?:\/\//i.test(href);
@@ -100,6 +122,30 @@ function markdownComponents(options?: { mermaidAsCode?: boolean }): Components {
         >
           {children}
         </a>
+      );
+    },
+    img: ({ src, alt }) => {
+      if (!options?.basePath || !options.ticketId || !src) return null;
+      if (/^[a-z][\w+.-]*:|^[#/?]/i.test(src)) {
+        if (/^https?:\/\//i.test(src)) {
+          return (
+            <img
+              src={src}
+              alt={alt ?? ''}
+              className="my-3 max-h-[70vh] max-w-full rounded-md object-contain"
+            />
+          );
+        }
+        return null;
+      }
+      const resolved = resolveRelativePath(options.basePath, src);
+      if (!resolved) return null;
+      return (
+        <img
+          src={ticketFileUrl(options.ticketId, resolved)}
+          alt={alt || resolved}
+          className="my-3 max-h-[70vh] max-w-full rounded-md object-contain"
+        />
       );
     },
     code: ({ className, children }) => {
@@ -174,18 +220,31 @@ export function normalizeCommentMarkdown(text: string): string {
 export function TicketMarkdown({
   children,
   mermaidAsCode = false,
+  basePath,
+  ticketId,
 }: {
   children: string;
   /** Keep mermaid fences as code so a streaming source does not remount a diagram. */
   mermaidAsCode?: boolean;
+  /** When set (file preview), resolve relative link/image hrefs against this file. */
+  basePath?: string;
+  /** Ticket whose worktree serves preview images when `basePath` is set. */
+  ticketId?: string;
 }) {
   const text = normalizeCommentMarkdown(children.trim());
   if (!text) return null;
 
+  const comps =
+    basePath || ticketId
+      ? markdownComponents({ mermaidAsCode, basePath, ticketId })
+      : mermaidAsCode
+        ? mermaidAsCodeComponents
+        : components;
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkFileReferences]}
-      components={mermaidAsCode ? mermaidAsCodeComponents : components}
+      components={comps}
       urlTransform={urlTransform}
     >
       {text}

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { Button } from '../../components/ui/button';
 import {
   Dialog,
@@ -12,19 +13,22 @@ import {
 import { ApiError, apiFetch } from '../../lib/api';
 import { formatFileSize } from '../../lib/attachments';
 import { hljs } from '../../lib/highlight';
+import { cn } from '../../lib/utils';
 import {
   formatFileReference,
   highlightLanguage,
+  isMarkdownPreviewable,
   ticketFileUrl,
   type FileReference,
 } from './fileReference';
 
 /** Highlighting large files freezes the dialog; past this they show as plain text. */
-const MAX_HIGHLIGHT_BYTES = 200 * 1024;
+export const MAX_HIGHLIGHT_BYTES = 200 * 1024;
 /** Matches the `leading-5` line height of the gutter and code columns. */
 const LINE_HEIGHT_PX = 20;
 
 type FileSource = 'worktree' | 'repo';
+type ViewMode = 'preview' | 'source';
 
 interface TextFile {
   text: string;
@@ -84,6 +88,10 @@ function useTextFile(ticketId: string, path: string, enabled: boolean) {
   });
 }
 
+function initialViewMode(file: FileReference): ViewMode {
+  return file.line || file.endLine ? 'source' : 'preview';
+}
+
 function TextPreview({ file, text }: { file: FileReference; text: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lines = useMemo(() => text.replace(/\n$/, '').split('\n'), [text]);
@@ -140,6 +148,29 @@ function TextPreview({ file, text }: { file: FileReference; text: string }) {
   );
 }
 
+function MarkdownRenderedPreview({
+  text,
+  basePath,
+  ticketId,
+}: {
+  text: string;
+  basePath: string;
+  ticketId: string;
+}) {
+  return (
+    <div
+      data-testid="file-preview-markdown"
+      className="min-h-0 flex-1 overflow-auto bg-surface-raised"
+    >
+      <div className="mx-auto max-w-[760px] px-8 py-6">
+        <TicketMarkdown basePath={basePath} ticketId={ticketId}>
+          {text}
+        </TicketMarkdown>
+      </div>
+    </div>
+  );
+}
+
 function ImagePreview({
   file,
   url,
@@ -176,6 +207,45 @@ function PreviewMessage({ children }: { children: string }) {
   );
 }
 
+function ViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (next: ViewMode) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="View mode"
+      className="inline-flex overflow-hidden rounded-md border border-border"
+    >
+      {(
+        [
+          { id: 'preview', label: 'Preview' },
+          { id: 'source', label: 'Source' },
+        ] as const
+      ).map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={value === id}
+          onClick={() => onChange(id)}
+          className={cn(
+            'px-3 py-1 font-body text-xs transition-colors duration-fast',
+            value === id
+              ? 'bg-btn-primary text-btn-primary-fg'
+              : 'bg-btn-secondary text-btn-secondary-fg hover:text-text-primary',
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface FilePreviewModalProps {
   /** Keep the modal mounted and toggle this so the exit animation plays. */
   open: boolean;
@@ -189,13 +259,26 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
   const isText = file.kind === 'text';
   const textFile = useTextFile(ticketId, file.path, open && isText);
   const [imageFailed, setImageFailed] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => initialViewMode(file));
   useEffect(() => {
     setImageFailed(false);
   }, [url]);
+  useEffect(() => {
+    setViewMode(initialViewMode(file));
+  }, [file.path, file.line, file.endLine]);
+
   const source = textFile.data?.source;
-  const titleFile = textFile.data?.resolvedPath
-    ? { ...file, path: textFile.data.resolvedPath }
-    : file;
+  const resolvedPath = textFile.data?.resolvedPath;
+  const titleFile = resolvedPath ? { ...file, path: resolvedPath } : file;
+  const markdownBasePath = resolvedPath ?? file.path;
+  const canPreviewMarkdown = isText && isMarkdownPreviewable(markdownBasePath);
+  const tooLargeForPreview =
+    canPreviewMarkdown &&
+    textFile.data != null &&
+    textFile.data.text.length > MAX_HIGHLIGHT_BYTES;
+  const showViewToggle = canPreviewMarkdown && !tooLargeForPreview && Boolean(textFile.data);
+  const effectiveView: ViewMode =
+    canPreviewMarkdown && !tooLargeForPreview ? viewMode : 'source';
   const showOpenRaw = isText ? !textFile.isError : !imageFailed;
   const details = [
     source ? SOURCE_LABEL[source] : null,
@@ -218,6 +301,9 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
             </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {showViewToggle ? (
+              <ViewModeToggle value={effectiveView} onChange={setViewMode} />
+            ) : null}
             {showOpenRaw ? (
               <Button variant="secondary" size="sm" asChild>
                 <a href={url} target="_blank" rel="noopener noreferrer">
@@ -240,7 +326,15 @@ export function FilePreviewModal({ open, ticketId, file, onClose }: FilePreviewM
         ) : textFile.isError ? (
           <PreviewMessage>{filePreviewErrorMessage(textFile.error)}</PreviewMessage>
         ) : textFile.data ? (
-          <TextPreview file={file} text={textFile.data.text} />
+          effectiveView === 'preview' && canPreviewMarkdown ? (
+            <MarkdownRenderedPreview
+              text={textFile.data.text}
+              basePath={markdownBasePath}
+              ticketId={ticketId}
+            />
+          ) : (
+            <TextPreview file={file} text={textFile.data.text} />
+          )
         ) : (
           <PreviewMessage>Loading…</PreviewMessage>
         )}
