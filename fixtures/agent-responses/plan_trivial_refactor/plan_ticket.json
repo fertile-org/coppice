@@ -1,0 +1,8 @@
+{
+  "status": "done",
+  "summary": "## Plan\n\n### Approach\nRename the helper in place. No new dependency or module split.\n\nRejected alternatives: extract a shared crate (too much for a rename); introduce a facade trait (no second caller yet).\n\n### Steps\n- [ ] Rename the helper and update call sites\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

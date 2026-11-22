@@ -14,7 +14,7 @@ use crate::events::{publish_run_finished, AppEvent};
 use crate::mcp::grant::grant_for_run;
 use crate::mcp::token::NewRunToolScope;
 use crate::mcp::tools::result::prefer_submitted_result;
-use crate::plugins::builtin::DESIGN_SKILL_ID;
+use crate::plugins::builtin::{DESIGN_SKILL_ID, DESIGN_TECHNICAL_SKILL_ID};
 use crate::plugins::skills::SkillInfo;
 use crate::providers::{
     connector_enforces_read_only, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
@@ -132,6 +132,12 @@ async fn snapshot_plan_refs(
 /// The plugin can be off for this agent, and then its skill is not listed.
 fn has_design_skill(skills: &[SkillInfo]) -> bool {
     skills.iter().any(|skill| skill.id == DESIGN_SKILL_ID)
+}
+
+fn has_technical_design_skill(skills: &[SkillInfo]) -> bool {
+    skills
+        .iter()
+        .any(|skill| skill.id == DESIGN_TECHNICAL_SKILL_ID)
 }
 
 /// Work runs follow the selected design, when the agent has the design skill.
@@ -361,6 +367,9 @@ async fn drive_plan_run(
         append_plan_sections(pool, ticket_id, revision_input.as_ref(), &mut markdown).await?;
         if has_design_skill(&skills) {
             markdown.push_str(&format!("\n{}\n", plan::PLAN_DESIGN_INSTRUCTION));
+        }
+        if has_technical_design_skill(&skills) {
+            markdown.push_str(&format!("\n{}\n", plan::PLAN_TECHNICAL_DESIGN_INSTRUCTION));
         }
     }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
@@ -643,7 +652,7 @@ async fn drive_plan_run(
 mod tests {
     use super::{append_plan_ref_diff, append_work_design_instruction, has_design_skill};
     use crate::copy::plan::{PLAN_DESIGN_INSTRUCTION, WORK_DESIGN_INSTRUCTION};
-    use crate::plugins::builtin::DESIGN_SKILL_ID;
+    use crate::plugins::builtin::{DESIGN_SKILL_ID, DESIGN_TECHNICAL_SKILL_ID};
     use crate::plugins::skills::SkillInfo;
     use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
     use uuid::Uuid;
@@ -662,6 +671,8 @@ mod tests {
         assert!(!has_design_skill(&[skill("coppice-git")]));
         assert!(PLAN_DESIGN_INSTRUCTION.contains(DESIGN_SKILL_ID));
         assert!(PLAN_DESIGN_INSTRUCTION.contains("noVisibleChange"));
+        assert!(crate::copy::plan::PLAN_TECHNICAL_DESIGN_INSTRUCTION
+            .contains(DESIGN_TECHNICAL_SKILL_ID));
     }
 
     #[test]

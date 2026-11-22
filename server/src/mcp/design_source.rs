@@ -87,11 +87,11 @@ async fn design_plugin_id(pool: &PgPool, plugin_ids: &[Uuid]) -> Result<Option<U
 fn description(name: &str) -> &'static str {
     match name {
         "design__create" => {
-            "Create a design set and return its id and absolute folder under artifacts."
+            "Create a design set and return its id and absolute folder under artifacts. Pass kind: ui (default), architecture, module, or dependency."
         }
-        "design__write" => "Write a utf-8 file under that design set's folder.",
+        "design__write" => "Write a utf-8 file under that design set's folder (UI sets only).",
         "design__publish" => {
-            "Publish 2 to 4 HTML options for a design set on this run, marking the one you recommend."
+            "Publish options for a design set on this run, marking the one you recommend. UI: 2–4 HTML options with entry paths. Technical (architecture/module/dependency): 2–3 structured options plus recommendedReason; optional mermaid sketch per option."
         }
         "design__list" => {
             "List published design sets for this ticket or chat, newest first, with the chosen, recommended and selected option."
@@ -102,7 +102,17 @@ fn description(name: &str) -> &'static str {
 
 fn input_schema(name: &str) -> Value {
     match name {
-        "design__create" => object(json!({ "title": { "type": "string" } }), &["title"]),
+        "design__create" => object(
+            json!({
+                "title": { "type": "string" },
+                "kind": {
+                    "type": "string",
+                    "enum": ["ui", "architecture", "module", "dependency"],
+                    "description": "Defaults to ui.",
+                },
+            }),
+            &["title"],
+        ),
         "design__write" => object(
             json!({
                 "setId": { "type": "string" },
@@ -115,6 +125,10 @@ fn input_schema(name: &str) -> Value {
             json!({
                 "setId": { "type": "string" },
                 "recommendedOptionId": { "type": "string" },
+                "recommendedReason": {
+                    "type": "string",
+                    "description": "Required for technical kinds: one-line why this option is recommended.",
+                },
                 "options": {
                     "type": "array",
                     "items": {
@@ -123,8 +137,14 @@ fn input_schema(name: &str) -> Value {
                             "id": { "type": "string" },
                             "title": { "type": "string" },
                             "entry": { "type": "string" },
+                            "changes": { "type": "string" },
+                            "effort": { "type": "string" },
+                            "risk": { "type": "string" },
+                            "reversibility": { "type": "string" },
+                            "rulesOut": { "type": "string" },
+                            "sketch": { "type": "string" },
                         },
-                        "required": ["id", "title", "entry"],
+                        "required": ["id", "title"],
                     },
                 },
             }),

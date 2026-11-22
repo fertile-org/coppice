@@ -25,6 +25,7 @@ pub mod criteria_results;
 pub mod design_choice;
 pub mod design_markers;
 pub mod design_service;
+pub mod design_sketch;
 pub mod git_chain;
 pub mod git_cmd;
 pub mod git_flow;

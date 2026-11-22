@@ -1,4 +1,8 @@
-import type { ChosenDesignOption, DesignOption, DesignSet } from '../../lib/schemas/design';
+import type {
+  ChosenDesignOption,
+  DesignOption,
+  DesignSet,
+} from '../../lib/schemas/design';
 
 /** An option as the server returns it; the display title defaults to the title. */
 export function makeOption(
@@ -8,6 +12,33 @@ export function makeOption(
   displayTitle: string = title,
 ): DesignOption {
   return { id, title, entry: `${id}/index.html`, label, displayTitle };
+}
+
+/** Structured technical option (no HTML entry). */
+export function makeTechnicalOption(
+  id: string,
+  title: string,
+  label: string,
+  fields: Partial<
+    Pick<
+      DesignOption,
+      'changes' | 'effort' | 'risk' | 'reversibility' | 'rulesOut' | 'sketch'
+    >
+  > = {},
+): DesignOption {
+  return {
+    id,
+    title,
+    entry: '',
+    label,
+    displayTitle: title,
+    changes: fields.changes ?? 'server/src/example.rs',
+    effort: fields.effort ?? 'S',
+    risk: fields.risk ?? 'Low',
+    reversibility: fields.reversibility ?? 'Easy',
+    rulesOut: fields.rulesOut ?? 'Nothing soon',
+    sketch: fields.sketch ?? 'flowchart LR\n  A --> B',
+  };
 }
 
 /** The `chosen`, `recommended` and `selected` shape. */
@@ -39,4 +70,27 @@ export function makeDesignSet(overrides: Partial<DesignSet> = {}): DesignSet {
     choice: { mode: 'update_plan', planOutOfDate: false },
     ...overrides,
   };
+}
+
+/** A technical set with two structured options. */
+export function makeTechnicalDesignSet(
+  kind: 'architecture' | 'module' | 'dependency',
+  overrides: Partial<DesignSet> = {},
+): DesignSet {
+  const a = makeTechnicalOption('a', 'Postgres LISTEN/NOTIFY', 'A');
+  const b = makeTechnicalOption('b', 'Embedded message queue', 'B', {
+    effort: 'M',
+    risk: 'Medium',
+    reversibility: 'Hard',
+    sketch: 'flowchart LR\n  Service --> Queue --> Hub',
+  });
+  return makeDesignSet({
+    title: `Technical decision (${kind})`,
+    kind,
+    options: [a, b],
+    recommended: makePick(a),
+    selected: makePick(a),
+    recommendedReason: 'No new dependency; fits bundled Postgres.',
+    ...overrides,
+  });
 }

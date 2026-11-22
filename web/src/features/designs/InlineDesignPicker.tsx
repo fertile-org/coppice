@@ -3,6 +3,8 @@ import { Button } from '../../components/ui/button';
 import type { DesignSet } from '../../lib/schemas/design';
 import { DesignDialog } from './DesignDialog';
 import { DESIGN_COPY } from './designCopy';
+import { TechnicalDesignPicker } from './TechnicalDesignPicker';
+import { isTechnicalDesignKind } from './technicalKind';
 import { useChooseDesign } from './useDesigns';
 
 /** Radio-style option rows for a design set embedded in the plan. */
@@ -19,6 +21,16 @@ export function InlineDesignPicker({
   const [openId, setOpenId] = useState<string | null>(null);
   const choose = useChooseDesign(ticketId);
   const canPick = design.choice.mode === 'update_plan' || design.choice.mode === 'save_only';
+
+  if (isTechnicalDesignKind(design.kind)) {
+    return (
+      <TechnicalDesignPicker
+        design={design}
+        ticketId={ticketId}
+        sectionId={sectionId}
+      />
+    );
+  }
 
   return (
     <div

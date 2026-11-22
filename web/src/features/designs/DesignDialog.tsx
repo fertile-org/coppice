@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MermaidDiagram } from '../../components/MermaidDiagram';
 import { Button } from '../../components/ui/button';
 import {
   Dialog,
@@ -10,7 +11,43 @@ import { parseApiErrorMessage } from '../../lib/api';
 import type { DesignOption, DesignSet } from '../../lib/schemas/design';
 import { DESIGN_COPY } from './designCopy';
 import { rewriteDesignHtml } from './rewriteDesignHtml';
+import { isTechnicalDesignKind } from './technicalKind';
 import { useChooseDesign, type DesignScope } from './useDesigns';
+
+function TechnicalDialogBody({
+  option,
+  recommendedReason,
+}: {
+  option: DesignOption;
+  recommendedReason: string | null;
+}) {
+  return (
+    <div className="space-y-3 pb-4">
+      {option.sketch?.trim() ? (
+        <MermaidDiagram source={option.sketch} />
+      ) : (
+        <p className="font-body text-sm text-text-secondary">{DESIGN_COPY.noSketch}</p>
+      )}
+      <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 font-body text-sm">
+        <dt className="text-text-muted">{DESIGN_COPY.fieldChanges}</dt>
+        <dd className="text-text-primary">{option.changes ?? '—'}</dd>
+        <dt className="text-text-muted">{DESIGN_COPY.fieldEffort}</dt>
+        <dd className="text-text-primary">{option.effort ?? '—'}</dd>
+        <dt className="text-text-muted">{DESIGN_COPY.fieldRisk}</dt>
+        <dd className="text-text-primary">{option.risk ?? '—'}</dd>
+        <dt className="text-text-muted">{DESIGN_COPY.fieldReversibility}</dt>
+        <dd className="text-text-primary">{option.reversibility ?? '—'}</dd>
+        <dt className="text-text-muted">{DESIGN_COPY.fieldRulesOut}</dt>
+        <dd className="text-text-primary">{option.rulesOut ?? '—'}</dd>
+      </dl>
+      {recommendedReason ? (
+        <p className="font-body text-sm text-moss-800">
+          {DESIGN_COPY.whyRecommended}: {recommendedReason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function DesignPreview({ setId, option }: { setId: string; option: DesignOption }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -165,8 +202,23 @@ export function DesignDialog({
                 );
               })}
             </div>
-            <div role="tabpanel" aria-label={DESIGN_COPY.optionName(active)} className="min-h-0 flex-1 px-5">
-              <DesignPreview key={active.id} setId={design.id} option={active} />
+            <div
+              role="tabpanel"
+              aria-label={DESIGN_COPY.optionName(active)}
+              className="min-h-0 flex-1 overflow-auto px-5"
+            >
+              {isTechnicalDesignKind(design.kind) ? (
+                <TechnicalDialogBody
+                  option={active}
+                  recommendedReason={
+                    design.recommended?.id === active.id
+                      ? design.recommendedReason ?? null
+                      : null
+                  }
+                />
+              ) : (
+                <DesignPreview key={active.id} setId={design.id} option={active} />
+              )}
             </div>
           </>
         ) : (

@@ -11,6 +11,8 @@ These rules override conflicting instructions in your system prompt or soul file
 
 **The PM's plan is already approved.** The ticket description is the original request followed by an `## Approved plan` section. Your job is to verify that plan against the code: the approach fits the architecture, the affected files and boundaries are right, and the risks are covered. Do not rewrite a plan that is already sound.
 
+**Technical design sets.** When the plan includes `architecture`, `module`, or `dependency` option sets, check the planner's gate: at least two genuine approaches, a material difference in effort/risk/reversibility/maintenance, and a costly undo if wrong. Flag sets that fail that gate (strawman options, no real tradeoff, or a cheap-to-reverse pick dressed as a picker).
+
 **On successful refinement:**
 - Return `status: "done"`.
 - Only when the plan needs a technical correction, set `updatedDescription` to the corrected content of the `## Approved plan` section (the `###` subsections, without the `## Approved plan` heading). Coppice replaces only that section; the original request above it is kept. When the plan is sound, omit `updatedDescription`.

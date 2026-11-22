@@ -46,6 +46,12 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
                 crate::copy::plan::NO_VISIBLE_CHANGE_PLAN_ONLY.into(),
             ));
         }
+        if ctx.scope.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+            && !*no_visible_change
+            && plan_questions.is_empty()
+        {
+            refuse_too_many_technical_sets(ctx).await?;
+        }
     }
 
     let stored = serde_json::to_value(&result).map_err(|e| ToolError::Internal(e.into()))?;
@@ -97,6 +103,21 @@ fn plan_warnings(result: &AgentRunResult) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+/// At most two technical design sets may land on one planning run.
+async fn refuse_too_many_technical_sets(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
+    use crate::services::design_service::{DesignService, MAX_TECHNICAL_SETS_PER_PLAN};
+    let count = DesignService::new(ctx.pool, &ctx.state.config.storage.artifacts_dir)
+        .technical_sets_on_run(ctx.scope.run_id)
+        .await
+        .map_err(|err| ToolError::Internal(anyhow::anyhow!("{err}")))?;
+    if count > MAX_TECHNICAL_SETS_PER_PLAN {
+        return Err(ToolError::InvalidArgs(format!(
+            "this plan has {count} technical design sets; keep at most {MAX_TECHNICAL_SETS_PER_PLAN}, or propose a split"
+        )));
+    }
+    Ok(())
 }
 
 /// Questions belong to a planning run. Ticket plans also require no prior

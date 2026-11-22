@@ -5,7 +5,7 @@ use coppice_server::copy::plan::{
     NO_PM, NO_TECH_LEAD, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_CHANGES_DISCARDED,
     PLAN_REQUIRED, PLAN_STALE, READY_REQUIRES_PLAN,
 };
-use coppice_server::services::design_service::{CreateScope, DesignOption, DesignService};
+use coppice_server::services::design_service::{CreateScope, DesignKind, DesignOption, DesignService};
 use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::worktree_service::legacy_ticket_branch;
 use std::path::{Path, PathBuf};
@@ -1749,6 +1749,7 @@ async fn inserted_plan_records_the_selected_design() {
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(ticket),
                 chat_session_id: None,
@@ -1773,9 +1774,10 @@ async fn inserted_plan_records_the_selected_design() {
             id: id.into(),
             title: id.to_uppercase(),
             entry: format!("{id}/index.html"),
+        ..Default::default()
         })
         .to_vec();
-    svc.publish(created.id, run_id, options, "b")
+    svc.publish(created.id, run_id, options, "b", None)
         .await
         .expect("publish");
 
@@ -1814,6 +1816,7 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
     let created = svc
         .create(
             "Home",
+            DesignKind::Ui,
             CreateScope {
                 ticket_id: Some(ticket),
                 chat_session_id: None,
@@ -1838,9 +1841,10 @@ async fn plan_revision_without_no_visible_change_keeps_the_design_link() {
             id: id.into(),
             title: id.to_uppercase(),
             entry: format!("{id}/index.html"),
+        ..Default::default()
         })
         .to_vec();
-    svc.publish(created.id, run_id, options, "b")
+    svc.publish(created.id, run_id, options, "b", None)
         .await
         .expect("publish");
     planning

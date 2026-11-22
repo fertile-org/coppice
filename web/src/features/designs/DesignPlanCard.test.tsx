@@ -21,7 +21,7 @@ describe('DesignPlanSummary', () => {
       />,
     );
     expect(screen.getByTestId('design-plan-summary')).toHaveTextContent(
-      '1 decision in this plan',
+      '1 decision in this plan · 3 options',
     );
     expect(screen.getByRole('button', { name: /UI design: not picked/ })).toBeInTheDocument();
   });
@@ -55,7 +55,7 @@ describe('DesignPlanSummary', () => {
       />,
     );
     expect(screen.getByTestId('design-plan-summary')).toHaveTextContent(
-      '2 decisions in this plan',
+      '2 decisions in this plan · 4 options',
     );
     expect(
       screen.getByRole('button', {

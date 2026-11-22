@@ -19,6 +19,7 @@ export function DesignPlanSummary({
 }) {
   const live = livePlanDesigns(sets);
   if (live.length === 0) return null;
+  const optionCount = live.reduce((total, set) => total + set.options.length, 0);
 
   function labelFor(set: DesignSet): string {
     return sections?.[set.id]
@@ -45,6 +46,8 @@ export function DesignPlanSummary({
     >
       <span className="font-medium text-text-primary">
         {DESIGN_COPY.decisionsInPlan(live.length)}
+        {' · '}
+        {DESIGN_COPY.options(optionCount)}
       </span>
       {live.map((set) => (
         <span key={set.id}>
