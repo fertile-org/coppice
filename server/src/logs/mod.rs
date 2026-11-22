@@ -233,7 +233,21 @@ pub fn init(logs_dir: &Path) -> io::Result<()> {
         .with(stdout)
         .with(json_file_layer(logs_dir, true)?)
         .init();
+    install_panic_hook();
     Ok(())
+}
+
+/// Route process panics into the JSON log (desktop `current.jsonl`).
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(
+            message = %info.to_string(),
+            location = ?info.location(),
+            "process panic"
+        );
+        default(info);
+    }));
 }
 
 /// Run `f` with the JSONL subscriber pointed at `logs_dir`.
