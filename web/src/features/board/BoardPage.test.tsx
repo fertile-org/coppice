@@ -1,9 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
+import { selectComboboxOption } from '../../test/combobox';
 import { BoardPage } from './BoardPage';
 
 vi.mock('./useReviewCapacity', () => ({
@@ -88,6 +89,19 @@ vi.mock('@dnd-kit/core', () => ({
   }),
 }));
 
+const createTicket = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    id: 'ticket-new',
+    boardId: 'board-1',
+    title: 'New from dialog',
+    status: 'backlog',
+    createdBy: 'user',
+    createdAt: '2026-08-03T00:00:00.000Z',
+    updatedAt: '2026-08-03T00:00:00.000Z',
+    lastActivityAt: '2026-08-03T00:00:00.000Z',
+  }),
+);
+
 vi.mock('./useTickets', () => ({
   ticketsQueryKey: (boardId: string) => ['tickets', boardId],
   useTickets: (
@@ -104,7 +118,7 @@ vi.mock('./useTickets', () => ({
       refetch: vi.fn(),
     };
   },
-  useCreateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateTicket: () => ({ mutateAsync: createTicket, isPending: false }),
   useStartPlanRun: () => ({
     mutateAsync: vi.fn(),
     isPending: false,
@@ -130,7 +144,9 @@ vi.mock('../agents/useAgents', () => ({
 }));
 
 vi.mock('../repos/useRepos', () => ({
-  useRepos: () => ({ data: [] }),
+  useRepos: () => ({
+    data: [{ id: 'repo-1', name: 'coppice', verificationStatus: 'ready' }],
+  }),
 }));
 
 vi.mock('../tickets/TicketDrawer', () => ({
@@ -603,5 +619,71 @@ describe('BoardPage split swimlanes', () => {
       within(screen.getByRole('region', { name: 'Done' })).getByText('Survey the site'),
     ).toBeVisible();
     expect(screen.getByText('Plain ticket')).toBeVisible();
+  });
+});
+
+describe('BoardPage new ticket button', () => {
+  beforeEach(() => {
+    createTicket.mockClear();
+    createTicket.mockResolvedValue({
+      id: 'ticket-new',
+      boardId: 'board-1',
+      title: 'New from dialog',
+      status: 'backlog',
+      createdBy: 'user',
+      createdAt: '2026-08-03T00:00:00.000Z',
+      updatedAt: '2026-08-03T00:00:00.000Z',
+      lastActivityAt: '2026-08-03T00:00:00.000Z',
+    });
+    ticketsState.lastIncludeArchived = false;
+    ticketsState.archived = [];
+    ticketsState.active = [
+      makeTicket({
+        id: 'root',
+        title: 'Root ticket',
+        status: 'backlog',
+      }),
+    ];
+    boardsState.data = [{ id: 'board-1', name: 'Launch plan' }];
+    boardsState.isPending = false;
+  });
+
+  it('opens the New ticket dialog with the title focused', () => {
+    renderBoard();
+    fireEvent.click(screen.getByRole('button', { name: '+ New ticket' }));
+    const dialog = screen.getByRole('dialog', { name: 'New ticket' });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Title')).toHaveFocus();
+  });
+
+  it('creates with the full payload and opens the new ticket drawer', async () => {
+    renderBoard();
+    fireEvent.click(screen.getByRole('button', { name: '+ New ticket' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'New ticket' }));
+
+    fireEvent.change(dialog.getByLabelText('Title'), {
+      target: { value: 'Ship the dialog' },
+    });
+    fireEvent.change(dialog.getByLabelText('Description'), {
+      target: { value: 'Full create payload' },
+    });
+    selectComboboxOption(dialog.getByLabelText('Repository'), 'coppice');
+    selectComboboxOption(dialog.getByLabelText('Priority'), 'Critical');
+    fireEvent.click(dialog.getByRole('button', { name: 'Create ticket' }));
+
+    await waitFor(() => {
+      expect(createTicket).toHaveBeenCalledWith({
+        title: 'Ship the dialog',
+        description: 'Full create payload',
+        repoId: 'repo-1',
+        priority: 'critical',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
+        'data-ticket-id',
+        'ticket-new',
+      );
+    });
   });
 });
