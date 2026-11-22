@@ -17,11 +17,11 @@ use crate::services::comment_service::CommentService;
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::run_service::{RunError, RunService};
+use crate::services::design_service::{DesignError, DesignService};
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
 use crate::storage::attachment_store::sanitize_filename;
 use coppice_config::KnowledgeConfig;
-use sqlx::PgPool;
-use sqlx::Row;
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
@@ -161,6 +161,17 @@ impl From<KnowledgeError> for ChatError {
     }
 }
 
+impl From<DesignError> for ChatError {
+    fn from(err: DesignError) -> Self {
+        match err {
+            DesignError::NotFound => ChatError::Validation("design set not found".into()),
+            DesignError::Invalid(msg) => ChatError::Validation(msg),
+            DesignError::Denied => ChatError::Validation("design set denied".into()),
+            DesignError::Database(e) => ChatError::Database(e),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PostMessageResult {
     pub message: ChatMessage,
@@ -203,6 +214,10 @@ pub struct AcceptProposalInput<'a> {
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
     pub created_by: &'a str,
+    /// When set, only these proposal child ids are created. `None` means all.
+    pub selected_child_ids: Option<&'a [Id]>,
+    /// Artifacts root for copying a chat design set onto the new ticket.
+    pub artifacts_dir: &'a Path,
 }
 
 pub struct AcceptedProposal {
@@ -211,6 +226,8 @@ pub struct AcceptedProposal {
     /// The "Created ticket" or "Proposed knowledge" note.
     pub system_message: ChatMessage,
     pub ticket: Option<TicketWithDisplay>,
+    /// Children created with a ticket proposal (empty for knowledge / flat tickets).
+    pub children: Vec<TicketWithDisplay>,
     pub knowledge: Option<KnowledgeItemView>,
 }
 
@@ -1177,8 +1194,8 @@ impl<'a> ChatService<'a> {
         })
     }
 
-    /// Accept a pending proposal. The agent message row lock serializes
-    /// concurrent accept/reject calls, so a proposal creates at most one item.
+    /// Accept a pending proposal. Parent, children, design copy, system note,
+    /// and proposal status share one transaction with the message row lock.
     pub async fn accept_proposal(
         &self,
         session_id: Id,
@@ -1205,78 +1222,230 @@ impl<'a> ChatService<'a> {
                 .or_else(|| str_field(key).map(str::to_string))
         };
 
-        let (key, created_id, system_message, ticket, knowledge) = match str_field("type") {
-            Some("create_ticket") => {
-                let board_id = input
-                    .board_id
-                    .or_else(|| uuid_field("boardId"))
-                    .or(session.board_id)
-                    .ok_or(ChatError::BoardRequired)?;
-                let title = override_or(input.title, "title");
-                let description = override_or(input.description, "description");
-                let created = self
-                    .create_ticket_from_chat(
-                        session_id,
-                        owner_user_id,
-                        CreateTicketFromChatInput {
+        let (key, created_id, system_message, parent_id, child_ids, knowledge) =
+            match str_field("type") {
+                Some("create_ticket") => {
+                    let board_id = input
+                        .board_id
+                        .or_else(|| uuid_field("boardId"))
+                        .or(session.board_id)
+                        .ok_or(ChatError::BoardRequired)?;
+                    BoardService::new(self.pool).get_board(board_id).await?;
+                    let title = override_or(input.title, "title")
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| {
+                            // title required on proposal; fallback keeps accept resilient
+                            "From agent chat".into()
+                        });
+                    let description = override_or(input.description, "description").unwrap_or_default();
+                    let repo_id = uuid_field("repoId").or(session.repo_id);
+                    let tickets = self
+                        .create_ticket_proposal_in_tx(
+                            &mut tx,
+                            session_id,
+                            owner_user_id,
                             board_id,
-                            title: title.as_deref(),
-                            description: description.as_deref(),
-                            repo_id: uuid_field("repoId"),
-                            created_by: input.created_by,
-                        },
-                    )
-                    .await?;
-                (
-                    "ticketId",
-                    created.ticket.ticket.id,
-                    created.system_message,
-                    Some(created.ticket),
-                    None,
-                )
-            }
-            Some("create_knowledge") => {
-                let title = override_or(input.title, "title");
-                let content = override_or(input.description, "content");
-                let knowledge_type = override_or(input.knowledge_type, "knowledgeType");
-                let scope = override_or(input.scope, "scope");
-                let created = self
-                    .create_knowledge_from_chat(
+                            &title,
+                            &description,
+                            repo_id,
+                            input.created_by,
+                            &proposal,
+                            input.selected_child_ids,
+                            input.artifacts_dir,
+                        )
+                        .await?;
+                    let parent_id = tickets.parent.id;
+                    let child_ids: Vec<Id> = tickets.children.iter().map(|t| t.id).collect();
+                    let note = if child_ids.is_empty() {
+                        format!("Created ticket «{title}» from this chat.")
+                    } else {
+                        format!(
+                            "Created ticket «{title}» and {} child ticket{} from this chat.",
+                            child_ids.len(),
+                            if child_ids.len() == 1 { "" } else { "s" }
+                        )
+                    };
+                    let meta = ChatActionResultMeta {
+                        action: "create_ticket".into(),
+                        ticket_id: Some(parent_id),
+                        knowledge_item_id: None,
+                    };
+                    lock_chat_session(&mut tx, session_id).await?;
+                    let system_message = append_message_in_tx(
+                        &mut tx,
                         session_id,
-                        owner_user_id,
-                        knowledge_config,
-                        CreateKnowledgeFromChatInput {
-                            title: title.as_deref(),
-                            content: content.as_deref(),
-                            knowledge_type: knowledge_type.as_deref(),
-                            scope: scope.as_deref(),
-                            board_id: input.board_id.or_else(|| uuid_field("boardId")),
-                        },
+                        ChatMessageRole::System,
+                        &note,
+                        None,
+                        Some(serde_json::to_value(&meta).unwrap_or_default()),
                     )
                     .await?;
-                (
-                    "knowledgeItemId",
-                    created.item.id,
-                    created.system_message,
-                    None,
-                    Some(created.item),
-                )
-            }
-            _ => return Err(ChatError::Validation("unknown proposal type".into())),
-        };
+                    if session.board_id.is_none() {
+                        sqlx::query(
+                            r#"
+                            UPDATE chat_sessions
+                            SET board_id = $2, updated_at = now()
+                            WHERE id = $1
+                            "#,
+                        )
+                        .bind(session_id)
+                        .bind(board_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    (
+                        "ticketId",
+                        parent_id,
+                        system_message,
+                        Some(parent_id),
+                        child_ids,
+                        None,
+                    )
+                }
+                Some("create_knowledge") => {
+                    let title = override_or(input.title, "title");
+                    let content = override_or(input.description, "content");
+                    let knowledge_type = override_or(input.knowledge_type, "knowledgeType");
+                    let scope = override_or(input.scope, "scope");
+                    // Knowledge create still uses the pool; keep message lock until we mark created.
+                    let created = self
+                        .create_knowledge_from_chat(
+                            session_id,
+                            owner_user_id,
+                            knowledge_config,
+                            CreateKnowledgeFromChatInput {
+                                title: title.as_deref(),
+                                content: content.as_deref(),
+                                knowledge_type: knowledge_type.as_deref(),
+                                scope: scope.as_deref(),
+                                board_id: input.board_id.or_else(|| uuid_field("boardId")),
+                            },
+                        )
+                        .await?;
+                    (
+                        "knowledgeItemId",
+                        created.item.id,
+                        created.system_message,
+                        None,
+                        Vec::new(),
+                        Some(created.item),
+                    )
+                }
+                _ => return Err(ChatError::Validation("unknown proposal type".into())),
+            };
 
         let proposal = proposal_mut(&mut metadata, &pid).ok_or(ChatError::NotFound)?;
         proposal["status"] = "created".into();
         proposal[key] = created_id.to_string().into();
+        if !child_ids.is_empty() {
+            proposal["childTicketIds"] = serde_json::json!(
+                child_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
         let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
         tx.commit().await?;
+
+        let ticket = match parent_id {
+            Some(id) => Some(TicketService::new(self.pool).get(id).await?),
+            None => None,
+        };
+        let mut children = Vec::with_capacity(child_ids.len());
+        for id in child_ids {
+            children.push(TicketService::new(self.pool).get(id).await?);
+        }
 
         Ok(AcceptedProposal {
             message,
             system_message,
             ticket,
+            children,
             knowledge,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_ticket_proposal_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        session_id: Id,
+        owner_user_id: Id,
+        board_id: Id,
+        title: &str,
+        description: &str,
+        repo_id: Option<Id>,
+        created_by: &str,
+        proposal: &serde_json::Value,
+        selected_child_ids: Option<&[Id]>,
+        artifacts_dir: &Path,
+    ) -> Result<CreatedTicketProposal, ChatError> {
+        let tickets = TicketService::new(self.pool);
+        let parent = tickets
+            .create_with_source_in_tx(
+                tx,
+                board_id,
+                title,
+                description,
+                repo_id,
+                None,
+                created_by,
+                owner_user_id,
+                Some(session_id),
+            )
+            .await?;
+
+        let proposal_children = proposal
+            .get("children")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let selected: Option<HashSet<Id>> =
+            selected_child_ids.map(|ids| ids.iter().copied().collect());
+        let mut children = Vec::new();
+        for child in &proposal_children {
+            let child_id = child
+                .get("id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| Id::parse_str(s).ok());
+            let Some(child_id) = child_id else {
+                continue;
+            };
+            if let Some(ref want) = selected {
+                if !want.contains(&child_id) {
+                    continue;
+                }
+            }
+            let child_title = child
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if child_title.is_empty() {
+                continue;
+            }
+            let child_description = child
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let created = tickets
+                .create_child_in_tx(tx, &parent, child_title, child_description, owner_user_id)
+                .await?;
+            children.push(created);
+        }
+
+        if let Some(set_id) = proposal
+            .get("designSetId")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Id::parse_str(s).ok())
+        {
+            DesignService::new(self.pool, artifacts_dir)
+                .copy_chat_set_to_ticket(tx, set_id, session_id, parent.id)
+                .await?;
+        }
+
+        Ok(CreatedTicketProposal { parent, children })
     }
 
     /// Reject a pending proposal. Creates nothing.
@@ -1300,9 +1469,14 @@ impl<'a> ChatService<'a> {
     }
 }
 
+struct CreatedTicketProposal {
+    parent: crate::domain::ticket::Ticket,
+    children: Vec<crate::domain::ticket::Ticket>,
+}
+
 /// Lock one agent message's proposal metadata for the rest of `tx`.
 async fn lock_proposal_message(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     session_id: Id,
     message_id: Id,
 ) -> Result<serde_json::Value, ChatError> {
@@ -1328,7 +1502,7 @@ fn ensure_proposal_pending(proposal: &serde_json::Value) -> Result<(), ChatError
 }
 
 async fn update_message_metadata(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     message_id: Id,
     metadata: &serde_json::Value,
 ) -> Result<ChatMessage, ChatError> {
@@ -1347,10 +1521,61 @@ async fn update_message_metadata(
     Ok(row_to_message(&row))
 }
 
+async fn append_message_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    session_id: Id,
+    role: ChatMessageRole,
+    body: &str,
+    agent_run_id: Option<Id>,
+    action_metadata: Option<serde_json::Value>,
+) -> Result<ChatMessage, ChatError> {
+    let next_seq: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
+        "#,
+    )
+    .bind(session_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let id = Id::new();
+    let row = sqlx::query(
+        r#"
+        INSERT INTO chat_messages (
+            id, session_id, seq, role, body, agent_run_id, action_metadata, attachment_ids
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, '{}')
+        RETURNING
+            id, session_id, seq, role, body, agent_run_id, action_metadata,
+            attachment_ids, created_at
+        "#,
+    )
+    .bind(id)
+    .bind(session_id)
+    .bind(next_seq)
+    .bind(role.as_str())
+    .bind(body)
+    .bind(agent_run_id)
+    .bind(action_metadata)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        UPDATE chat_sessions SET updated_at = now() WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(row_to_message(&row))
+}
+
 /// Serialize message inserts for one session. `seq` is unique per session, and
 /// a repository-copy note can land while the person is posting.
 async fn lock_chat_session(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     session_id: Id,
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT id FROM chat_sessions WHERE id = $1 FOR UPDATE")

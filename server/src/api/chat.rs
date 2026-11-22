@@ -53,6 +53,8 @@ struct AcceptProposalBody {
     board_id: Option<Id>,
     knowledge_type: Option<String>,
     scope: Option<String>,
+    /// When set, only these proposal child ids are created. Omit to create all.
+    selected_child_ids: Option<Vec<Id>>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +63,8 @@ struct AcceptProposalResponse {
     message: MessageResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     ticket: Option<crate::api::tickets::TicketResponse>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    children: Vec<crate::api::tickets::TicketResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     knowledge: Option<crate::api::knowledge::KnowledgeResponse>,
 }
@@ -429,6 +433,8 @@ async fn accept_proposal(
                 knowledge_type: body.knowledge_type.as_deref(),
                 scope: body.scope.as_deref(),
                 created_by: &user.email,
+                selected_child_ids: body.selected_child_ids.as_deref(),
+                artifacts_dir: std::path::Path::new(&state.config.storage.artifacts_dir),
             },
         )
         .await
@@ -438,6 +444,7 @@ async fn accept_proposal(
     Ok(Json(AcceptProposalResponse {
         message: message_response(result.message, &attachments_by_id),
         ticket: result.ticket.map(ticket_to_response),
+        children: result.children.into_iter().map(ticket_to_response).collect(),
         knowledge: result.knowledge.map(knowledge_item_response),
     }))
 }

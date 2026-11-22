@@ -1,5 +1,5 @@
 use crate::domain::Id;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::path::{Path, PathBuf};
 
 use super::design_sketch;
@@ -464,6 +464,107 @@ impl<'a> DesignService<'a> {
         })
     }
 
+    /// Duplicate a published chat design onto a ticket. The chat set stays.
+    /// Preserves options, recommendation, and human choice so a later plan run
+    /// sees `selectedDesign` and does not republish.
+    pub async fn copy_chat_set_to_ticket(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        source_set_id: Id,
+        chat_session_id: Id,
+        ticket_id: Id,
+    ) -> Result<Id, DesignError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, title, kind, ticket_id, chat_session_id, run_id, agent_id, dir, options,
+                   chosen_option_id, chosen_by_user_id, chosen_at,
+                   recommended_option_id, recommended_reason, published_at
+            FROM design_sets
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+        )
+        .bind(source_set_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(DesignError::NotFound)?;
+
+        let source_chat: Option<Id> = row.get("chat_session_id");
+        if source_chat != Some(chat_session_id) {
+            return Err(DesignError::Invalid(
+                "design set does not belong to this chat session".into(),
+            ));
+        }
+        let published_at: Option<time::OffsetDateTime> = row.get("published_at");
+        if published_at.is_none() {
+            return Err(DesignError::Invalid("design set is not published".into()));
+        }
+
+        let source_dir: String = row.get("dir");
+        let new_id = Id::new();
+        let new_dir = format!("designs/{new_id}");
+        let dest_root = self.artifacts_dir.join(&new_dir);
+        std::fs::create_dir_all(&dest_root).map_err(invalid_io)?;
+        let (artifacts, source_root) = resolve_set_dir(&self.artifacts_dir, &source_dir)?;
+        let dest_canon = std::fs::canonicalize(&dest_root).map_err(invalid_io)?;
+        if !dest_canon.starts_with(&artifacts) {
+            return Err(DesignError::Invalid(
+                "path escapes the design folder".into(),
+            ));
+        }
+        copy_dir_recursive(&source_root, &dest_canon, &artifacts)?;
+
+        let mut chosen_option_id: Option<String> = row.get("chosen_option_id");
+        let chosen_by_user_id: Option<Id> = row.get("chosen_by_user_id");
+        let chosen_at: Option<time::OffsetDateTime> = row.get("chosen_at");
+        let recommended_option_id: Option<String> = row.get("recommended_option_id");
+        // Promote recommendation to a choice so effective_for_ticket finds the set
+        // (non-plan sets need `chosen` for own_effective).
+        if chosen_option_id.is_none() {
+            chosen_option_id = recommended_option_id.clone();
+        }
+
+        let title: String = row.get("title");
+        let kind: String = row.get("kind");
+        let run_id: Id = row.get("run_id");
+        let agent_id: Id = row.get("agent_id");
+        let options: serde_json::Value = row.get("options");
+        let recommended_reason: Option<String> = row.get("recommended_reason");
+
+        sqlx::query(
+            r#"
+            INSERT INTO design_sets (
+                id, title, kind, ticket_id, chat_session_id, run_id, agent_id, dir,
+                options, chosen_option_id, chosen_by_user_id, chosen_at,
+                recommended_option_id, recommended_reason, published_at
+            )
+            VALUES (
+                $1, $2, $3, $4, NULL, $5, $6, $7,
+                $8, $9, $10, $11,
+                $12, $13, $14
+            )
+            "#,
+        )
+        .bind(new_id)
+        .bind(title)
+        .bind(kind)
+        .bind(ticket_id)
+        .bind(run_id)
+        .bind(agent_id)
+        .bind(&new_dir)
+        .bind(options)
+        .bind(chosen_option_id)
+        .bind(chosen_by_user_id)
+        .bind(chosen_at)
+        .bind(recommended_option_id)
+        .bind(recommended_reason)
+        .bind(published_at)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(new_id)
+    }
+
     pub async fn read_file(&self, set_id: Id, rel: &str) -> Result<Vec<u8>, DesignError> {
         if let Some(reason) = reject_rel_path(rel) {
             return Err(DesignError::Invalid(reason.into()));
@@ -676,6 +777,26 @@ fn resolve_set_dir(artifacts_dir: &Path, dir: &str) -> Result<(PathBuf, PathBuf)
         ));
     }
     Ok((artifacts, set_dir))
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path, artifacts: &Path) -> Result<(), DesignError> {
+    if !src.starts_with(artifacts) || !dest.starts_with(artifacts) {
+        return Err(DesignError::Invalid(
+            "path escapes the design folder".into(),
+        ));
+    }
+    for entry in std::fs::read_dir(src).map_err(invalid_io)? {
+        let entry = entry.map_err(invalid_io)?;
+        let file_type = entry.file_type().map_err(invalid_io)?;
+        let to = dest.join(entry.file_name());
+        if file_type.is_dir() {
+            std::fs::create_dir_all(&to).map_err(invalid_io)?;
+            copy_dir_recursive(&entry.path(), &to, artifacts)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), &to).map_err(invalid_io)?;
+        }
+    }
+    Ok(())
 }
 
 fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, DesignError> {

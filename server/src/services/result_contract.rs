@@ -1172,6 +1172,25 @@ mod tests {
         let err = validate_for_profile(&many, ContextProfile::Conversation, "chat_turn")
             .expect_err("cap");
         assert!(err.contains("at most 5"), "{err}");
+
+        let mut too_many_children = done_result();
+        if let AgentRunResult::Done { actions, .. } = &mut too_many_children {
+            let children: Vec<_> = (0..9)
+                .map(|n| serde_json::json!({ "title": format!("C{n}") }))
+                .collect();
+            *actions = Some(Box::new(serde_json::json!([{
+                "type": "create_ticket",
+                "title": "Parent",
+                "children": children,
+            }])));
+        }
+        let err = validate_for_profile(
+            &too_many_children,
+            ContextProfile::Conversation,
+            "chat_turn",
+        )
+        .expect_err("child cap");
+        assert!(err.contains("at most 8"), "{err}");
     }
 
     #[test]

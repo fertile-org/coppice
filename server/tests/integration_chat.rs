@@ -2358,3 +2358,305 @@ async fn chat_session_usage_adds_up_its_turns() {
     let (status, _) = usage(format!("/api/chat/sessions/{missing}/usage")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn accept_ticket_proposal_with_children_creates_swimlane() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+    let child_a = Id::new();
+    let child_b = Id::new();
+    let child_c = Id::new();
+    let (message_id, proposal_id) = seed_agent_proposal(
+        pool,
+        &session_id,
+        serde_json::json!({
+            "type": "create_ticket",
+            "title": "Parent epic",
+            "description": "Parent body",
+            "status": "pending",
+            "children": [
+                { "id": child_a.to_string(), "title": "Child A", "description": "A" },
+                { "id": child_b.to_string(), "title": "Child B", "description": "B" },
+                { "id": child_c.to_string(), "title": "Child C", "description": "C" },
+            ],
+        }),
+    )
+    .await;
+    let before = ticket_count(pool, &board_id).await;
+
+    let accepted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(accepted).await;
+    let parent_id = body["ticket"]["id"].as_str().expect("parent");
+    let children = body["children"].as_array().expect("children");
+    assert_eq!(children.len(), 3);
+    assert_eq!(ticket_count(pool, &board_id).await, before + 4);
+
+    let rows: Vec<(Option<Id>, Option<Id>, String)> = sqlx::query_as(
+        r#"
+        SELECT parent_ticket_id, approved_plan_id, status
+        FROM tickets
+        WHERE board_id = $1 AND id <> $2
+        ORDER BY title
+        "#,
+    )
+    .bind(Id::parse_str(&board_id).unwrap())
+    .bind(Id::parse_str(parent_id).unwrap())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 3);
+    for (parent, plan, status) in &rows {
+        assert_eq!(parent.map(|id| id.to_string()).as_deref(), Some(parent_id));
+        assert!(plan.is_none(), "chat children must not get an approved plan");
+        assert_eq!(status, "backlog");
+    }
+
+    let second = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    assert_eq!(ticket_count(pool, &board_id).await, before + 4);
+}
+
+#[tokio::test]
+async fn accept_ticket_proposal_skips_unticked_children() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+    let child_keep = Id::new();
+    let child_skip = Id::new();
+    let (message_id, proposal_id) = seed_agent_proposal(
+        pool,
+        &session_id,
+        serde_json::json!({
+            "type": "create_ticket",
+            "title": "Parent",
+            "status": "pending",
+            "children": [
+                { "id": child_keep.to_string(), "title": "Keep", "description": "" },
+                { "id": child_skip.to_string(), "title": "Skip", "description": "" },
+            ],
+        }),
+    )
+    .await;
+    let before = ticket_count(pool, &board_id).await;
+
+    let accepted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            &format!(r#"{{"selectedChildIds":["{child_keep}"]}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(accepted).await;
+    assert_eq!(body["children"].as_array().unwrap().len(), 1);
+    assert_eq!(body["children"][0]["title"], "Keep");
+    assert_eq!(ticket_count(pool, &board_id).await, before + 2);
+}
+
+#[tokio::test]
+async fn accept_ticket_proposal_copies_chat_design_and_rolls_back_on_bad_design() {
+    use coppice_server::services::design_service::{
+        CreateScope, DesignKind, DesignOption, DesignService,
+    };
+    use std::path::PathBuf;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+    let session_uuid = Id::parse_str(&session_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
+
+    let run_id = Id::new();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, chat_session_id, agent_id, job_type, status,
+            sandbox_profile_id, context_profile
+        )
+        VALUES ($1, NULL, $2, $3, 'chat_turn', 'succeeded', 'permissive-default', 'conversation')
+        "#,
+    )
+    .bind(run_id)
+    .bind(session_uuid)
+    .bind(agent_uuid)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let artifacts = PathBuf::from(&state.config.storage.artifacts_dir);
+    let svc = DesignService::new(pool, &artifacts);
+    let created = svc
+        .create(
+            "Chat UI",
+            DesignKind::Ui,
+            CreateScope {
+                ticket_id: None,
+                chat_session_id: Some(session_uuid),
+                run_id,
+                agent_id: agent_uuid,
+            },
+        )
+        .await
+        .expect("create design");
+    svc.write(
+        created.id,
+        run_id,
+        "a/index.html",
+        b"<!doctype html><title>A</title>",
+    )
+    .await
+    .unwrap();
+    svc.write(
+        created.id,
+        run_id,
+        "b/index.html",
+        b"<!doctype html><title>B</title>",
+    )
+    .await
+    .unwrap();
+    svc.publish(
+        created.id,
+        run_id,
+        vec![
+            DesignOption {
+                id: "a".into(),
+                title: "Option A".into(),
+                entry: "a/index.html".into(),
+                ..Default::default()
+            },
+            DesignOption {
+                id: "b".into(),
+                title: "Option B".into(),
+                entry: "b/index.html".into(),
+                ..Default::default()
+            },
+        ],
+        "b",
+        None,
+    )
+    .await
+    .unwrap();
+    let user_id: Id = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    svc.choose(created.id, "b", user_id).await.unwrap();
+
+    let (message_id, proposal_id) = seed_agent_proposal(
+        pool,
+        &session_id,
+        serde_json::json!({
+            "type": "create_ticket",
+            "title": "With design",
+            "status": "pending",
+            "designSetId": created.id.to_string(),
+        }),
+    )
+    .await;
+
+    let accepted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(accepted).await;
+    let ticket_id = Id::parse_str(body["ticket"]["id"].as_str().unwrap()).unwrap();
+
+    let effective = svc.effective_for_ticket(ticket_id).await.unwrap().unwrap();
+    assert_eq!(effective.selected.id, "b");
+    assert_ne!(effective.set_id, created.id);
+    let chat_still = svc.get(created.id).await.unwrap();
+    assert_eq!(chat_still.chat_session_id, Some(session_uuid));
+
+    // Bad designSetId on another proposal: nothing is created (same-tx rollback).
+    let before = ticket_count(pool, &board_id).await;
+    let foreign = Id::new();
+    let (message_id2, proposal_id2) = seed_agent_proposal(
+        pool,
+        &session_id,
+        serde_json::json!({
+            "type": "create_ticket",
+            "title": "Bad design",
+            "status": "pending",
+            "designSetId": foreign.to_string(),
+            "children": [
+                { "id": Id::new().to_string(), "title": "Would-be child", "description": "" }
+            ],
+        }),
+    )
+    .await;
+    let failed = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id2, &proposal_id2, "accept"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        failed.status().is_client_error() || failed.status().is_server_error(),
+        "status={}",
+        failed.status()
+    );
+    assert_eq!(ticket_count(pool, &board_id).await, before);
+}

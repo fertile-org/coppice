@@ -12,8 +12,7 @@ use crate::services::human_review_service::{HumanReview, HumanReviewService};
 use crate::services::review_capacity::ReviewCapacityService;
 use crate::services::workflow_service::{PlanEntry, WorkflowService};
 use serde_json::Value;
-use sqlx::PgPool;
-use sqlx::Row;
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 pub struct TicketService<'a> {
@@ -289,6 +288,60 @@ impl<'a> TicketService<'a> {
         self.enrich_row(&row).await
     }
 
+    /// Insert a ticket inside an open transaction. Caller enriches after commit.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_with_source_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        board_id: Id,
+        title: &str,
+        description: &str,
+        repo_id: Option<Id>,
+        priority: Option<TicketPriority>,
+        created_by: &str,
+        created_by_id: Id,
+        source_chat_session_id: Option<Id>,
+    ) -> Result<Ticket, TicketError> {
+        let repo_id = match repo_id {
+            Some(id) => Some(id),
+            None => self.default_repo_id().await?,
+        };
+        let id = Id::new();
+        let status = TicketStatus::Backlog;
+        let priority_str = priority_to_str(priority_for_create(priority));
+        let row = sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, board_id, repo_id, title, description, status, priority,
+                created_by, created_by_id, source_chat_session_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING
+                id, board_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                skip_planning, skip_human_review, content_version,
+                approved_plan_id, approved_plan_content_version,
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
+            "#,
+        )
+        .bind(id)
+        .bind(board_id)
+        .bind(repo_id)
+        .bind(title)
+        .bind(description)
+        .bind(status_to_str(status))
+        .bind(priority_str)
+        .bind(created_by)
+        .bind(created_by_id)
+        .bind(source_chat_session_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        Ok(row_to_ticket(&row))
+    }
+
     pub async fn create_child(
         &self,
         parent: &Ticket,
@@ -297,7 +350,23 @@ impl<'a> TicketService<'a> {
         created_by_id: Id,
     ) -> Result<TicketWithDisplay, TicketError> {
         self.ensure_board_exists(parent.board_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let ticket = self
+            .create_child_in_tx(&mut tx, parent, title, description, created_by_id)
+            .await?;
+        tx.commit().await?;
+        self.enrich_ticket(ticket, false).await
+    }
 
+    /// Insert a Backlog child inside an open transaction. No plan approval.
+    pub async fn create_child_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        parent: &Ticket,
+        title: &str,
+        description: &str,
+        created_by_id: Id,
+    ) -> Result<Ticket, TicketError> {
         let id = Id::new();
         let status = TicketStatus::Backlog;
         let priority_str = priority_to_str(priority_for_create(None));
@@ -330,10 +399,10 @@ impl<'a> TicketService<'a> {
         .bind(parent.id)
         .bind("agent")
         .bind(created_by_id)
-        .fetch_one(self.pool)
+        .fetch_one(&mut **tx)
         .await?;
 
-        self.enrich_row(&row).await
+        Ok(row_to_ticket(&row))
     }
 
     pub async fn set_pending_split_recommendation(

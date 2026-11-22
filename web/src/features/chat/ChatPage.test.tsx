@@ -594,6 +594,90 @@ describe('ChatPage', () => {
     expect(mocks.openTicket).not.toHaveBeenCalled();
   });
 
+  it('lets the human untick a child and updates Create N tickets', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.messages = [
+      {
+        id: '00000000-0000-4000-8000-000000000070',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'agent',
+        body: 'Draft ready.',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: {
+          proposals: [
+            {
+              id: '00000000-0000-4000-8000-000000000071',
+              type: 'create_ticket',
+              status: 'pending',
+              title: 'Parent epic',
+              description: 'Parent body',
+              children: [
+                {
+                  id: '00000000-0000-4000-8000-000000000072',
+                  title: 'Child A',
+                  description: 'A',
+                },
+                {
+                  id: '00000000-0000-4000-8000-000000000073',
+                  title: 'Child B',
+                  description: 'B',
+                },
+              ],
+            },
+          ],
+        },
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+    ];
+    mocks.acceptProposal.mockResolvedValue({
+      message: mocks.messages[0],
+      ticket: {
+        id: '00000000-0000-4000-8000-000000000050',
+        boardId: ACTIVE_SESSION.boardId,
+        title: 'Parent epic',
+        status: 'backlog',
+      },
+      children: [
+        {
+          id: '00000000-0000-4000-8000-000000000051',
+          boardId: ACTIVE_SESSION.boardId,
+          title: 'Child A',
+          status: 'backlog',
+        },
+      ],
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const card = screen.getByTestId('chat-proposal-card');
+    expect(within(card).getByText('Child tickets (2 of 2)')).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Create 3 tickets' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole('checkbox', { name: 'Child B' }));
+    expect(within(card).getByText('Child tickets (1 of 2)')).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Create 2 tickets' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Create 2 tickets' }));
+
+    await waitFor(() => {
+      expect(mocks.acceptProposal).toHaveBeenCalledWith({
+        messageId: '00000000-0000-4000-8000-000000000070',
+        proposalId: '00000000-0000-4000-8000-000000000071',
+        title: 'Parent epic',
+        description: 'Parent body',
+        boardId: ACTIVE_SESSION.boardId,
+        selectedChildIds: ['00000000-0000-4000-8000-000000000072'],
+      });
+    });
+  });
+
   it('rejects a proposal from the chat card without creating anything', async () => {
     mocks.sessions = [ACTIVE_SESSION];
     mocks.messages = [

@@ -28,6 +28,7 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     }
     validate_for_profile(&result, ctx.scope.profile, &ctx.scope.job_type)
         .map_err(ToolError::InvalidArgs)?;
+    refuse_foreign_chat_design_sets(ctx, &result).await?;
     if let AgentRunResult::Done {
         plan_questions,
         no_visible_change,
@@ -104,6 +105,57 @@ fn plan_warnings(result: &AgentRunResult) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+/// `designSetId` on a chat `create_ticket` action must be a published set on this chat session.
+async fn refuse_foreign_chat_design_sets(
+    ctx: &ToolCtx<'_>,
+    result: &AgentRunResult,
+) -> Result<(), ToolError> {
+    let AgentRunResult::Done {
+        actions: Some(actions),
+        ..
+    } = result
+    else {
+        return Ok(());
+    };
+    if ctx.scope.profile != ContextProfile::Conversation || ctx.scope.job_type != "chat_turn" {
+        return Ok(());
+    }
+    let Some(session_id) = ctx.scope.chat_session_id else {
+        return Ok(());
+    };
+    let parsed = crate::domain::chat_action::parse_chat_actions(actions)
+        .map_err(ToolError::InvalidArgs)?;
+    for action in parsed {
+        let crate::domain::chat_action::ChatAction::CreateTicket {
+            design_set_id: Some(set_id),
+            ..
+        } = action
+        else {
+            continue;
+        };
+        let owned: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM design_sets
+                WHERE id = $1
+                  AND chat_session_id = $2
+                  AND published_at IS NOT NULL
+            )
+            "#,
+        )
+        .bind(set_id)
+        .bind(session_id)
+        .fetch_one(ctx.pool)
+        .await?;
+        if !owned {
+            return Err(ToolError::InvalidArgs(format!(
+                "designSetId `{set_id}` is not a published design set on this chat session"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Each `{{design:<id>}}` marker in the plan must point at a live published set on this ticket.

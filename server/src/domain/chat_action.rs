@@ -1,6 +1,15 @@
 use crate::domain::Id;
 use crate::domain::knowledge::{scope_from_str, type_from_str};
 use serde::{Deserialize, Serialize};
+/// Child ticket draft nested under one `create_ticket` chat action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTicketChild {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 /// Compact server-validated chat actions (distinct from ticket result contract).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -13,6 +22,12 @@ pub enum ChatAction {
         repo_id: Option<Id>,
         #[serde(default, rename = "boardId")]
         board_id: Option<Id>,
+        /// Nested Backlog children created with the parent on accept (max [`MAX_CHAT_CHILDREN`]).
+        #[serde(default)]
+        children: Vec<ChatTicketChild>,
+        /// Published design set on this chat session to copy onto the parent ticket.
+        #[serde(default, rename = "designSetId")]
+        design_set_id: Option<Id>,
     },
     CreateKnowledge {
         title: String,
@@ -46,6 +61,9 @@ pub struct ChatActionResultMeta {
 
 /// Most proposals one chat turn may carry.
 pub const MAX_CHAT_ACTIONS: usize = 5;
+
+/// Most child tickets one `create_ticket` proposal may carry.
+pub const MAX_CHAT_CHILDREN: usize = 8;
 
 /// `knowledgeType` values a `create_knowledge` proposal may use.
 pub const KNOWLEDGE_TYPES: &[&str] = &[
@@ -84,6 +102,20 @@ pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>
         match &action {
             ChatAction::CreateTicket { title, .. } if title.trim().is_empty() => {
                 return Err(format!("create_ticket at index {i}: title is required"));
+            }
+            ChatAction::CreateTicket { children, .. } if children.len() > MAX_CHAT_CHILDREN => {
+                return Err(format!(
+                    "create_ticket at index {i}: children allows at most {MAX_CHAT_CHILDREN}"
+                ));
+            }
+            ChatAction::CreateTicket { children, .. } => {
+                for (j, child) in children.iter().enumerate() {
+                    if child.title.trim().is_empty() {
+                        return Err(format!(
+                            "create_ticket at index {i}: children[{j}].title is required"
+                        ));
+                    }
+                }
             }
             ChatAction::CreateKnowledge { title, content, .. }
                 if title.trim().is_empty() || content.trim().is_empty() =>
@@ -127,15 +159,31 @@ pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
                 description,
                 repo_id,
                 board_id,
-            } => serde_json::json!({
-                "id": Id::new(),
-                "type": "create_ticket",
-                "title": title,
-                "description": description,
-                "repoId": repo_id,
-                "boardId": board_id,
-                "status": "pending",
-            }),
+                children,
+                design_set_id,
+            } => {
+                let child_cards: Vec<serde_json::Value> = children
+                    .iter()
+                    .map(|child| {
+                        serde_json::json!({
+                            "id": Id::new(),
+                            "title": child.title,
+                            "description": child.description,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "id": Id::new(),
+                    "type": "create_ticket",
+                    "title": title,
+                    "description": description,
+                    "repoId": repo_id,
+                    "boardId": board_id,
+                    "children": child_cards,
+                    "designSetId": design_set_id,
+                    "status": "pending",
+                })
+            }
             ChatAction::CreateKnowledge {
                 title,
                 content,
@@ -254,6 +302,46 @@ mod tests {
         assert!(parse_chat_actions(&six)
             .expect_err("cap")
             .contains("at most 5"));
+    }
+
+    #[test]
+    fn parse_rejects_too_many_children() {
+        let children: Vec<_> = (0..9)
+            .map(|n| json!({ "title": format!("Child {n}"), "description": "" }))
+            .collect();
+        let err = parse_chat_actions(&json!([{
+            "type": "create_ticket",
+            "title": "Parent",
+            "children": children,
+        }]))
+        .expect_err("cap");
+        assert!(err.contains("at most 8"), "{err}");
+    }
+
+    #[test]
+    fn parse_accepts_children_and_design_set_id() {
+        let actions = parse_chat_actions(&json!([{
+            "type": "create_ticket",
+            "title": "Parent",
+            "children": [
+                { "title": "A", "description": "one" },
+                { "title": "B" }
+            ],
+            "designSetId": "11111111-1111-1111-1111-111111111111"
+        }]))
+        .expect("parse");
+        match &actions[0] {
+            ChatAction::CreateTicket {
+                children,
+                design_set_id,
+                ..
+            } => {
+                assert_eq!(children.len(), 2);
+                assert_eq!(children[0].title, "A");
+                assert!(design_set_id.is_some());
+            }
+            other => panic!("expected create_ticket, got {other:?}"),
+        }
     }
 
     #[test]

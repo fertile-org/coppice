@@ -30,6 +30,12 @@ export const chatActionMetadataSchema = z.object({
   knowledgeItemId: idSchema.optional(),
 });
 
+export const chatProposalChildSchema = z.object({
+  id: idSchema,
+  title: z.string(),
+  description: z.string().optional(),
+});
+
 export const chatProposalSchema = z.object({
   id: idSchema,
   type: z.enum(['create_ticket', 'create_knowledge']),
@@ -41,7 +47,10 @@ export const chatProposalSchema = z.object({
   repoId: idSchema.nullable().optional(),
   knowledgeType: z.string().optional(),
   scope: z.string().optional(),
+  children: z.array(chatProposalChildSchema).optional(),
+  designSetId: idSchema.nullable().optional(),
   ticketId: idSchema.optional(),
+  childTicketIds: z.array(idSchema).optional(),
   knowledgeItemId: idSchema.optional(),
 });
 
@@ -101,6 +110,7 @@ const chatCreatedTicketSchema = z
 export const acceptChatProposalResponseSchema = z.object({
   message: chatMessageSchema,
   ticket: chatCreatedTicketSchema.optional(),
+  children: z.array(chatCreatedTicketSchema).optional(),
   knowledge: knowledgeItemSchema.optional(),
 });
 
