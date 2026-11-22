@@ -10,24 +10,23 @@ export function configureMacFeed(autoUpdater, feed = MAC_UPDATE_FEED) {
   autoUpdater.autoInstallOnAppQuit = true;
 }
 
+// Skip download-progress: it floods updater.log once per tick.
 const LOGGED_EVENTS = [
   'checking-for-update',
   'update-available',
   'update-not-available',
-  'download-progress',
   'update-downloaded',
   'error',
 ];
+
+export const IN_PLACE_NOT_AVAILABLE_REASON =
+  'Update feed has no newer build for this app (latest-mac.yml may lag latest.json).';
 
 function summarizeEvent(name, payload) {
   if (name === 'error') {
     const err = payload;
     const detail = err?.message || err?.stack || String(err);
     return `error: ${detail}`;
-  }
-  if (name === 'download-progress') {
-    const pct = typeof payload?.percent === 'number' ? payload.percent.toFixed(1) : '?';
-    return `download-progress: ${pct}%`;
   }
   if (name === 'update-available' || name === 'update-downloaded' || name === 'update-not-available') {
     const version = typeof payload?.version === 'string' ? payload.version : '';
@@ -36,7 +35,7 @@ function summarizeEvent(name, payload) {
   return name;
 }
 
-export function attachMacUpdater(autoUpdater, { onDownloaded, onError, onLog } = {}) {
+export function attachMacUpdater(autoUpdater, { onDownloaded, onError, onNotAvailable, onLog } = {}) {
   for (const name of LOGGED_EVENTS) {
     autoUpdater.on(name, (payload) => {
       onLog?.(summarizeEvent(name, payload));
@@ -44,6 +43,9 @@ export function attachMacUpdater(autoUpdater, { onDownloaded, onError, onLog } =
   }
   autoUpdater.on('update-downloaded', (info) => {
     onDownloaded?.({ version: typeof info?.version === 'string' ? info.version : '' });
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    onNotAvailable?.(info);
   });
   autoUpdater.on('error', (error) => {
     onError?.(error);

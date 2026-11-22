@@ -7,7 +7,11 @@ import { startServer } from './src/serverProcess.mjs';
 import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { macInstallBlocked } from './src/macInstallLocation.mjs';
-import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
+import {
+  attachMacUpdater,
+  configureMacFeed,
+  IN_PLACE_NOT_AVAILABLE_REASON,
+} from './src/macUpdater.mjs';
 import { macUpdateFeed, updateBase } from './src/updateEndpoints.mjs';
 import { readUpdateBase, readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
@@ -197,6 +201,12 @@ async function ensureMacUpdater() {
             downloadState = { phase: 'downloaded', version: info.version };
             logUpdater(`ready to install: ${info.version}`);
             publishBanner();
+          },
+          onNotAvailable() {
+            // latest.json said newer, but the zip feed disagreed — do not stay on downloading.
+            if (downloadState?.phase === 'downloading') {
+              markInPlaceFailed(IN_PLACE_NOT_AVAILABLE_REASON);
+            }
           },
           onError(error) {
             const reason = error?.message || String(error || 'Update download failed.');
