@@ -284,7 +284,7 @@ function renderOffer(desktopMode: boolean, role = 'admin') {
         <SessionContext.Provider value={session(desktopMode, role)}>
           <ThemeProvider>
             <MemoryRouter>
-              <InitWizardOffer boardsEmpty />
+              <InitWizardOffer />
             </MemoryRouter>
           </ThemeProvider>
         </SessionContext.Provider>
@@ -294,6 +294,23 @@ function renderOffer(desktopMode: boolean, role = 'admin') {
   return client;
 }
 
+function deferredJson(body: unknown, status = 200) {
+  let resolve!: (value: Response) => void;
+  const promise = new Promise<Response>((r) => {
+    resolve = r;
+  });
+  return {
+    promise,
+    resolve: () =>
+      resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+  };
+}
+
 describe('InitWizardOffer', () => {
   const fetchMock = vi.fn();
 
@@ -301,6 +318,7 @@ describe('InitWizardOffer', () => {
     localStorage.clear();
     fetchMock.mockReset();
     fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/boards') return jsonResponse([]);
       if (path === '/api/repos') return jsonResponse([]);
       if (path === '/api/agents') return jsonResponse({ items: [] });
       if (path === '/api/init') return jsonResponse(previewReady);
@@ -318,8 +336,37 @@ describe('InitWizardOffer', () => {
     renderOffer(true);
     expect(await screen.findByRole('heading', { name: INIT_COPY.title })).toBeInTheDocument();
     expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'yes');
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes');
     expect(screen.getByTestId('init-welcome')).toBeInTheDocument();
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows a cover while checks load so the home page never flashes first', async () => {
+    const boards = deferredJson([]);
+    const repos = deferredJson([]);
+    const agents = deferredJson({ items: [] });
+    fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/boards') return boards.promise;
+      if (path === '/api/repos') return repos.promise;
+      if (path === '/api/agents') return agents.promise;
+      if (path === '/api/init') return jsonResponse(previewReady);
+      if (path === '/api/connectors') return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    });
+    renderOffer(true);
+    expect(screen.getByTestId('init-cover')).toBeInTheDocument();
+    expect(screen.queryByTestId('init-welcome')).not.toBeInTheDocument();
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'no');
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
+
+    boards.resolve();
+    repos.resolve();
+    agents.resolve();
+    expect(await screen.findByTestId('init-welcome')).toBeInTheDocument();
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes');
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'yes');
   });
 
   it('leaves the welcome page when setup is skipped', async () => {
@@ -331,19 +378,56 @@ describe('InitWizardOffer', () => {
 
   it('stays closed when a repo already exists', async () => {
     fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/boards') return jsonResponse([]);
       if (path === '/api/repos') return jsonResponse([{ id: 'repo-1' }]);
       if (path === '/api/agents') return jsonResponse({ items: [] });
       return jsonResponse([]);
     });
     renderOffer(true);
     await waitFor(() =>
-      expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no'),
+      expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes'),
     );
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('init-welcome')).not.toBeInTheDocument();
+  });
+
+  it('stays closed when a board already exists', async () => {
+    fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/boards') return jsonResponse([{ id: 'board-1', name: 'Main' }]);
+      if (path === '/api/repos') return jsonResponse([]);
+      if (path === '/api/agents') return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    });
+    renderOffer(true);
+    await waitFor(() =>
+      expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes'),
+    );
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('init-welcome')).not.toBeInTheDocument();
+  });
+
+  it('clears the cover when a check errors so it never stays stuck', async () => {
+    fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/boards') return jsonResponse([]);
+      if (path === '/api/repos') return jsonResponse({ error: 'boom' }, 500);
+      if (path === '/api/agents') return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    });
+    renderOffer(true);
+    await waitFor(() =>
+      expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes'),
+    );
+    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('init-welcome')).not.toBeInTheDocument();
   });
 
   it('stays closed outside the desktop app', () => {
     renderOffer(false);
     expect(screen.queryByRole('heading', { name: INIT_COPY.title })).not.toBeInTheDocument();
     expect(screen.queryByTestId('init-offer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('init-cover')).not.toBeInTheDocument();
   });
 });

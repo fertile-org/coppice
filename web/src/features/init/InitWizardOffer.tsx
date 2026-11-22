@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import { turnedOnToast } from '../tools/connectorCopy';
 import { useSession } from '../auth/useSession';
-import { setLastBoardId } from '../boards/useBoards';
+import { setLastBoardId, useBoards } from '../boards/useBoards';
 import { useAgents } from '../agents/useAgents';
 import { useRepos } from '../repos/useRepos';
 import { BrandLogo } from '../../components/BrandLogo';
@@ -12,30 +12,62 @@ import { InitWizard, type InitCreated } from './InitWizard';
 import { initWizardFlag, setInitWizardFlag } from './storage';
 
 /** Offers the wizard once on an empty desktop workspace, as a welcome page. */
-export function InitWizardOffer({ boardsEmpty }: { boardsEmpty: boolean }) {
+export function InitWizardOffer() {
   const { desktopMode, user } = useSession();
   const navigate = useNavigate();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [offered, setOffered] = useState(false);
   const [settled, setSettled] = useState(false);
-  const eligible =
-    desktopMode && user?.role === 'admin' && boardsEmpty && initWizardFlag() == null;
-  const repos = useRepos({ enabled: eligible });
-  const agents = useAgents({ enabled: eligible });
+  // Candidate before boards load so repos/agents start in parallel with boards.
+  const candidate =
+    desktopMode && user?.role === 'admin' && initWizardFlag() == null;
+  const boards = useBoards();
+  const repos = useRepos({ enabled: candidate });
+  const agents = useAgents({ enabled: candidate });
+  const pending = candidate && !settled;
 
   useEffect(() => {
-    if (!eligible) {
+    if (!candidate) {
       setSettled(true);
       return;
     }
-    if (offered || !repos.data || !agents.data) return;
-    setSettled(true);
-    if (repos.data.length === 0 && agents.data.length === 0) {
-      setOffered(true);
-      setOpen(true);
+    if (offered) return;
+
+    if (boards.isError || repos.isError || agents.isError) {
+      setSettled(true);
+      return;
     }
-  }, [agents.data, eligible, offered, repos.data]);
+
+    const boardsDone = boards.isFetched;
+    const reposDone = repos.isFetched;
+    const agentsDone = agents.isFetched;
+    const hasBoards = boardsDone && (boards.data?.length ?? 0) > 0;
+    const hasRepos = reposDone && (repos.data?.length ?? 0) > 0;
+    const hasAgents = agentsDone && (agents.data?.length ?? 0) > 0;
+    if (hasBoards || hasRepos || hasAgents) {
+      setSettled(true);
+      return;
+    }
+
+    if (!boardsDone || !reposDone || !agentsDone) return;
+
+    setSettled(true);
+    setOffered(true);
+    setOpen(true);
+  }, [
+    agents.data,
+    agents.isError,
+    agents.isFetched,
+    boards.data,
+    boards.isError,
+    boards.isFetched,
+    candidate,
+    offered,
+    repos.data,
+    repos.isError,
+    repos.isFetched,
+  ]);
 
   function finish(created: InitCreated) {
     setInitWizardFlag('done');
@@ -57,7 +89,18 @@ export function InitWizardOffer({ boardsEmpty }: { boardsEmpty: boolean }) {
         data-open={open ? 'yes' : 'no'}
         hidden
       />
-      {open ? (
+      {pending ? (
+        // Covers the app shell while empty-workspace checks finish.
+        <main
+          className="coppice-grain fixed inset-0 z-50 overflow-y-auto bg-background"
+          data-testid="init-cover"
+          aria-busy="true"
+        >
+          <div className="mx-auto flex min-h-full w-full max-w-lg flex-col items-center justify-center px-4 py-12">
+            <BrandLogo size={72} className="h-[72px] w-[72px]" />
+          </div>
+        </main>
+      ) : open ? (
         // Covers the app shell: a new user sees a welcome, not an empty board.
         <main
           className="coppice-grain fixed inset-0 z-50 overflow-y-auto bg-background"
