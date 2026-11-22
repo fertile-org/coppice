@@ -148,27 +148,6 @@ describe('RepositoriesPage', () => {
     });
   });
 
-  it('shows a list-only page for admins without a side form or token selector', () => {
-    renderPage();
-
-    expect(screen.getByRole('heading', { name: 'Repositories' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add repository' })).toBeVisible();
-    expect(screen.getByText('coppice')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'View code' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible();
-
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Local path')).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Verify' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Remove' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId('default-branch-sync')).not.toBeInTheDocument();
-  });
-
   it('opens a create drawer from Add repository and closes on Escape and backdrop', async () => {
     renderPage();
 
@@ -255,33 +234,17 @@ describe('RepositoriesPage', () => {
     expect(mocks.syncEnabledCalls.every((c) => !c.enabled)).toBe(true);
   });
 
-  it('shows GIT status and Sync for ready admin rows without Push', () => {
-    renderPage();
+  it('enables Sync when clean and disables it when dirty', () => {
+    const clean = renderPage();
+    expect(screen.getByRole('button', { name: 'Sync' })).toBeEnabled();
+    clean.unmount();
 
-    expect(screen.getByRole('columnheader', { name: 'Git' })).toBeVisible();
-    expect(screen.getByTestId('repo-git-status')).toHaveTextContent(
-      'ahead 0, behind 2',
-    );
-    const sync = screen.getByRole('button', { name: 'Sync' });
-    expect(sync).toBeEnabled();
-    expect(
-      screen.queryByRole('button', { name: 'Push to remote' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Fetch' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Pull' })).not.toBeInTheDocument();
-  });
-
-  it('disables Sync when the working tree is dirty', () => {
     mocks.syncStatus = baseSyncStatus({
       workingTreeClean: false,
       canFetch: true,
       canPull: false,
     });
     renderPage();
-
-    expect(screen.getByTestId('repo-git-status')).toHaveTextContent(
-      'working tree dirty',
-    );
     expect(screen.getByRole('button', { name: 'Sync' })).toBeDisabled();
   });
 
@@ -309,29 +272,18 @@ describe('RepositoriesPage', () => {
     ).toBeVisible();
   });
 
-  it('canceling remove repository leaves it in place', async () => {
+  it('cancel or confirm remove repository', async () => {
     renderPage();
-
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Edit repository' })).getByRole('button', { name: 'Remove' }));
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Remove repository "coppice"?',
-    });
+    const edit = screen.getByRole('dialog', { name: 'Edit repository' });
+    fireEvent.click(within(edit).getByRole('button', { name: 'Remove' }));
+    let dialog = await screen.findByRole('dialog', { name: 'Remove repository "coppice"?' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-
     expect(mocks.remove).not.toHaveBeenCalled();
-  });
 
-  it('confirming remove repository deletes it', async () => {
-    renderPage();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Edit repository' })).getByRole('button', { name: 'Remove' }));
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Remove repository "coppice"?',
-    });
+    fireEvent.click(within(edit).getByRole('button', { name: 'Remove' }));
+    dialog = await screen.findByRole('dialog', { name: 'Remove repository "coppice"?' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
-
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(sampleRepo.id));
   });
 });

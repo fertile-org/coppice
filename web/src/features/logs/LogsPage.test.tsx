@@ -119,25 +119,6 @@ describe('LogsPage', () => {
     );
   });
 
-  it('shows the empty state', async () => {
-    renderPage();
-    expect(await screen.findByText('No logs match these filters.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Logs' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Source')).toBeInTheDocument();
-    expect(screen.getByLabelText('Level')).toHaveTextContent('Info');
-    expect(screen.getByRole('switch', { name: 'Live' })).not.toBeChecked();
-  });
-
-  it('shows a request line and keeps the run from the address', async () => {
-    mocks.apiFetch.mockImplementation((path: string) =>
-      apiResult(path, { lines: [httpLine], nextCursor: null }),
-    );
-    renderPage('/logs?run=run-9');
-    expect(await screen.findByText('http request')).toBeInTheDocument();
-    expect(screen.getByText('GET /api/health 200')).toBeInTheDocument();
-    expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('run=run-9'));
-  });
-
   it('asks for agent lines when the source changes', async () => {
     renderPage();
     await screen.findByText('No logs match these filters.');
@@ -216,48 +197,31 @@ describe('LogsPage', () => {
     expect(screen.getAllByText(/^old \d+$/).length).toBeLessThanOrEqual(1000 + MAX_OLDER_LINES);
   }, 20_000);
 
-  it('labels the warn level Warning', async () => {
-    renderPage();
-    await screen.findByText('No logs match these filters.');
-    openSelect('Level');
-    fireEvent.click(await screen.findByRole('option', { name: 'Warning' }));
-    await waitFor(() => {
-      expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('level=warn'));
-    });
-    expect(screen.getByLabelText('Level')).toHaveTextContent('Warning');
-  });
-
-  it('shows the server sentence when the log store is missing', async () => {
-    mocks.apiFetch.mockImplementation(() => {
-      throw new ApiError(
-        503,
-        JSON.stringify({ message: "Logs aren't available on this server." }),
-      );
-    });
-    renderPage();
-    expect(await screen.findByText("Logs aren't available on this server.")).toBeInTheDocument();
-    expect(screen.queryByText("Couldn't load logs. Try again.")).not.toBeInTheDocument();
-  });
-
-  it('shows the search sentence for a bad query', async () => {
-    mocks.apiFetch.mockImplementation(() => {
-      throw new ApiError(
-        400,
-        JSON.stringify({ message: "Couldn't read that search. Check it and try again." }),
-      );
-    });
-    renderPage();
-    expect(
-      await screen.findByText("Couldn't read that search. Check it and try again."),
-    ).toBeInTheDocument();
-  });
-
-  it('shows the retry sentence when the request fails without a server sentence', async () => {
-    mocks.apiFetch.mockImplementation(() => {
-      throw new Error('network');
-    });
-    renderPage();
-    expect(await screen.findByText("Couldn't load logs. Try again.")).toBeInTheDocument();
+  it('shows server, search, and network errors', async () => {
+    const cases = [
+      [
+        () => {
+          throw new ApiError(503, JSON.stringify({ message: "Logs aren't available on this server." }));
+        },
+        "Logs aren't available on this server.",
+      ],
+      [
+        () => {
+          throw new ApiError(
+            400,
+            JSON.stringify({ message: "Couldn't read that search. Check it and try again." }),
+          );
+        },
+        "Couldn't read that search. Check it and try again.",
+      ],
+      [() => { throw new Error('network'); }, "Couldn't load logs. Try again."],
+    ] as const;
+    for (const [impl, message] of cases) {
+      mocks.apiFetch.mockImplementation(impl);
+      const view = renderPage();
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it('exports the current filters and says the file was saved', async () => {

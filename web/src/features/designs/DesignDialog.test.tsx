@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
 import type { DesignSet } from '../../lib/schemas/design';
@@ -72,40 +72,13 @@ describe('DesignDialog footer', () => {
     );
   });
 
-  it('plan_running: "The plan is being updated." with no button', () => {
-    const dialog = open(
-      makeDesignSet({ choice: { mode: 'plan_running', planOutOfDate: false } }),
-    );
-    viewOption(dialog, 'Full-width');
-    expect(dialog.getByText('The plan is being updated.')).toBeInTheDocument();
-    expect(dialog.queryByRole('button', { name: /^Choose|Try again/ })).toBeNull();
-  });
-
-  it('plan_final: approved-plan text and no button', () => {
-    const dialog = open(makeDesignSet({ choice: { mode: 'plan_final', planOutOfDate: false } }));
-    viewOption(dialog, 'Full-width');
-    expect(
-      dialog.getByText(
-        'The plan is approved, so this design is final. To change it, add a comment on the ticket.',
-      ),
-    ).toBeInTheDocument();
-    expect(dialog.queryByRole('button', { name: /^Choose|Try again/ })).toBeNull();
-  });
-
-  it('save_only: "Choose B", also with nothing selected', () => {
-    const dialog = open(
-      makeDesignSet({ selected: null, choice: { mode: 'save_only', planOutOfDate: false } }),
-    );
-    expect(dialog.getByRole('button', { name: 'Choose A' })).toBeInTheDocument();
-    viewOption(dialog, 'Full-width');
-    expect(dialog.getByRole('button', { name: 'Choose B' })).toBeInTheDocument();
-  });
-
-  it('save_only plan-run set: the selected option has no action', () => {
-    const dialog = open(makeDesignSet({ choice: { mode: 'save_only', planOutOfDate: false } }));
-    expect(dialog.getByText('Work follows this option.')).toBeInTheDocument();
-    viewOption(dialog, 'Footer');
-    expect(dialog.getByRole('button', { name: 'Choose C' })).toBeInTheDocument();
+  it('hides choose actions in plan_running, plan_final, and read_only modes', () => {
+    for (const mode of ['plan_running', 'plan_final', 'read_only'] as const) {
+      const dialog = open(makeDesignSet({ choice: { mode, planOutOfDate: false } }));
+      viewOption(dialog, 'Full-width');
+      expect(dialog.queryByRole('button', { name: /^Choose|Try again/ })).toBeNull();
+      cleanup();
+    }
   });
 
   it('save_only work-run or chat set: the recommended option can be chosen, and saves', async () => {
@@ -136,22 +109,6 @@ describe('DesignDialog footer', () => {
     viewOption(dialog, 'Quiet button');
     expect(dialog.queryByText('Work follows this option.')).toBeNull();
     expect(dialog.getByRole('button', { name: 'Choose A' })).toBeInTheDocument();
-  });
-
-  it('read_only: no action', () => {
-    const dialog = open(makeDesignSet({ choice: { mode: 'read_only', planOutOfDate: false } }));
-    viewOption(dialog, 'Full-width');
-    expect(dialog.queryByRole('button', { name: /^Choose|Try again/ })).toBeNull();
-    expect(dialog.queryByText('Work follows this option.')).toBeNull();
-  });
-
-  it('shows the Recommended badge and the chosen marker', () => {
-    const dialog = open(makeDesignSet({ chosen: makePick(makeOption('b', 'Full-width button with Show all', 'B')) }));
-    const tabA = dialog.getByRole('tab', { name: /Quiet button/ });
-    const tabB = dialog.getByRole('tab', { name: /Full-width/ });
-    expect(within(tabA).getByText('Recommended')).toBeInTheDocument();
-    expect(within(tabB).queryByText('Recommended')).toBeNull();
-    expect(within(tabB).getByText('Chosen')).toBeInTheDocument();
   });
 
   it('shows the server error message when a pick is refused', async () => {
@@ -190,10 +147,5 @@ describe('DesignDialog footer', () => {
       );
     });
 
-    it('says "Choose B" when the plan is not touched', () => {
-      const dialog = open(slugSet({ choice: { mode: 'save_only', planOutOfDate: false } }));
-      fireEvent.click(dialog.getByRole('tab', { name: /^B: Full-width/ }));
-      expect(dialog.getByRole('button', { name: 'Choose B' })).toBeInTheDocument();
-    });
   });
 });

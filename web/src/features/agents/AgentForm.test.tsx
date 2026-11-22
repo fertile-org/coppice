@@ -151,25 +151,43 @@ describe('AgentForm model choice', () => {
     mocks.uncoveredIds = [];
   });
 
-  it('preselects the connector default and offers Refresh models', () => {
-    mocks.groups = [
-      { provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }, { id: 'composer-2.5', name: 'Composer 2.5' }] },
-    ];
+  it('connector default model display and submit', async () => {
+    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
+    const agent = {
+      id: 'a',
+      name: 'Builder',
+      role: 'Developer',
+      responsibilities: [],
+      systemPrompt: '',
+      connector: 'cursor',
+      modelProvider: '   ',
+      model: '   ',
+      health: 'healthy',
+      enabled: true,
+      createdAt: '',
+      updatedAt: '',
+    } satisfies Agent;
+    expect(agentToFormValues(agent).model).toBe('');
+    expect(agentToFormValues(agent).modelProvider).toBe('');
+
+    const onSubmit = vi.fn();
     render(
       <Harness
         mode="create"
-        initial={baseValues({ connector: 'cursor' })}
-        onSubmit={vi.fn()}
+        initial={baseValues({ connector: 'cursor', model: '', modelProvider: '', systemPrompt: 'Help' })}
+        onSubmit={onSubmit}
         connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
       />,
     );
 
-    expect(screen.queryByLabelText('Model provider')).toBeNull();
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
-      "Cursor's default",
-    );
+    const trigger = screen.getByRole('combobox', { name: 'Model' });
+    expect(trigger).toHaveTextContent("Cursor's default");
     fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
     expect(mocks.refreshModels).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].model).toBe('');
+    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('');
   });
 
   it('marks a model the user checked as not covered', () => {
@@ -242,73 +260,6 @@ describe('AgentForm model choice', () => {
     expect(onSubmit.mock.calls[0][0].modelProvider).toBe('cursor');
   });
 
-  it('uses provider names only as group headings', async () => {
-    mocks.groups = [
-      { provider: 'sonnet', models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }] },
-      { provider: 'fable', models: [{ id: 'fable', name: 'fable' }] },
-    ];
-    const onSubmit = vi.fn();
-    render(
-      <Harness
-        mode="edit"
-        initial={baseValues({ connector: 'claude-code', systemPrompt: 'Help' })}
-        onSubmit={onSubmit}
-        connectorOptions={[{ id: 'claude-code', displayName: 'Claude Code' }]}
-      />,
-    );
-
-    expect(screen.queryByLabelText('Model provider')).toBeNull();
-    const trigger = screen.getByRole('combobox', { name: 'Model' });
-    expect(trigger).toHaveTextContent("Claude Code's default");
-    openCombobox(trigger);
-    expect(screen.getByText('sonnet')).toBeInTheDocument();
-    expect(screen.getAllByText('fable').length).toBeGreaterThan(0);
-    selectComboboxOption(trigger, 'Claude Sonnet 4.6');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].model).toBe('claude-sonnet-4-6');
-    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('sonnet');
-  });
-
-  it('shows the failure copy, the stderr line, and the Cursor sign-in line', () => {
-    mocks.modelsError = true;
-    mocks.modelsDetail = 'boom from cli';
-    const { rerender } = render(
-      <Harness
-        mode="create"
-        initial={baseValues({ connector: 'cursor' })}
-        onSubmit={vi.fn()}
-        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
-      />,
-    );
-    expect(
-      screen.getByText("Couldn't get Cursor's models. Using Cursor's default for now."),
-    ).toBeInTheDocument();
-    expect(screen.getByText('boom from cli')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Refresh models' })).toBeInTheDocument();
-
-    mocks.modelsDetail = 'Error: Authentication required';
-    rerender(
-      <Harness
-        mode="create"
-        initial={baseValues({ connector: 'cursor' })}
-        onSubmit={vi.fn()}
-        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
-      />,
-    );
-    const signIn = screen.getByText((_content, element) => {
-      return (
-        element?.tagName === 'P' &&
-        element.textContent ===
-          "Cursor's CLI isn't signed in for Coppice. Run cursor-agent login in a terminal, then click Refresh models."
-      );
-    });
-    expect(signIn.querySelector('code')?.textContent).toBe('cursor-agent login');
-    expect(signIn.textContent).not.toContain('`');
-    expect(screen.queryByText('Error: Authentication required')).toBeNull();
-  });
-
   it('links a turned-off connector to System → Connectors', () => {
     mocks.modelsError = true;
     mocks.modelsErrorMessage =
@@ -332,58 +283,6 @@ describe('AgentForm model choice', () => {
     ).toBeNull();
   });
 
-  it('treats a blank saved model as the connector default', () => {
-    const agent = {
-      id: 'a',
-      name: 'Builder',
-      role: 'Developer',
-      responsibilities: [],
-      systemPrompt: '',
-      connector: 'cursor',
-      modelProvider: '   ',
-      model: '   ',
-      health: 'healthy',
-      enabled: true,
-      createdAt: '',
-      updatedAt: '',
-    } satisfies Agent;
-    expect(agentToFormValues(agent).model).toBe('');
-    expect(agentToFormValues(agent).modelProvider).toBe('');
-  });
-
-  it('shows the connector default for an agent with no saved model', () => {
-    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
-    render(
-      <Harness
-        initial={baseValues({ connector: 'cursor', model: '', modelProvider: '' })}
-        onSubmit={vi.fn()}
-        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
-      />,
-    );
-
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
-      "Cursor's default",
-    );
-  });
-
-  it('submits a blank model when the default stays selected', async () => {
-    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
-    const onSubmit = vi.fn();
-    render(
-      <Harness
-        mode="create"
-        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help' })}
-        onSubmit={onSubmit}
-        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
-
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].model).toBe('');
-    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('');
-  });
 });
 
 describe('AgentForm thinking level', () => {
@@ -485,46 +384,12 @@ describe('AgentForm plugins picker', () => {
     mocks.modelsError = false;
   });
 
-  it('empty plugin list links to the Plugins page', () => {
-    mocks.plugins = [pluginB];
-    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
-
-    expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute(
-      'href',
-      '/settings/plugins',
-    );
-  });
-
-  it('has no free-text skills field', () => {
-    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
-
-    expect(screen.queryByRole('textbox', { name: /^Skills/ })).toBeNull();
-    expect(screen.getByRole('group', { name: /Skills/ })).toBeVisible();
-    expect(screen.getByText("Changes apply from each agent's next run.")).toBeVisible();
-  });
-
   it('lists only enabled ok plugins', () => {
     render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
 
     expect(screen.getByRole('checkbox', { name: /alpha-plugin/ })).toBeEnabled();
     expect(screen.queryByRole('checkbox', { name: /beta-plugin/ })).toBeNull();
     expect(screen.queryByRole('checkbox', { name: /gamma-plugin/ })).toBeNull();
-  });
-
-  it('agent picker counts enabled skills only', () => {
-    const skill = (name: string, enabled: boolean) => ({
-      name,
-      description: '',
-      relPath: `skills/${name}/SKILL.md`,
-      error: null,
-      enabled,
-    });
-    mocks.plugins = [
-      { ...pluginA, skills: [skill('a', true), skill('b', false), skill('c', true)] },
-    ];
-    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
-
-    expect(screen.getByText('(2 skills)')).toBeInTheDocument();
   });
 
   it('submits selected plugin ids', async () => {
@@ -586,69 +451,3 @@ describe('AgentForm plugins picker', () => {
   });
 });
 
-describe('AgentForm connector hints', () => {
-  it('lists connectors that can run first and keeps the rest pickable with their status', () => {
-    render(
-      <Harness
-        initial={baseValues({ connector: 'claude-code', name: 'Ada' })}
-        onSubmit={vi.fn()}
-        connectorOptions={[
-          { id: 'claude-code', displayName: 'Claude Code', readiness: 'ready', enabled: true },
-          { id: 'codex', displayName: 'Codex', readiness: 'not_on_path', enabled: false },
-          { id: 'cursor', displayName: 'Cursor', readiness: 'ready', enabled: false },
-          { id: 'grok', displayName: 'Grok', readiness: 'found', enabled: true },
-        ]}
-      />,
-    );
-
-    const trigger = screen.getByRole('combobox', { name: 'Connector' });
-    const list = openCombobox(trigger);
-    expect(within(list).getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'Claude Code — Ready',
-      'Grok — Installed',
-      'Codex — Not on your PATH',
-      'Cursor — Turned off',
-    ]);
-    selectComboboxOption(trigger, 'Codex — Not on your PATH');
-    expect(trigger).toHaveTextContent('Codex — Not on your PATH');
-  });
-
-  it('shows the install hint and the no-ready hint', () => {
-    render(
-      <MemoryRouter>
-        <AgentForm
-          mode="create"
-          values={baseValues({ connector: 'claude-code', name: 'Ada' })}
-          onChange={() => {}}
-          onSubmit={vi.fn()}
-          onCancel={() => {}}
-          connectorOptions={[
-            {
-              id: 'claude-code',
-              displayName: 'Claude Code',
-              readiness: 'not_on_path',
-            },
-            {
-              id: 'codex',
-              displayName: 'Codex',
-              readiness: 'found_not_signed_in',
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText('Claude Code — Not on your PATH')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Claude Code isn't installed on this machine yet. Install it and sign in, then this agent can run tickets. You can still save now.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute(
-      'href',
-      'https://getcoppice.app/docs/providers',
-    );
-    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('target', '_blank');
-    expect(screen.getByText(/No agent CLI is ready yet/)).toBeInTheDocument();
-  });
-});

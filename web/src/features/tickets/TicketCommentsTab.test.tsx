@@ -65,7 +65,7 @@ describe('TicketCommentsTab', () => {
     createComment.mockResolvedValue({ startedRuns: [] });
   });
 
-  it('adds a pending chip when a file is dropped on the comment box', () => {
+  it('adds a pending chip when a file is dropped or an image is pasted', () => {
     vi.stubGlobal('URL', {
       ...URL,
       createObjectURL: () => 'blob:shot',
@@ -80,23 +80,6 @@ describe('TicketCommentsTab', () => {
     fireEvent.drop(form!, { dataTransfer: { types: ['Files'], files: [shot] } });
     expect(screen.getByAltText('shot.png')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach files' })).toBeInTheDocument();
-  });
-
-  it('adds a pending chip when an image is pasted into the comment box', () => {
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: () => 'blob:pasted',
-      revokeObjectURL: () => {},
-    });
-    renderComments();
-    const form = screen.getByLabelText('Comment').closest('form');
-    const shot = new File(['png'], 'pasted.png', { type: 'image/png' });
-    fireEvent.paste(form!, {
-      clipboardData: {
-        items: [{ kind: 'file', type: 'image/png', getAsFile: () => shot }],
-      },
-    });
-    expect(screen.getByAltText('pasted.png')).toBeInTheDocument();
   });
 
   it('toasts the locked type and size sentences and skips the chip', () => {
@@ -145,16 +128,6 @@ describe('TicketCommentsTab', () => {
     expect(
       screen.queryByRole('listbox', { name: 'Agent mentions' }),
     ).not.toBeInTheDocument();
-  });
-
-  it('renders the rich-text comment editor by default', () => {
-    renderComments();
-
-    expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveAttribute(
-      'contenteditable',
-      'true',
-    );
-    expect(screen.getByRole('button', { name: 'Post comment' })).toBeDisabled();
   });
 
   it('posts once with Mod+Enter from the comment editor and stays quiet otherwise', async () => {

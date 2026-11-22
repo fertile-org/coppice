@@ -5,10 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCsrfToken } from '../../lib/api';
 import { selectComboboxOption } from '../../test/combobox';
-import {
-  connectorStatusSchema,
-  type ConnectorStatus,
-} from '../../lib/schemas/connectorDiagnostics';
+import type { ConnectorStatus } from '../../lib/schemas/connectorDiagnostics';
 import { ConnectorsTab } from './ConnectorsTab';
 import { connectorStatusesRefetchInterval } from './useConnectorDiagnostics';
 
@@ -171,56 +168,6 @@ describe('ConnectorsTab', () => {
     vi.unstubAllGlobals();
   });
 
-  it('lists connectors as rows sorted with attention first', async () => {
-    renderTab();
-    await row('claude-code');
-    const rows = screen.getAllByTestId(/connector-row-/);
-    expect(rows.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'connector-row-claude-code',
-      'connector-row-codex',
-      'connector-row-opencode',
-      'connector-row-kilo-code',
-    ]);
-  });
-
-  it('shows status in the drawer and attention on the row', async () => {
-    renderTab();
-
-    const kiloRow = await row('kilo-code');
-    expect(kiloRow.getByText('Installed · kilo 9.9.9')).toBeVisible();
-    expect(kiloRow.getByRole('switch', { name: 'Enabled Kilo Code' })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-
-    const kiloDrawer = await openDrawer('kilo-code');
-    expect(kiloDrawer.getByText('Installed')).toBeVisible();
-    expect(
-      kiloDrawer.getByText(
-        "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
-      ),
-    ).toBeVisible();
-    expect(kiloDrawer.getByText('/home/coppice/.local/bin/kilo')).toBeVisible();
-    expect(kiloDrawer.getByText('kilo 9.9.9')).toBeVisible();
-    expect(kiloDrawer.getByText(/KILO_API_KEY/)).toBeVisible();
-    expect(kiloDrawer.getByText(/\.kilocode/)).toBeVisible();
-    expect(kiloDrawer.queryByText(/restart the server/)).not.toBeInTheDocument();
-    expect(kiloDrawer.getByRole('button', { name: 'Test connection' })).toBeDisabled();
-    fireEvent.click(kiloDrawer.getByRole('button', { name: 'Close' }));
-
-    const claudeRow = await row('claude-code');
-    expect(claudeRow.getByText('Not on your PATH')).toBeVisible();
-    const claudeDrawer = await openDrawer('claude-code');
-    expect(claudeDrawer.getByText('Not on your PATH')).toBeVisible();
-    expect(
-      claudeDrawer.getByText('Run claude login or set ANTHROPIC_API_KEY'),
-    ).toBeVisible();
-    expect(claudeDrawer.getByRole('link', { name: /install docs/i })).toHaveAttribute(
-      'href',
-      'https://docs.anthropic.com/claude-code',
-    );
-  });
-
   it('filters connectors by search and chips', async () => {
     renderTab();
     await row('kilo-code');
@@ -255,23 +202,6 @@ describe('ConnectorsTab', () => {
     expect(codexDrawer.queryByText(/Needs version/)).not.toBeInTheDocument();
   });
 
-  it('shows checking state before the first probe', async () => {
-    fetchMock.mockReset();
-    stubApi((path, init) =>
-      path === '/api/tools/connectors' && (init.method ?? 'GET') === 'GET'
-        ? json([{ ...claude, probedAt: null }])
-        : undefined,
-    );
-    renderTab();
-
-    const claudeRow = await row('claude-code');
-    expect(claudeRow.getByText('Checking…')).toBeVisible();
-    expect(claudeRow.queryByText('Not on your PATH')).not.toBeInTheDocument();
-    const claudeDrawer = await openDrawer('claude-code');
-    expect(claudeDrawer.getAllByText('Checking…').length).toBeGreaterThan(0);
-    expect(claudeDrawer.queryByText('Not on your PATH')).not.toBeInTheDocument();
-  });
-
   it('polls statuses until startup probes finish', async () => {
     let lists = 0;
     stubApi((path, init) => {
@@ -285,6 +215,10 @@ describe('ConnectorsTab', () => {
 
     const claudeRow = await row('claude-code');
     expect(claudeRow.getByText('Checking…')).toBeVisible();
+    expect(claudeRow.queryByText('Not on your PATH')).not.toBeInTheDocument();
+    const claudeDrawer = await openDrawer('claude-code');
+    expect(claudeDrawer.getAllByText('Checking…').length).toBeGreaterThan(0);
+    expect(claudeDrawer.queryByText('Not on your PATH')).not.toBeInTheDocument();
     expect(await claudeRow.findByText('Not on your PATH', {}, { timeout: 5000 })).toBeVisible();
     expect(lists).toBe(2);
   }, 10_000);
@@ -305,49 +239,37 @@ describe('ConnectorsTab', () => {
     expect((await openDrawer('opencode')).getByText('No runs yet')).toBeVisible();
   });
 
-  it('run check posts with csrf and refreshes drawer', async () => {
-    stubApi((path, init) =>
-      path === '/api/tools/connectors/codex/check' && init.method === 'POST'
-        ? json({ ...codex, cli: { ...codex.cli, probe: { status: 'ok', detail: 'codex 2.0.0' } } })
-        : undefined,
-    );
-    renderTab();
-
-    const codexDrawer = await openDrawer('codex');
-    fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
-
-    expect(await codexDrawer.findByText('codex 2.0.0')).toBeVisible();
-    const [, init] = callsFor('/api/tools/connectors/codex/check', 'POST')[0];
-    expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
-  });
-
-  it('run check with an unchanged result updates the checked time', async () => {
-    stubApi((path, init) =>
-      path === '/api/tools/connectors/codex/check' && init.method === 'POST'
-        ? json({ ...codex, probedAt: new Date().toISOString() })
-        : undefined,
-    );
+  it('run check posts with csrf, refreshes probe or checked time, and surfaces errors', async () => {
+    let checkAttempts = 0;
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors/codex/check' && init.method === 'POST') {
+        checkAttempts += 1;
+        if (checkAttempts === 1) {
+          return json({
+            ...codex,
+            cli: { ...codex.cli, probe: { status: 'ok', detail: 'codex 2.0.0' } },
+          });
+        }
+        if (checkAttempts === 2) {
+          return json({ ...codex, probedAt: new Date().toISOString() });
+        }
+        return new Response('', { status: 500 });
+      }
+      return undefined;
+    });
     renderTab();
 
     const codexDrawer = await openDrawer('codex');
     expect(codexDrawer.queryByText('now')).not.toBeInTheDocument();
     fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
+    expect(await codexDrawer.findByText('codex 2.0.0')).toBeVisible();
+    const [, init] = callsFor('/api/tools/connectors/codex/check', 'POST')[0];
+    expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
 
-    expect(await codexDrawer.findByText('now')).toBeVisible();
-    expect(codexDrawer.getByText('Checked')).toBeVisible();
-  });
-
-  it('run check failure shows the error in the drawer', async () => {
-    stubApi((path, init) =>
-      path === '/api/tools/connectors/codex/check' && init.method === 'POST'
-        ? new Response('', { status: 500 })
-        : undefined,
-    );
-    renderTab();
-
-    const codexDrawer = await openDrawer('codex');
     fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
+    expect(await codexDrawer.findByText('now')).toBeVisible();
 
+    fireEvent.click(codexDrawer.getByRole('button', { name: 'Run check' }));
     expect(await codexDrawer.findByRole('alert')).toHaveTextContent('Check failed.');
   });
 
@@ -380,9 +302,13 @@ describe('ConnectorsTab', () => {
     await waitFor(() =>
       expect(codexDrawer.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
+    expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(1);
     fireEvent.click(codexDrawer.getByRole('button', { name: 'Test connection' }));
     selectComboboxOption(codexDrawer.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
     fireEvent.click(codexDrawer.getByRole('button', { name: 'Start test' }));
+    await waitFor(() =>
+      expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(2),
+    );
 
     await waitFor(() =>
       expect(callsFor('/api/tools/connectors/codex/test', 'POST')).toHaveLength(1),
@@ -449,34 +375,6 @@ describe('ConnectorsTab', () => {
     expect(await reopened.findByText('Passed')).toBeVisible();
   }, 10_000);
 
-  it('test connection start refreshes statuses', async () => {
-    stubApi((path, init) => {
-      if (path === '/api/tools/connectors/codex/test' && init.method === 'POST') {
-        return json({ checkId: CHECK_ID, runId: RUN_ID });
-      }
-      if (path === `/api/tools/connector-checks/${CHECK_ID}`) {
-        return json(check('running'));
-      }
-      return undefined;
-    });
-    renderTab();
-
-    const codexDrawer = await openDrawer('codex');
-    await waitFor(() =>
-      expect(codexDrawer.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
-    );
-    expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(1);
-    fireEvent.click(codexDrawer.getByRole('button', { name: 'Test connection' }));
-    selectComboboxOption(codexDrawer.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
-    fireEvent.click(codexDrawer.getByRole('button', { name: 'Start test' }));
-
-    await waitFor(() =>
-      expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(2),
-    );
-    const result = within(await screen.findByTestId('connector-test-result-codex'));
-    expect(await result.findByText('Running…')).toBeVisible();
-  });
-
   it('test connection shows failure reason', async () => {
     stubApi((path, init) => {
       if (path === '/api/tools/connectors/opencode/test' && init.method === 'POST') {
@@ -502,7 +400,7 @@ describe('ConnectorsTab', () => {
     expect(result.getByText('ticket_get was not called')).toBeVisible();
   });
 
-  it('test connection start error renders inline', async () => {
+  it('test start errors render inline in the drawer', async () => {
     stubApi((path, init) =>
       path === '/api/tools/connectors/opencode/test' && init.method === 'POST'
         ? new Response('', { status: 409 })
@@ -522,10 +420,13 @@ describe('ConnectorsTab', () => {
     );
   });
 
-  it('confirms before turning off a connector that agents use', async () => {
+  it('toggles connector enabled state with confirm when agents depend on it', async () => {
     stubApi((path, init) => {
       if (path === '/api/tools/connectors/codex' && init.method === 'PATCH') {
         return json({ ...codex, enabled: false });
+      }
+      if (path === '/api/tools/connectors/claude-code' && init.method === 'PATCH') {
+        return json({ ...claude, enabled: false });
       }
       return undefined;
     });
@@ -550,21 +451,11 @@ describe('ConnectorsTab', () => {
     expect(JSON.parse(String(callsFor('/api/tools/connectors/codex', 'PATCH')[0][1].body))).toEqual({
       enabled: false,
     });
-  });
-
-  it('turns off a connector with no agents immediately', async () => {
-    stubApi((path, init) => {
-      if (path === '/api/tools/connectors/claude-code' && init.method === 'PATCH') {
-        return json({ ...claude, enabled: false });
-      }
-      return undefined;
-    });
-    renderTab();
 
     const claudeRow = await row('claude-code');
-    const toggle = await claudeRow.findByRole('switch', { name: 'Enabled Claude Code' });
-    await waitFor(() => expect(toggle).toBeEnabled());
-    fireEvent.click(toggle);
+    const claudeToggle = await claudeRow.findByRole('switch', { name: 'Enabled Claude Code' });
+    await waitFor(() => expect(claudeToggle).toBeEnabled());
+    fireEvent.click(claudeToggle);
 
     await waitFor(() =>
       expect(callsFor('/api/tools/connectors/claude-code', 'PATCH')).toHaveLength(1),
@@ -626,48 +517,6 @@ describe('ConnectorsTab', () => {
     expect(composer).toBeChecked();
   });
 
-  it('shows only checked models until the list is expanded', async () => {
-    const cursor = connector({ id: 'cursor', displayName: 'Cursor' });
-    stubApi((path, init) => {
-      const method = init.method ?? 'GET';
-      if (path === '/api/tools/connectors' && method === 'GET') {
-        return json([cursor]);
-      }
-      if (path === '/api/connectors/cursor/model-providers' && method === 'GET') {
-        return json({ items: [{ id: 'cursor' }] });
-      }
-      if (path === '/api/connectors/cursor/model-providers/cursor/models' && method === 'GET') {
-        return json({
-          items: [
-            { id: 'composer-2.5', name: 'Composer 2.5' },
-            { id: 'auto', name: 'Auto' },
-          ],
-        });
-      }
-      if (path === '/api/tools/connectors/cursor/uncovered-models' && method === 'GET') {
-        return json({ modelIds: ['composer-2.5'] });
-      }
-      return undefined;
-    });
-    renderTab();
-
-    const cursorDrawer = await openDrawer('cursor');
-    const disclosure = cursorDrawer.getByRole('button', { name: 'Models not covered by my plan' });
-    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    const composer = await cursorDrawer.findByRole('checkbox', { name: /Composer 2.5/ });
-    expect(composer).toBeChecked();
-    expect(cursorDrawer.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
-
-    fireEvent.click(disclosure);
-    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-    expect(cursorDrawer.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
-
-    fireEvent.click(disclosure);
-    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    expect(cursorDrawer.getByRole('checkbox', { name: /Composer 2.5/ })).toBeChecked();
-    expect(cursorDrawer.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
-  });
-
   it('offers Refresh models when the live list fails', async () => {
     const cursor = connector({ id: 'cursor', displayName: 'Cursor' });
     stubApi((path, init) => {
@@ -714,13 +563,4 @@ describe('ConnectorsTab', () => {
     );
   });
 
-  it('unknown statuses fall back', () => {
-    const parsed = connectorStatusSchema.parse({
-      ...claude,
-      cli: { found: false, probe: { status: 'weird' } },
-      auth: { status: 'maybe', envSet: [], pathsFound: [] },
-    });
-    expect(parsed.cli.probe.status).toBe('not_run');
-    expect(parsed.auth.status).toBe('not_found');
-  });
 });

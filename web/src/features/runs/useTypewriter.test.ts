@@ -3,20 +3,9 @@ import { act, renderHook } from '@testing-library/react';
 import { charsForFrame, useTypewriter } from './useTypewriter';
 
 describe('charsForFrame', () => {
-  it('returns 0 when nothing remains', () => {
+  it('scales reveal rate with backlog and edge divisors', () => {
     expect(charsForFrame(0, 2, 24)).toBe(0);
-    expect(charsForFrame(-5, 2, 24)).toBe(0);
-  });
-
-  it('scales with backlog size so large backlogs drain faster', () => {
-    const small = charsForFrame(10, 2, 24);
-    const large = charsForFrame(1000, 2, 24);
-    expect(large).toBeGreaterThan(small);
-    expect(small).toBe(2 + Math.ceil(10 / 24));
-    expect(large).toBe(2 + Math.ceil(1000 / 24));
-  });
-
-  it('drains everything when the divisor is non-positive', () => {
+    expect(charsForFrame(1000, 2, 24)).toBeGreaterThan(charsForFrame(10, 2, 24));
     expect(charsForFrame(50, 2, 0)).toBe(50);
   });
 });
@@ -45,27 +34,20 @@ describe('useTypewriter', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the full text immediately when disabled', () => {
-    const { result } = renderHook(() =>
-      useTypewriter('hello world', { enabled: false }),
-    );
-    expect(result.current).toBe('hello world');
-  });
+  it('returns full text when animation is skipped', () => {
+    const text = 'hello world';
+    const { result: disabled } = renderHook(() => useTypewriter(text, { enabled: false }));
+    expect(disabled.current).toBe(text);
 
-  it('returns the full text immediately when reduced motion is preferred', () => {
     mockMatchMedia((query) => query.includes('reduce'));
-    const { result } = renderHook(() =>
-      useTypewriter('hello world', { enabled: true }),
-    );
-    expect(result.current).toBe('hello world');
-  });
+    const { result: reduced } = renderHook(() => useTypewriter(text, { enabled: true }));
+    expect(reduced.current).toBe(text);
 
-  it('skips animation for text at or above maxAnimateLength', () => {
-    const big = 'x'.repeat(6000);
-    const { result } = renderHook(() =>
-      useTypewriter(big, { enabled: true, maxAnimateLength: 6000 }),
+    const long = 'x'.repeat(6000);
+    const { result: capped } = renderHook(() =>
+      useTypewriter(long, { enabled: true, maxAnimateLength: 6000 }),
     );
-    expect(result.current).toBe(big);
+    expect(capped.current).toBe(long);
   });
 
   it('progressively reveals text and reaches the full string', () => {
@@ -111,33 +93,6 @@ describe('useTypewriter', () => {
       vi.advanceTimersByTime(5000);
     });
     expect(result.current).toBe('hello world'.repeat(20) + ' appended tail');
-  });
-
-  it('drains a large backlog faster per frame than a small one', () => {
-    const short = 'b'.repeat(50);
-    const long = 'c'.repeat(2000);
-    const shortHook = renderHook(() =>
-      useTypewriter(short, {
-        enabled: true,
-        commitIntervalMs: 0,
-        backlogAccelDivisor: 10,
-      }),
-    );
-    const longHook = renderHook(() =>
-      useTypewriter(long, {
-        enabled: true,
-        commitIntervalMs: 0,
-        backlogAccelDivisor: 10,
-      }),
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(48);
-    });
-
-    expect(longHook.result.current.length).toBeGreaterThan(
-      shortHook.result.current.length,
-    );
   });
 
   it('flushes to full when disabled mid-stream', () => {

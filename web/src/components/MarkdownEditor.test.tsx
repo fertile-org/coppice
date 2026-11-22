@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { createRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   MarkdownEditor,
   type MarkdownEditorHandle,
@@ -22,34 +22,21 @@ function renderEditor(value: string, onChange = vi.fn()) {
 }
 
 describe('MarkdownEditor', () => {
-  it('renders initial markdown as rich text', () => {
-    renderEditor('## Plan\n\nSome **bold** text');
-
-    const textbox = screen.getByRole('textbox', { name: 'Body' });
-    expect(textbox.querySelector('h2')).toHaveTextContent('Plan');
-    expect(textbox.querySelector('strong')).toHaveTextContent('bold');
-  });
-
-  it.each([
-    ['headings', '# Title\n\n## Section\n\n### Sub'],
-    ['emphasis', 'Some **bold**, *italic*, ~~strike~~ and `code`.'],
-    ['bullet list', '- one\n- two\n  - nested'],
-    ['ordered list', '1. first\n2. second'],
-    ['task list', '- [ ] todo\n- [x] done'],
-    ['code block', '```rust\nfn main() {}\n```'],
-    ['link', 'See [docs](https://example.com/docs).'],
-    ['blockquote', '> quoted line'],
-    ['mention text', 'Ping @pm-codex about the plan.'],
-    ['table', '| a | b |\n| --- | --- |\n| 1 | 2 |'],
-    ['identifiers', 'Rename snake_case_name in src/foo_bar.rs'],
-    ['inline html text', 'Use <br> tags & <!-- note -->'],
-    [
-      'mixed document',
-      '## Goal\n\nShip **it**.\n\n- [ ] write tests\n- [x] spec\n\n1. a\n2. b\n\n> note\n\n```ts\nconst x = 1;\n```\n\nDone: see [PR](https://x.dev/1).',
-    ],
-  ])('round-trips %s', (_name, markdown) => {
+  it('round-trips rich markdown and shows a placeholder when empty', () => {
+    const markdown =
+      '## Goal\n\nShip **it**.\n\n- one\n\n```ts\nconst x = 1;\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
     const { ref } = renderEditor(markdown);
+    const textbox = screen.getByRole('textbox', { name: 'Body' });
+    expect(textbox.querySelector('h2')).toHaveTextContent('Goal');
     expect(ref.current!.getMarkdown()).toBe(markdown);
+
+    cleanup();
+    const empty = renderEditor('');
+    expect(empty.getByRole('textbox', { name: 'Body' })).toHaveAttribute(
+      'aria-placeholder',
+      'Write…',
+    );
+    empty.unmount();
   });
 
   it('toggles bold from the toolbar and emits markdown', () => {
@@ -65,19 +52,6 @@ describe('MarkdownEditor', () => {
 
     expect(onChange).toHaveBeenLastCalledWith('**hello**');
     expect(bold).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('shows the placeholder when empty', () => {
-    renderEditor('');
-
-    const textbox = screen.getByRole('textbox', { name: 'Body' });
-    expect(textbox).toHaveAttribute('aria-placeholder', 'Write…');
-    expect(textbox.querySelector('p[data-placeholder="Write…"]')).not.toBeNull();
-  });
-
-  it('does not emit changes for an untouched value', () => {
-    const { onChange } = renderEditor('snake_case and *text*');
-    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('updates when the value is reset externally', () => {

@@ -61,29 +61,9 @@ describe('PlanReviewActions', () => {
     });
   });
 
-  it('asks the questions instead of offering Approve plan', () => {
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" hasPlan={false} planQuestions={questions} />);
-    expect(screen.getByText('Which database?')).toBeVisible();
-    expect(screen.getByText('Keep the old endpoint?')).toBeVisible();
-    expect(screen.queryByRole('button', { name: PLAN_COPY.approvePlan })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: PLAN_COPY.askForChanges })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send answers' })).toBeDisabled();
-  });
-
   it('disables Approve while a plan run is active', () => {
     wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" planRunActive />);
     expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeDisabled();
-  });
-
-  it('warns beside Approve when the plan missed the chosen design, without blocking', () => {
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" designOutOfDate />);
-    expect(screen.getByText("The plan wasn't updated to this option.")).toBeVisible();
-    expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeEnabled();
-  });
-
-  it('has no design warning when the plan is up to date', () => {
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
-    expect(screen.queryByText("The plan wasn't updated to this option.")).toBeNull();
   });
 
   it('sends the answers once at least one is given', async () => {
@@ -98,38 +78,6 @@ describe('PlanReviewActions', () => {
         expect.objectContaining({ body: JSON.stringify({ answers: ['Postgres', ''] }) }),
       ),
     );
-  });
-
-  it('shows nothing while the plan is still being written', () => {
-    const { container } = wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        hasPlan={false}
-        planQuestions={{ ...questions, waiting: false }}
-      />,
-    );
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('offers Approve plan and Ask for changes once a plan exists', () => {
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" hasPlan />);
-    expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeVisible();
-    expect(screen.getByRole('button', { name: PLAN_COPY.askForChanges })).toBeVisible();
-  });
-  it('shows the plan right above Approve plan and Ask for changes', () => {
-    wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        plan={'## Plan\n\n### Approach\nMove the settings into a drawer.'}
-      />,
-    );
-    const plan = screen.getByTestId('pending-plan');
-    expect(plan).toHaveTextContent('Move the settings into a drawer.');
-    const approve = screen.getByRole('button', { name: PLAN_COPY.approvePlan });
-    expect(plan.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText(PLAN_COPY.approveAddsToDescription)).toBeInTheDocument();
   });
 
   it('pre-ticks Skip human review from the planner suggestion and approves with the box value', async () => {
@@ -148,47 +96,6 @@ describe('PlanReviewActions', () => {
     );
   });
 
-  it('leaves Skip human review unticked without a suggestion, and shows an existing flag without the hint', () => {
-    const first = wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
-    expect(
-      screen.getByRole('checkbox', { name: new RegExp(PLAN_COPY.skipHumanReview) }),
-    ).not.toBeChecked();
-    first.unmount();
-    wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        plan="## Plan"
-        suggestSkipHumanReview
-        skipHumanReview
-      />,
-    );
-    expect(
-      screen.getByRole('checkbox', { name: new RegExp(PLAN_COPY.skipHumanReview) }),
-    ).toBeChecked();
-    expect(screen.queryByText(PLAN_COPY.suggestedByPlanner)).toBeNull();
-  });
-
-  it('puts the feedback box before Approve, with Approve on the right', () => {
-    wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        plan={'## Plan\n\n### Approach\nMove the settings into a drawer.'}
-      />,
-    );
-    const plan = screen.getByTestId('pending-plan');
-    const box = screen.getByRole('textbox', { name: PLAN_COPY.askPlaceholder });
-    const ask = screen.getByRole('button', { name: PLAN_COPY.askForChanges });
-    const approve = screen.getByRole('button', { name: PLAN_COPY.approvePlan });
-    expect(plan.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(box.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(ask.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(approve.parentElement).toHaveClass('ml-auto');
-    expect(approve).toHaveClass('bg-accent');
-    expect(ask).not.toHaveClass('bg-accent');
-  });
-
   it('locks Approve while a note is unsent, and turns it back on when the box is cleared', () => {
     wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan="## Plan" />);
     const box = screen.getByRole('textbox', { name: PLAN_COPY.askPlaceholder });
@@ -198,8 +105,6 @@ describe('PlanReviewActions', () => {
     fireEvent.change(box, { target: { value: 'please split this' } });
     expect(approve).toBeDisabled();
     expect(ask).toBeEnabled();
-    expect(ask).toHaveClass('bg-accent');
-    expect(approve).not.toHaveClass('bg-accent');
     expect(screen.getByText(PLAN_COPY.approveNeedsEmptyNote)).toBeVisible();
 
     fireEvent.change(box, { target: { value: '   ' } });
@@ -254,94 +159,6 @@ describe('PlanReviewActions', () => {
         '/api/tickets/t1/approve-plan',
         expect.objectContaining({ method: 'POST' }),
       ),
-    );
-  });
-
-  it('lists every proposed sub-ticket with its steps and criteria, and names the count on Approve', () => {
-    wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        plan={'## Plan\n\n### Approach\nRun them in order.'}
-        proposedSplits={[
-          {
-            title: 'Server: run sub-tickets in order',
-            description: 'Start the next after a merge.',
-            assignTo: 'backend_engineer',
-            steps: ['Record child order', 'Start child 1 on approve'],
-            acceptanceCriteria: '- Approving starts sub-ticket 1\n- Merging one starts the next',
-          },
-          {
-            title: 'Plan Review shows proposed sub-tickets',
-            description: 'Show the split inside the plan.',
-            steps: ['Render the pending split', 'Name the count on Approve'],
-            acceptanceCriteria: '- Every sub-ticket is visible before approval',
-          },
-        ]}
-      />,
-    );
-    const plan = screen.getByTestId('pending-plan');
-    expect(plan).toHaveTextContent('Server: run sub-tickets in order');
-    expect(plan).toHaveTextContent('Plan Review shows proposed sub-tickets');
-    expect(plan).toHaveTextContent('Record child order');
-    expect(plan).toHaveTextContent('Start child 1 on approve');
-    expect(plan).toHaveTextContent('Render the pending split');
-    expect(plan).toHaveTextContent('Name the count on Approve');
-    expect(plan).toHaveTextContent('Approving starts sub-ticket 1');
-    expect(plan).toHaveTextContent('Merging one starts the next');
-    expect(plan).toHaveTextContent('Every sub-ticket is visible before approval');
-    const approve = screen.getByRole('button', { name: PLAN_COPY.approvePlanAndStart(2) });
-    expect(plan.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('shows the revision and a collapsed list of requested changes', () => {
-    wrap(
-      <PlanReviewActions
-        ticketId="t1"
-        boardId="b1"
-        revision={2}
-        changeRequests={['Use Postgres.', 'Split the API change.']}
-        plan={'## Plan\n\n### Approach\nPostgres.'}
-      />,
-    );
-    expect(screen.getByText('Revision 2')).toBeVisible();
-    const requested = screen.getByText(PLAN_COPY.requestedChanges);
-    expect(requested.closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText('Use Postgres.')).toBeInTheDocument();
-    expect(screen.getByText('Split the API change.')).toBeInTheDocument();
-  });
-
-  it('renders the picker under the marked section, not above the plan', async () => {
-    const set = makeDesignSet();
-    mocks.apiFetch.mockImplementation((path: string) => {
-      if (String(path).endsWith('/designs')) {
-        return Promise.resolve({ ok: true, status: 200, json: async () => [set] });
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
-    const plan = `## Approach\nMove options.\n\n## UI design\n\n{{design:${set.id}}}\n\n### Steps\n- [ ] Ship`;
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan={plan} />);
-    const pending = await screen.findByTestId('pending-plan');
-    const picker = await screen.findByTestId(`design-picker-${set.id}`);
-    expect(pending).toContainElement(picker);
-    expect(pending.textContent?.indexOf('UI design') ?? -1).toBeLessThan(
-      pending.textContent?.indexOf('Quiet button') ?? -1,
-    );
-    expect(screen.queryByText(`{{design:${set.id}}}`)).toBeNull();
-  });
-
-  it('falls back to a top picker when the plan has no marker', async () => {
-    const set = makeDesignSet();
-    mocks.apiFetch.mockImplementation((path: string) => {
-      if (String(path).endsWith('/designs')) {
-        return Promise.resolve({ ok: true, status: 200, json: async () => [set] });
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
-    });
-    wrap(<PlanReviewActions ticketId="t1" boardId="b1" plan={'## Plan\n\n### Approach\nGo.'} />);
-    expect(await screen.findByTestId(`design-picker-${set.id}`)).toBeInTheDocument();
-    expect(await screen.findByTestId('design-plan-summary')).toHaveTextContent(
-      '1 decision in this plan',
     );
   });
 

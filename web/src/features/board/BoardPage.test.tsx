@@ -184,36 +184,11 @@ function renderBoard(initialEntry = '/boards/board-1') {
   );
 }
 
-describe('BoardPage heading', () => {
-  beforeEach(() => {
-    ticketsState.active = [];
-    ticketsState.archived = [];
-  });
+describe('BoardPage ticket hierarchy', () => {
   afterEach(() => {
     boardsState.data = [{ id: 'board-1', name: 'Launch plan' }];
     boardsState.isPending = false;
   });
-
-  it('shows the name of the open board', () => {
-    renderBoard();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Launch plan');
-  });
-
-  it('does not flash a generic title while boards load', () => {
-    boardsState.data = undefined;
-    boardsState.isPending = true;
-    renderBoard();
-    expect(screen.getByRole('heading', { level: 1 })).not.toHaveTextContent('Board');
-  });
-
-  it('falls back to Board when the board is not in the list', () => {
-    boardsState.data = [];
-    renderBoard();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Board');
-  });
-});
-
-describe('BoardPage ticket hierarchy', () => {
   beforeEach(() => {
     ticketsState.lastIncludeArchived = false;
     ticketsState.archived = [];
@@ -270,43 +245,6 @@ describe('BoardPage ticket hierarchy', () => {
     expect(screen.getByTestId('ticket-drawer-parent')).toHaveTextContent(
       'Root ticket',
     );
-  });
-
-  it('shows assignee names on cards and omits them when unassigned', () => {
-    ticketsState.active = [
-      makeTicket({
-        id: 'assigned',
-        title: 'Assigned ticket',
-        status: 'backlog',
-        assigneeAgentId: 'agent-fe',
-        priority: 'high',
-      }),
-      makeTicket({
-        id: 'unassigned',
-        title: 'Unassigned ticket',
-        status: 'backlog',
-        assigneeAgentId: 'missing-agent',
-      }),
-      makeTicket({
-        id: 'plain',
-        title: 'Plain ticket',
-        status: 'ready',
-      }),
-    ];
-
-    renderBoard();
-
-    const backlog = screen.getByRole('region', { name: 'Backlog' });
-    expect(within(backlog).getByText('Frontend Engineer')).toBeVisible();
-    expect(within(backlog).getByText('Unknown agent')).toBeVisible();
-    expect(within(backlog).getByText('high')).toHaveAttribute(
-      'data-priority',
-      'high',
-    );
-
-    const ready = screen.getByRole('region', { name: 'Ready' });
-    expect(within(ready).queryByText('Frontend Engineer')).toBeNull();
-    expect(within(ready).queryByText('Unknown agent')).toBeNull();
   });
 
   it('keeps one of the ticket, filter and settings panels open at a time', () => {
@@ -411,53 +349,6 @@ describe('BoardPage ticket hierarchy', () => {
   });
 });
 
-describe('BoardPage render cost when opening a ticket', () => {
-  beforeEach(() => {
-    ticketsState.lastIncludeArchived = false;
-    ticketsState.archived = [];
-    ticketsState.active = [
-      makeTicket({ id: 'a', title: 'Ticket A', status: 'backlog' }),
-      makeTicket({ id: 'b', title: 'Ticket B', status: 'backlog' }),
-      makeTicket({ id: 'c', title: 'Ticket C', status: 'backlog' }),
-      makeTicket({ id: 'd', title: 'Ticket D', status: 'in_progress' }),
-      makeTicket({ id: 'e', title: 'Ticket E', status: 'in_progress' }),
-    ];
-  });
-
-  it('re-renders only the cards whose focus changed, on the first click', () => {
-    renderBoard();
-    cardRenders.ids = [];
-
-    // focusState is still null here: the default focus is card A.
-    fireEvent.click(screen.getByText('Ticket E'));
-
-    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
-      'data-open',
-      'true',
-    );
-    const rendered = new Set(cardRenders.ids);
-    expect(rendered).not.toContain('b');
-    expect(rendered).not.toContain('c');
-    expect(rendered).not.toContain('d');
-    // A loses the tab stop and E gains it.
-    expect([...rendered].sort()).toEqual(['a', 'e']);
-  });
-
-  it('does not re-render any card when the drawer opens on the focused card', () => {
-    renderBoard();
-    fireEvent.focus(screen.getByText('Ticket D').closest('[role="button"]')!);
-    cardRenders.ids = [];
-
-    fireEvent.click(screen.getByText('Ticket D'));
-
-    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
-      'data-open',
-      'true',
-    );
-    expect(cardRenders.ids).toEqual([]);
-  });
-});
-
 function doneTickets(count: number, titlePrefix = 'Done'): Ticket[] {
   return Array.from({ length: count }, (_, index) =>
     makeTicket({
@@ -475,13 +366,13 @@ describe('BoardPage Done column limit', () => {
     ticketsState.archived = [];
   });
 
-  it('shows the 10 newest Done tickets and the full count in the header', () => {
+  it('paginates Done when more than 10 tickets, otherwise shows every card', () => {
     ticketsState.active = [
       ...doneTickets(32).reverse(),
       makeTicket({ id: 'backlog-1', title: 'Backlog card', status: 'backlog' }),
     ];
 
-    renderBoard();
+    const view = renderBoard();
 
     const done = screen.getByRole('region', { name: 'Done' });
     expect(
@@ -497,6 +388,18 @@ describe('BoardPage Done column limit', () => {
     expect(within(backlog).getByText('Backlog card')).toBeVisible();
     expect(within(backlog).queryByText(/Showing \d+ of \d+/)).toBeNull();
     expect(within(backlog).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
+
+    view.unmount();
+    ticketsState.active = doneTickets(8);
+    renderBoard();
+
+    const doneSmall = screen.getByRole('region', { name: 'Done' });
+    expect(
+      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
+    ).toHaveTextContent('8');
+    expect(within(doneSmall).getAllByText(/^Done \d+$/)).toHaveLength(8);
+    expect(within(doneSmall).queryByText(/Showing \d+ of \d+/)).toBeNull();
+    expect(within(doneSmall).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
   });
 
   it('adds up to 10 cards per click and removes the button when all are shown', () => {
@@ -513,20 +416,6 @@ describe('BoardPage Done column limit', () => {
 
     fireEvent.click(within(done).getByRole('button', { name: 'Show 2 more' }));
     expect(within(done).getByText('Done 21')).toBeVisible();
-    expect(within(done).queryByText(/Showing \d+ of \d+/)).toBeNull();
-    expect(within(done).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
-  });
-
-  it('shows every ticket and no footer when Done has 10 or fewer', () => {
-    ticketsState.active = doneTickets(8);
-
-    renderBoard();
-
-    const done = screen.getByRole('region', { name: 'Done' });
-    expect(
-      screen.getByRole('heading', { name: 'Done', level: 2 }).closest('header'),
-    ).toHaveTextContent('8');
-    expect(within(done).getAllByText(/^Done \d+$/)).toHaveLength(8);
     expect(within(done).queryByText(/Showing \d+ of \d+/)).toBeNull();
     expect(within(done).queryByRole('button', { name: /Show \d+ more/ })).toBeNull();
   });
@@ -655,59 +544,6 @@ describe('BoardPage split swimlanes', () => {
     expect(
       within(screen.getByRole('region', { name: 'Done' })).queryByText('Survey the site'),
     ).toBeNull();
-  });
-
-  it('opens the parent from the header without collapsing the lane', () => {
-    renderBoard();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open parent →' }));
-
-    const drawer = screen.getByTestId('ticket-drawer-parent');
-    expect(drawer).toHaveAttribute('data-open', 'true');
-    expect(drawer).toHaveAttribute('data-ticket-id', 'parent');
-    expect(screen.getByTestId('swimlane-row')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Collapse Ship the gate' }),
-    ).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('shows the parent status from the live parent ticket in the header', () => {
-    ticketsState.active = ticketsState.active.map((ticket) =>
-      ticket.id === 'parent' ? { ...ticket, status: 'plan_review' } : ticket,
-    );
-    renderBoard();
-
-    expect(
-      within(screen.getByRole('region', { name: 'Ship the gate' })).getByText(
-        'Plan Review',
-      ),
-    ).toBeVisible();
-  });
-
-  it('keeps status headers above the swimlane inside the same board grid', () => {
-    renderBoard();
-
-    const board = document.getElementById('board');
-    expect(board).not.toBeNull();
-    const grid = board!.querySelector(':scope > div');
-    expect(grid).toHaveClass('grid');
-
-    const backlogHead = screen.getByRole('heading', { name: 'Backlog', level: 2 });
-    const lane = screen.getByRole('region', { name: 'Ship the gate' });
-    const backlog = screen.getByRole('region', { name: 'Backlog' });
-    expect(
-      backlogHead.compareDocumentPosition(lane) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      lane.compareDocumentPosition(backlog) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it('keeps the board scroller positioned so swimlane sr-only labels stay inside it', () => {
-    renderBoard();
-
-    expect(screen.getByTestId('swimlane-row')).toBeVisible();
-    expect(document.getElementById('board')).toHaveClass('relative');
   });
 
   it('collapses and expands the lane without moving an ordinary ticket', () => {

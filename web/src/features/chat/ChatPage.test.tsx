@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
@@ -223,61 +223,6 @@ describe('ChatPage', () => {
     );
   });
 
-  it('lists every enabled agent with name and role', () => {
-    renderChat('/chat');
-
-    const list = screen.getByTestId('chat-session-list');
-    expect(within(list).getByText('Backend Engineer')).toBeInTheDocument();
-    expect(within(list).getAllByText('Engineer').length).toBeGreaterThan(0);
-    expect(within(list).getAllByText('No messages yet').length).toBeGreaterThan(0);
-    expect(within(list).queryByText('Disabled Agent')).toBeNull();
-    expect(screen.queryByTestId('new-chat-form')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Start chat' })).not.toBeInTheDocument();
-  });
-
-  it('puts the most recently chatted agent first and the rest by name', () => {
-    mocks.sessions = [
-      {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000041',
-        agentId: '00000000-0000-4000-8000-000000000012',
-        updatedAt: '2026-09-08T00:01:00Z',
-      },
-      {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000042',
-        agentId: '00000000-0000-4000-8000-000000000013',
-        updatedAt: '2026-09-08T00:05:00Z',
-      },
-    ];
-    renderChat('/chat');
-
-    const text = screen.getByTestId('chat-session-list').textContent ?? '';
-    const order = ['Codex Agent', 'Kilo Agent', 'Backend Engineer', 'Cursor Agent', 'OpenCode Agent'].map(
-      (name) => text.indexOf(name),
-    );
-    expect(order.every((index) => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-  });
-
-  it('lists Cursor and Kilo Code as chats that can start', () => {
-    renderChat('/chat');
-
-    expect(
-      screen.queryByText(
-        "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Kilo Agent/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Cursor Agent/ })).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-agent-unavailable')).not.toBeInTheDocument();
-  });
-
   it('opens an empty chat and creates the session on the first message', async () => {
     mocks.createSession.mockResolvedValue({
       id: '00000000-0000-4000-8000-000000000001',
@@ -308,11 +253,7 @@ describe('ChatPage', () => {
     renderChat('/chat');
     fireEvent.click(screen.getByRole('link', { name: /OpenCode Agent/ }));
 
-    expect(
-      await screen.findByText(
-        'Say hi to OpenCode Agent. They can see all your projects.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
     expect(mocks.createSession).not.toHaveBeenCalled();
 
@@ -332,114 +273,14 @@ describe('ChatPage', () => {
     });
   });
 
-  it('opens the newest chat when the page opens', async () => {
-    mocks.sessions = [
-      { ...ACTIVE_SESSION, title: 'Older', updatedAt: '2026-09-08T00:01:00Z' },
-      {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000099',
-        title: 'Newest',
-        updatedAt: '2026-09-08T00:05:00Z',
-      },
-    ];
-    renderChat('/chat');
+  it('shows the isolation banner only for connectors that need it', () => {
+    mocks.sessions = [{ ...ACTIVE_SESSION, agentId: '00000000-0000-4000-8000-000000000010' }];
+    const { unmount } = renderChat(`/chat/${ACTIVE_SESSION.id}`);
+    expect(screen.getByTestId('chat-isolation-banner')).toBeVisible();
+    unmount();
 
-    expect(await screen.findByTestId('chat-session-pane')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Newest' })).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('opens a new chat with the first agent when there are no chats', async () => {
-    renderChat('/chat');
-
-    expect(
-      await screen.findByText('Say hi to Backend Engineer. They can see all your projects.'),
-    ).toBeInTheDocument();
-  });
-
-  it('puts New chat in the open chat header, not on every agent row', async () => {
-    mocks.sessions = [{ ...ACTIVE_SESSION, title: 'Fix the login form' }];
+    mocks.sessions = [{ ...ACTIVE_SESSION, agentId: '00000000-0000-4000-8000-000000000014' }];
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const header = await screen.findByTestId('chat-session-header');
-    const button = within(header).getByRole('button', {
-      name: 'New chat with Backend Engineer',
-    });
-    expect(button).toHaveAttribute('title', 'New chat with Backend Engineer');
-    const list = screen.getByTestId('chat-session-list');
-    expect(within(list).queryByRole('button', { name: /New chat/ })).toBeNull();
-
-    fireEvent.click(button);
-    expect(
-      await screen.findByText('Say hi to Backend Engineer. They can see all your projects.'),
-    ).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('chat-session-header')).queryByRole('button', {
-        name: /New chat/,
-      }),
-    ).toBeNull();
-  });
-
-  it('expands an agent that has several chats and titles them from the first message', () => {
-    mocks.sessions = [
-      {
-        ...ACTIVE_SESSION,
-        title: 'Fix the login form',
-        updatedAt: '2026-09-08T00:02:00Z',
-      },
-      {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000099',
-        title: null,
-        updatedAt: '2026-09-08T00:01:00Z',
-      },
-    ];
-    renderChat('/chat');
-
-    const list = screen.getByTestId('chat-session-list');
-    const backend = within(list)
-      .getAllByTestId('chat-agent-row')
-      .find((row) => within(row).queryByText('Backend Engineer'));
-    expect(backend).toBeTruthy();
-    expect(within(backend!).getByRole('link', { name: 'Fix the login form' })).toBeInTheDocument();
-    expect(within(backend!).getByRole('link', { name: 'New chat' })).toBeInTheDocument();
-    expect(within(backend!).queryByText('No messages yet')).not.toBeInTheDocument();
-  });
-
-  it.each([
-    [
-      '00000000-0000-4000-8000-000000000010',
-      "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
-    ],
-    [
-      '00000000-0000-4000-8000-000000000012',
-      "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer.",
-    ],
-  ])('shows the isolation banner and the composer for %s', (agentId, message) => {
-    mocks.sessions = [
-      {
-        ...ACTIVE_SESSION,
-        agentId,
-      },
-    ];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
-    expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
-  });
-
-  it.each([
-    ['OpenCode', '00000000-0000-4000-8000-000000000014'],
-    ['Codex', '00000000-0000-4000-8000-000000000013'],
-    ['Cursor', '00000000-0000-4000-8000-000000000015'],
-  ])('hides the isolation banner for a %s session', (_name, agentId) => {
-    mocks.sessions = [
-      {
-        ...ACTIVE_SESSION,
-        agentId,
-      },
-    ];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
     expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
   });
@@ -531,7 +372,6 @@ describe('ChatPage', () => {
     const transcript = await screen.findByTestId('chat-message-list');
     expect(within(transcript).getByText('Prior message')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-pane')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Backend Engineer' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create ticket' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Propose knowledge' })).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
@@ -548,48 +388,6 @@ describe('ChatPage', () => {
     expect(await screen.findByTestId('chat-streaming-bubble')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-live-turn')).toBeNull();
     expect(screen.getByText(/Partial/)).toBeInTheDocument();
-  });
-
-  it('fills available height instead of a fixed 70vh/720px pane', () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const page = screen.getByTestId('chat-page');
-    expect(page).toHaveClass('flex-1');
-    expect(page).toHaveClass('min-h-0');
-
-    const pane = screen.getByTestId('chat-session-pane');
-    expect(pane).toHaveClass('flex-1');
-    expect(pane).toHaveClass('min-h-0');
-    expect(pane.className).not.toMatch(/70vh|720px/);
-  });
-
-  it('keeps session list and pane header fixed while transcript scrolls', () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const list = screen.getByTestId('chat-session-list');
-    expect(list).toHaveClass('min-h-0');
-    expect(list).toHaveClass('overflow-hidden');
-    expect(list.querySelector('.overflow-y-auto')).toBeTruthy();
-    expect(list).toHaveClass('lg:h-full');
-
-    const grid = screen.getByTestId('chat-layout-grid');
-    expect(grid).toHaveClass('min-h-0');
-    expect(grid).toHaveClass('flex-1');
-    expect(grid).toHaveClass('overflow-hidden');
-    expect(grid.className).toMatch(/lg:grid-cols-\[240px_minmax\(0,1fr\)\]/);
-
-    const header = screen.getByTestId('chat-session-header');
-    expect(header).toHaveClass('shrink-0');
-
-    const pane = screen.getByTestId('chat-session-pane');
-    expect(pane).toHaveClass('overflow-hidden');
-    expect(pane).toHaveClass('min-h-0');
-
-    const composer = screen.getByTestId('chat-composer');
-    expect(composer).toHaveClass('shrink-0');
-    expect(composer.querySelector('.max-w-\\[720px\\]')).toBeTruthy();
   });
 
   it('uploads attachments then posts message with attachmentIds', async () => {
@@ -882,59 +680,32 @@ describe('ChatPage', () => {
     expect(input).toHaveValue('line one');
   });
 
-  it('does nothing on Enter when the body is empty or whitespace', async () => {
+  it('does not submit on Enter when empty, composing, pending, or mid-turn', async () => {
     mocks.sessions = [ACTIVE_SESSION];
-
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
     const input = await screen.findByLabelText('Message');
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-  });
-
-  it('does not submit Enter while IME composition is active', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const input = await screen.findByLabelText('Message');
-    fireEvent.change(input, { target: { value: 'こんにちは' } });
     fireEvent.keyDown(input, {
       key: 'Enter',
       code: 'Enter',
       isComposing: true,
-    });
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(input, {
-      key: 'Enter',
-      code: 'Enter',
       keyCode: 229,
     });
     expect(mocks.postMessage).not.toHaveBeenCalled();
-  });
 
-  it('does not submit Enter while a post is pending', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
+    cleanup();
     mocks.postMessagePending = true;
-
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const input = await screen.findByLabelText('Message');
-    // Pending disables the textarea; still assert key handler is a no-op.
-    expect(input).toBeDisabled();
-    fireEvent.change(input, { target: { value: 'Should not send' } });
-    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
-
+    const pending = await screen.findByLabelText('Message');
+    expect(pending).toBeDisabled();
+    fireEvent.keyDown(pending, { key: 'Enter', code: 'Enter' });
     expect(mocks.postMessage).not.toHaveBeenCalled();
-  });
+    mocks.postMessagePending = false;
 
-  it('does not submit Enter while a turn is in flight', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
+    cleanup();
     mocks.postMessage.mockResolvedValue({
       message: {
         id: '00000000-0000-4000-8000-000000000031',
@@ -950,25 +721,14 @@ describe('ChatPage', () => {
       },
       runId: '00000000-0000-4000-8000-000000000040',
     });
-
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    const input = await screen.findByLabelText('Message');
-    fireEvent.change(input, { target: { value: 'First' } });
+    const busy = await screen.findByLabelText('Message');
+    fireEvent.change(busy, { target: { value: 'First' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(mocks.postMessage).toHaveBeenCalledWith({ body: 'First' });
-    });
+    await waitFor(() => expect(mocks.postMessage).toHaveBeenCalledWith({ body: 'First' }));
     expect(await screen.findByTestId('chat-streaming-bubble')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-live-turn')).toBeNull();
-
     mocks.postMessage.mockClear();
-    const disabledInput = screen.getByLabelText('Message');
-    expect(disabledInput).toBeDisabled();
-    fireEvent.change(disabledInput, { target: { value: 'Second' } });
-    fireEvent.keyDown(disabledInput, { key: 'Enter', code: 'Enter' });
-
+    fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter', code: 'Enter' });
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 });

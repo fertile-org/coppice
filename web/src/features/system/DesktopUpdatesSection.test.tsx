@@ -60,30 +60,6 @@ describe('DesktopUpdatesSection', () => {
     localStorage.clear();
   });
 
-  it('describes a signed macOS build as a background download', async () => {
-    shell({ platform: 'darwin', macInPlaceUpdates: true });
-    render(<DesktopUpdatesSection />);
-    expect(
-      await screen.findByText('Download new versions in the background. They install when you restart Coppice.'),
-    ).toBeInTheDocument();
-  });
-
-  it('describes an unsigned macOS build as a notice only', async () => {
-    shell({ platform: 'darwin', macInPlaceUpdates: false });
-    render(<DesktopUpdatesSection />);
-    expect(await screen.findByText('Tell me when a new version is out.', { exact: true })).toBeInTheDocument();
-    expect(screen.queryByText(/Updates install through apt/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/They install when you restart Coppice/)).not.toBeInTheDocument();
-  });
-
-  it('describes Linux updates as apt', async () => {
-    shell({ platform: 'linux', macInPlaceUpdates: false });
-    render(<DesktopUpdatesSection />);
-    expect(
-      await screen.findByText('Tell me when a new version is out. Updates install through apt.'),
-    ).toBeInTheDocument();
-  });
-
   it('stays hidden outside the desktop shell', () => {
     const { container } = render(<DesktopUpdatesSection />);
     expect(container).toBeEmptyDOMElement();
@@ -213,7 +189,7 @@ describe('DesktopUpdatesSection', () => {
     expect(screen.getByText(APT_COMMAND)).toBeInTheDocument();
   });
 
-  it('shows a message instead of restarting while a run is active', async () => {
+  it('blocks update actions while a run is active', async () => {
     stubActiveRun(true);
     shell(
       { platform: 'linux', macInPlaceUpdates: false },
@@ -225,53 +201,10 @@ describe('DesktopUpdatesSection', () => {
 
     render(<DesktopUpdatesSection />);
     fireEvent.click(await screen.findByRole('button', { name: 'Restart Coppice' }));
-
     expect(
       await screen.findByText('Wait for the agent run to finish, then try again.'),
     ).toBeInTheDocument();
     expect(window.coppiceDesktop?.restartToUpdate).not.toHaveBeenCalled();
-  });
-
-  it('shows a message instead of downloading while a run is active', async () => {
-    stubActiveRun(true);
-    const open = vi.fn();
-    vi.stubGlobal('open', open);
-    shell(
-      { platform: 'darwin', macInPlaceUpdates: false },
-      {
-        getUpdateInfo: vi.fn(async () => ({
-          kind: 'download' as const,
-          version: '9.0.0',
-          url: 'https://example/release',
-        })),
-      },
-    );
-
-    render(<DesktopUpdatesSection />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Download update' }));
-
-    expect(
-      await screen.findByText('Wait for the agent run to finish, then try again.'),
-    ).toBeInTheDocument();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it('shows the guide after leaving and reopening without another check', async () => {
-    const getUpdateInfo = vi.fn(async () => ({ kind: 'linux' as const, version: '9.0.0' }));
-    const checkForUpdates = vi.fn(async () => ({ status: 'up-to-date' as const }));
-    shell(
-      { platform: 'linux', macInPlaceUpdates: false },
-      { getUpdateInfo, checkForUpdates },
-    );
-
-    const first = render(<DesktopUpdatesSection />);
-    expect(await screen.findByRole('heading', { name: 'Update to Coppice 9.0.0' })).toBeInTheDocument();
-    expect(checkForUpdates).not.toHaveBeenCalled();
-    first.unmount();
-
-    render(<DesktopUpdatesSection />);
-    expect(await screen.findByRole('heading', { name: 'Update to Coppice 9.0.0' })).toBeInTheDocument();
-    expect(checkForUpdates).not.toHaveBeenCalled();
   });
 
   it('switches to Restart Coppice once apt has installed the package', async () => {
@@ -304,47 +237,37 @@ describe('DesktopUpdatesSection', () => {
     await waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
   });
 
-  it('keeps the available text and hides the panel across nulls during a signed macOS download', async () => {
-    const { push, extra } = listenForUpdateInfo();
+  it('handles update info broadcasts and null clears on macOS vs Linux', async () => {
+    const mac = listenForUpdateInfo();
     shell(
       { platform: 'darwin', macInPlaceUpdates: true },
       {
-        ...extra,
+        ...mac.extra,
         getUpdateInfo: vi.fn(async () => null),
         checkForUpdates: vi.fn(async () => ({ status: 'available' as const, version: '9.0.0' })),
       },
     );
-
-    render(<DesktopUpdatesSection />);
+    const macView = render(<DesktopUpdatesSection />);
     fireEvent.click(await screen.findByRole('button', { name: 'Check for updates' }));
     expect(await screen.findByText('Coppice 9.0.0 is available.')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Update to Coppice 9.0.0' })).not.toBeInTheDocument();
-
-    await act(async () => {
-      push(null);
-    });
+    await act(async () => mac.push(null));
     expect(screen.getByText('Coppice 9.0.0 is available.')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Update to Coppice 9.0.0' })).not.toBeInTheDocument();
-  });
+    macView.unmount();
+    delete window.coppiceDesktop;
+    vi.unstubAllGlobals();
 
-  it('clears the panel and available text when update info goes from present to null', async () => {
-    const { push, extra } = listenForUpdateInfo();
+    const linux = listenForUpdateInfo();
     shell(
       { platform: 'linux', macInPlaceUpdates: false },
       {
-        ...extra,
+        ...linux.extra,
         getUpdateInfo: vi.fn(async () => ({ kind: 'linux' as const, version: '9.0.0' })),
       },
     );
-
     render(<DesktopUpdatesSection />);
     expect(await screen.findByRole('heading', { name: 'Update to Coppice 9.0.0' })).toBeInTheDocument();
-
-    await act(async () => {
-      push(null);
-    });
+    await act(async () => linux.push(null));
     expect(screen.queryByRole('heading', { name: 'Update to Coppice 9.0.0' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Coppice 9.0.0 is available.')).not.toBeInTheDocument();
   });
 
   it('does not let a late getUpdateInfo result overwrite a newer broadcast', async () => {

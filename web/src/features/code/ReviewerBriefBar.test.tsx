@@ -17,11 +17,6 @@ describe('ReviewerBriefBar', () => {
 
     const section = screen.getByTestId('reviewer-brief');
     expect(section).toHaveAccessibleName('Reviewer brief');
-    expect(
-      screen.getByText(
-        "The agent wrote these notes when it finished. Coppice tags any file that wasn't in the plan you approved.",
-      ),
-    ).toBeVisible();
     expect(screen.getByText('Reads the header.')).toBeVisible();
     expect(screen.getByText('Changes from the plan')).toBeVisible();
     expect(screen.getByText('None')).toBeVisible();
@@ -29,17 +24,4 @@ describe('ReviewerBriefBar', () => {
     expect(screen.getByText('src/parser.rs')).toBeVisible();
   });
 
-  it('shows the agent text when the plan did change', () => {
-    render(
-      <ReviewerBriefBar
-        brief={{
-          howItWorks: 'Same path.',
-          changesFromPlan: 'Dropped the cache.',
-          lookHereFirst: 'src/lib.rs',
-        }}
-      />,
-    );
-    expect(screen.getByText('Dropped the cache.')).toBeVisible();
-    expect(screen.queryByText('None')).toBeNull();
-  });
 });

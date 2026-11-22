@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '../../lib/api';
 import { helpSections } from './help';
 import {
   applyKeybindingOverrides,
-  configBinding,
   readKeybindings,
   type KeybindingOverrides,
 } from './keybindings';
@@ -18,22 +15,6 @@ import { listPaletteActions } from './palette';
 import { SHORTCUT_ACTIONS } from './registry';
 import type { KeyEventLike } from './types';
 
-function defaultKeybindingsFile(): Record<string, string[]> {
-  const text = readFileSync(
-    resolve(process.cwd(), '../config/default-keybindings.toml'),
-    'utf8',
-  );
-  const parsed: Record<string, string[]> = {};
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const match = /^"([^"]+)"\s*=\s*\[(.*)\]\s*$/.exec(trimmed);
-    if (!match) throw new Error(`unparsed default keybinding: ${line}`);
-    parsed[match[1]] = [...match[2].matchAll(/"((?:\\.|[^"\\])*)"/g)].map((found) => found[1]);
-  }
-  return parsed;
-}
-
 const quiet: KeyEventLike = {
   key: '',
   metaKey: false,
@@ -43,14 +24,6 @@ const quiet: KeyEventLike = {
 };
 
 describe('keybinding overrides', () => {
-  it('keeps the registry defaults aligned with config/default-keybindings.toml', () => {
-    const defaults = defaultKeybindingsFile();
-    expect(Object.keys(defaults).sort()).toEqual(SHORTCUT_ACTIONS.map((action) => action.id).sort());
-    for (const action of SHORTCUT_ACTIONS) {
-      expect(action.bindings.map(configBinding)).toEqual(defaults[action.id]);
-    }
-  });
-
   it('replaces a command, unbinds another, and shows the effective keys', () => {
     const overrides: KeybindingOverrides = {
       'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],

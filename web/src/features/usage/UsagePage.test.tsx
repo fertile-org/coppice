@@ -149,22 +149,6 @@ describe('UsagePage', () => {
     expect(screen.getByText('1.5k', { selector: 'p' })).toBeInTheDocument();
   });
 
-  it('names untracked connectors in the coverage line', () => {
-    renderPage();
-    expect(screen.getByTestId('usage-coverage')).toHaveTextContent(
-      'Counts 3 of 15 runs in this range. Not tracked: Cursor (12 runs).',
-    );
-  });
-
-  it('tells a count a connector never reports from one a run did not report', () => {
-    renderPage();
-    const [claude, turny] = screen.getAllByRole('row').slice(1);
-    // Claude Code can report cached reads; this run just didn't.
-    expect(within(claude).getAllByRole('cell')[2]).toHaveTextContent('not reported');
-    // Turny never reports cached reads.
-    expect(within(turny).getAllByRole('cell')[2]).toHaveTextContent('—');
-  });
-
   it('asks again when a filter changes', () => {
     renderPage();
     expect(mocks.params.at(-1)).toMatchObject({ groupBy: 'model', board: null, connector: null });

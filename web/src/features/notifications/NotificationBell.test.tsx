@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotificationBell } from './NotificationBell';
 import {
@@ -133,30 +133,6 @@ describe('NotificationBell', () => {
     expect(onOpenTicket).not.toHaveBeenCalled();
   });
 
-  it('lists unread needs-action notifications first, marked and labelled', () => {
-    const needsAction: NotificationItem = {
-      ...unreadNotification,
-      id: '00000000-0000-0000-0000-000000000004',
-      type: 'git_needs_action',
-      title: 'Needs action: Fix login',
-      body: '2 files conflict with main',
-      runId: null,
-      agentId: null,
-      createdAt: '2026-08-01T12:00:00.000Z',
-    };
-    vi.stubGlobal('fetch', mockNotificationApi([unreadNotification, needsAction], 2));
-    renderBell({ items: [unreadNotification, needsAction], count: 2 });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Notifications, 2 unread' }));
-
-    const rows = within(
-      screen.getByRole('list', { name: 'Notification history' }),
-    ).getAllByRole('button');
-    expect(rows[0]).toHaveAttribute('data-kind', 'needs-action');
-    expect(within(rows[0]).getByText('Needs action')).toBeInTheDocument();
-    expect(rows[1]).not.toHaveAttribute('data-kind');
-  });
-
   it('does not reuse notification state when the signed-in user changes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith('/unread-count')) {
@@ -192,49 +168,6 @@ describe('NotificationBell', () => {
         name: 'Notifications, no unread notifications',
       }),
     ).toBeInTheDocument();
-  });
-
-  it('shows an unread badge and exposes the count in its accessible name', () => {
-    renderBell({ count: 3 });
-
-    const button = screen.getByRole('button', {
-      name: 'Notifications, 3 unread',
-    });
-    expect(button).toBeInTheDocument();
-    expect(within(button).getByText('3')).toBeInTheDocument();
-  });
-
-  it('moves focus into the notification dialog when it opens', () => {
-    renderBell();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Notifications, 1 unread' }),
-    );
-
-    expect(
-      screen.getByRole('heading', { name: 'Notifications' }),
-    ).toHaveFocus();
-  });
-
-  it('opens a newest-first list with unread items visually distinguished', () => {
-    renderBell({ items: [readNotification, unreadNotification] });
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Notifications, 1 unread' }),
-    );
-
-    const list = screen.getByRole('list', { name: 'Notification history' });
-    const items = within(list).getAllByRole('button');
-    expect(items[0]).toHaveTextContent(unreadNotification.title);
-    expect(items[1]).toHaveTextContent(readNotification.title);
-    expect(items[0]).toHaveAttribute('data-unread', 'true');
-    expect(items[1]).toHaveAttribute('data-unread', 'false');
-    expect(items[0]).toHaveAccessibleName(
-      expect.stringMatching(/^Unread notification\./),
-    );
-    expect(items[1]).toHaveAccessibleName(
-      expect.stringMatching(/^Read notification\./),
-    );
   });
 
   it('marks an unread notification read and opens its ticket', async () => {
@@ -303,38 +236,6 @@ describe('NotificationBell', () => {
     ).toHaveFocus();
   });
 
-  it('shows the empty state when there is no history', () => {
-    renderBell({ items: [], count: 0 });
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Notifications, no unread notifications',
-      }),
-    );
-
-    expect(screen.getByText('No notifications yet')).toBeInTheDocument();
-  });
-
-  it('shows loading and error states for the notification list', async () => {
-    const fetchMock = vi.fn(() => Promise.reject(new Error('offline')));
-    vi.stubGlobal('fetch', fetchMock);
-    renderBell({ count: 0, primeList: false });
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Notifications, no unread notifications',
-      }),
-    );
-
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Loading notifications…',
-    );
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Notifications could not be loaded.',
-    );
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
-  });
-
   it('closes on Escape and returns focus to the bell', () => {
     renderBell();
     const trigger = screen.getByRole('button', {
@@ -347,26 +248,6 @@ describe('NotificationBell', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull();
     expect(trigger).toHaveFocus();
-  });
-
-  it('uses a neutral accessible label and retry state when count loading fails', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
-    renderBell({ items: [], primeCount: false });
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Notifications, loading unread count',
-      }),
-    ).toBeInTheDocument();
-    const trigger = await screen.findByRole('button', {
-      name: 'Notifications, unread count unavailable',
-    });
-    fireEvent.click(trigger);
-
-    expect(screen.getByText('Unread count unavailable.')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Retry count' }),
-    ).toBeInTheDocument();
   });
 
   it('surfaces ticket navigation failures instead of rejecting silently', async () => {

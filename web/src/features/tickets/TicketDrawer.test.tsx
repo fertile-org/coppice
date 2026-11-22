@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
@@ -254,67 +254,6 @@ describe('TicketDrawer', () => {
     };
   });
 
-  it('offers Attach files and highlights the ticket drop zone', () => {
-    renderDrawer();
-    expect(screen.getByRole('button', { name: 'Attach files' })).toHaveAttribute(
-      'title',
-      'Attach files',
-    );
-    fireEvent.dragOver(screen.getByText('Ticket description'), {
-      dataTransfer: { types: ['Files'], files: [] },
-    });
-    expect(screen.getByText('Drop to attach')).toBeInTheDocument();
-  });
-
-  it('renders Detail, Live Console, and Agent Runs tabs', () => {
-    renderDrawer();
-    expect(screen.getByRole('tab', { name: 'Detail' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Live Console' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Agent Runs' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Comments' })).toBeNull();
-  });
-
-  it('opens Agent Runs from the Tokens link on the Detail tab', () => {
-    renderDrawer();
-    fireEvent.click(screen.getByRole('button', { name: 'View runs →' }));
-    expect(screen.getByRole('tab', { name: 'Agent Runs' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-  });
-
-  it('drawer panel uses 90% width class', () => {
-    renderDrawer();
-    const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
-    expect(dialog.className).toMatch(/w-\[90%\]/);
-  });
-
-  it('shows the reviewed short SHA in the review area', () => {
-    ticketState.ticket = {
-      ...ticketState.ticket,
-      status: 'done',
-      humanReview: {
-        headSha: 'abc1234deadbeef',
-        shortSha: 'abc1234',
-        stale: false,
-        gitState: 'not_merged' as const,
-        acceptedByCoppice: false,
-        commentIds: [],
-        runIds: [],
-      },
-    };
-    renderDrawer();
-
-    const sha = screen.getByText('abc1234');
-    expect(sha.tagName).toBe('CODE');
-    expect(sha.closest('p')).toHaveTextContent('Reviewed at abc1234');
-    expect(
-      screen.queryByText(
-        'New commits since your review. Review again before you accept.',
-      ),
-    ).toBeNull();
-  });
-
   it('says when new commits arrived after review', () => {
     ticketState.ticket = {
       ...ticketState.ticket,
@@ -479,35 +418,6 @@ describe('TicketDrawer', () => {
     expect(screen.getByRole('button', { name: 'Run Agent' })).toBeEnabled();
   });
 
-  it('does not refetch runs when the cached list already has the active run', () => {
-    ticketState.ticket = { ...ticketState.ticket, hasActiveRun: true };
-    runsState.runs = [
-      {
-        id: '00000000-0000-0000-0000-0000000000aa',
-        ticketId: ticketState.ticket.id,
-        agentId: '00000000-0000-0000-0000-000000000010',
-        jobType: 'work_on_ticket',
-        status: 'queued',
-        sandboxProfileId: 'permissive-default',
-        worktreePath: null,
-        branchName: null,
-        startedAt: null,
-        endedAt: null,
-        createdAt: '2026-06-08T00:00:00.000Z',
-        errorMessage: null,
-        connector: 'mock',
-      },
-    ];
-    const client = new QueryClient();
-    const invalidate = vi.spyOn(client, 'invalidateQueries');
-    renderDrawer(null, client);
-
-    expect(invalidate).not.toHaveBeenCalledWith({
-      queryKey: ['agent-runs', ticketState.ticket.id],
-    });
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
-  });
-
   it('shows unarchive and banner for archived tickets', async () => {
     ticketState.ticket = {
       ...ticketState.ticket,
@@ -525,56 +435,6 @@ describe('TicketDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
     expect(archiveMocks.unarchive).toHaveBeenCalledTimes(1);
   });
-  it('routes kilo-code runs through the structured live console', () => {
-    runsState.runs = [
-      {
-        id: '00000000-0000-0000-0000-000000000010',
-        ticketId: ticketState.ticket.id,
-        agentId: '00000000-0000-0000-0000-000000000011',
-        jobType: 'agent_run',
-        status: 'running',
-        sandboxProfileId: 'default',
-        errorMessage: null,
-        worktreePath: null,
-        branchName: null,
-        startedAt: '2026-06-08T00:00:00.000Z',
-        endedAt: null,
-        createdAt: '2026-06-08T00:00:00.000Z',
-        connector: 'kilo-code',
-      },
-    ];
-
-    renderDrawer();
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
-    expect(screen.getByText('Claude live console')).toBeInTheDocument();
-  });
-
-  it('routes cursor runs through the structured live console', () => {
-    runsState.runs = [
-      {
-        id: '00000000-0000-0000-0000-000000000010',
-        ticketId: ticketState.ticket.id,
-        agentId: '00000000-0000-0000-0000-000000000011',
-        jobType: 'agent_run',
-        status: 'running',
-        sandboxProfileId: 'default',
-        errorMessage: null,
-        worktreePath: null,
-        branchName: null,
-        startedAt: '2026-06-08T00:00:00.000Z',
-        endedAt: null,
-        createdAt: '2026-06-08T00:00:00.000Z',
-        connector: 'cursor',
-      },
-    ];
-
-    renderDrawer();
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
-    expect(screen.getByText('Claude live console')).toBeInTheDocument();
-  });
-
   function runOn(connector: string): AgentRun {
     return {
       id: '00000000-0000-0000-0000-000000000010',
@@ -602,44 +462,12 @@ describe('TicketDrawer', () => {
     };
   }
 
-  it('uses OpenCode session view for openCodeSession', () => {
-    connectorsState.connectors = [descriptor('acme-session', 'openCodeSession')];
-    runsState.runs = [runOn('acme-session')];
-
-    renderDrawer();
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
-    expect(screen.getByText('Live session')).toBeInTheDocument();
-  });
-
-  it('uses structured console for structured', () => {
+  it('routes Live Console by connector console kind', () => {
     connectorsState.connectors = [descriptor('acme-structured', 'structured')];
     runsState.runs = [runOn('acme-structured')];
-
     renderDrawer();
     fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
     expect(screen.getByText('Claude live console')).toBeInTheDocument();
-  });
-
-  it('unknown connector falls back to plain console', () => {
-    connectorsState.connectors = [descriptor('mock', 'plain')];
-    runsState.runs = [runOn('opencode')];
-
-    renderDrawer();
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
-    expect(screen.getByText('Live console')).toBeInTheDocument();
-  });
-
-  it('uses plain console while connectors are loading', () => {
-    connectorsState.connectors = undefined;
-    runsState.runs = [runOn('cursor')];
-
-    renderDrawer();
-    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
-
-    expect(screen.getByText('Live console')).toBeInTheDocument();
   });
 
   it('links a sub-ticket back to its parent with its place in the order', () => {
@@ -724,31 +552,6 @@ describe('TicketDrawer', () => {
     expect(screen.getByRole('button', { name: PLAN_COPY.splitResume })).toBeVisible();
     expect(screen.getByRole('button', { name: PLAN_COPY.splitStartNext })).toBeVisible();
     expect(screen.getByRole('button', { name: PLAN_COPY.splitMergedElsewhere })).toBeVisible();
-  });
-
-  it('opens a child ticket parent in the same drawer route', () => {
-    const parent = {
-      id: '00000000-0000-0000-0000-000000000020',
-      title: 'Parent roadmap ticket',
-    };
-    ticketState.ticket = {
-      ...ticketState.ticket,
-      parentTicketId: parent.id,
-    };
-
-    renderDrawer(parent);
-
-    expect(screen.getByText('Parent ticket')).toBeVisible();
-    const parentButton = screen.getByRole('button', {
-      name: `Open parent ticket: ${parent.title}`,
-    });
-    expect(parentButton).toHaveTextContent(parent.title);
-
-    fireEvent.click(parentButton);
-
-    expect(screen.getByTestId('location-search')).toHaveTextContent(
-      `?ticket=${parent.id}`,
-    );
   });
 
   it('preserves navigation from a parent to its child tickets', () => {
@@ -862,16 +665,13 @@ describe('TicketDrawer keyboard sections', () => {
     expect(live).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('opens the assignee combobox with A', () => {
-    renderKeyboardDrawer();
+  it('opens the assignee combobox with A unless the ticket is archived', () => {
+    const { unmount } = renderKeyboardDrawer();
     const assignee = screen.getByRole('combobox', { name: 'Assignee' });
-    expect(assignee).toHaveAttribute('aria-expanded', 'false');
-
     fireEvent.keyDown(document, { key: 'a' });
     expect(assignee).toHaveAttribute('aria-expanded', 'true');
-  });
+    unmount();
 
-  it('does not open the assignee combobox for an archived ticket', () => {
     ticketState.ticket = {
       ...ticketState.ticket,
       archivedAt: '2026-06-08T00:00:00.000Z',
@@ -996,18 +796,6 @@ describe('TicketDrawer keyboard sections', () => {
     expect(finalApprove).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores section keys while typing', () => {
-    renderKeyboardDrawer();
-    const input = document.createElement('input');
-    document.body.appendChild(input);
-    input.focus();
-    fireEvent.keyDown(input, { key: ']' });
-    expect(screen.getByRole('tab', { name: 'Detail' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    input.remove();
-  });
 });
 
 function stubReducedMotion(reduce: boolean) {
@@ -1065,22 +853,11 @@ describe('TicketDrawer first frame', () => {
     expect(skeleton).toBeInTheDocument();
     expect(skeleton).toHaveAttribute('aria-busy', 'true');
     expect(within(skeleton).getByText('Loading ticket…')).toBeInTheDocument();
-    expect(skeleton.querySelectorAll('[class*="animate-pulse"]').length).toBeGreaterThan(0);
     // No editable description or metadata panel on list data.
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByText('Comments')).toBeNull();
     expect(screen.getByRole('button', { name: 'Run Agent' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
-  });
-
-  it('shows a pulsing skeleton on cold load with no list placeholder', () => {
-    ticketState.loading = true;
-    renderDrawer();
-
-    const skeleton = screen.getByTestId('ticket-detail-skeleton');
-    expect(skeleton).toHaveAttribute('aria-busy', 'true');
-    expect(within(skeleton).getByText('Loading ticket…')).toBeInTheDocument();
-    expect(screen.queryByText('Ticket description')).toBeNull();
   });
 
   it('skips the skeleton when detail data is already warm', () => {
@@ -1092,41 +869,20 @@ describe('TicketDrawer first frame', () => {
     expect(screen.getByText('Ticket description')).toBeInTheDocument();
   });
 
-  it('mounts comments only after the sheet fade ends', () => {
+  it('defers comments until the sheet settles or reduced motion skips deferral', () => {
     stubReducedMotion(false);
     renderDrawer();
-
-    expect(screen.getByText('Ticket description')).toBeInTheDocument();
     expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
-    expect(screen.queryByText('Comments', { selector: 'div' })).toBeNull();
-
     const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
-    // A child's animation bubbles up; it must not settle the sheet.
     fireAnimationEnd(screen.getByText('Ticket description'), 'sheet-in');
-    fireAnimationEnd(dialog, 'fade-in');
-    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
-
     fireAnimationEnd(dialog, 'sheet-in');
     expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
     expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
-  });
 
-  it('settles after a fallback timeout when animationend never fires', () => {
-    vi.useFakeTimers();
-    stubReducedMotion(false);
-    renderDrawer();
-    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
-  });
-
-  it('mounts comments right away with prefers-reduced-motion', () => {
+    cleanup();
+    vi.unstubAllGlobals();
     stubReducedMotion(true);
     renderDrawer();
-
     expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
     expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
   });

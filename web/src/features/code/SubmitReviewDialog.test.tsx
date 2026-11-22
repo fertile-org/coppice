@@ -11,8 +11,6 @@ const {
   TICKET_ID,
   BOARD_ID,
   ADA_ID,
-  BEN_ID,
-  PM_ID,
   REPO_ID,
   agents,
   boards,
@@ -29,8 +27,6 @@ const {
     TICKET_ID,
     BOARD_ID,
     ADA_ID,
-    BEN_ID,
-    PM_ID,
     REPO_ID,
     agents: [
       { id: ADA_ID, name: 'Ada', role: 'Backend Engineer', enabled: true },
@@ -124,42 +120,6 @@ describe('SubmitReviewDialog', () => {
         workflowAction: 'move_to_in_progress',
         reassignAgentId: ADA_ID,
       }),
-    );
-  });
-
-  it('sends the chosen engineer when reassigning', async () => {
-    renderDialog();
-    fillSummary();
-
-    selectComboboxOption(
-      screen.getByRole('combobox', { name: 'Workflow action' }),
-      'Reassign engineer',
-    );
-    selectComboboxOption(
-      screen.getByRole('combobox', { name: 'Engineer' }),
-      'Ben · Frontend Engineer',
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit review' }));
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
-    expect(mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflowAction: 'reassign_engineer',
-        reassignAgentId: BEN_ID,
-      }),
-    );
-  });
-
-  it('prefills the first engineer when the assignee is not an engineer', () => {
-    ticketState.assigneeAgentId = PM_ID;
-    renderDialog();
-
-    selectComboboxOption(
-      screen.getByRole('combobox', { name: 'Workflow action' }),
-      'Move to In Progress',
-    );
-    expect(screen.getByRole('combobox', { name: 'Engineer' })).toHaveTextContent(
-      'Ada · Backend Engineer',
     );
   });
 

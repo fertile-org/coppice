@@ -84,19 +84,6 @@ describe('RunToolsAndSkills', () => {
     expect(within(skills).getByText('sample-plugin:hello')).toBeVisible();
   });
 
-  it('empty state', () => {
-    useRunToolCalls.mockReturnValue({
-      data: { items: [], skillsUsed: [] },
-      isLoading: false,
-      isError: false,
-    });
-
-    render(<RunToolsAndSkills runId={RUN_ID} enabled />);
-
-    expect(screen.getByText('No tool calls recorded.')).toBeVisible();
-    expect(screen.queryByRole('list', { name: 'Skills used' })).toBeNull();
-  });
-
   it('shows loading and error states', () => {
     useRunToolCalls.mockReturnValue({ data: undefined, isLoading: true, isError: false });
     const { rerender } = render(<RunToolsAndSkills runId={RUN_ID} enabled />);

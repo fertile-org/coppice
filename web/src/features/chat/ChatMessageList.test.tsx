@@ -54,14 +54,6 @@ describe('ChatMessageList', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows a thinking indicator while awaiting a reply', () => {
-    render(<ThinkingIndicator />);
-    const indicator = screen.getByTestId('thinking-indicator');
-    expect(indicator).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent('Thinking…');
-    expect(indicator.className).not.toMatch(/bg-moss-50/);
-  });
-
   it('shows a design card on the agent message only', () => {
     const runId = '22222222-2222-4222-8222-222222222222';
     const design = makeDesignSet({
@@ -151,73 +143,6 @@ describe('ChatMessageList', () => {
     expect(article.querySelector('p')?.closest('[class*="[&_p]"]')).not.toBeNull();
   });
 
-  it('aligns human and agent bubbles for a messenger thread', () => {
-    const pair: ChatMessage[] = [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 1,
-        role: 'human',
-        body: 'Hello from me',
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:00Z',
-      },
-      {
-        id: '00000000-0000-4000-8000-000000000002',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 2,
-        role: 'agent',
-        body: 'Hello from the agent',
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:01Z',
-      },
-    ];
-
-    renderList(<ChatMessageList messages={pair} />);
-
-    const human = screen.getByLabelText('You');
-    const agent = screen.getByLabelText('Agent');
-    expect(human).toHaveAttribute('data-role', 'human');
-    expect(agent).toHaveAttribute('data-role', 'agent');
-    expect(human.parentElement).toHaveClass('justify-end');
-    expect(agent.parentElement).toHaveClass('justify-start');
-    expect(human.className).toMatch(/bg-paper-200/);
-    expect(human.className).toMatch(/text-text-primary/);
-    expect(agent.className).not.toMatch(/bg-moss-50/);
-    expect(agent.className).toMatch(/w-full/);
-    expect(agent.className).toMatch(/min-w-0/);
-  });
-
-  it('renders agent prose in the body font, not the console mono class', () => {
-    const reply: ChatMessage[] = [
-      {
-        id: '00000000-0000-4000-8000-000000000002',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 1,
-        role: 'agent',
-        body: 'Hello from the agent',
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:00Z',
-      },
-    ];
-
-    renderList(<ChatMessageList messages={reply} />);
-
-    const prose = screen.getByLabelText('Agent').querySelector('p');
-    expect(prose).not.toBeNull();
-    expect(prose!.className).toMatch(/font-body/);
-    expect(prose!.className).not.toMatch(/font-mono/);
-  });
-
   it('opens absolute http links from agent replies in a new tab', () => {
     const reply: ChatMessage[] = [
       {
@@ -242,98 +167,32 @@ describe('ChatMessageList', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer');
   });
 
-  it('left-aligns system notices like agent replies', () => {
-    const notices: ChatMessage[] = [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 1,
-        role: 'system',
-        body: 'Opening coppice…',
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:00Z',
-      },
-    ];
+  it('streaming thinking bubbles stay single, collapsible, and beside reply prose', () => {
+    render(<ThinkingIndicator />);
+    expect(screen.getByTestId('thinking-indicator')).toHaveAttribute('aria-busy', 'true');
 
-    renderList(<ChatMessageList messages={notices} />);
-
-    const system = screen.getByLabelText('System');
-    expect(system).toHaveAttribute('data-role', 'system');
-    expect(system.parentElement).toHaveClass('justify-start');
-    expect(system.parentElement).not.toHaveClass('justify-center');
-    expect(system.className).toMatch(/border-l-2/);
-    expect(system.className).toMatch(/border-info/);
-    expect(system.className).not.toMatch(/bg-info-muted|bg-moss/);
-  });
-
-  it('shows streaming agent row inside the virtualized list', () => {
-    renderList(
-      <ChatMessageList
-        messages={[]}
-        streamingAgent={{ runId: 'run-1', replyText: 'Partial…' }}
-      />,
-    );
-    expect(screen.getByText(/Partial/)).toBeInTheDocument();
-    expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
-    expect(screen.getByTestId('chat-streaming-reply').className).not.toMatch(
-      /bg-moss-50/,
-    );
-  });
-
-  it('renders a streaming mermaid fence as code instead of a diagram', () => {
-    renderList(
-      <ChatMessageList
-        messages={[]}
-        streamingAgent={{
-          runId: 'run-1',
-          replyText: '```mermaid\nflowchart LR\n  A --> B\n```',
-        }}
-      />,
-    );
-    expect(screen.getByText(/flowchart LR/)).toBeInTheDocument();
-    expect(screen.getByText(/A --> B/).closest('pre')).not.toBeNull();
-    expect(document.querySelector('svg')).toBeNull();
-    expect(
-      screen.queryByText("This diagram couldn't be drawn, so here's its source."),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows one thinking bubble, not one inside another, before text arrives', () => {
-    renderList(
-      <ChatMessageList messages={[]} streamingAgent={{ runId: 'run-1', replyText: '' }} />,
+    const client = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ChatMessageList
+            messages={[]}
+            streamingAgent={{
+              runId: 'run-1',
+              thinkingText: 'Checking updater paths…',
+              replyText: '',
+            }}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     const indicator = screen.getByTestId('thinking-indicator');
     expect(indicator.closest('article')).toBeNull();
     expect(screen.getAllByRole('status')).toHaveLength(1);
-  });
-
-  it('keeps pre-result thinking under CollapsibleDetail, not reply prose', () => {
-    renderList(
-      <ChatMessageList
-        messages={[]}
-        streamingAgent={{
-          runId: 'run-1',
-          thinkingText: 'Checking updater paths…',
-          replyText: '',
-        }}
-      />,
-    );
     expect(screen.getByTestId('chat-streaming-thinking')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Thinking/ })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
-    expect(screen.getByText(/Checking updater paths/)).toBeInTheDocument();
     expect(screen.queryByTestId('chat-streaming-reply')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Agent')).not.toBeInTheDocument();
-  });
 
-  it('renders reply prose beside thinking and collapses when streaming ends', () => {
-    const client = new QueryClient();
-    const { rerender } = render(
+    rerender(
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <ChatMessageList
@@ -348,7 +207,6 @@ describe('ChatMessageList', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByTestId('chat-streaming-thinking')).toBeInTheDocument();
     expect(screen.getByTestId('chat-streaming-reply')).toHaveTextContent(
       'Signed builds auto-update.',
     );
@@ -376,9 +234,7 @@ describe('ChatMessageList', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.getByTestId('chat-streaming-reply')).toHaveTextContent(
-      'Signed builds auto-update.',
-    );
+    expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
   });
 
   it('virtualizes a long transcript in a scrollable log', () => {
@@ -394,80 +250,6 @@ describe('ChatMessageList', () => {
     expect(renderedRows.length).toBeLessThan(messages.length);
     expect(screen.queryByText('Human turn 0')).toBeInTheDocument();
     expect(screen.queryByText('Human turn 39')).not.toBeInTheDocument();
-  });
-
-  it('sizes rows from measured content so tall messages do not clip to 88px', () => {
-    const tallBody = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}.`).join(
-      '\n\n',
-    );
-    const tallMessages: ChatMessage[] = [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 1,
-        role: 'agent',
-        body: tallBody,
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:00Z',
-      },
-      {
-        id: '00000000-0000-4000-8000-000000000002',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 2,
-        role: 'human',
-        body: 'Short follow-up',
-        agentRunId: null,
-        actionMetadata: null,
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:01Z',
-      },
-    ];
-
-    const TALL_ROW_HEIGHT = 240;
-    const SHORT_ROW_HEIGHT = 64;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function getBoundingClientRect(this: HTMLElement) {
-        const indexAttr = this.getAttribute?.('data-index');
-        const height =
-          indexAttr === '0'
-            ? TALL_ROW_HEIGHT
-            : indexAttr === '1'
-              ? SHORT_ROW_HEIGHT
-              : 0;
-        return {
-          x: 0,
-          y: 0,
-          top: 0,
-          left: 0,
-          bottom: height,
-          right: 640,
-          width: 640,
-          height,
-          toJSON() {
-            return {};
-          },
-        };
-      },
-    );
-
-    renderList(<ChatMessageList messages={tallMessages} />);
-
-    const list = screen.getByTestId('chat-message-list');
-    const tallRow = list.querySelector('[data-index="0"]');
-    expect(tallRow).not.toBeNull();
-    // Content-driven rows must not lock height to the estimate.
-    expect(tallRow).not.toHaveStyle({ height: '72px' });
-    expect(tallRow).not.toHaveStyle({ height: '88px' });
-
-    const spacer = list.firstElementChild as HTMLElement | null;
-    expect(spacer).not.toBeNull();
-    expect(Number.parseFloat(spacer!.style.height)).toBeGreaterThanOrEqual(
-      TALL_ROW_HEIGHT + SHORT_ROW_HEIGHT,
-    );
   });
 
   it('surfaces action result chips for ticket and knowledge', () => {

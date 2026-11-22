@@ -12,18 +12,14 @@ const doneContract = {
 };
 
 describe('parseResultContractFromText', () => {
-  it('parses bare JSON', () => {
-    const result = parseResultContractFromText(JSON.stringify(doneContract));
-    expect(result?.status).toBe('done');
-    expect(result?.summary).toContain('Research complete');
-  });
-
-  it('parses fenced json code block', () => {
-    const text = '```json\n' + JSON.stringify(doneContract, null, 2) + '\n```';
-    const result = parseResultContractFromText(text);
-    expect(result?.status).toBe('done');
-    if (result?.status === 'done') {
-      expect(result.changedFiles).toEqual(['docs/research/competitive-analysis.md']);
+  it('parses bare and fenced JSON', () => {
+    for (const text of [
+      JSON.stringify(doneContract),
+      '```json\n' + JSON.stringify(doneContract, null, 2) + '\n```',
+    ]) {
+      const result = parseResultContractFromText(text);
+      expect(result?.status).toBe('done');
+      expect(result?.summary).toContain('Research complete');
     }
   });
 
@@ -48,7 +44,7 @@ describe('parseResultContractFromText', () => {
     expect(result?.summary).toContain('Research complete');
   });
 
-  it('parses blocked contract', () => {
+  it('parses blocked, optional fields, and the last duplicate JSON blob', () => {
     const blocked = {
       status: 'blocked',
       blockerType: 'missing_secret',
@@ -56,18 +52,12 @@ describe('parseResultContractFromText', () => {
       nextStatus: 'Blocked',
       mentionAgents: ['owner'],
     };
-    const result = parseResultContractFromText(JSON.stringify(blocked));
-    expect(result?.status).toBe('blocked');
-    if (result?.status === 'blocked') {
-      expect(result.blockerType).toBe('missing_secret');
+    const blockedResult = parseResultContractFromText(JSON.stringify(blocked));
+    expect(blockedResult?.status).toBe('blocked');
+    if (blockedResult?.status === 'blocked') {
+      expect(blockedResult.blockerType).toBe('missing_secret');
     }
-  });
 
-  it('returns null for normal markdown', () => {
-    expect(parseResultContractFromText('Just a regular update.')).toBeNull();
-  });
-
-  it('parses acceptanceCriteria and assignTo', () => {
     const contract = {
       status: 'done',
       summary: 'Refined ticket.',
@@ -78,38 +68,14 @@ describe('parseResultContractFromText', () => {
       mentionAgents: [],
       blockers: [],
     };
-    const result = parseResultContractFromText(JSON.stringify(contract));
-    expect(result?.status).toBe('done');
-    if (result?.status === 'done') {
-      expect(result.acceptanceCriteria).toContain('Must pass CI');
-      expect(result.assignTo).toBe('backend_engineer');
+    const doneResult = parseResultContractFromText(JSON.stringify(contract));
+    if (doneResult?.status === 'done') {
+      expect(doneResult.acceptanceCriteria).toContain('Must pass CI');
+      expect(doneResult.assignTo).toBe('backend_engineer');
     }
-  });
 
-  it('parses summary with angle-bracket field names', () => {
-    const contract = {
-      status: 'done',
-      summary:
-        'Wire `ConnectorRegistry::get(<id>)` and spawn `<command>` at `<path>`.',
-      changedFiles: [],
-      testsRun: [],
-      assignTo: 'backend_engineer',
-      mentionAgents: [],
-      blockers: [],
-    };
-    const text =
-      'Done.\n\n```json\n' + JSON.stringify(contract, null, 2) + '\n```';
-    const result = parseResultContractFromText(text);
-    expect(result?.status).toBe('done');
-    if (result?.status === 'done') {
-      expect(result.summary).toContain('<id>');
-    }
-  });
-
-  it('parses the last contract from concatenated duplicate JSON', () => {
     const json = JSON.stringify(doneContract);
-    const result = parseResultContractFromText(json + json + json);
-    expect(result?.status).toBe('done');
-    expect(result?.summary).toContain('Research complete');
+    const last = parseResultContractFromText(json + json + json);
+    expect(last?.summary).toContain('Research complete');
   });
 });

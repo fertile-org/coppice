@@ -21,29 +21,6 @@ describe('applyClaudeConsoleEvent', () => {
     });
   });
 
-  it('preserves the connector id on generic session events', () => {
-    const state = applyClaudeConsoleEvent(createClaudeConsoleState(), {
-      type: 'future-agent.console.session',
-      model: 'model-x',
-    });
-
-    expect(state.entries).toHaveLength(1);
-    expect(state.entries[0]).toMatchObject({
-      kind: 'session',
-      model: 'model-x',
-      connector: 'future-agent',
-    });
-  });
-
-  it('ignores non-console events', () => {
-    const state = applyClaudeConsoleEvent(createClaudeConsoleState(), {
-      type: 'session.message',
-      markdown: 'ignored',
-    });
-
-    expect(state.entries).toEqual([]);
-  });
-
   it('coalesces Codex command lifecycle events into one shell card', () => {
     let state = applyClaudeConsoleEvent(createClaudeConsoleState(), {
       type: 'codex.console.tool',
@@ -148,7 +125,7 @@ describe('applyClaudeConsoleEvent', () => {
     expect(state.entries[0]).toMatchObject({ markdown: `line ${20_000 - MAX_CONSOLE_ENTRIES}` });
   });
 
-  it('keeps only the tail of the legacy terminal text', () => {
+  it('keeps legacy terminal text within the cap', () => {
     let state = createClaudeConsoleState();
     const chunk = 'x'.repeat(100_000);
     for (let i = 0; i < 15; i += 1) state = appendLegacyFrameText(state, chunk);

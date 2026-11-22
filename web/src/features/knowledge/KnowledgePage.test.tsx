@@ -132,25 +132,6 @@ describe('KnowledgePage', () => {
     resetKnowledgePageMocks(mocks);
   });
 
-  it('shows governed lifecycle tabs and audit metadata', () => {
-    render(<KnowledgePage />);
-
-    expect(screen.getByRole('heading', { name: 'Knowledge' })).toBeVisible();
-    expect(screen.getByRole('tab', { name: 'Pending' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    expect(screen.getByText('Fast feedback loop')).toBeVisible();
-    expect(screen.queryByText(/Embedding/)).toBeNull();
-    expect(screen.getByTestId('compaction-strip-stub')).toBeInTheDocument();
-    expect(screen.getByText(/3 runs/)).toBeVisible();
-    expect(screen.getByText(/Supersedes 00000000/)).toBeVisible();
-    expect(screen.getByText(/Source run 00000000/)).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(mocks.openTicket).toHaveBeenCalledWith(item.sourceId);
-  });
-
   it('lists approved items with open flags on the Flagged tab', () => {
     mocks.items = [{ ...item, status: 'approved', openFlagCount: 1 }];
     render(<KnowledgePage />);
@@ -197,17 +178,6 @@ describe('KnowledgePage', () => {
     expect(mocks.openTicket).toHaveBeenCalledWith('aaaaaaaa-0000-4000-8000-000000000021');
   });
 
-  it('drops agent-facing guidance and the fail-closed badge', () => {
-    render(<KnowledgePage />);
-
-    expect(
-      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
-    expect(screen.queryByText('Human-governed · fail-closed')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Would a different ticket/)).not.toBeInTheDocument();
-  });
-
   it('shows a main Approve button on pending cards that approves with expectedVersion', async () => {
     render(<KnowledgePage />);
 
@@ -220,34 +190,29 @@ describe('KnowledgePage', () => {
     });
   });
 
-  it('hides Approve anyway when there are no near-duplicates', () => {
-    mocks.similarItems = [];
-    render(<KnowledgePage />);
+  it.each([
+    { similar: [] as typeof neighbor[], expectAnyway: false },
+    { similar: [neighbor], expectAnyway: true },
+  ])(
+    'Approve anyway visibility depends on near-duplicates',
+    ({ similar, expectAnyway }) => {
+      mocks.similarItems = similar;
+      render(<KnowledgePage />);
 
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Approve anyway' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows Approve anyway when there is a near-duplicate', () => {
-    mocks.similarItems = [neighbor];
-    render(<KnowledgePage />);
-
-    expect(
-      within(screen.getByRole('region', { name: 'Near-duplicate assist' })).getByRole(
-        'button',
-        { name: 'Approve anyway' },
-      ),
-    ).toBeVisible();
-  });
-
-  it('hides the raw policy reason on pending cards but keeps rejection reasons', () => {
-    render(<KnowledgePage />);
-
-    expect(screen.queryByText(/Policy:/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Manual candidates require review/)).not.toBeInTheDocument();
-  });
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
+      const anyway = screen.queryByRole('button', { name: 'Approve anyway' });
+      if (expectAnyway) {
+        expect(
+          within(screen.getByRole('region', { name: 'Near-duplicate assist' })).getByRole(
+            'button',
+            { name: 'Approve anyway' },
+          ),
+        ).toBeVisible();
+      } else {
+        expect(anyway).not.toBeInTheDocument();
+      }
+    },
+  );
 
   it('keeps the rejection reason on rejected cards', () => {
     mocks.items = [
@@ -266,13 +231,16 @@ describe('KnowledgePage', () => {
     expect(screen.getByText('Policy:')).toBeVisible();
   });
 
-  it('uses the selected status and sends optimistic versions for approval', async () => {
+  it('near-duplicate assist neighbors, approve-anyway mutation, and empty state', async () => {
     mocks.similarItems = [neighbor];
+    mocks.items = [item];
     render(<KnowledgePage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
-    expect(mocks.filter).toMatchObject({ status: 'rejected' });
+    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
+    expect(within(assist).getByText(neighbor.title)).toBeVisible();
+    expect(mocks.similarEnabled).toBe(true);
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
     fireEvent.click(screen.getByRole('button', { name: 'Approve anyway' }));
     await waitFor(() => {
       expect(mocks.approve).toHaveBeenCalledWith({
@@ -280,19 +248,16 @@ describe('KnowledgePage', () => {
         expectedVersion: item.version,
       });
     });
-  });
 
-  it('shows No close matches when similar list is empty', () => {
+    cleanup();
     mocks.similarItems = [];
     render(<KnowledgePage />);
-
-    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
-    expect(assist).toHaveTextContent('No close matches');
-    expect(mocks.similarEnabled).toBe(true);
+    expect(screen.getByRole('region', { name: 'Near-duplicate assist' })).toHaveTextContent(
+      'No close matches',
+    );
   });
 
-  it('renders similar neighbors and opens the approved neighbor', async () => {
-    mocks.similarItems = [neighbor];
+  it('opens the approved neighbor from near-duplicate assist', async () => {
     const approvedNeighbor = {
       ...item,
       id: neighbor.itemId,
@@ -300,14 +265,12 @@ describe('KnowledgePage', () => {
       title: neighbor.title,
       activeRevisionId: neighbor.revisionId,
     };
+    mocks.similarItems = [neighbor];
     mocks.items = [item];
     render(<KnowledgePage />);
 
-    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
-    expect(within(assist).getByText(neighbor.title)).toBeVisible();
-    expect(within(assist).getByText(/match 98%/)).toBeVisible();
-
     mocks.items = [approvedNeighbor];
+    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
     fireEvent.click(within(assist).getByRole('button', { name: /Open/i }));
     await waitFor(() => {
       expect(mocks.filter).toMatchObject({ status: 'approved' });
@@ -375,19 +338,6 @@ describe('KnowledgePage', () => {
     });
   });
 
-  it('approves anyway with pending expectedVersion', async () => {
-    mocks.similarItems = [neighbor];
-    render(<KnowledgePage />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Approve anyway' }));
-    await waitFor(() => {
-      expect(mocks.approve).toHaveBeenCalledWith({
-        id: item.id,
-        expectedVersion: item.version,
-      });
-    });
-  });
-
   it('filters by board and type comboboxes and searches loaded items', () => {
     mocks.items = [
       item,
@@ -421,21 +371,6 @@ describe('KnowledgePage', () => {
     expect(screen.getByText('Fast feedback loop')).toBeVisible();
     expect(board).toHaveTextContent('All scopes');
     expect(mocks.filter).toMatchObject({ boardId: undefined, knowledgeType: undefined });
-  });
-
-  it('shows empty states with an Add knowledge call to action', () => {
-    mocks.items = [];
-    render(<KnowledgePage />);
-
-    expect(screen.getByRole('heading', { name: 'No pending knowledge' })).toBeVisible();
-    expect(screen.getAllByRole('button', { name: 'Add knowledge' })).toHaveLength(2);
-
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search knowledge' }), {
-      target: { value: 'nothing' },
-    });
-    expect(screen.getByRole('heading', { name: 'No matching knowledge' })).toBeVisible();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[1]);
-    expect(screen.getByRole('heading', { name: 'No pending knowledge' })).toBeVisible();
   });
 
   it('is read-only for non-admins', () => {

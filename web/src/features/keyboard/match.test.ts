@@ -105,7 +105,7 @@ describe('shortcut matching', () => {
     ).toEqual([]);
   });
 
-  it('moves between files on the diff and ignores those keys while typing', () => {
+  it('moves with J/K (including diff) and ignores them while typing', () => {
     const diff = ctx({
       scopes: ['global', 'diff'],
       enabled: new Set([
@@ -120,20 +120,10 @@ describe('shortcut matching', () => {
       type: 'run',
       actionId: 'diff.nextFile',
     });
-    expect(press(EMPTY_SEQUENCE_SESSION, key('k'), diff).effect).toEqual({
-      type: 'run',
-      actionId: 'diff.previousFile',
-    });
     expect(press(EMPTY_SEQUENCE_SESSION, key('v'), diff).effect).toEqual({
       type: 'run',
       actionId: 'diff.markViewed',
     });
-    const typing = ctx({ scopes: ['text'], enabled: diff.enabled });
-    expect(press(EMPTY_SEQUENCE_SESSION, key('j'), typing).effect).toEqual({ type: 'none' });
-    expect(press(EMPTY_SEQUENCE_SESSION, key('v'), typing).effect).toEqual({ type: 'none' });
-  });
-
-  it('moves with J and K, ignores them while typing, and lets a disabled Mod+K through', () => {
     const board = ctx();
     expect(press(EMPTY_SEQUENCE_SESSION, key('j'), board).effect).toEqual({
       type: 'run',

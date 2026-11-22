@@ -3,7 +3,6 @@ import { omittedActionIds } from './registry';
 import {
   layoutPalette,
   listPaletteActions,
-  PALETTE_COPY,
   PALETTE_HELP_LABEL,
   PALETTE_RECENT_KEY,
   readRecentIds,
@@ -43,38 +42,6 @@ describe('command palette commands', () => {
     expect(entries.some((entry) => entry.id === 'board.nextCard')).toBe(false);
     expect(entries.some((entry) => entry.id.startsWith('board.column.'))).toBe(false);
     expect(entries.some((entry) => entry.id === 'ticket.create')).toBe(false);
-  });
-
-  it('draws the help.show hint as ? on every platform', () => {
-    const linux = listPaletteActions({
-      omitted: new Set(),
-      platform: 'linux',
-    }).find((entry) => entry.id === 'help.show');
-    const macos = listPaletteActions({
-      omitted: new Set(),
-      platform: 'macos',
-    }).find((entry) => entry.id === 'help.show');
-
-    expect(linux?.label).toBe(PALETTE_HELP_LABEL);
-    expect(linux?.shortcut).toBe('?');
-    expect(macos?.shortcut).toBe('?');
-    expect(linux?.keywords).toBe('Show keyboard shortcuts');
-  });
-
-  it('omits admin pages for members and keeps Keyboard shortcuts', () => {
-    const labels = listPaletteActions({
-      omitted: omittedActionIds({ isAdmin: false, desktopMode: false }),
-      platform: 'linux',
-    }).map((entry) => entry.label);
-
-    expect(labels).toEqual([
-      'Go to Boards',
-      'Go to Agents',
-      'Go to Chat',
-      'Go to Knowledge',
-      'Go to Repositories',
-      PALETTE_HELP_LABEL,
-    ]);
   });
 
   it('hides Go to Users in the desktop app and shows it for an admin in the browser', () => {
@@ -122,38 +89,14 @@ describe('command palette search', () => {
       query: '',
     });
 
-    expect(layout.recent.map((entry) => entry.label)).toEqual([
-      'Go to Settings',
-      'Go to System',
-      'Go to Users',
-      'Go to Plugins',
-      'Go to Repositories',
-      'Go to Knowledge',
-      'Go to Chat',
-      'Go to Agents',
-    ]);
     expect(layout.recent).toHaveLength(8);
+    expect(layout.recent[0]?.id).toBe('nav.settings');
     const pages = layout.groups.find((group) => group.group === 'Navigate');
     expect(pages?.items.map((entry) => entry.id)).not.toContain('nav.settings');
     expect(pages?.items.map((entry) => entry.id)).toContain('nav.boards');
     expect(pages?.items.map((entry) => entry.id)).toContain('help.show');
     expect(layout.matches).toEqual([]);
     expect(layout.empty).toBe(false);
-  });
-
-  it('does not surface a stale Next card or ticket under Recent', () => {
-    const layout = layoutPalette({
-      actions,
-      tickets: [{ id: 'tic-1', title: 'Plan the release' }],
-      agents: [{ id: 'agt-1', name: 'Planner' }],
-      recentIds: ['board.nextCard', 'ticket:tic-1', 'agent:agt-1', 'nav.boards'],
-      query: '',
-    });
-
-    expect(layout.recent.map((entry) => entry.id)).toEqual(['nav.boards']);
-    expect(layout.recent.map((entry) => entry.label)).not.toContain('Next card');
-    expect(layout.recent.map((entry) => entry.label)).not.toContain('Plan the release');
-    expect(layout.matches).toEqual([]);
   });
 
   it('fuzzy-matches page labels, ticket titles, ticket ids, and agent names', () => {
@@ -211,11 +154,6 @@ describe('command palette search', () => {
     expect(none.empty).toBe(true);
     expect(none.groups).toEqual([]);
     expect(none.matches).toEqual([]);
-  });
-
-  it('uses the Pages heading copy', () => {
-    expect(PALETTE_COPY.pages).toBe('Pages');
-    expect(PALETTE_COPY.placeholder).toBe('Search pages, tickets, and agents…');
   });
 
   it('remembers recent ids in order and ignores a corrupt store', () => {

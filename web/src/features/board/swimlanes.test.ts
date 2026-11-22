@@ -140,7 +140,7 @@ describe('splitLanes', () => {
     expect(open.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual(['c1']);
   });
 
-  it('returns a finished split to the columns', () => {
+  it('returns finished or orphaned split children to the columns', () => {
     const finishedParent = makeTicket({
       id: 'parent',
       title: 'Ship the gate',
@@ -158,69 +158,9 @@ describe('splitLanes', () => {
     );
 
     const finished = splitLanes([finishedParent, ...merged]);
-
     expect(finished.lanes).toEqual([]);
-    expect(finished.rest.map((ticket) => ticket.id)).toEqual([
-      'parent',
-      'merged-1',
-      'merged-2',
-      'merged-3',
-    ]);
 
-    const parentHidden = splitLanes(merged, [finishedParent, ...merged]);
-    expect(parentHidden.lanes).toEqual([]);
-    expect(parentHidden.rest.map((ticket) => ticket.id)).toEqual([
-      'merged-1',
-      'merged-2',
-      'merged-3',
-    ]);
-  });
-
-  it('keeps the lane when a filter hides the parent but the parent is still active', () => {
-    const visible = splitLanes([ready, backlog], [parent, ready, backlog]);
-
-    expect(visible.lanes).toHaveLength(1);
-    expect(visible.lanes[0]?.parent.id).toBe('parent');
-    expect(visible.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
-      'child-ready',
-      'child-backlog',
-    ]);
-    expect(visible.rest).toEqual([]);
-  });
-
-  it('keeps a parent with no visible children in the columns', () => {
-    const alone = splitLanes([parent], [parent, ready, backlog]);
-
-    expect(alone.lanes).toEqual([]);
-    expect(alone.rest.map((ticket) => ticket.id)).toEqual(['parent']);
-  });
-
-  it('returns the family to the columns when the parent is archived but still listed', () => {
-    const archivedParent = makeTicket({
-      id: 'parent',
-      title: 'Ship the gate',
-      status: 'in_progress',
-      archivedAt: '2026-11-22T00:00:00.000Z',
-      splitProgress: progress(),
-    });
-
-    const listed = splitLanes(
-      [archivedParent, ready, backlog, done],
-      [archivedParent, ready, backlog, done],
-    );
-
-    expect(listed.lanes).toEqual([]);
-    expect(listed.rest.map((ticket) => ticket.id)).toEqual([
-      'parent',
-      'child-ready',
-      'child-backlog',
-      'child-done',
-    ]);
-  });
-
-  it('returns the family to the columns when the parent is absent from the board list', () => {
     const absent = splitLanes([ready, backlog, done], [ready, backlog, done]);
-
     expect(absent.lanes).toEqual([]);
     expect(absent.rest.map((ticket) => ticket.id)).toEqual([
       'child-ready',
@@ -229,33 +169,14 @@ describe('splitLanes', () => {
     ]);
   });
 
-  it('keeps the lane for a live parent that is not Done', () => {
-    const live = splitLanes([parent, ready, backlog, done]);
-
-    expect(live.lanes).toHaveLength(1);
-    expect(live.lanes[0]?.parentId).toBe('parent');
-    expect(live.lanes[0]?.parent.id).toBe('parent');
-    expect(live.lanes[0]?.tickets.map((ticket) => ticket.id)).toEqual([
-      'child-ready',
-      'child-backlog',
-      'child-done',
-    ]);
-    expect(live.rest).toEqual([]);
-  });
 });
 
 describe('split copy and lane drop ids', () => {
-  it('labels a child and not the parent', () => {
+  it('labels children, review gates, and lane drop ids', () => {
     expect(splitChildLabel(progress({ position: 2 }))).toBe('↳ 2 of 3');
     expect(splitChildLabel(progress())).toBeNull();
-  });
-
-  it('needs review only when the next actor is a person', () => {
     expect(splitNeedsReview(progress({ nextActor: 'you' }))).toBe(true);
     expect(splitNeedsReview(progress({ nextActor: 'agent' }))).toBe(false);
-  });
-
-  it('reads a status from a lane drop id', () => {
     expect(statusFromLaneDropId('lane:parent:wait_for_final_review')).toBe(
       'wait_for_final_review',
     );

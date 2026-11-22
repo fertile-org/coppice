@@ -43,44 +43,28 @@ describe('SidebarSearch', () => {
     });
   });
 
-  it('opens the command palette with the input focused', async () => {
-    renderSearch();
-
-    fireEvent.click(screen.getByRole('button', { name: /Search/ }));
-
-    const input = await screen.findByPlaceholderText('Search pages, tickets, and agents…');
-    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(input).toHaveFocus();
-    });
-  });
-
-  it('returns focus to the search button when the palette closes', async () => {
+  it('opens the palette with focus and returns it on Escape', async () => {
     renderSearch();
     const search = screen.getByRole('button', { name: /Search/ });
 
     fireEvent.click(search);
     const input = await screen.findByPlaceholderText('Search pages, tickets, and agents…');
-    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect(input).toHaveFocus());
 
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(search).toHaveFocus();
   });
 
   it('shows Ctrl+K on Linux and Windows', () => {
-    renderSearch();
-    expect(screen.getByRole('button', { name: /Search/ }).querySelector('kbd')).toHaveTextContent(
-      'Ctrl+K',
-    );
-
-    cleanup();
-    vi.mocked(detectPlatform).mockReturnValue('windows');
-    renderSearch();
-    expect(screen.getByRole('button', { name: /Search/ }).querySelector('kbd')).toHaveTextContent(
-      'Ctrl+K',
-    );
+    for (const platform of ['linux', 'windows'] as const) {
+      cleanup();
+      vi.mocked(detectPlatform).mockReturnValue(platform);
+      renderSearch();
+      expect(screen.getByRole('button', { name: /Search/ }).querySelector('kbd')).toHaveTextContent(
+        'Ctrl+K',
+      );
+    }
   });
 
   it('shows ⌘+K on macOS', () => {

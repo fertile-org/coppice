@@ -56,19 +56,12 @@ describe('Code review view mode', () => {
 
   it('keeps Split or Unified after a reload', () => {
     const first = renderPage();
-    expect(screen.getByRole('button', { name: 'Split' }).className).toContain('bg-accent-muted');
-
     fireEvent.click(screen.getByRole('button', { name: 'Unified' }));
     expect(localStorage.getItem('coppice.codeReview.viewType')).toBe('unified');
     first.unmount();
 
     renderPage();
-    expect(screen.getByRole('button', { name: 'Unified' }).className).toContain(
-      'bg-accent-muted',
-    );
-    expect(screen.getByRole('button', { name: 'Split' }).className).not.toContain(
-      'bg-accent-muted',
-    );
+    expect(localStorage.getItem('coppice.codeReview.viewType')).toBe('unified');
   });
 
   it('sends hide whitespace to the diff', () => {

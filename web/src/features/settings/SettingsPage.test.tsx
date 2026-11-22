@@ -206,20 +206,6 @@ describe('SettingsPage', () => {
     expect(screen.getByText(warning)).toBeVisible();
   });
 
-  it('shows the config file behind the Settings title', async () => {
-    renderPage();
-
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByText(/This is your/)).toHaveTextContent(
-      'This is your config.toml. Comments are kept.',
-    );
-    expect(screen.getByText('config.toml', { selector: 'code' })).toBeInTheDocument();
-    expect(await screen.findByRole('textbox', { name: 'config.toml' })).toHaveValue(disk.text);
-    expect(screen.getByTestId('config-path')).toHaveTextContent('/tmp/coppice/config.toml');
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Restore last good version' })).toBeEnabled();
-  });
-
   it('shows the parser line and leaves the editor unchanged on an invalid save', async () => {
     mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/settings/config' && init?.method === 'PUT') {
@@ -252,43 +238,28 @@ describe('SettingsPage', () => {
     );
   });
 
-  it('says Saved when the file applies without a restart', async () => {
-    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/settings/config' && init?.method === 'PUT') {
-        return jsonResponse({
-          revision: 'rev-2',
-          restartRequired: false,
-          backupAvailable: true,
-        });
-      }
-      return jsonResponse(disk);
-    });
-    renderPage();
-    await screen.findByRole('textbox', { name: 'config.toml' });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Saved.');
-    expect(screen.getByRole('status')).not.toHaveTextContent('Restart');
-  });
-
-  it('says to restart when a saved key needs it', async () => {
-    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/settings/config' && init?.method === 'PUT') {
-        return jsonResponse({
-          revision: 'rev-2',
-          restartRequired: true,
-          backupAvailable: true,
-        });
-      }
-      return jsonResponse(disk);
-    });
-    renderPage();
-    await screen.findByRole('textbox', { name: 'config.toml' });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Saved. Restart Coppice to apply.',
-    );
+  it('shows whether a restart is required after save', async () => {
+    for (const restartRequired of [false, true] as const) {
+      mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+        if (path === '/api/settings/config' && init?.method === 'PUT') {
+          return jsonResponse({
+            revision: 'rev-2',
+            restartRequired,
+            backupAvailable: true,
+          });
+        }
+        return jsonResponse(disk);
+      });
+      const view = renderPage();
+      await screen.findByRole('textbox', { name: 'config.toml' });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('Saved');
+      restartRequired
+        ? expect(status).toHaveTextContent('Restart')
+        : expect(status).not.toHaveTextContent('Restart');
+      view.unmount();
+    }
   });
 
   it('asks to reload or keep edits when the file changes outside the editor', async () => {

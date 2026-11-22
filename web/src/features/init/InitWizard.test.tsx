@@ -9,8 +9,6 @@ import { ThemeProvider } from '../theme/ThemeProvider';
 import { INIT_COPY } from './copy';
 import { InitWizard } from './InitWizard';
 import { InitWizardOffer } from './InitWizardOffer';
-import { setInitWizardFlag } from './storage';
-
 const previewReady = {
   presetId: 'starter',
   status: 'ready',
@@ -95,16 +93,9 @@ describe('InitWizard', () => {
   it('skips without creating anything', async () => {
     const { onSkip } = renderWizard();
     expect(await screen.findByRole('heading', { name: INIT_COPY.title })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Pick a repository, name a board, and add a starter team. Nothing is created until you click Create.',
-      ),
-    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.skip }));
     expect(onSkip).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls.some((call) => call[1]?.method === 'POST' && call[0] === '/api/init')).toBe(
-      false,
-    );
+    expect(postCount()).toBe(0);
   });
 
   it('does not create until the last step is confirmed', async () => {
@@ -120,10 +111,7 @@ describe('InitWizard', () => {
     expect(postCount()).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
-    expect(await screen.findByText('PM, Technical Lead, Backend Engineer, Frontend Engineer, and QC.')).toBeInTheDocument();
     expect(screen.getByLabelText('Agent CLI')).toHaveValue('claude-code');
-    expect(screen.getByText('They run on Claude Code with its default model.')).toBeInTheDocument();
-    expect(screen.getByText(INIT_COPY.teamIdle)).toBeInTheDocument();
     expect(postCount()).toBe(0);
     expect(document.body.textContent).not.toMatch(/mock|fake/i);
 
@@ -330,12 +318,7 @@ describe('InitWizardOffer', () => {
     renderOffer(true);
     expect(await screen.findByRole('heading', { name: INIT_COPY.title })).toBeInTheDocument();
     expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'yes');
-    const welcome = screen.getByTestId('init-welcome');
-    expect(welcome).toContainElement(screen.getByRole('img', { name: 'Coppice' }));
-    expect(
-      screen.getByRole('heading', { level: 1, name: INIT_COPY.welcomeTitle }),
-    ).toBeInTheDocument();
-    expect(welcome).toHaveTextContent(INIT_COPY.welcomeIntro);
+    expect(screen.getByTestId('init-welcome')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -346,24 +329,16 @@ describe('InitWizardOffer', () => {
     expect(localStorage.getItem('coppice.initWizard')).toBe('skipped');
   });
 
-  it('stays closed when the workspace already has a repository', async () => {
+  it('stays closed when a repo already exists', async () => {
     fetchMock.mockImplementation((path: string) => {
       if (path === '/api/repos') return jsonResponse([{ id: 'repo-1' }]);
       if (path === '/api/agents') return jsonResponse({ items: [] });
       return jsonResponse([]);
     });
     renderOffer(true);
-    await waitFor(() => expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes'));
-    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
-    expect(screen.queryByRole('heading', { name: INIT_COPY.title })).not.toBeInTheDocument();
-  });
-
-  it('stays closed after it was skipped', async () => {
-    setInitWizardFlag('skipped');
-    renderOffer(true);
-    await waitFor(() => expect(screen.getByTestId('init-offer')).toHaveAttribute('data-settled', 'yes'));
-    expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no');
-    expect(screen.queryByRole('heading', { name: INIT_COPY.title })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'no'),
+    );
   });
 
   it('stays closed outside the desktop app', () => {

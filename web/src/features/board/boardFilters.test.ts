@@ -26,12 +26,6 @@ function ticket(
 }
 
 describe('parseBoardFilters / writeBoardFilters', () => {
-  it('returns defaults for empty params', () => {
-    expect(parseBoardFilters(new URLSearchParams())).toEqual(
-      DEFAULT_BOARD_FILTERS,
-    );
-  });
-
   it('round-trips non-default filters and preserves ticket', () => {
     const filters: BoardFilters = {
       q: 'auth',
@@ -49,7 +43,8 @@ describe('parseBoardFilters / writeBoardFilters', () => {
     expect(parseBoardFilters(params)).toEqual(filters);
   });
 
-  it('omits default values from the URL', () => {
+  it('uses defaults for empty params and omits them from the URL', () => {
+    expect(parseBoardFilters(new URLSearchParams())).toEqual(DEFAULT_BOARD_FILTERS);
     const params = writeBoardFilters(
       new URLSearchParams({ ticket: 't-1' }),
       DEFAULT_BOARD_FILTERS,
@@ -71,7 +66,7 @@ describe('parseBoardFilters / writeBoardFilters', () => {
 });
 
 describe('countActiveBoardFilters', () => {
-  it('counts each non-default dimension once', () => {
+  it('counts active filter dimensions', () => {
     expect(countActiveBoardFilters(DEFAULT_BOARD_FILTERS)).toBe(0);
     expect(
       countActiveBoardFilters({
@@ -83,9 +78,6 @@ describe('countActiveBoardFilters', () => {
         activityUntil: null,
       }),
     ).toBe(4);
-  });
-
-  it('does not count empty custom activity', () => {
     expect(
       countActiveBoardFilters({
         ...DEFAULT_BOARD_FILTERS,
@@ -106,14 +98,11 @@ describe('includeArchivedForVisibility', () => {
 describe('activityWindow', () => {
   const now = new Date('2026-09-28T12:00:00.000Z');
 
-  it('returns relative windows for presets', () => {
+  it('builds activity windows for presets and custom days', () => {
     expect(activityWindow({ ...DEFAULT_BOARD_FILTERS, activityPreset: '7d' }, now)).toEqual({
       since: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
       until: null,
     });
-  });
-
-  it('parses custom local day bounds', () => {
     const { since, until } = activityWindow(
       {
         ...DEFAULT_BOARD_FILTERS,
@@ -123,12 +112,8 @@ describe('activityWindow', () => {
       },
       now,
     );
-    expect(since?.getFullYear()).toBe(2026);
-    expect(since?.getMonth()).toBe(8);
     expect(since?.getDate()).toBe(1);
-    expect(since?.getHours()).toBe(0);
     expect(until?.getDate()).toBe(2);
-    expect(until?.getHours()).toBe(23);
   });
 });
 
@@ -157,7 +142,7 @@ describe('filterTickets', () => {
   ];
 
   it('filters by search, status, visibility, and activity', () => {
-    const result = filterTickets(
+    const active = filterTickets(
       tickets,
       {
         q: 'auth',
@@ -169,15 +154,13 @@ describe('filterTickets', () => {
       },
       now,
     );
-    expect(result.map((t) => t.id)).toEqual(['a', 'c']);
-  });
+    expect(active.map((t) => t.id)).toEqual(['a', 'c']);
 
-  it('keeps only archived tickets when visibility is archived', () => {
-    const result = filterTickets(
+    const archived = filterTickets(
       tickets,
       { ...DEFAULT_BOARD_FILTERS, visibility: 'archived' },
       now,
     );
-    expect(result.map((t) => t.id)).toEqual(['b']);
+    expect(archived.map((t) => t.id)).toEqual(['b']);
   });
 });

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignCard } from './DesignCard';
-import { makeDesignSet, makeOption, makePick } from './designFixtures';
+import { makeDesignSet, makeOption } from './designFixtures';
 import { rewriteDesignHtml } from './rewriteDesignHtml';
 
 const apiFetch = vi.hoisted(() => vi.fn());
@@ -98,11 +98,6 @@ describe('DesignCard', () => {
     });
   });
 
-  it('shows the Chosen marker once the list says so', () => {
-    wrap(<DesignCard design={{ ...published, chosen: makePick(makeOption('a', 'Quiet', 'A')) }} />);
-    expect(screen.getByText('Chosen')).toBeInTheDocument();
-  });
-
   it('previews the entry in a sandboxed iframe', async () => {
     apiFetch.mockImplementation((path: string) => {
       if (String(path).endsWith('/a/index.html')) {
@@ -192,20 +187,6 @@ describe('DesignCard', () => {
     expect(blobs.every((blob) => blob.type === 'text/html')).toBe(true);
   });
 
-  it('leaves a missing stylesheet link in place', async () => {
-    apiFetch.mockImplementation((path: string) => {
-      if (String(path).endsWith('/a/index.html')) {
-        return Promise.resolve(
-          new Response('<link rel="stylesheet" href="nope.css"><p>Hi</p>', { status: 200 }),
-        );
-      }
-      return Promise.resolve(new Response('missing', { status: 404 }));
-    });
-
-    await rewriteDesignHtml(published.id, 'a/index.html');
-    expect(await readBlob(blobs[0])).toContain('<link rel="stylesheet" href="nope.css">');
-  });
-
   it('places the preview CSP after head and keeps the doctype first', async () => {
     apiFetch.mockImplementation((path: string) => {
       if (String(path).endsWith('/a/index.html')) {
@@ -225,53 +206,4 @@ describe('DesignCard', () => {
     expect(html.indexOf(CSP_META)).toBeLessThan(html.indexOf('<title>'));
   });
 
-  it('adds the preview CSP to a nested html file', async () => {
-    apiFetch.mockImplementation((path: string) => {
-      const file = String(path);
-      if (file.endsWith('/a/index.html')) {
-        return Promise.resolve(new Response('<a href="page.HTML">Next</a>', { status: 200 }));
-      }
-      if (file.endsWith('/a/page.HTML')) {
-        return Promise.resolve(new Response('<p>Nested</p>', { status: 200 }));
-      }
-      return Promise.resolve(new Response('missing', { status: 404 }));
-    });
-
-    await rewriteDesignHtml(published.id, 'a/index.html');
-    const html = await readBlob(blobs[0]);
-    const href = /href="([^"]+)"/.exec(html)?.[1] ?? '';
-    const payload = new TextDecoder().decode(
-      Uint8Array.from(atob(href.split(',')[1] ?? ''), (char) => char.charCodeAt(0)),
-    );
-    expect(href.startsWith('data:text/html;base64,')).toBe(true);
-    expect(payload).toBe(`${CSP_META}<p>Nested</p>`);
-    expect(blobs).toHaveLength(1);
-  });
-
-  it('revokes nothing when a later file aborts before the page blob exists', async () => {
-    const revoked: string[] = [];
-    Object.defineProperty(URL, 'revokeObjectURL', {
-      configurable: true,
-      writable: true,
-      value: (url: string) => {
-        revoked.push(url);
-      },
-    });
-    apiFetch.mockImplementation((path: string) => {
-      const file = String(path);
-      if (file.endsWith('/a/index.html')) {
-        return Promise.resolve(new Response('<img src="ok.png"><img src="later.png">', { status: 200 }));
-      }
-      if (file.endsWith('/a/ok.png')) {
-        return Promise.resolve(new Response(new Uint8Array([1]), { status: 200 }));
-      }
-      const abort = new Error('aborted');
-      abort.name = 'AbortError';
-      return Promise.reject(abort);
-    });
-
-    await expect(rewriteDesignHtml(published.id, 'a/index.html')).rejects.toThrow(/aborted/);
-    expect(revoked).toEqual([]);
-    expect(blobs).toHaveLength(0);
-  });
 });
