@@ -20,6 +20,9 @@ type CheckState =
   | { kind: 'checking' }
   | { kind: 'up-to-date' }
   | { kind: 'available'; version: string }
+  | { kind: 'downloading'; version: string }
+  | { kind: 'ready'; version: string }
+  | { kind: 'failed'; reason: string }
   | { kind: 'error' };
 
 function checkText(state: CheckState): string | null {
@@ -30,6 +33,12 @@ function checkText(state: CheckState): string | null {
       return "You're up to date.";
     case 'available':
       return `Coppice ${state.version} is available.`;
+    case 'downloading':
+      return `Downloading Coppice ${state.version}…`;
+    case 'ready':
+      return `Coppice ${state.version} is ready to install.`;
+    case 'failed':
+      return state.reason;
     case 'error':
       return "Couldn't check for updates. Try again later.";
     default:
@@ -45,18 +54,21 @@ function UpdateGuidePanel({
   runBlocked,
   onRestart,
   onDownload,
+  onMove,
 }: {
   info: DesktopUpdateInfo;
   platform: string;
   runBlocked: boolean;
   onRestart: () => void;
   onDownload: (url: string) => void;
+  onMove: () => void;
 }) {
   const linuxAvailable = info.kind === 'linux';
   const linuxReady = info.kind === 'ready' && platform === 'linux';
   const macReady = info.kind === 'ready' && platform === 'darwin';
   const macDownload = info.kind === 'download';
-  if (!linuxAvailable && !linuxReady && !macReady && !macDownload) {
+  const macMove = info.kind === 'move';
+  if (!linuxAvailable && !linuxReady && !macReady && !macDownload && !macMove) {
     return null;
   }
 
@@ -92,6 +104,17 @@ function UpdateGuidePanel({
         <Button type="button" className="mt-3" onClick={() => onDownload(info.url)}>
           Download update
         </Button>
+      ) : null}
+      {macMove ? (
+        <>
+          <p className="mt-1 font-body text-sm text-text-secondary">
+            In-place updates need Coppice in the Applications folder. Running from a DMG or
+            another folder blocks them.
+          </p>
+          <Button type="button" className="mt-3" onClick={onMove}>
+            Move to Applications
+          </Button>
+        </>
       ) : null}
       {runBlocked ? (
         <p className="mt-3 font-body text-sm text-text-secondary">{RUN_BLOCKED_TEXT}</p>
@@ -148,11 +171,20 @@ export function DesktopUpdatesSection() {
       setCheck((current) => {
         if (current.kind === 'checking') return current;
         if (info == null) {
-          if (prev != null && current.kind === 'available') return { kind: 'idle' };
+          if (
+            prev != null &&
+            (current.kind === 'available' ||
+              current.kind === 'downloading' ||
+              current.kind === 'failed')
+          ) {
+            return { kind: 'idle' };
+          }
           return current;
         }
         if (info.kind === 'ready') {
-          return current.kind === 'available' ? { kind: 'idle' } : current;
+          return current.kind === 'available' || current.kind === 'downloading'
+            ? { kind: 'idle' }
+            : current;
         }
         return { kind: 'available', version: info.version };
       });
@@ -193,14 +225,30 @@ export function DesktopUpdatesSection() {
     try {
       const result: DesktopUpdateCheck = (await desktop?.checkForUpdates?.()) ?? { status: 'error' };
       setCheck(() => {
-        if (lastInfoRef.current?.kind === 'ready') return { kind: 'idle' };
+        if (lastInfoRef.current?.kind === 'ready' && result.status !== 'ready') {
+          return { kind: 'idle' };
+        }
         if (result.status === 'available') return { kind: 'available', version: result.version };
+        if (result.status === 'downloading') return { kind: 'downloading', version: result.version };
+        if (result.status === 'ready') return { kind: 'ready', version: result.version };
+        if (result.status === 'failed') return { kind: 'failed', reason: result.reason };
         if (result.status === 'up-to-date') return { kind: 'up-to-date' };
         return { kind: 'error' };
       });
     } catch {
       setCheck(() => (lastInfoRef.current?.kind === 'ready' ? { kind: 'idle' } : { kind: 'error' }));
     }
+  }
+
+  function moveToApplications() {
+    void runIsActive().then((active) => {
+      if (active) {
+        setRunBlocked(true);
+        return;
+      }
+      setRunBlocked(false);
+      void desktop?.moveToApplications?.();
+    });
   }
 
   function restart() {
@@ -256,6 +304,7 @@ export function DesktopUpdatesSection() {
           runBlocked={runBlocked}
           onRestart={restart}
           onDownload={download}
+          onMove={moveToApplications}
         />
       ) : null}
     </section>

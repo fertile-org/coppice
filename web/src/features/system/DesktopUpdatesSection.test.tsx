@@ -142,7 +142,21 @@ describe('DesktopUpdatesSection', () => {
     expect(await screen.findByText('Coppice 1.4.0-rc.2 is available.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
-    pending[2]({ status: 'error' });
+    pending[2]({ status: 'downloading', version: '1.4.0-rc.3' });
+    expect(await screen.findByText('Downloading Coppice 1.4.0-rc.3…')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    pending[3]({ status: 'ready', version: '1.4.0-rc.3' });
+    expect(await screen.findByText('Coppice 1.4.0-rc.3 is ready to install.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    pending[4]({ status: 'failed', reason: 'Move Coppice to the Applications folder to update in place.' });
+    expect(
+      await screen.findByText('Move Coppice to the Applications folder to update in place.'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    pending[5]({ status: 'error' });
     expect(await screen.findByText("Couldn't check for updates. Try again later.")).toBeInTheDocument();
   });
 

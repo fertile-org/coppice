@@ -94,6 +94,16 @@ describe('DesktopUpdateBanner', () => {
     await vi.waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
   });
 
+  it('offers Move to Applications when the install cannot update in place', async () => {
+    stubBridge({ kind: 'move', version: '9.0.0' });
+    window.coppiceDesktop!.moveToApplications = vi.fn(async () => ({ moved: true }));
+    render(<DesktopUpdateBanner />);
+    const banner = await screen.findByRole('status');
+    expect(banner).toHaveTextContent('Move Coppice to Applications to update.');
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Applications' }));
+    await vi.waitFor(() => expect(window.coppiceDesktop?.moveToApplications).toHaveBeenCalled());
+  });
+
   it('hides the banner while a run is active', async () => {
     stubBridge({ kind: 'linux', version: '9.0.0' });
     vi.stubGlobal(

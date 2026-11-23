@@ -9,7 +9,8 @@ export type DesktopAppInfo = {
 export type DesktopUpdateInfo =
   | { kind: 'linux'; version: string }
   | { kind: 'download'; version: string; url: string }
-  | { kind: 'ready'; version: string };
+  | { kind: 'ready'; version: string }
+  | { kind: 'move'; version: string };
 
 export type DesktopUpdateSettings = {
   automaticUpdates: boolean;
@@ -18,6 +19,9 @@ export type DesktopUpdateSettings = {
 export type DesktopUpdateCheck =
   | { status: 'up-to-date' }
   | { status: 'available'; version: string }
+  | { status: 'downloading'; version: string }
+  | { status: 'ready'; version: string }
+  | { status: 'failed'; reason: string }
   | { status: 'error' };
 
 export type CoppiceDesktopBridge = {
@@ -29,6 +33,7 @@ export type CoppiceDesktopBridge = {
   setUpdateSettings?: (settings: DesktopUpdateSettings) => Promise<DesktopUpdateSettings>;
   checkForUpdates?: () => Promise<DesktopUpdateCheck>;
   restartToUpdate?: () => Promise<void>;
+  moveToApplications?: () => Promise<{ moved: boolean }>;
   /** `process.platform` from the Electron shell (`darwin`, `linux`, …). */
   platform?: string;
   showItemInFolder?: (filePath: string) => Promise<void>;
