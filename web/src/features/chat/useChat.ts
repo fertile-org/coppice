@@ -47,6 +47,8 @@ export interface AcceptChatProposalInput {
   boardId?: string;
   knowledgeType?: KnowledgeType;
   scope?: KnowledgeScope;
+  /** When set, only these proposal child ids are created. */
+  selectedChildIds?: string[];
 }
 
 async function fetchSessions(boardId?: string | null): Promise<ChatSession[]> {
@@ -139,6 +141,7 @@ async function acceptProposal(
         boardId: input.boardId,
         knowledgeType: input.knowledgeType,
         scope: input.scope,
+        selectedChildIds: input.selectedChildIds,
       }),
     },
   );

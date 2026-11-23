@@ -222,9 +222,46 @@ impl CoreTool {
 
 /// Shape of the run result. Deliberately permissive: the server-side
 /// deserializer and profile rules are the real validator, and report errors.
+fn chat_actions_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "Agent chat only (chat turns). Ticket or knowledge drafts for the human to confirm with Create or Reject. Nothing is created until they click. Max 5.",
+        "items": {
+            "type": "object",
+            "properties": {
+                "type": { "type": "string", "enum": ["create_ticket", "create_knowledge"] },
+                "title": { "type": "string" },
+                "description": { "type": "string", "description": "create_ticket body (markdown)." },
+                "content": { "type": "string", "description": "create_knowledge body (markdown)." },
+                "knowledgeType": { "type": "string", "enum": KNOWLEDGE_TYPES },
+                "scope": { "type": "string", "enum": KNOWLEDGE_SCOPES },
+                "boardId": { "type": "string" },
+                "repoId": { "type": "string" },
+                "children": {
+                    "type": "array",
+                    "description": "create_ticket only. Nested Backlog children (title + description each). Max 8. Created with the parent when the human clicks Create.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string" },
+                            "description": { "type": "string" },
+                        },
+                        "required": ["title"],
+                    },
+                },
+                "designSetId": {
+                    "type": "string",
+                    "description": "create_ticket only. Published design set from this chat to copy onto the parent ticket.",
+                },
+            },
+            "required": ["type", "title"],
+        },
+    })
+}
+
 fn result_submit_properties() -> Value {
     let strings = |description: &str| json!({ "type": "array", "items": { "type": "string" }, "description": description });
-    json!({
+    let mut props = json!({
         "status": {
             "type": "string",
             "enum": ["done", "blocked", "continued"],
@@ -327,25 +364,12 @@ fn result_submit_properties() -> Value {
             "description": "plan_plugin_build only. Structured Advanced data (pluginName, version, description, files, skills, servers, settings, permissions, manifestPreview).",
             "additionalProperties": true,
         },
-        "actions": {
-            "type": "array",
-            "description": "Agent chat only (chat turns). Ticket or knowledge drafts for the human to confirm with Create or Reject. Nothing is created until they click. Max 5.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": { "type": "string", "enum": ["create_ticket", "create_knowledge"] },
-                    "title": { "type": "string" },
-                    "description": { "type": "string", "description": "create_ticket body (markdown)." },
-                    "content": { "type": "string", "description": "create_knowledge body (markdown)." },
-                    "knowledgeType": { "type": "string", "enum": KNOWLEDGE_TYPES },
-                    "scope": { "type": "string", "enum": KNOWLEDGE_SCOPES },
-                    "boardId": { "type": "string" },
-                    "repoId": { "type": "string" },
-                },
-                "required": ["type", "title"],
-            },
-        },
-    })
+    });
+    props
+        .as_object_mut()
+        .expect("result props object")
+        .insert("actions".into(), chat_actions_schema());
+    props
 }
 
 fn ticket_id_prop() -> Value {

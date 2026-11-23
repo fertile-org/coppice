@@ -197,4 +197,31 @@ describe('chat schemas', () => {
     expect(parseChatProposals({ action: 'create_ticket' })).toEqual([]);
     expect(parseChatProposals(null)).toEqual([]);
   });
+
+  it('parses ticket proposals with children and designSetId', () => {
+    const proposals = parseChatProposals({
+      proposals: [
+        {
+          id: '00000000-0000-4000-8000-000000000052',
+          type: 'create_ticket',
+          status: 'pending',
+          title: 'Parent',
+          designSetId: '00000000-0000-4000-8000-000000000060',
+          children: [
+            {
+              id: '00000000-0000-4000-8000-000000000061',
+              title: 'Child A',
+              description: 'API',
+            },
+            {
+              id: '00000000-0000-4000-8000-000000000062',
+              title: 'Child B',
+            },
+          ],
+        },
+      ],
+    });
+    expect(proposals[0]?.children).toHaveLength(2);
+    expect(proposals[0]?.designSetId).toBe('00000000-0000-4000-8000-000000000060');
+  });
 });

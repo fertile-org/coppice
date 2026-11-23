@@ -137,16 +137,23 @@ function ChatProposalCard({
   const accept = useAcceptChatProposal(context.sessionId);
   const reject = useRejectChatProposal(context.sessionId);
   const isTicket = proposal.type === 'create_ticket';
+  const children = proposal.children ?? [];
   const needsBoard = isTicket || (proposal.scope ?? 'board') !== 'workspace';
   const defaultBoardId = proposal.boardId ?? context.boardId ?? '';
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(proposal.title);
   const [body, setBody] = useState(proposal.description ?? proposal.content ?? '');
   const [boardId, setBoardId] = useState(defaultBoardId);
+  const [selectedChildIds, setSelectedChildIds] = useState<string[]>(() =>
+    children.map((child) => child.id),
+  );
   const [error, setError] = useState<string | null>(null);
   const busy = accept.isPending || reject.isPending;
+  const selectedCount = selectedChildIds.length;
+  const createCount = isTicket ? 1 + selectedCount : 1;
 
   if (proposal.status === 'created') {
+    const childTicketIds = proposal.childTicketIds ?? [];
     return (
       <section
         className="mt-2 rounded-lg border border-moss-200 bg-paper-50 px-3 py-2 font-body text-xs text-text-secondary"
@@ -155,14 +162,27 @@ function ChatProposalCard({
       >
         <p className="font-medium text-text-primary">{proposal.title}</p>
         {isTicket && proposal.ticketId ? (
-          <button
-            type="button"
-            className="mt-1 inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 text-accent hover:bg-accent/15"
-            data-testid="chat-proposal-open-ticket"
-            onClick={() => void openTicket(proposal.ticketId!)}
-          >
-            Created ticket · Open
-          </button>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <button
+              type="button"
+              className="inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 text-accent hover:bg-accent/15"
+              data-testid="chat-proposal-open-ticket"
+              onClick={() => void openTicket(proposal.ticketId!)}
+            >
+              Created ticket · Open
+            </button>
+            {childTicketIds.map((id, index) => (
+              <button
+                key={id}
+                type="button"
+                className="inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 text-accent hover:bg-accent/15"
+                data-testid={`chat-proposal-open-child-${index}`}
+                onClick={() => void openTicket(id)}
+              >
+                Child {index + 1} · Open
+              </button>
+            ))}
+          </div>
         ) : (
           <Link
             to="/knowledge"
@@ -192,6 +212,16 @@ function ChatProposalCard({
   const interactive = !context.readOnly;
   const showBoardPicker = needsBoard && !proposal.boardId && !context.boardId;
 
+  function toggleChild(childId: string, checked: boolean) {
+    setSelectedChildIds((current) =>
+      checked
+        ? current.includes(childId)
+          ? current
+          : [...current, childId]
+        : current.filter((id) => id !== childId),
+    );
+  }
+
   async function handleAccept(event?: FormEvent) {
     event?.preventDefault();
     if (needsBoard && !boardId) {
@@ -206,6 +236,7 @@ function ChatProposalCard({
         title: title.trim() || undefined,
         description: body.trim() || undefined,
         boardId: boardId || undefined,
+        selectedChildIds: children.length > 0 ? selectedChildIds : undefined,
       });
     } catch (err) {
       setError(
@@ -226,6 +257,12 @@ function ChatProposalCard({
     }
   }
 
+  const createLabel = !isTicket
+    ? 'Save knowledge'
+    : createCount === 1
+      ? 'Create ticket'
+      : `Create ${createCount} tickets`;
+
   return (
     <form
       className="mt-2 space-y-2 rounded-lg border border-accent/40 bg-paper-50 px-3 py-2 font-body text-xs"
@@ -234,7 +271,11 @@ function ChatProposalCard({
       onSubmit={(event) => void handleAccept(event)}
     >
       <p className="font-medium text-text-primary">
-        {isTicket ? 'Proposed ticket' : 'Proposed knowledge'}
+        {isTicket
+          ? children.length > 0
+            ? 'Proposed ticket · with child tickets'
+            : 'Proposed ticket'
+          : 'Proposed knowledge'}
       </p>
       {editing ? (
         <div className="space-y-2">
@@ -268,6 +309,50 @@ function ChatProposalCard({
           ) : null}
         </div>
       )}
+      {proposal.designSetId ? (
+        <span className="inline-block rounded-full bg-paper-100 px-2 py-0.5 text-[11px] text-text-secondary">
+          Design attached
+        </span>
+      ) : null}
+      {children.length > 0 ? (
+        <div
+          className="space-y-1 border-t border-border pt-2"
+          data-testid="chat-proposal-children"
+        >
+          <p className="font-medium text-text-secondary">
+            Child tickets ({selectedCount} of {children.length})
+          </p>
+          {children.map((child) => {
+            const checked = selectedChildIds.includes(child.id);
+            return (
+              <label
+                key={child.id}
+                className={cn(
+                  'flex gap-2 py-1',
+                  !checked && 'text-text-secondary line-through opacity-70',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={checked}
+                  disabled={busy || !interactive}
+                  aria-label={child.title}
+                  onChange={(event) => toggleChild(child.id, event.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-text-primary">{child.title}</span>
+                  {child.description?.trim() ? (
+                    <span className="mt-0.5 block text-text-secondary">
+                      {child.description}
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
       {interactive && showBoardPicker ? (
         <div className="space-y-1">
           <Label htmlFor={`proposal-board-${proposal.id}`}>Board</Label>
@@ -308,11 +393,7 @@ function ChatProposalCard({
             Reject
           </Button>
           <Button type="submit" size="sm" disabled={busy || (needsBoard && !boardId)}>
-            {accept.isPending
-              ? 'Saving…'
-              : isTicket
-                ? 'Create ticket'
-                : 'Save knowledge'}
+            {accept.isPending ? 'Saving…' : createLabel}
           </Button>
         </div>
       ) : null}

@@ -141,6 +141,11 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              `{\"type\":\"create_knowledge\",\"title\":...,\"content\":...,\"knowledgeType\":...,\"scope\":...}`. \
              `scope` is `workspace`, `board` or `agent`; `knowledgeType` must be one of the values in the \
              `result_submit` schema (default `coding_convention`). \
+             For multi-part work, use one `create_ticket` with nested `children` (each `title` + `description`, \
+             max 8) so the board gets a parent swimlane — do not emit separate flat tickets for the same epic. \
+             When UI or technical choices matter, load `design:design-ui-options` or \
+             `design:design-technical-options`, publish options, and set `designSetId` on that `create_ticket` \
+             to the published set so the pick carries onto the parent. \
              Use at most 5 actions per reply and only when asked. The human confirms each one in the chat \
              with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n",
         );
