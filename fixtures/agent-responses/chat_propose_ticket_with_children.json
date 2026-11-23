@@ -1,0 +1,28 @@
+{
+  "status": "done",
+  "summary": "Draft ticket with child tickets ready for you to confirm: Saved filters on the board.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "actions": [
+    {
+      "type": "create_ticket",
+      "title": "Saved filters on the board",
+      "description": "Let people save a filter set and switch between saved filters from the board header.",
+      "children": [
+        {
+          "title": "API: store saved filters per user",
+          "description": "Table, CRUD endpoints, tests."
+        },
+        {
+          "title": "Board header filter dropdown",
+          "description": "Follows the chosen design."
+        },
+        {
+          "title": "E2E: save and switch filters",
+          "description": "Playwright smoke."
+        }
+      ]
+    }
+  ]
+}
