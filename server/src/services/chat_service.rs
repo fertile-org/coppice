@@ -23,7 +23,7 @@ use crate::storage::attachment_store::sanitize_filename;
 use coppice_config::KnowledgeConfig;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
 pub const CHAT_MESSAGE_PREVIEW_MAX_LEN: usize = 120;
@@ -1214,6 +1214,8 @@ impl<'a> ChatService<'a> {
             .clone();
         ensure_proposal_pending(&proposal)?;
 
+        // Removes a copied design folder if accept fails after the FS write.
+        let mut staged_design = StagedDesignDir::empty();
         let str_field = |key: &str| proposal.get(key).and_then(serde_json::Value::as_str);
         let uuid_field = |key: &str| str_field(key).and_then(|s| Id::parse_str(s).ok());
         let override_or = |value: Option<&str>, key: &str| {
@@ -1233,11 +1235,9 @@ impl<'a> ChatService<'a> {
                     BoardService::new(self.pool).get_board(board_id).await?;
                     let title = override_or(input.title, "title")
                         .filter(|s| !s.trim().is_empty())
-                        .unwrap_or_else(|| {
-                            // title required on proposal; fallback keeps accept resilient
-                            "From agent chat".into()
-                        });
-                    let description = override_or(input.description, "description").unwrap_or_default();
+                        .unwrap_or_else(|| "From agent chat".into());
+                    let description =
+                        override_or(input.description, "description").unwrap_or_default();
                     let repo_id = uuid_field("repoId").or(session.repo_id);
                     let tickets = self
                         .create_ticket_proposal_in_tx(
@@ -1254,6 +1254,9 @@ impl<'a> ChatService<'a> {
                             input.artifacts_dir,
                         )
                         .await?;
+                    if let Some(dir) = tickets.copied_design_dir {
+                        staged_design.stage(dir);
+                    }
                     let parent_id = tickets.parent.id;
                     let child_ids: Vec<Id> = tickets.children.iter().map(|t| t.id).collect();
                     let note = if child_ids.is_empty() {
@@ -1307,7 +1310,6 @@ impl<'a> ChatService<'a> {
                     let content = override_or(input.description, "content");
                     let knowledge_type = override_or(input.knowledge_type, "knowledgeType");
                     let scope = override_or(input.scope, "scope");
-                    // Knowledge create still uses the pool; keep message lock until we mark created.
                     let created = self
                         .create_knowledge_from_chat(
                             session_id,
@@ -1347,6 +1349,7 @@ impl<'a> ChatService<'a> {
         }
         let message = update_message_metadata(&mut tx, message_id, &metadata).await?;
         tx.commit().await?;
+        staged_design.persist();
 
         let ticket = match parent_id {
             Some(id) => Some(TicketService::new(self.pool).get(id).await?),
@@ -1381,6 +1384,30 @@ impl<'a> ChatService<'a> {
         selected_child_ids: Option<&[Id]>,
         artifacts_dir: &Path,
     ) -> Result<CreatedTicketProposal, ChatError> {
+        let proposal_children = proposal
+            .get("children")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let known_child_ids: HashSet<Id> = proposal_children
+            .iter()
+            .filter_map(|child| {
+                child
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Id::parse_str(s).ok())
+            })
+            .collect();
+        if let Some(ids) = selected_child_ids {
+            for id in ids {
+                if !known_child_ids.contains(id) {
+                    return Err(ChatError::Validation(format!(
+                        "selectedChildIds contains unknown child id {id}"
+                    )));
+                }
+            }
+        }
+
         let tickets = TicketService::new(self.pool);
         let parent = tickets
             .create_with_source_in_tx(
@@ -1396,11 +1423,6 @@ impl<'a> ChatService<'a> {
             )
             .await?;
 
-        let proposal_children = proposal
-            .get("children")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
         let selected: Option<HashSet<Id>> =
             selected_child_ids.map(|ids| ids.iter().copied().collect());
         let mut children = Vec::new();
@@ -1435,17 +1457,23 @@ impl<'a> ChatService<'a> {
             children.push(created);
         }
 
+        let mut copied_design_dir = None;
         if let Some(set_id) = proposal
             .get("designSetId")
             .and_then(|v| v.as_str())
             .and_then(|s| Id::parse_str(s).ok())
         {
-            DesignService::new(self.pool, artifacts_dir)
+            let copied = DesignService::new(self.pool, artifacts_dir)
                 .copy_chat_set_to_ticket(tx, set_id, session_id, parent.id)
                 .await?;
+            copied_design_dir = Some(copied.dir);
         }
 
-        Ok(CreatedTicketProposal { parent, children })
+        Ok(CreatedTicketProposal {
+            parent,
+            children,
+            copied_design_dir,
+        })
     }
 
     /// Reject a pending proposal. Creates nothing.
@@ -1472,6 +1500,35 @@ impl<'a> ChatService<'a> {
 struct CreatedTicketProposal {
     parent: crate::domain::ticket::Ticket,
     children: Vec<crate::domain::ticket::Ticket>,
+    /// Absolute design folder created on disk; cleaned up if accept rolls back.
+    copied_design_dir: Option<PathBuf>,
+}
+
+/// Holds a design copy folder until commit. Drop removes it on failure.
+struct StagedDesignDir {
+    dir: Option<PathBuf>,
+}
+
+impl StagedDesignDir {
+    fn empty() -> Self {
+        Self { dir: None }
+    }
+
+    fn stage(&mut self, dir: PathBuf) {
+        self.dir = Some(dir);
+    }
+
+    fn persist(&mut self) {
+        self.dir = None;
+    }
+}
+
+impl Drop for StagedDesignDir {
+    fn drop(&mut self) {
+        if let Some(dir) = self.dir.take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 /// Lock one agent message's proposal metadata for the rest of `tx`.

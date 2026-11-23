@@ -2660,3 +2660,173 @@ async fn accept_ticket_proposal_copies_chat_design_and_rolls_back_on_bad_design(
     );
     assert_eq!(ticket_count(pool, &board_id).await, before);
 }
+
+/// FS write succeeds, then the DB insert fails (bad ticket FK) — the new
+/// `designs/{id}/` folder must be removed (no orphan).
+#[tokio::test]
+async fn copy_chat_design_removes_dir_when_insert_fails_after_fs_copy() {
+    use coppice_server::services::design_service::{
+        CreateScope, DesignKind, DesignOption, DesignService,
+    };
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+    let session_uuid = Id::parse_str(&session_id).unwrap();
+    let agent_uuid = Id::parse_str(&agent_id).unwrap();
+
+    let run_id = Id::new();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, chat_session_id, agent_id, job_type, status,
+            sandbox_profile_id, context_profile
+        )
+        VALUES ($1, NULL, $2, $3, 'chat_turn', 'succeeded', 'permissive-default', 'conversation')
+        "#,
+    )
+    .bind(run_id)
+    .bind(session_uuid)
+    .bind(agent_uuid)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let artifacts = PathBuf::from(&state.config.storage.artifacts_dir);
+    let designs_root = artifacts.join("designs");
+    let list_design_dirs = || -> HashSet<String> {
+        std::fs::read_dir(&designs_root)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let svc = DesignService::new(pool, &artifacts);
+    let created = svc
+        .create(
+            "Chat UI",
+            DesignKind::Ui,
+            CreateScope {
+                ticket_id: None,
+                chat_session_id: Some(session_uuid),
+                run_id,
+                agent_id: agent_uuid,
+            },
+        )
+        .await
+        .expect("create design");
+    svc.write(
+        created.id,
+        run_id,
+        "a/index.html",
+        b"<!doctype html><title>A</title>",
+    )
+    .await
+    .unwrap();
+    svc.write(
+        created.id,
+        run_id,
+        "b/index.html",
+        b"<!doctype html><title>B</title>",
+    )
+    .await
+    .unwrap();
+    svc.publish(
+        created.id,
+        run_id,
+        vec![
+            DesignOption {
+                id: "a".into(),
+                title: "Option A".into(),
+                entry: "a/index.html".into(),
+                ..Default::default()
+            },
+            DesignOption {
+                id: "b".into(),
+                title: "Option B".into(),
+                entry: "b/index.html".into(),
+                ..Default::default()
+            },
+        ],
+        "a",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let before_dirs = list_design_dirs();
+    let mut tx = pool.begin().await.unwrap();
+    let err = svc
+        .copy_chat_set_to_ticket(&mut tx, created.id, session_uuid, Id::new())
+        .await;
+    assert!(
+        err.is_err(),
+        "bogus ticket_id must fail the design_sets insert"
+    );
+    drop(tx);
+    assert_eq!(
+        list_design_dirs(),
+        before_dirs,
+        "failed copy must not leave an orphan under designs/"
+    );
+}
+
+#[tokio::test]
+async fn accept_ticket_proposal_rejects_unknown_selected_child_ids() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, Some(&board_id)).await;
+    let child_id = Id::new();
+    let (message_id, proposal_id) = seed_agent_proposal(
+        pool,
+        &session_id,
+        serde_json::json!({
+            "type": "create_ticket",
+            "title": "Parent",
+            "status": "pending",
+            "children": [
+                { "id": child_id.to_string(), "title": "Keep", "description": "" },
+            ],
+        }),
+    )
+    .await;
+    let before = ticket_count(pool, &board_id).await;
+    let unknown = Id::new();
+
+    let rejected = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &proposal_url(&session_id, &message_id, &proposal_id, "accept"),
+            &format!(r#"{{"selectedChildIds":["{unknown}"]}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(ticket_count(pool, &board_id).await, before);
+}
