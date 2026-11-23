@@ -7,6 +7,13 @@
 //! a [`UsageTracker`], compares the result, and checks the rules every reader
 //! follows (see [`invariant_errors`]).
 //!
+//! Claude Code, Cursor, Codex and OpenCode CLI captures are fed as the raw
+//! JSON lines the shared runners observe. OpenCode ACP fixtures are full
+//! JSON-RPC stdout; the harness unwraps them the way [`AcpConsole`] does
+//! (`session/update` → `params.update`; a result that carries `usage` → that
+//! result object; handshake and unrelated lines are skipped) so the reader
+//! sees the same shapes production does.
+//!
 //! To write or refresh the expected files after a deliberate reader change:
 //! `UPDATE_USAGE_FIXTURES=1 cargo test -p coppice-server --lib usage::harness`,
 //! then review the diff. A missing `process` is written as a fresh process.
@@ -28,6 +35,8 @@ const CAPTURE_DIRS: &[(&str, UsageFormat)] = &[
     ("claude-code", UsageFormat::ClaudeStreamJson),
     ("cursor", UsageFormat::CursorStreamJson),
     ("codex", UsageFormat::CodexJson),
+    ("opencode-cli", UsageFormat::OpenCodeCliJson),
+    ("opencode-acp", UsageFormat::OpenCodeAcp),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -73,6 +82,26 @@ struct Replayed {
     context: Vec<ContextWindowUsage>,
 }
 
+/// Events a reader should see for one capture line. Most formats pass the
+/// line through; OpenCode ACP unwraps JSON-RPC the way `AcpConsole` does.
+fn harness_events(format: UsageFormat, line: &Value) -> Vec<Value> {
+    match format {
+        UsageFormat::OpenCodeAcp => unwrap_opencode_acp(line).into_iter().collect(),
+        _ => vec![line.clone()],
+    }
+}
+
+/// `session/update` → `params.update`; a JSON-RPC result with `usage` → that
+/// result; handshake and unrelated lines are dropped.
+fn unwrap_opencode_acp(line: &Value) -> Option<Value> {
+    if line.get("method").and_then(Value::as_str) == Some("session/update") {
+        return line.pointer("/params/update").cloned();
+    }
+    line.get("result")
+        .filter(|result| result.get("usage").is_some())
+        .cloned()
+}
+
 /// One CLI process: `start_process`, then every line of the capture.
 fn replay(format: UsageFormat, capture: &Path, process: &ProcessContext) -> Replayed {
     let mut reader = reader_for(format).expect("a format with a reader");
@@ -90,8 +119,10 @@ fn replay(format: UsageFormat, capture: &Path, process: &ProcessContext) -> Repl
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let value: Value = serde_json::from_str(line)
             .unwrap_or_else(|err| panic!("{}: {err}", capture.display()));
-        for event in reader.read(&value) {
-            apply(event);
+        for observed in harness_events(format, &value) {
+            for event in reader.read(&observed) {
+                apply(event);
+            }
         }
     }
     Replayed {

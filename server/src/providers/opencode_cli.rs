@@ -96,7 +96,17 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
         result_before_exit: false,
         result_exit_grace: None,
         stall_limits: None,
-        usage: UsageHook::for_connector(&input, coppice_connectors::OPENCODE, Some(spec.version)),
+        // Descriptor advertises OpenCodeAcp; this transport speaks CLI JSON.
+        usage: input.stream.as_ref().map(|stream| {
+            UsageHook::new(
+                stream.clone(),
+                coppice_connectors::UsageFormat::OpenCodeCliJson,
+                super::usage::ProcessContext::new(
+                    input.resume_session_id.as_deref(),
+                    Some(spec.version),
+                ),
+            )
+        }),
     };
     let mut lines = RunLines::new(
         AcpConsole::new(CONSOLE_PREFIX, input.stream.clone()),
