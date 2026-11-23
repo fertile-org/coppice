@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   postMessage: vi.fn(),
   postMessagePending: false,
+  stopSession: vi.fn(),
+  stopSessionPending: false,
   uploadAttachment: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
@@ -145,6 +147,10 @@ vi.mock('./useChat', () => ({
     mutateAsync: mocks.postMessage,
     isPending: mocks.postMessagePending,
   }),
+  useStopChatSession: () => ({
+    mutateAsync: mocks.stopSession,
+    isPending: mocks.stopSessionPending,
+  }),
   useAcceptChatProposal: () => ({
     mutateAsync: mocks.acceptProposal,
     isPending: false,
@@ -208,6 +214,8 @@ describe('ChatPage', () => {
     mocks.createSession.mockReset();
     mocks.postMessage.mockReset();
     mocks.postMessagePending = false;
+    mocks.stopSession.mockReset();
+    mocks.stopSessionPending = false;
     mocks.uploadAttachment.mockReset();
     mocks.acceptProposal.mockReset();
     mocks.rejectProposal.mockReset();
@@ -270,6 +278,49 @@ describe('ChatPage', () => {
         body: 'Hello',
         sessionId: '00000000-0000-4000-8000-000000000001',
       });
+    });
+  });
+
+  it('swaps Send for Stop while a reply is pending and stops on click', async () => {
+    const runId = '00000000-0000-4000-8000-000000000040';
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        hasActiveRun: true,
+        activeRunId: runId,
+      },
+    ];
+    mocks.messages = [
+      {
+        id: '00000000-0000-4000-8000-000000000030',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 1,
+        role: 'human',
+        body: 'Go',
+        agentRunId: runId,
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:01:00Z',
+      },
+    ];
+    mocks.stopSession.mockResolvedValue({
+      ...ACTIVE_SESSION,
+      hasActiveRun: false,
+      activeRunId: null,
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    expect(screen.queryByTestId('chat-composer-send')).not.toBeInTheDocument();
+    const stop = await screen.findByTestId('chat-composer-stop');
+    expect(stop).toHaveTextContent('Stop');
+    expect(screen.getByLabelText('Message')).toBeDisabled();
+    expect(screen.getByText(/Esc to stop/)).toBeInTheDocument();
+
+    fireEvent.click(stop);
+    await waitFor(() => {
+      expect(mocks.stopSession).toHaveBeenCalled();
     });
   });
 

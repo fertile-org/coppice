@@ -2358,3 +2358,370 @@ async fn chat_session_usage_adds_up_its_turns() {
     let (status, _) = usage(format!("/api/chat/sessions/{missing}/usage")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+async fn list_chat_messages(
+    app: &axum::Router,
+    session_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> Vec<serde_json::Value> {
+    let list = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(list).await;
+    body["messages"].as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn stop_queued_chat_turn_cancels_and_posts_stopped_note() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    // No workers: the turn stays queued until we stop it.
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, None).await;
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"please stop me"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let post_body: serde_json::Value = common::json_body(posted).await;
+    let run_id = post_body["runId"].as_str().expect("runId");
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+    let stopped_session: serde_json::Value = common::json_body(stop).await;
+    assert_eq!(stopped_session["hasActiveRun"], false);
+    assert!(stopped_session["activeRunId"].is_null());
+
+    let run = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/agent-runs/{run_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(run.status(), StatusCode::OK);
+    let run_body: serde_json::Value = common::json_body(run).await;
+    assert_eq!(run_body["run"]["status"], "cancelled");
+
+    let messages = list_chat_messages(&app, &session_id, &cookie, &csrf).await;
+    assert!(messages.iter().any(|m| m["role"] == "system" && m["body"] == "Reply stopped."));
+    assert!(messages.iter().all(|m| m["role"] != "agent"));
+}
+
+#[tokio::test]
+async fn stop_running_chat_turn_keeps_partial_reply_and_posts_stopped_note() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("hold_slot", |_| {}).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, None).await;
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"stream then stop"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let post_body: serde_json::Value = common::json_body(posted).await;
+    let run_id = Id::parse_str(post_body["runId"].as_str().expect("runId")).expect("run uuid");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let handle = loop {
+        if let Some(handle) = state.run_streams.get(run_id) {
+            break handle;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("chat run never registered a live stream");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    handle.publish(coppice_server::sessions::LiveMessage::Event {
+        event: serde_json::json!({
+            "type": "claude-code.console.text",
+            "markdown": "Half a streamed reply"
+        }),
+    });
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+
+    let messages = list_chat_messages(&app, &session_id, &cookie, &csrf).await;
+    let agent = messages
+        .iter()
+        .find(|m| m["role"] == "agent")
+        .expect("partial agent reply");
+    assert_eq!(agent["body"], "Half a streamed reply");
+    assert!(messages.iter().any(|m| m["role"] == "system" && m["body"] == "Reply stopped."));
+
+    let run = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/agent-runs/{run_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let run_body: serde_json::Value = common::json_body(run).await;
+    assert_eq!(run_body["run"]["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn stop_chat_rejects_non_owner_and_is_noop_without_active_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, admin_cookie, admin_csrf) = common::bootstrap_and_login().await;
+    let create_member = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/users",
+            r#"{"email":"member@localhost","password":"secret123"}"#,
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_member.status(), StatusCode::CREATED);
+
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "BE",
+        &admin_cookie,
+        &admin_csrf,
+    )
+    .await;
+    let session_id = start_chat_session(&app, &admin_cookie, &admin_csrf, &agent_id, None).await;
+
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+    let deny = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/stop"),
+            "",
+            &member_cookie,
+            &member_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deny.status(), StatusCode::NOT_FOUND);
+
+    let before = list_chat_messages(&app, &session_id, &admin_cookie, &admin_csrf).await;
+    let noop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/stop"),
+            "",
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(noop.status(), StatusCode::OK);
+    let after = list_chat_messages(&app, &session_id, &admin_cookie, &admin_csrf).await;
+    assert_eq!(before.len(), after.len());
+    assert!(after.iter().all(|m| m["role"] != "system"));
+}
+
+#[tokio::test]
+async fn stop_preserves_provider_session_for_next_message() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("backend_engineer/chat_turn", |_| {})
+            .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, None).await;
+    let session_uuid = Id::parse_str(&session_id).expect("session uuid");
+
+    let first = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"first turn"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let provider_sid = loop {
+        let sid: Option<String> = sqlx::query_scalar(
+            "SELECT provider_session_id FROM chat_sessions WHERE id = $1",
+        )
+        .bind(session_uuid)
+        .fetch_one(pool)
+        .await
+        .expect("load provider session");
+        if sid.as_deref().is_some_and(|s| !s.is_empty()) {
+            break sid.unwrap();
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("first chat turn did not store provider_session_id");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    // Hold the second turn so we can stop it mid-flight.
+    std::env::set_var("MOCK_AGENT_RESPONSE", "hold_slot");
+    let second = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"second turn to stop"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second_body: serde_json::Value = common::json_body(second).await;
+    let second_run = Id::parse_str(second_body["runId"].as_str().unwrap()).unwrap();
+
+    let stream_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while state.run_streams.get(second_run).is_none() {
+        if tokio::time::Instant::now() >= stream_deadline {
+            std::env::remove_var("MOCK_AGENT_RESPONSE");
+            panic!("second turn never started streaming");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+
+    let sid_after_stop: Option<String> = sqlx::query_scalar(
+        "SELECT provider_session_id FROM chat_sessions WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("provider session after stop");
+    assert_eq!(sid_after_stop.as_deref(), Some(provider_sid.as_str()));
+
+    std::env::set_var("MOCK_AGENT_RESPONSE", "backend_engineer/chat_turn");
+    let third = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"third turn after stop"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(third.status(), StatusCode::CREATED);
+
+    let reply_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let messages = list_chat_messages(&app, &session_id, &cookie, &csrf).await;
+        let agent_count = messages.iter().filter(|m| m["role"] == "agent").count();
+        if agent_count >= 2 {
+            std::env::remove_var("MOCK_AGENT_RESPONSE");
+            return;
+        }
+        if tokio::time::Instant::now() >= reply_deadline {
+            std::env::remove_var("MOCK_AGENT_RESPONSE");
+            panic!("third chat turn after stop did not persist a reply");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
