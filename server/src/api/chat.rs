@@ -1,4 +1,5 @@
 use crate::domain::Id;
+use crate::api::agent_runs::finish_run_stop;
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::knowledge::item_response as knowledge_item_response;
 use crate::api::tickets::ticket_to_response;
@@ -7,6 +8,8 @@ use crate::domain::chat_message::ChatMessage;
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
 use crate::services::chat_service::{AcceptProposalInput, ChatError, ChatService};
 use crate::services::comment_service::CommentService;
+use crate::services::run_service::{RunError, RunService};
+use crate::sessions::chat_partial_reply::partial_chat_reply;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -35,6 +38,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(list_messages).post(post_message),
         )
         .route(
+            "/api/chat/sessions/{session_id}/stop",
+            post(stop_session),
+        )
+        .route(
             "/api/chat/sessions/{session_id}/messages/{message_id}/proposals/{proposal_id}/accept",
             post(accept_proposal),
         )
@@ -43,6 +50,8 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(reject_proposal),
         )
 }
+
+const STOPPED_CHAT_TURN_NOTE: &str = "Reply stopped.";
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -409,6 +418,73 @@ async fn post_message(
             run_id: result.run.id,
         }),
     ))
+}
+
+fn map_run_error(err: RunError) -> StatusCode {
+    match err {
+        RunError::ActiveRunExists => StatusCode::CONFLICT,
+        RunError::NotFound => StatusCode::NOT_FOUND,
+        RunError::Validation(_) => StatusCode::BAD_REQUEST,
+        RunError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn stop_session(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(session_id): Path<Id>,
+) -> Result<Json<SessionResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let chat = ChatService::new(pool);
+    let session = chat
+        .get_session(session_id, user.id)
+        .await
+        .map_err(map_error)?;
+    let Some(run_id) = session.active_run_id else {
+        // Idempotent: no active turn → no note and no other side effects.
+        return Ok(Json(session_response(session)));
+    };
+
+    let partial = state
+        .run_streams
+        .get(run_id)
+        .map(|handle| partial_chat_reply(&handle))
+        .unwrap_or_default();
+
+    let run = match RunService::new(pool).stop(run_id).await {
+        Ok(run) => run,
+        // Turn finished between the active-run read and stop — treat as no-op.
+        Err(RunError::Validation(_)) => {
+            let session = chat
+                .get_session(session_id, user.id)
+                .await
+                .map_err(map_error)?;
+            return Ok(Json(session_response(session)));
+        }
+        Err(err) => return Err(map_run_error(err)),
+    };
+    finish_run_stop(&state, pool, &run).await;
+
+    if !partial.is_empty() {
+        if let Err(err) = chat
+            .append_agent_message_with_proposals(session_id, run.id, &partial, None)
+            .await
+        {
+            tracing::warn!(%session_id, %run.id, error = %err, "failed to persist partial chat reply on stop");
+        }
+    }
+    if let Err(err) = chat
+        .append_system_note(session_id, STOPPED_CHAT_TURN_NOTE)
+        .await
+    {
+        tracing::warn!(%session_id, %run.id, error = %err, "failed to note a stopped chat turn");
+    }
+
+    let session = chat
+        .get_session(session_id, user.id)
+        .await
+        .map_err(map_error)?;
+    Ok(Json(session_response(session)))
 }
 
 async fn accept_proposal(

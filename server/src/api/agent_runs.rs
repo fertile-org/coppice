@@ -226,26 +226,21 @@ async fn get_run(
         .map_err(map_error)
 }
 
-async fn stop_run(
-    State(state): State<Arc<AppState>>,
-    AuthUser { .. }: AuthUser,
-    Path(run_id): Path<Id>,
-) -> Result<Json<SingleRunResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
-    let service = RunService::new(pool);
-    let run = service.stop(run_id).await.map_err(map_error)?;
-    if let Some(handle) = state.run_streams.get(run_id) {
+/// After `RunService::stop`, cancel the live stream (or finish ticket follow-ups
+/// when the run never started) and publish the cancelled transition once.
+pub(crate) async fn finish_run_stop(state: &AppState, pool: &sqlx::PgPool, run: &AgentRun) {
+    if let Some(handle) = state.run_streams.get(run.id) {
         handle.cancel();
     } else {
         RunOrchestrator::new(pool, &state.config.workflow)
             .with_event_bus(&state.event_bus)
-            .handle_terminal_run(&run)
+            .handle_terminal_run(run)
             .await;
     }
-    // This endpoint owns cancellation publication because it owns the only
+    // Callers own cancellation publication because they own the only
     // transition into RunStatus::Cancelled. Workers only clean up the job.
     publish_run_finished(
-        &state,
+        state,
         pool,
         run.id,
         run.ticket_id,
@@ -254,6 +249,17 @@ async fn stop_run(
         None,
     )
     .await;
+}
+
+async fn stop_run(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(run_id): Path<Id>,
+) -> Result<Json<SingleRunResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = RunService::new(pool);
+    let run = service.stop(run_id).await.map_err(map_error)?;
+    finish_run_stop(&state, pool, &run).await;
     let connector = service
         .agent_connector_for_run(run.agent_id)
         .await

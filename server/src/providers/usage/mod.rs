@@ -8,6 +8,8 @@
 mod claude_stream_json;
 mod codex_json;
 mod cursor_stream_json;
+mod opencode_acp;
+mod opencode_cli_json;
 #[cfg(test)]
 mod harness;
 
@@ -21,6 +23,8 @@ use std::sync::Arc;
 pub use claude_stream_json::ClaudeStreamJsonReader;
 pub use codex_json::CodexJsonReader;
 pub use cursor_stream_json::CursorStreamJsonReader;
+pub use opencode_acp::OpenCodeAcpReader;
+pub use opencode_cli_json::OpenCodeCliJsonReader;
 
 /// Sends one CLI process's output to its run's usage tracking. The shared
 /// runners (`cli_runner`, `acp_connector`) hold it and call it, so an adapter
@@ -107,6 +111,8 @@ pub fn reader_for(format: UsageFormat) -> Option<Box<dyn UsageReader>> {
         UsageFormat::ClaudeStreamJson => Some(Box::new(ClaudeStreamJsonReader::default())),
         UsageFormat::CursorStreamJson => Some(Box::new(CursorStreamJsonReader::default())),
         UsageFormat::CodexJson => Some(Box::new(CodexJsonReader::default())),
+        UsageFormat::OpenCodeAcp => Some(Box::new(OpenCodeAcpReader::default())),
+        UsageFormat::OpenCodeCliJson => Some(Box::new(OpenCodeCliJsonReader::default())),
         UsageFormat::Normalized => Some(Box::new(NormalizedReader)),
         UsageFormat::None => None,
     }
@@ -142,6 +148,8 @@ mod tests {
             UsageFormat::ClaudeStreamJson,
             UsageFormat::CursorStreamJson,
             UsageFormat::CodexJson,
+            UsageFormat::OpenCodeAcp,
+            UsageFormat::OpenCodeCliJson,
             UsageFormat::Normalized,
             UsageFormat::None,
         ] {

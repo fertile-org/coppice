@@ -28,7 +28,7 @@ async function fetchConnectorStatuses(): Promise<ConnectorStatus[]> {
   return connectorStatusListSchema.parse(await res.json());
 }
 
-async function recheckConnector(id: string): Promise<ConnectorStatus> {
+export async function recheckConnector(id: string): Promise<ConnectorStatus> {
   const res = await apiFetch(`/api/tools/connectors/${id}/check`, { method: 'POST' });
   return connectorStatusSchema.parse(await res.json());
 }

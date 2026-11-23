@@ -366,6 +366,14 @@ async fn list_connectors_returns_mock() {
     assert_eq!(coverage("codex")["model"], "none");
     assert_eq!(coverage("codex")["subagents"], "none");
     assert_eq!(coverage("codex")["fields"]["reasoning"], true);
+    assert_eq!(coverage("opencode")["granularity"], "turn");
+    assert_eq!(coverage("opencode")["contextWindow"], "withSize");
+    assert_eq!(coverage("opencode")["model"], "none");
+    assert_eq!(coverage("opencode")["subagents"], "none");
+    assert_eq!(coverage("opencode")["fields"]["cacheWrite"], false);
+    // Other ACP connectors stay untracked until they get a reader.
+    assert!(coverage("copilot").is_null());
+    assert!(coverage("kilo-code").is_null());
 }
 
 #[tokio::test]

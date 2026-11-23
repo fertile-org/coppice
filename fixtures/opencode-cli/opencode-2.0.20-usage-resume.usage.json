@@ -1,0 +1,36 @@
+{
+  "contextWindow": null,
+  "process": {
+    "cliVersion": null,
+    "resumed": true
+  },
+  "requests": [
+    {
+      "granularity": "turn",
+      "id": "turn-1",
+      "model": null,
+      "tokens": {
+        "cacheRead": 9472,
+        "cacheWrite": 0,
+        "input": 275,
+        "output": 43,
+        "reasoning": 25
+      }
+    }
+  ],
+  "subagents": [],
+  "totals": {
+    "costUsd": null,
+    "requestCount": 1,
+    "status": "partial",
+    "subagentCount": 0,
+    "subagentTokens": null,
+    "tokens": {
+      "cacheRead": 9472,
+      "cacheWrite": 0,
+      "input": 275,
+      "output": 43,
+      "reasoning": 25
+    }
+  }
+}

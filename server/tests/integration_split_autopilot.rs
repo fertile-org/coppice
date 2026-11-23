@@ -35,7 +35,19 @@ async fn post(
         .unwrap()
 }
 
-async fn approved_split(titles: &[&str]) -> Split {
+struct PreparedSplit {
+    state: Arc<AppState>,
+    app: Router,
+    cookie: String,
+    csrf: String,
+    board_id: String,
+    parent_id: Id,
+    parent: String,
+    plan_id: Id,
+    pool: sqlx::PgPool,
+}
+
+async fn prepare_plan_split(splits: Vec<Value>) -> PreparedSplit {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id =
@@ -71,10 +83,6 @@ async fn approved_split(titles: &[&str]) -> Split {
     .await
     .unwrap();
 
-    let splits: Vec<Value> = titles
-        .iter()
-        .map(|title| json!({ "title": title, "description": format!("Do {title}.") }))
-        .collect();
     let pending = json!({
         "recommendedByAgentId": agent,
         "recommendedAt": "2026-01-01T00:00:00Z",
@@ -88,17 +96,32 @@ async fn approved_split(titles: &[&str]) -> Split {
         .await
         .unwrap();
 
-    let approved = post(
-        &app,
-        &format!("/api/tickets/{parent}/approve-plan"),
-        "{}",
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(approved.status(), StatusCode::OK, "approve plan");
+    PreparedSplit {
+        state,
+        app,
+        cookie,
+        csrf,
+        board_id,
+        parent_id,
+        parent,
+        plan_id,
+        pool,
+    }
+}
 
-    let children: Vec<Id> = sqlx::query_scalar(
+async fn approve_prepared(prepared: &PreparedSplit) -> axum::http::Response<axum::body::Body> {
+    post(
+        &prepared.app,
+        &format!("/api/tickets/{}/approve-plan", prepared.parent),
+        "{}",
+        &prepared.cookie,
+        &prepared.csrf,
+    )
+    .await
+}
+
+async fn load_split_children(pool: &sqlx::PgPool, parent_id: Id) -> Vec<Id> {
+    sqlx::query_scalar(
         r#"
         SELECT id FROM tickets
         WHERE parent_ticket_id = $1
@@ -109,17 +132,29 @@ async fn approved_split(titles: &[&str]) -> Split {
         "#,
     )
     .bind(parent_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
-    .unwrap();
+    .unwrap()
+}
+
+async fn approved_split(titles: &[&str]) -> Split {
+    let splits: Vec<Value> = titles
+        .iter()
+        .map(|title| json!({ "title": title, "description": format!("Do {title}.") }))
+        .collect();
+    let prepared = prepare_plan_split(splits).await;
+    let approved = approve_prepared(&prepared).await;
+    assert_eq!(approved.status(), StatusCode::OK, "approve plan");
+
+    let children = load_split_children(&prepared.pool, prepared.parent_id).await;
     assert_eq!(children.len(), titles.len());
     Split {
-        state,
-        app,
-        cookie,
-        csrf,
-        board_id,
-        parent_id,
+        state: prepared.state,
+        app: prepared.app,
+        cookie: prepared.cookie,
+        csrf: prepared.csrf,
+        board_id: prepared.board_id,
+        parent_id: prepared.parent_id,
         children,
     }
 }
@@ -600,4 +635,308 @@ async fn merge_button_starts_the_next_child_and_the_last_starts_verification() {
     .await
     .unwrap();
     assert_eq!(runs, 1, "last merge starts parent verification");
+}
+
+#[tokio::test]
+async fn approving_a_split_plan_leaves_every_child_plan_current_and_movable() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let prepared = prepare_plan_split(vec![
+        json!({
+            "title": "Assigned",
+            "description": "With assignee.",
+            "assignTo": "backend_engineer",
+        }),
+        json!({
+            "title": "Unassigned",
+            "description": "No assignee.",
+        }),
+    ])
+    .await;
+    let approved = approve_prepared(&prepared).await;
+    assert_eq!(approved.status(), StatusCode::OK);
+
+    let children = load_split_children(&prepared.pool, prepared.parent_id).await;
+    assert_eq!(children.len(), 2);
+    let parent = common::get_ticket(
+        &prepared.app,
+        &prepared.parent,
+        &prepared.cookie,
+        &prepared.csrf,
+    )
+    .await;
+    assert_eq!(parent["status"], "in_progress");
+    assert_eq!(parent["splitParent"], true);
+    assert!(!parent["splitProgress"].is_null());
+
+    for child_id in &children {
+        let child = common::get_ticket(
+            &prepared.app,
+            &child_id.to_string(),
+            &prepared.cookie,
+            &prepared.csrf,
+        )
+        .await;
+        assert_eq!(child["planApproved"], true, "{child}");
+
+        // Child 1 is already Ready from autopilot; later children start in Backlog.
+        if child["status"] == "backlog" {
+            let ready = prepared
+                .app
+                .clone()
+                .oneshot(common::json_request(
+                    "PATCH",
+                    &format!("/api/tickets/{child_id}/status"),
+                    r#"{"status":"ready"}"#,
+                    &prepared.cookie,
+                    &prepared.csrf,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(ready.status(), StatusCode::OK, "child moves to Ready");
+        }
+
+        let in_progress = prepared
+            .app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{child_id}/status"),
+                r#"{"status":"in_progress"}"#,
+                &prepared.cookie,
+                &prepared.csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            in_progress.status(),
+            StatusCode::OK,
+            "child moves to In Progress without plan refusal"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mid_approve_failure_keeps_plan_review_and_retry_succeeds() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let prepared = prepare_plan_split(vec![
+        json!({ "title": "One", "description": "First." }),
+        json!({ "title": "Two", "description": "Second." }),
+    ])
+    .await;
+
+    // Fail before the split row is written: children exist briefly, then cleanup.
+    sqlx::query(
+        r#"
+        CREATE OR REPLACE FUNCTION coppice_test_fail_plan_split() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'forced plan-split failure';
+        END $$ LANGUAGE plpgsql
+        "#,
+    )
+    .execute(&prepared.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER coppice_test_fail_plan_split
+        BEFORE INSERT ON ticket_plan_splits
+        FOR EACH ROW EXECUTE FUNCTION coppice_test_fail_plan_split()
+        "#,
+    )
+    .execute(&prepared.pool)
+    .await
+    .unwrap();
+
+    let failed = approve_prepared(&prepared).await;
+    assert_ne!(failed.status(), StatusCode::OK, "create failure surfaces");
+    let body = common::json_body(failed).await;
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("forced plan-split failure"),
+        "API returns the create failure: {body}"
+    );
+
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+            .bind(prepared.parent_id)
+            .fetch_one(&prepared.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "plan_review");
+    let orphans: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tickets WHERE parent_ticket_id = $1 AND archived_at IS NULL",
+    )
+    .bind(prepared.parent_id)
+    .fetch_one(&prepared.pool)
+    .await
+    .unwrap();
+    assert_eq!(orphans, 0, "orphans cleaned after mid-approve failure");
+    let pending: Option<Value> = sqlx::query_scalar(
+        "SELECT pending_split_recommendation FROM tickets WHERE id = $1",
+    )
+    .bind(prepared.parent_id)
+    .fetch_one(&prepared.pool)
+    .await
+    .unwrap();
+    assert!(pending.is_some(), "pending kept so retry can run");
+
+    sqlx::query("DROP TRIGGER coppice_test_fail_plan_split ON ticket_plan_splits")
+        .execute(&prepared.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION coppice_test_fail_plan_split()")
+        .execute(&prepared.pool)
+        .await
+        .unwrap();
+
+    let approved = approve_prepared(&prepared).await;
+    assert_eq!(approved.status(), StatusCode::OK, "retry succeeds");
+    let children = load_split_children(&prepared.pool, prepared.parent_id).await;
+    assert_eq!(children.len(), 2);
+    let parent = common::get_ticket(
+        &prepared.app,
+        &prepared.parent,
+        &prepared.cookie,
+        &prepared.csrf,
+    )
+    .await;
+    assert_eq!(parent["status"], "in_progress");
+    assert_eq!(parent["splitProgress"]["children"][0]["status"], "ready");
+}
+
+#[tokio::test]
+async fn double_approve_creates_only_one_child_set() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let prepared = prepare_plan_split(vec![
+        json!({ "title": "One", "description": "First." }),
+        json!({ "title": "Two", "description": "Second." }),
+    ])
+    .await;
+    let first = approve_prepared(&prepared).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let children = load_split_children(&prepared.pool, prepared.parent_id).await;
+    assert_eq!(children.len(), 2);
+
+    let second = approve_prepared(&prepared).await;
+    assert_ne!(second.status(), StatusCode::OK);
+    let again = load_split_children(&prepared.pool, prepared.parent_id).await;
+    assert_eq!(again.len(), 2, "second approve does not create more children");
+    assert_eq!(again, children);
+}
+
+#[tokio::test]
+async fn ready_parent_stuck_without_split_row_can_be_repaired() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let prepared = prepare_plan_split(vec![
+        json!({ "title": "One", "description": "First." }),
+        json!({ "title": "Two", "description": "Second." }),
+    ])
+    .await;
+
+    // Reproduce the pre-fix stuck state: Ready, children with plans, no
+    // ticket_plan_splits, pending cleared.
+    let recommended_by_raw: String = sqlx::query_scalar(
+        "SELECT pending_split_recommendation->>'recommendedByAgentId' FROM tickets WHERE id = $1",
+    )
+    .bind(prepared.parent_id)
+    .fetch_one(&prepared.pool)
+    .await
+    .unwrap();
+    let recommended_by = Id::parse_str(&recommended_by_raw).unwrap();
+    let parent_ticket = coppice_server::services::ticket_service::TicketService::new(&prepared.pool)
+        .get(prepared.parent_id)
+        .await
+        .unwrap()
+        .ticket;
+    let children = coppice_server::services::split_service::SplitService::new(
+        &prepared.pool,
+        &prepared.state.config.workflow,
+    )
+    .create_child_tickets(
+        &parent_ticket,
+        &[
+            coppice_server::domain::workflow::SplitTicketSpec {
+                title: "One".into(),
+                description: "First.".into(),
+                acceptance_criteria: None,
+                assign_to: None,
+                steps: Vec::new(),
+            },
+            coppice_server::domain::workflow::SplitTicketSpec {
+                title: "Two".into(),
+                description: "Second.".into(),
+                acceptance_criteria: None,
+                assign_to: None,
+                steps: Vec::new(),
+            },
+        ],
+        recommended_by,
+    )
+    .await
+    .expect("seed children");
+    assert_eq!(children.len(), 2);
+
+    sqlx::query(
+        r#"
+        UPDATE tickets
+        SET status = 'ready',
+            approved_plan_id = $2,
+            approved_plan_content_version = 1,
+            pending_split_recommendation = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(prepared.parent_id)
+    .bind(prepared.plan_id)
+    .execute(&prepared.pool)
+    .await
+    .unwrap();
+
+    let has_split: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM ticket_plan_splits WHERE parent_ticket_id = $1)",
+    )
+    .bind(prepared.parent_id)
+    .fetch_one(&prepared.pool)
+    .await
+    .unwrap();
+    assert!(!has_split);
+
+    let repaired = approve_prepared(&prepared).await;
+    assert_eq!(repaired.status(), StatusCode::OK, "repair via approve");
+
+    let parent = common::get_ticket(
+        &prepared.app,
+        &prepared.parent,
+        &prepared.cookie,
+        &prepared.csrf,
+    )
+    .await;
+    assert_eq!(parent["status"], "in_progress");
+    assert_eq!(parent["splitParent"], true);
+    assert_eq!(
+        parent["splitProgress"]["children"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(parent["splitProgress"]["children"][0]["status"], "ready");
+
+    let child_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tickets WHERE parent_ticket_id = $1 AND archived_at IS NULL",
+    )
+    .bind(prepared.parent_id)
+    .fetch_one(&prepared.pool)
+    .await
+    .unwrap();
+    assert_eq!(child_count, 2, "repair reuses existing children");
 }

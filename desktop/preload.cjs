@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('coppiceDesktop', {
   setUpdateSettings: (settings) => ipcRenderer.invoke('coppice:update-settings-set', settings),
   checkForUpdates: () => ipcRenderer.invoke('coppice:check-for-updates'),
   restartToUpdate: () => ipcRenderer.invoke('coppice:restart-to-update'),
+  moveToApplications: () => ipcRenderer.invoke('coppice:move-to-applications'),
   platform: process.platform,
   showItemInFolder: (filePath) => ipcRenderer.invoke('coppice:show-item-in-folder', filePath),
 });

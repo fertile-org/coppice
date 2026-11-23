@@ -33,6 +33,7 @@ import {
   useChatSessions,
   useCreateChatSession,
   usePostChatMessage,
+  useStopChatSession,
 } from './useChat';
 import { ChatSessionTokens } from './ChatSessionTokens';
 import { useChatRunLiveStream } from './useChatRunLiveStream';
@@ -72,31 +73,38 @@ function sessionsForAgent(sessions: ChatSession[], agentId: string): ChatSession
 function ChatComposer({
   sessionId,
   agentId,
-  disabled,
+  awaiting,
   onPosted,
+  onStopped,
 }: {
   sessionId: string | null;
   agentId: string;
-  disabled?: boolean;
+  /** True while a reply is queued or streaming (Send becomes Stop). */
+  awaiting?: boolean;
   onPosted: (runId: string, sessionId: string) => void;
+  onStopped?: () => void;
 }) {
   const postMessage = usePostChatMessage(sessionId ?? '');
+  const stopSession = useStopChatSession(sessionId ?? '');
   const createSession = useCreateChatSession();
   const uploadAttachment = useUploadAttachment();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [body, setBody] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const composerLocked = Boolean(
-    disabled ||
-      postMessage.isPending ||
+  const sending = Boolean(
+    postMessage.isPending ||
       uploadAttachment.isPending ||
       createSession.isPending,
   );
+  const stopping = stopSession.isPending;
+  const showStop = Boolean(awaiting && sessionId);
+  const composerLocked = Boolean(awaiting || sending || stopping);
   const canSend = body.trim().length > 0 || pendingFiles.length > 0;
 
   const pendingFilesRef = useRef(pendingFiles);
   pendingFilesRef.current = pendingFiles;
+  const stopReplyRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     return () => {
@@ -107,6 +115,18 @@ function ChatComposer({
       }
     };
   }, []);
+
+  // Textarea is disabled while a reply runs, so Esc has to live on the window.
+  useEffect(() => {
+    if (!showStop) return;
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      stopReplyRef.current();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showStop]);
 
   function addPendingFiles(files: FileList | File[]) {
     const next = Array.from(files).map(pendingFileFromFile);
@@ -142,7 +162,9 @@ function ChatComposer({
 
   async function submitMessage() {
     const trimmed = body.trim();
-    if ((!trimmed && pendingFiles.length === 0) || composerLocked) return;
+    if ((!trimmed && pendingFiles.length === 0) || composerLocked || showStop) {
+      return;
+    }
     setError(null);
     try {
       const attachmentIds: string[] = [];
@@ -169,8 +191,26 @@ function ChatComposer({
     }
   }
 
+  async function stopReply() {
+    if (!sessionId || !showStop || stopping) return;
+    setError(null);
+    try {
+      await stopSession.mutateAsync();
+      onStopped?.();
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Could not stop the reply.'));
+    }
+  }
+  stopReplyRef.current = () => {
+    void stopReply();
+  };
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (showStop) {
+      await stopReply();
+      return;
+    }
     await submitMessage();
   }
 
@@ -178,6 +218,7 @@ function ChatComposer({
     if (event.key !== 'Enter') return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.shiftKey) return;
+    if (showStop) return;
     event.preventDefault();
     void submitMessage();
   }
@@ -265,24 +306,36 @@ function ChatComposer({
             className="min-h-[2.75rem] flex-1 resize-none border-border bg-surface-raised"
             aria-describedby="chat-composer-hint"
           />
-          <Button
-            type="submit"
-            disabled={composerLocked || !canSend}
-            className="shrink-0"
-          >
-            {postMessage.isPending ||
-            uploadAttachment.isPending ||
-            createSession.isPending
-              ? 'Sending…'
-              : 'Send'}
-          </Button>
+          {showStop ? (
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={stopping}
+              loading={stopping}
+              className="shrink-0"
+              aria-label="Stop reply"
+              data-testid="chat-composer-stop"
+            >
+              {stopping ? 'Stopping…' : 'Stop'}
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              disabled={composerLocked || !canSend}
+              className="shrink-0"
+              data-testid="chat-composer-send"
+            >
+              {sending ? 'Sending…' : 'Send'}
+            </Button>
+          )}
         </div>
         <p
           id="chat-composer-hint"
           className="mt-1.5 font-body text-[11px] text-text-muted"
         >
-          Enter to send · Shift+Enter for a new line · up to {MAX_CHAT_ATTACHMENTS}{' '}
-          files
+          {showStop
+            ? 'Esc to stop · reply is running'
+            : `Enter to send · Shift+Enter for a new line · up to ${MAX_CHAT_ATTACHMENTS} files`}
         </p>
         {error && (
           <p className="mt-1 font-body text-sm text-danger" role="alert">
@@ -494,12 +547,16 @@ function ChatTranscript({
         <ChatComposer
           sessionId={sessionId}
           agentId={agent.id}
-          disabled={awaiting}
+          awaiting={awaiting}
           onPosted={(runId, nextSessionId) => {
             if (sessionId && nextSessionId === sessionId) {
               setActiveRunId(runId);
             }
             onPosted(runId, nextSessionId);
+          }}
+          onStopped={() => {
+            setActiveRunId(null);
+            void refetch();
           }}
         />
       )}
