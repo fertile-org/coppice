@@ -167,8 +167,7 @@ start_stack() {
 case "$cmd" in
   up)
     start_stack
-    cd e2e && yarn install --frozen-lockfile \
-      && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-x64}" yarn playwright install chromium
+    cd e2e && yarn install --frozen-lockfile && yarn playwright install chromium
     cd "$root"
     if ! COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" node e2e/screenshot/capture-hero.mjs; then
       printf '%s\n' "screenshot: capture failed. The loopback stack is still up. Run make screenshot-down to remove it." >&2
@@ -188,15 +187,13 @@ case "$cmd" in
     ;;
   docs)
     load_pointer
-    cd e2e && yarn install --frozen-lockfile \
-      && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-x64}" yarn playwright install chromium
+    cd e2e && yarn install --frozen-lockfile && yarn playwright install chromium
     cd "$root"
     COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" node e2e/screenshot/capture-docs.mjs
     ;;
   articles)
     load_pointer
-    cd e2e && yarn install --frozen-lockfile \
-      && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-x64}" yarn playwright install chromium
+    cd e2e && yarn install --frozen-lockfile && yarn playwright install chromium
     cd "$root"
     COPPICE_SCREENSHOT_CONFIG="$COPPICE_SCREENSHOT_CONFIG" node e2e/screenshot/capture-articles.mjs
     ;;
