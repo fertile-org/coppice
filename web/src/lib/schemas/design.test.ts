@@ -13,6 +13,7 @@ describe('designSetSchema', () => {
       selected: null,
       superseded: false,
       fromPlanRun: true,
+      fromChat: false,
       inherited: false,
       choice: { mode: 'update_plan', planOutOfDate: false },
     });
@@ -51,6 +52,7 @@ describe('designSetSchema', () => {
       selected: null,
       superseded: false,
       fromPlanRun: true,
+      fromChat: false,
       inherited: false,
       choice: { mode: 'update_plan', planOutOfDate: false },
     });

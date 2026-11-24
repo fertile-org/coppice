@@ -92,6 +92,7 @@ struct DesignSetResponse {
     selected: Option<ChosenOption>,
     superseded: bool,
     from_plan_run: bool,
+    from_chat: bool,
     inherited: bool,
     choice: ChoiceState,
 }
@@ -129,6 +130,7 @@ async fn to_response(
         selected: set.selected,
         superseded: set.superseded,
         from_plan_run: set.from_plan_run,
+        from_chat: set.from_chat,
         inherited: set.inherited,
         choice,
     })

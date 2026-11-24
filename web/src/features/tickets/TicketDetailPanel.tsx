@@ -21,6 +21,8 @@ import { PlanChecklist } from '../plan/PlanChecklist';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { SplitParentTracker } from '../plan/SplitParentTracker';
 import { VerifyParentAction } from '../plan/VerifyParentAction';
+import { DesignCard } from '../designs/DesignCard';
+import { useDesigns } from '../designs/useDesigns';
 import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
 import { TicketStatusBadge } from './TicketStatusBadge';
@@ -81,6 +83,10 @@ export function TicketDetailPanel({
   const runs = useAgentRuns(ticket.status === 'plan_review' ? ticket.id : undefined);
   const planRunActive = (runs.data ?? []).some(
     (run) => run.jobType === 'plan_ticket' && isActiveRunStatus(run.status),
+  );
+  const { data: designs } = useDesigns(ticket.id);
+  const chatDesigns = (designs ?? []).filter(
+    (set) => set.fromChat && !set.superseded && !set.inherited,
   );
   const descriptionFiles = descriptionAttachments(ticket);
 
@@ -260,6 +266,21 @@ export function TicketDetailPanel({
           <CommentAttachments attachments={descriptionFiles} />
         </div>
       </div>
+
+      {chatDesigns.length > 0 ? (
+        <section className="border-t border-border pt-6" data-testid="ticket-chat-designs">
+          <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
+            Design
+          </h3>
+          <ul className="space-y-3">
+            {chatDesigns.map((set) => (
+              <li key={set.id}>
+                <DesignCard design={set} scope={ticket.id} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {ticket.substatus === 'blocked_by_error' && !isArchived && (
         <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />

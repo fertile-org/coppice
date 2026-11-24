@@ -91,6 +91,28 @@ vi.mock('../agents/useAgents', () => ({
   }),
 }));
 
+const designsState = vi.hoisted(() => ({
+  data: [] as Array<{
+    id: string;
+    title: string;
+    runId: string;
+    fromChat: boolean;
+    fromPlanRun: boolean;
+    options: Array<{ id: string; title: string; entry: string; label: string; displayTitle: string }>;
+    chosen: null;
+    recommended: null;
+    selected: null;
+    superseded: boolean;
+    inherited: boolean;
+    choice: { mode: 'save_only'; planOutOfDate: false };
+    kind: 'ui';
+  }>,
+}));
+
+vi.mock('../designs/useDesigns', () => ({
+  useDesigns: () => ({ data: designsState.data }),
+}));
+
 function renderRuns() {
   const client = new QueryClient();
   return render(
@@ -105,7 +127,63 @@ function renderRuns() {
 describe('TicketRunsTab', () => {
   beforeEach(() => {
     session.role = 'admin';
+    designsState.data = [];
     useTicketUsage.mockReturnValue({ data: undefined });
+  });
+
+  it('shows designs for the matching run only (chat copies stay off this tab)', () => {
+    designsState.data = [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        title: 'Work-run design',
+        kind: 'ui',
+        runId: failedRun.id,
+        fromChat: false,
+        fromPlanRun: false,
+        options: [
+          {
+            id: 'a',
+            title: 'Quiet',
+            entry: 'a.html',
+            label: 'A',
+            displayTitle: 'Quiet',
+          },
+        ],
+        chosen: null,
+        recommended: null,
+        selected: null,
+        superseded: false,
+        inherited: false,
+        choice: { mode: 'save_only', planOutOfDate: false },
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        title: 'Chat copy',
+        kind: 'ui',
+        runId: '99999999-9999-4999-8999-999999999999',
+        fromChat: true,
+        fromPlanRun: false,
+        options: [
+          {
+            id: 'a',
+            title: 'Quiet',
+            entry: 'a.html',
+            label: 'A',
+            displayTitle: 'Quiet',
+          },
+        ],
+        chosen: null,
+        recommended: null,
+        selected: null,
+        superseded: false,
+        inherited: false,
+        choice: { mode: 'save_only', planOutOfDate: false },
+      },
+    ];
+    renderRuns();
+    expect(screen.getByText('Work-run design')).toBeInTheDocument();
+    expect(screen.queryByText('Chat copy')).not.toBeInTheDocument();
+    expect(screen.queryByText('From chat')).not.toBeInTheDocument();
   });
 
   it('shows each run’s tokens and the ticket total', () => {

@@ -28,6 +28,15 @@ vi.mock('./useTicket', () => ({
   commentsQueryKey: (ticketId: string) => ['comments', ticketId],
 }));
 
+vi.mock('../designs/useDesigns', () => ({
+  useDesigns: () => ({ data: [] }),
+}));
+
+vi.mock('./useAgentRuns', () => ({
+  isActiveRunStatus: () => false,
+  useAgentRuns: () => ({ data: [] }),
+}));
+
 const ticket: Ticket = {
   id: '00000000-0000-0000-0000-000000000001',
   boardId: '00000000-0000-0000-0000-000000000002',

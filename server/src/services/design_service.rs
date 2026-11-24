@@ -198,6 +198,8 @@ pub struct DesignSetSummary {
     pub selected: Option<ChosenOption>,
     pub superseded: bool,
     pub from_plan_run: bool,
+    /// Copied from a chat turn (or still on one): run is `chat_turn`.
+    pub from_chat: bool,
     /// The set belongs to the parent ticket, not this one.
     pub inherited: bool,
 }
@@ -732,7 +734,11 @@ impl<'a> DesignService<'a> {
                    EXISTS (
                        SELECT 1 FROM agent_runs r
                        WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
-                   ) AS from_plan_run
+                   ) AS from_plan_run,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'chat_turn'
+                   ) AS from_chat
             FROM design_sets
             WHERE published_at IS NOT NULL
               AND (
@@ -759,6 +765,10 @@ impl<'a> DesignService<'a> {
                        SELECT 1 FROM agent_runs r
                        WHERE r.id = design_sets.run_id AND r.job_type = 'plan_ticket'
                    ) AS from_plan_run,
+                   EXISTS (
+                       SELECT 1 FROM agent_runs r
+                       WHERE r.id = design_sets.run_id AND r.job_type = 'chat_turn'
+                   ) AS from_chat,
                    published_at IS NOT NULL AS published
             FROM design_sets
             WHERE id = $1
@@ -855,6 +865,7 @@ fn summary_from_row(row: &sqlx::postgres::PgRow) -> Result<DesignSetSummary, Des
         selected,
         superseded: row.get("superseded"),
         from_plan_run: row.get("from_plan_run"),
+        from_chat: row.get("from_chat"),
         inherited: false,
     })
 }

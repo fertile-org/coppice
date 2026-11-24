@@ -43,6 +43,7 @@ export const designSetSchema = z.object({
   selected: chosenDesignOptionSchema.nullable(),
   superseded: z.boolean(),
   fromPlanRun: z.boolean(),
+  fromChat: z.boolean(),
   inherited: z.boolean(),
   choice: designChoiceSchema,
 });

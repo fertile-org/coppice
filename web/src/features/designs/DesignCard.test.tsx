@@ -73,6 +73,11 @@ describe('DesignCard', () => {
     });
   });
 
+  it('shows a From chat tag when the set came from chat', () => {
+    wrap(<DesignCard design={makeDesignSet({ fromChat: true, chosen: null })} />);
+    expect(screen.getByText('From chat')).toBeInTheDocument();
+  });
+
   it('opens the popup and posts Choose', async () => {
     wrap(<DesignCard design={published} />);
 

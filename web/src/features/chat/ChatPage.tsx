@@ -38,6 +38,7 @@ import {
 import { ChatSessionTokens } from './ChatSessionTokens';
 import { useChatRunLiveStream } from './useChatRunLiveStream';
 import { chatSessionUsageQueryKey } from './useChatSessionUsage';
+import { designsQueryKey } from '../designs/useDesigns';
 
 const CHAT_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,text/csv,application/json,application/pdf,.md,.csv,.json,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp';
@@ -426,6 +427,9 @@ function ChatTranscript({
     void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
     if (sessionId) {
       void queryClient.invalidateQueries({ queryKey: chatSessionUsageQueryKey(sessionId) });
+      void queryClient.invalidateQueries({
+        queryKey: designsQueryKey({ chatSessionId: sessionId }),
+      });
     }
   }, [queryClient, refetch, sessionId]);
 

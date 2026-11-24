@@ -2992,6 +2992,45 @@ async fn accept_ticket_proposal_copies_chat_design_and_rolls_back_on_bad_design(
     let chat_still = svc.get(created.id).await.unwrap();
     assert_eq!(chat_still.chat_session_id, Some(session_uuid));
 
+    // Copied set is marked fromChat so Detail can show it (run stays chat_turn).
+    let listed = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/designs"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    let sets = common::json_body(listed).await;
+    let sets = sets.as_array().expect("design list");
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0]["id"], effective.set_id.to_string());
+    assert_eq!(sets[0]["fromChat"], true);
+    assert_eq!(sets[0]["fromPlanRun"], false);
+    assert_eq!(sets[0]["chosen"]["id"], "b");
+    assert_eq!(sets[0]["selected"]["id"], "b");
+
+    // Choosing another option persists for ticket_get.selectedDesign.
+    let choose = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/designs/{}/choose", effective.set_id),
+            r#"{"optionId":"a"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(choose.status(), StatusCode::NO_CONTENT);
+    let after = svc.effective_for_ticket(ticket_id).await.unwrap().unwrap();
+    assert_eq!(after.selected.id, "a");
+    assert_eq!(after.set_id, effective.set_id);
+
     // Bad designSetId on another proposal: nothing is created (same-tx rollback).
     let before = ticket_count(pool, &board_id).await;
     let foreign = Id::new();
