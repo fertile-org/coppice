@@ -18,6 +18,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { PLAN_COPY } from '../plan/copy';
 import { PlanChecklist } from '../plan/PlanChecklist';
+import { QaEvidenceCard } from '../plan/QaEvidenceCard';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { SplitParentTracker } from '../plan/SplitParentTracker';
 import { VerifyParentAction } from '../plan/VerifyParentAction';
@@ -311,7 +312,10 @@ export function TicketDetailPanel({
       )}
 
       {ticket.status === 'wait_for_final_review' && ticket.approvedPlan && (
-        <PlanChecklist plan={ticket.approvedPlan} />
+        <>
+          <QaEvidenceCard ticketId={ticket.id} plan={ticket.approvedPlan} />
+          <PlanChecklist plan={ticket.approvedPlan} />
+        </>
       )}
 
       {ticket.splitProgress?.position != null ? (

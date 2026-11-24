@@ -688,6 +688,7 @@ async fn human_review_ticks_criteria_from_the_result_for_the_reviewed_commit() {
     assert_eq!(criteria[0]["evidence"], "test plan_gate_refuses_drag");
     assert_eq!(criteria[1]["status"], "not_met");
     assert_eq!(criteria[2]["status"], "not_checked");
+    assert_eq!(plan["criteriaCommitSha"], head);
 
     // A result written for another commit is stale.
     seed_criteria_results(

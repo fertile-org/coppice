@@ -438,6 +438,13 @@ pub struct CriterionResult {
     pub status: CriterionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Worktree-relative paths under `.agent/qa-evidence/` (png/jpeg/gif/webp).
+    /// After record, rewritten to stable artifact filenames.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+    /// Captions paired with `screenshots` by index when lengths match.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,13 +480,32 @@ where
                 .map(str::trim)
                 .filter(|text| !text.is_empty())
                 .map(str::to_string);
+            let screenshots = string_list(item.get("screenshots"));
+            let steps = string_list(item.get("steps"));
             Some(CriterionResult {
                 criterion: criterion.to_string(),
                 status,
                 evidence,
+                screenshots,
+                steps,
             })
         })
         .collect())
+}
+
+fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn lenient_plan_questions<'de, D>(deserializer: D) -> Result<Vec<PlanQuestion>, D::Error>

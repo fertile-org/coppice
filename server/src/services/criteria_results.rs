@@ -6,7 +6,12 @@ use crate::domain::Id;
 
 use serde::Serialize;
 use sqlx::PgPool;
+use std::path::{Component, Path, PathBuf};
 use crate::providers::{AgentRunResult, CriterionResult, CriterionStatus};
+
+const QA_EVIDENCE_PREFIX: &str = ".agent/qa-evidence/";
+const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+const MAX_FILE_BYTES: u64 = 512 * 1024;
 
 pub struct StoredCriteriaResults {
     pub commit_sha: String,
@@ -21,6 +26,11 @@ pub struct CriterionView {
     pub status: CriterionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Stable artifact filenames under the ticket's qa-evidence folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
 }
 
 pub struct CriteriaResultsService<'a> {
@@ -35,11 +45,18 @@ impl<'a> CriteriaResultsService<'a> {
     /// Keep a done result's criteria report for `commit_sha`. A result with no
     /// report leaves the stored one alone; it then belongs to an older commit
     /// and reads as not checked.
+    ///
+    /// When `worktree` and `artifacts_dir` are set, accepted screenshots under
+    /// `.agent/qa-evidence/` are copied into
+    /// `artifacts_dir/tickets/{ticket_id}/qa-evidence/` and the stored paths
+    /// are rewritten to those filenames. Invalid paths are dropped.
     pub async fn record(
         &self,
         ticket_id: Id,
         result: &AgentRunResult,
         commit_sha: &str,
+        worktree: Option<&Path>,
+        artifacts_dir: Option<&Path>,
     ) -> Result<(), sqlx::Error> {
         let AgentRunResult::Done {
             criteria_results, ..
@@ -50,6 +67,14 @@ impl<'a> CriteriaResultsService<'a> {
         let commit_sha = crate::services::human_review_service::normalize_sha(commit_sha);
         if criteria_results.is_empty() || commit_sha.is_empty() {
             return Ok(());
+        }
+        let mut stored = criteria_results.clone();
+        if let (Some(worktree), Some(artifacts_dir)) = (worktree, artifacts_dir) {
+            ingest_screenshots(ticket_id, &mut stored, worktree, artifacts_dir);
+        } else {
+            for result in &mut stored {
+                result.screenshots.clear();
+            }
         }
         sqlx::query(
             r#"
@@ -63,7 +88,7 @@ impl<'a> CriteriaResultsService<'a> {
         )
         .bind(ticket_id)
         .bind(&commit_sha)
-        .bind(serde_json::to_value(criteria_results).unwrap_or_default())
+        .bind(serde_json::to_value(&stored).unwrap_or_default())
         .execute(self.pool)
         .await?;
         Ok(())
@@ -80,6 +105,157 @@ impl<'a> CriteriaResultsService<'a> {
             commit_sha,
             results: serde_json::from_value(results).unwrap_or_default(),
         }))
+    }
+}
+
+/// Absolute path of the durable QA evidence folder for a ticket.
+pub fn qa_evidence_dir(artifacts_dir: &Path, ticket_id: Id) -> PathBuf {
+    artifacts_dir
+        .join("tickets")
+        .join(ticket_id.to_string())
+        .join("qa-evidence")
+}
+
+/// Read one image from the ticket's qa-evidence folder. Rejects path escape and
+/// non-images. Caps at 512 KiB.
+pub fn read_qa_evidence(
+    artifacts_dir: &Path,
+    ticket_id: Id,
+    file: &str,
+) -> Result<Vec<u8>, QaEvidenceReadError> {
+    let name = sanitize_artifact_name(file).ok_or(QaEvidenceReadError::Invalid)?;
+    let root = qa_evidence_dir(artifacts_dir, ticket_id);
+    let dest = root.join(&name);
+    let meta = std::fs::metadata(&dest).map_err(|_| QaEvidenceReadError::NotFound)?;
+    if !meta.is_file() {
+        return Err(QaEvidenceReadError::NotFound);
+    }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(QaEvidenceReadError::Invalid);
+    }
+    std::fs::read(&dest).map_err(|_| QaEvidenceReadError::NotFound)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum QaEvidenceReadError {
+    Invalid,
+    NotFound,
+}
+
+fn ingest_screenshots(
+    ticket_id: Id,
+    results: &mut [CriterionResult],
+    worktree: &Path,
+    artifacts_dir: &Path,
+) {
+    let dest_root = qa_evidence_dir(artifacts_dir, ticket_id);
+    let _ = std::fs::remove_dir_all(&dest_root);
+    if let Err(err) = std::fs::create_dir_all(&dest_root) {
+        tracing::warn!(error = %err, %ticket_id, "qa-evidence folder create failed");
+        for result in results.iter_mut() {
+            result.screenshots.clear();
+        }
+        return;
+    }
+    for (ci, result) in results.iter_mut().enumerate() {
+        let mut kept = Vec::new();
+        for (si, raw) in result.screenshots.iter().enumerate() {
+            let Some(rel) = accept_source_path(raw) else {
+                tracing::warn!(path = %raw, %ticket_id, "rejected qa screenshot path");
+                continue;
+            };
+            let src = worktree.join(&rel);
+            let Ok(meta) = std::fs::metadata(&src) else {
+                tracing::warn!(path = %rel, %ticket_id, "qa screenshot missing");
+                continue;
+            };
+            if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_FILE_BYTES {
+                tracing::warn!(path = %rel, %ticket_id, "qa screenshot rejected (size/type)");
+                continue;
+            }
+            let ext = Path::new(&rel)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png")
+                .to_ascii_lowercase();
+            let name = format!("c{ci}-s{si}.{ext}");
+            let dest = dest_root.join(&name);
+            if let Err(err) = std::fs::copy(&src, &dest) {
+                tracing::warn!(error = %err, path = %rel, %ticket_id, "qa screenshot copy failed");
+                continue;
+            }
+            kept.push(name);
+        }
+        result.screenshots = kept;
+    }
+}
+
+/// Worktree-relative path under `.agent/qa-evidence/` with an image extension.
+fn accept_source_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches("./");
+    if !trimmed.starts_with(QA_EVIDENCE_PREFIX) {
+        return None;
+    }
+    let rest = &trimmed[QA_EVIDENCE_PREFIX.len()..];
+    if rest.is_empty() {
+        return None;
+    }
+    let path = Path::new(rest);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+    {
+        return None;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !IMAGE_EXT.iter().any(|a| *a == ext) {
+        return None;
+    }
+    Some(format!("{QA_EVIDENCE_PREFIX}{rest}"))
+}
+
+fn sanitize_artifact_name(file: &str) -> Option<String> {
+    let name = file.trim().trim_start_matches('/');
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return None;
+    }
+    let path = Path::new(name);
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+    {
+        return None;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !IMAGE_EXT.iter().any(|a| *a == ext) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Content-Type for a qa-evidence filename.
+pub fn qa_evidence_media_type(file: &str) -> &'static str {
+    match Path::new(file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
     }
 }
 
@@ -139,6 +315,12 @@ pub fn criteria_view(
                 text: text.clone(),
                 status: found.map_or(CriterionStatus::NotChecked, |result| result.status),
                 evidence: found.and_then(|result| result.evidence.clone()),
+                screenshots: found
+                    .map(|result| result.screenshots.clone())
+                    .unwrap_or_default(),
+                steps: found
+                    .map(|result| result.steps.clone())
+                    .unwrap_or_default(),
             }
         })
         .collect()
@@ -153,6 +335,8 @@ mod tests {
             criterion: criterion.into(),
             status,
             evidence: Some(format!("evidence for {criterion}")),
+            screenshots: Vec::new(),
+            steps: Vec::new(),
         }
     }
 
@@ -213,12 +397,89 @@ mod tests {
     #[test]
     fn a_result_for_an_older_commit_reads_as_not_checked() {
         let criteria = vec!["One".to_string()];
-        let stored = stored("old", vec![result("one", CriterionStatus::Met)]);
+        let mut met = result("one", CriterionStatus::Met);
+        met.screenshots = vec!["c0-s0.png".into()];
+        met.steps = vec!["click Save".into()];
+        let stored = stored("old", vec![met]);
         let view = criteria_view(&criteria, Some(&stored), Some("new"));
         assert_eq!(view[0].status, CriterionStatus::NotChecked);
         assert_eq!(view[0].evidence, None);
+        assert!(view[0].screenshots.is_empty());
+        assert!(view[0].steps.is_empty());
         let none = criteria_view(&criteria, Some(&stored), None);
         assert_eq!(none[0].status, CriterionStatus::NotChecked);
+    }
+
+    #[test]
+    fn screenshots_pass_through_on_matching_commit() {
+        let criteria = vec!["One".to_string()];
+        let mut met = result("one", CriterionStatus::Met);
+        met.screenshots = vec!["c0-s0.png".into()];
+        met.steps = vec!["open drawer".into()];
+        let stored = stored("abc", vec![met]);
+        let view = criteria_view(&criteria, Some(&stored), Some("abc"));
+        assert_eq!(view[0].screenshots, vec!["c0-s0.png"]);
+        assert_eq!(view[0].steps, vec!["open drawer"]);
+    }
+
+    #[test]
+    fn accept_source_path_requires_qa_evidence_prefix() {
+        assert!(accept_source_path(".agent/qa-evidence/a.png").is_some());
+        assert!(accept_source_path("./.agent/qa-evidence/a.jpeg").is_some());
+        assert!(accept_source_path(".agent/qa-evidence/../secrets.png").is_none());
+        assert!(accept_source_path("artifacts/a.png").is_none());
+        assert!(accept_source_path(".agent/qa-evidence/a.txt").is_none());
+    }
+
+    #[test]
+    fn sanitize_artifact_name_rejects_escape_and_non_images() {
+        assert_eq!(
+            sanitize_artifact_name("c0-s0.png").as_deref(),
+            Some("c0-s0.png")
+        );
+        assert!(sanitize_artifact_name("../x.png").is_none());
+        assert!(sanitize_artifact_name("a/b.png").is_none());
+        assert!(sanitize_artifact_name("notes.txt").is_none());
+    }
+
+    #[test]
+    fn ingest_copies_and_rewrites_filenames() {
+        let work = tempfile::tempdir().unwrap();
+        let artifacts = tempfile::tempdir().unwrap();
+        let src_dir = work.path().join(".agent/qa-evidence");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let png = minimal_png();
+        std::fs::write(src_dir.join("shot.png"), &png).unwrap();
+        let ticket_id = Id::new();
+        let mut results = vec![CriterionResult {
+            criterion: "One".into(),
+            status: CriterionStatus::Met,
+            evidence: None,
+            screenshots: vec![".agent/qa-evidence/shot.png".into()],
+            steps: vec!["step".into()],
+        }];
+        ingest_screenshots(ticket_id, &mut results, work.path(), artifacts.path());
+        assert_eq!(results[0].screenshots, vec!["c0-s0.png"]);
+        let dest = qa_evidence_dir(artifacts.path(), ticket_id).join("c0-s0.png");
+        assert_eq!(std::fs::read(dest).unwrap(), png);
+        assert_eq!(
+            read_qa_evidence(artifacts.path(), ticket_id, "c0-s0.png").unwrap(),
+            png
+        );
+        assert_eq!(
+            read_qa_evidence(artifacts.path(), ticket_id, "../c0-s0.png"),
+            Err(QaEvidenceReadError::Invalid)
+        );
+    }
+
+    fn minimal_png() -> Vec<u8> {
+        vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
+            0x02, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ]
     }
 
     #[test]
@@ -227,7 +488,13 @@ mod tests {
             "status": "done",
             "summary": "s",
             "criteriaResults": [
-                {"criterion": "a", "status": "met", "evidence": "test x"},
+                {
+                    "criterion": "a",
+                    "status": "met",
+                    "evidence": "test x",
+                    "screenshots": [".agent/qa-evidence/a.png", ""],
+                    "steps": ["open"]
+                },
                 {"criterion": "b", "status": "maybe"},
                 {"status": "met"},
                 "junk"
@@ -241,6 +508,11 @@ mod tests {
             panic!("done");
         };
         assert_eq!(criteria_results.len(), 2);
+        assert_eq!(
+            criteria_results[0].screenshots,
+            vec![".agent/qa-evidence/a.png"]
+        );
+        assert_eq!(criteria_results[0].steps, vec!["open"]);
         assert_eq!(criteria_results[1].status, CriterionStatus::NotChecked);
         let missing: AgentRunResult = serde_json::from_value(
             serde_json::json!({"status": "done", "summary": "s", "criteriaResults": "nope"}),

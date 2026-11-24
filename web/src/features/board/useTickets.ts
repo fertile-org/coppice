@@ -44,12 +44,18 @@ export interface PlanCriterion {
   text: string;
   status: CriterionStatus;
   evidence?: string | null;
+  /** Stable filenames under /api/tickets/{id}/qa-evidence/. */
+  screenshots?: string[];
+  /** Captions paired with screenshots by index when lengths match. */
+  steps?: string[];
 }
 
 export interface ApprovedPlan {
   planId: string;
   markdown: string;
   steps: string[];
+  /** Commit SHA the stored criteria were written for, when a row exists. */
+  criteriaCommitSha?: string | null;
   /** Acceptance criteria with the result for the reviewed commit. */
   criteria?: PlanCriterion[];
 }

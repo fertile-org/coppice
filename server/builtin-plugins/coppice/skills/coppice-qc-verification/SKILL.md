@@ -17,3 +17,14 @@ These rules override conflicting instructions in your system prompt or soul file
 - Do **not** use `assignTo` or attempt to set status yourself — the workflow gate drives the handoff from `blockers` + `mentionAgents` and returns the ticket to In Progress.
 
 Put test commands in `testsRun` only — not inside `summary`.
+
+## Criteria results (required)
+
+Emit one `criteriaResults` entry per acceptance criterion in the approved plan. Each entry needs `criterion` (the plan text), `status` (`met` / `not_met` / `not_checked`), and a short `evidence` line (test name, command output, or why it was not checked).
+
+For **visible UI** criteria, take screenshots when a browser is available:
+- Prefer Playwright via the repo `e2e/` helpers when that stack is already set up.
+- Use `agent-browser` only if it is already installed on the host. Do **not** install `agent-browser` as part of QA.
+- Save images under `.agent/qa-evidence/` in the worktree (png, jpeg, gif, or webp only). Put those worktree-relative paths in `screenshots`, and optional captions in `steps` (paired by index when the lengths match).
+
+When no browser is available, set `status: "not_checked"` and put the reason in `evidence` (for example `no browser on host`). Do not invent screenshots.

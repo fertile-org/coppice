@@ -316,6 +316,7 @@ the representative mixed-cardinality query-plan assertion.
 - **Always `MockProvider` in automated tests.** Returns JSON from `fixtures/agent-responses/` (`done.json`, `blocked.json`, …).
 - Contract: `AgentRunResult` in `server/src/providers/mod.rs` — must match product design §17.
 - Do not wire real CLI tools (Claude Code, Codex, etc.) into CI.
+- **QA evidence:** QC `criteriaResults` may include `screenshots` under `.agent/qa-evidence/` (png/jpeg/gif/webp). On record, the server copies them to `artifacts/tickets/{id}/qa-evidence/` and serves them at `GET /api/tickets/{id}/qa-evidence/{file}` (signed-in only). See `integration_qa_evidence` and the `coppice-qc-verification` skill.
 
 ## What to test when adding features
 

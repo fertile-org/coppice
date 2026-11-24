@@ -920,11 +920,22 @@ async fn execute_job(
             )
             .await
             .context("store reviewer brief")?;
+    }
+
+    if should_capture_criteria_results(run, &agent, ticket.ticket.status) {
+        if brief_commit_sha.is_none() {
+            brief_commit_sha = crate::services::git_ops::git_head_sha(&paths.worktree_dir)
+                .await
+                .ok();
+        }
+        let artifacts = PathBuf::from(&state.config.storage.artifacts_dir);
         crate::services::criteria_results::CriteriaResultsService::new(pool)
             .record(
                 ticket_id,
                 &result,
                 brief_commit_sha.as_deref().unwrap_or(""),
+                Some(paths.worktree_dir.as_path()),
+                Some(artifacts.as_path()),
             )
             .await
             .context("store acceptance criteria results")?;
@@ -1724,6 +1735,35 @@ fn should_capture_reviewer_brief(
     true
 }
 
+/// Criteria results come from implementation and QC. Review and Ready tech-lead
+/// refinement do not replace them.
+fn should_capture_criteria_results(
+    run: &crate::domain::run::AgentRun,
+    agent: &crate::domain::agent::Agent,
+    ticket_status: TicketStatus,
+) -> bool {
+    if run.job_type != "work_on_ticket" {
+        return false;
+    }
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+    if is_ready_tech_lead_refinement(
+        run.context_profile,
+        &run.job_type,
+        status_to_str(ticket_status),
+        &agent_key,
+        &agent.role,
+    ) {
+        return false;
+    }
+    if is_review_agent(agent) && ticket_status == TicketStatus::InReview {
+        return false;
+    }
+    true
+}
+
 fn should_finalize_run_git(
     run: &crate::domain::run::AgentRun,
     agent: &crate::domain::agent::Agent,
@@ -1993,9 +2033,19 @@ mod tests {
             &qc,
             TicketStatus::InQa
         ));
+        assert!(should_capture_criteria_results(
+            &test_run("work_on_ticket"),
+            &qc,
+            TicketStatus::InQa
+        ));
 
         let reviewer = test_agent("Reviewer", Some("reviewer"));
         assert!(!should_capture_reviewer_brief(
+            &test_run("work_on_ticket"),
+            &reviewer,
+            TicketStatus::InReview
+        ));
+        assert!(!should_capture_criteria_results(
             &test_run("work_on_ticket"),
             &reviewer,
             TicketStatus::InReview
