@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '../features/theme/ThemeProvider';
@@ -43,6 +43,17 @@ describe('AppShell', () => {
     sessionState.desktopMode = false;
     sessionState.user = { ...sessionState.user, role: 'admin' };
     document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('lists primary sidebar links as Boards, Chat, Agents, Knowledge', () => {
+    renderShell(['/boards']);
+
+    const sidebar = screen.getByTestId('app-shell-sidebar');
+    const labels = ['Boards', 'Chat', 'Agents', 'Knowledge'] as const;
+    const links = within(sidebar)
+      .getAllByRole('link')
+      .filter((link) => labels.includes(link.textContent?.trim() as (typeof labels)[number]));
+    expect(links.map((link) => link.textContent?.trim())).toEqual([...labels]);
   });
 
   it('puts Skip to board first on a board route', () => {

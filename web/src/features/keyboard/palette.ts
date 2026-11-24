@@ -23,8 +23,8 @@ export const PALETTE_HELP_LABEL = 'Keyboard shortcuts';
 /** Page jumps the G-then shortcuts register. Do not add `help.show` here. */
 export const PAGE_ACTION_ROUTES: Readonly<Record<string, string>> = {
   'nav.boards': '/boards',
-  'nav.agents': '/agents',
   'nav.chat': '/chat',
+  'nav.agents': '/agents',
   'nav.knowledge': '/knowledge',
   'nav.repositories': '/settings/repositories',
   'nav.plugins': '/settings/plugins',

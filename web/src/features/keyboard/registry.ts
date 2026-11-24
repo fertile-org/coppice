@@ -83,17 +83,17 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     scopes: ['global'],
   },
   {
-    id: 'nav.agents',
-    label: 'Go to Agents',
-    group: 'Navigate',
-    bindings: [sequence('g', 'a')],
-    scopes: ['global'],
-  },
-  {
     id: 'nav.chat',
     label: 'Go to Chat',
     group: 'Navigate',
     bindings: [sequence('g', 'c')],
+    scopes: ['global'],
+  },
+  {
+    id: 'nav.agents',
+    label: 'Go to Agents',
+    group: 'Navigate',
+    bindings: [sequence('g', 'a')],
     scopes: ['global'],
   },
   {
