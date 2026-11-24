@@ -53,8 +53,8 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/boards', label: 'Boards', icon: LayoutGrid },
-  { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
   { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },

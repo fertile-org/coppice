@@ -12,8 +12,8 @@ import {
 
 const PAGE_LABELS = [
   'Go to Boards',
-  'Go to Agents',
   'Go to Chat',
+  'Go to Agents',
   'Go to Knowledge',
   'Go to Repositories',
   'Go to Plugins',
