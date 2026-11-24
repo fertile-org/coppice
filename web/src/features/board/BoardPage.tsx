@@ -24,6 +24,7 @@ import { useRepos } from '../repos/useRepos';
 import { AcceptTicketDialog } from '../tickets/AcceptTicketDialog';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { commentsQueryKey, ticketQueryKey, useAssignSuggested } from '../tickets/useTicket';
+import { BoardSwitcher } from '../boards/BoardSwitcher';
 import { setLastBoardId, useBoards } from '../boards/useBoards';
 import {
   BoardFilterButton,
@@ -498,9 +499,11 @@ export function BoardPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="break-words font-display text-2xl font-semibold text-text-primary">
-            {boardName ?? (boardsPending ? '\u00a0' : 'Board')}
-          </h1>
+          <BoardSwitcher
+            boardId={boardId}
+            boardName={boardName}
+            boardsPending={boardsPending}
+          />
           <p className="mt-1 font-body text-sm text-text-secondary">
             Drag tickets between columns to update status.
           </p>
