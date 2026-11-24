@@ -5,6 +5,78 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FilePreviewProvider } from '../features/files/FilePreviewProvider';
 import { TicketMarkdown } from './TicketMarkdown';
 
+describe('TicketMarkdown document variant', () => {
+  it('renders SKILL.md frontmatter as a Properties block without a rule or bold heading', () => {
+    const skill = [
+      '---',
+      'name: coppice-qc-verification',
+      'description: QC rules for verifying in_qa tickets - verification only.',
+      '---',
+      '',
+      '# Coppice platform rules — QA verification',
+      '',
+      'These rules override conflicting instructions.',
+    ].join('\n');
+
+    render(
+      <TicketMarkdown variant="document" basePath="skills/SKILL.md" ticketId="ticket-1">
+        {skill}
+      </TicketMarkdown>,
+    );
+
+    const props = screen.getByTestId('markdown-frontmatter');
+    expect(within(props).getByText('Properties')).toBeInTheDocument();
+    expect(within(props).getByText('name')).toBeInTheDocument();
+    expect(within(props).getByText('coppice-qc-verification')).toBeInTheDocument();
+    expect(within(props).getByText('description')).toBeInTheDocument();
+    expect(
+      within(props).getByText(
+        'QC rules for verifying in_qa tickets - verification only.',
+      ),
+    ).toBeInTheDocument();
+    expect(props.querySelector('hr')).toBeNull();
+    expect(within(props).queryByRole('heading')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: /Coppice platform rules/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^name:/)).not.toBeInTheDocument();
+  });
+
+  it('renders the full document when frontmatter is missing or unclosed', () => {
+    const { rerender } = render(
+      <TicketMarkdown variant="document">{'# Only body'}</TicketMarkdown>,
+    );
+    expect(screen.queryByTestId('markdown-frontmatter')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Only body' })).toBeInTheDocument();
+
+    rerender(
+      <TicketMarkdown variant="document">
+        {'---\nname: orphan\n\n# Still rendered'}
+      </TicketMarkdown>,
+    );
+    expect(screen.queryByTestId('markdown-frontmatter')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Still rendered' })).toBeInTheDocument();
+    expect(screen.getByText(/name: orphan/)).toBeInTheDocument();
+  });
+
+  it('keeps the default comment variant compact (no Properties, 14px body classes)', () => {
+    render(
+      <TicketMarkdown>
+        {[
+          '---',
+          'name: should-not-parse',
+          '---',
+          '',
+          'Comment body.',
+        ].join('\n')}
+      </TicketMarkdown>,
+    );
+    expect(screen.queryByTestId('markdown-frontmatter')).not.toBeInTheDocument();
+    expect(screen.getByText('Comment body.')).toHaveClass('text-sm');
+  });
+});
+
+
 const MARKDOWN = [
   'Updated server/src/api/mod.rs and `web/src/App.tsx:2`.',
   '',

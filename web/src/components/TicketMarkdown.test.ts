@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCommentMarkdown } from './TicketMarkdown';
+import {
+  normalizeCommentMarkdown,
+  splitMarkdownFrontmatter,
+} from './TicketMarkdown';
+
+describe('splitMarkdownFrontmatter', () => {
+  it('extracts name and description from a SKILL.md frontmatter block', () => {
+    const raw = [
+      '---',
+      'name: coppice-qc-verification',
+      'description: QC rules for verifying in_qa tickets',
+      '---',
+      '',
+      '# Coppice platform rules — QA verification',
+      '',
+      'Body text.',
+    ].join('\n');
+    const { fields, body } = splitMarkdownFrontmatter(raw);
+    expect(fields).toEqual([
+      { key: 'name', value: 'coppice-qc-verification' },
+      { key: 'description', value: 'QC rules for verifying in_qa tickets' },
+    ]);
+    expect(body).toContain('# Coppice platform rules — QA verification');
+    expect(body).not.toContain('name:');
+  });
+
+  it('leaves content unchanged when there is no frontmatter', () => {
+    const raw = '# Title\n\nHello.';
+    expect(splitMarkdownFrontmatter(raw)).toEqual({ fields: null, body: raw });
+  });
+
+  it('leaves content unchanged when the opening --- is unclosed', () => {
+    const raw = '---\nname: orphan\n\n# Still body';
+    expect(splitMarkdownFrontmatter(raw)).toEqual({ fields: null, body: raw });
+  });
+
+  it('strips surrounding quotes from frontmatter values', () => {
+    const raw = ['---', 'name: "quoted"', "title: 'also'", '---', 'Body'].join('\n');
+    expect(splitMarkdownFrontmatter(raw).fields).toEqual([
+      { key: 'name', value: 'quoted' },
+      { key: 'title', value: 'also' },
+    ]);
+  });
+});
 
 describe('normalizeCommentMarkdown', () => {
   it('inserts a blank line before bold section labels', () => {

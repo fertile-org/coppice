@@ -162,11 +162,9 @@ function MarkdownRenderedPreview({
       data-testid="file-preview-markdown"
       className="min-h-0 flex-1 overflow-auto bg-surface-raised"
     >
-      <div className="mx-auto max-w-[760px] px-8 py-6">
-        <TicketMarkdown basePath={basePath} ticketId={ticketId}>
-          {text}
-        </TicketMarkdown>
-      </div>
+      <TicketMarkdown variant="document" basePath={basePath} ticketId={ticketId}>
+        {text}
+      </TicketMarkdown>
     </div>
   );
 }
