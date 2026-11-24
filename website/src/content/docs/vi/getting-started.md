@@ -35,7 +35,7 @@ Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Coppice
 
 Lưu agent xong, connector đó sẽ được bật. Bạn sẽ thấy dòng "{name} turned on."
 
-Thêm một agent **PM**, một agent **Technical Lead**, và ít nhất một agent làm việc (**Frontend Engineer**, **Backend Engineer** hoặc **Research**). Lên kế hoạch và chuyển giao việc cần đủ cả ba.
+Thêm một agent **PM**, một agent **Technical Lead**, và ít nhất một agent làm việc (**Frontend Engineer**, **Backend Engineer** hoặc **Research**). Lên kế hoạch và chuyển giao việc cần đủ cả ba. Thêm cả một agent **QC**, để các ticket qua được code review được kiểm tra ở In QA. Tuỳ chọn: nếu Playwright đã được cấu hình sẵn trong helper `e2e/` của repo ticket, hoặc `agent-browser` đã cài trên máy này, QC có thể đính kèm ảnh chụp các thay đổi giao diện. QC không tự cài trình duyệt; xem [Playwright](https://playwright.dev/docs/intro) và [agent-browser](https://github.com/vercel-labs/agent-browser).
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="Form tạo agent mới, đã điền tên, vai trò và chọn một CLI.">

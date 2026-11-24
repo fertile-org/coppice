@@ -35,7 +35,7 @@ Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppi
 
 L’enregistrement active ce connecteur. Vous verrez « {name} turned on. ».
 
-Ajoutez un agent **PM**, un agent **Technical Lead**, et au moins un agent qui fait le travail (**Frontend Engineer**, **Backend Engineer** ou **Research**). La planification et les passages de relais ont besoin des trois.
+Ajoutez un agent **PM**, un agent **Technical Lead**, et au moins un agent qui fait le travail (**Frontend Engineer**, **Backend Engineer** ou **Research**). La planification et les passages de relais ont besoin des trois. Ajoutez aussi un agent **QC**, pour que les tickets qui passent la revue de code soient vérifiés en In QA. Optionnel : si Playwright est déjà configuré dans les helpers `e2e/` du dépôt du ticket, ou si `agent-browser` est déjà installé sur cet ordinateur, QC peut joindre des captures d’écran des changements d’interface. QC n’installe jamais ni l’un ni l’autre ; voir [Playwright](https://playwright.dev/docs/intro) et [agent-browser](https://github.com/vercel-labs/agent-browser).
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="Le formulaire de nouvel agent avec un nom, un rôle et une CLI choisis.">
