@@ -147,7 +147,10 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
              `design:design-technical-options`, publish options, and set `designSetId` on that `create_ticket` \
              to the published set so the pick carries onto the parent. \
              Use at most 5 actions per reply and only when asked. The human confirms each one in the chat \
-             with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n",
+             with Create or Reject. Say the draft is ready for them to confirm. Never say it was created.\n\n\
+             If something is unclear and the answer would change your reply, you may ask 1 to 3 short \
+             `questions` (each with optional `choices`) on `result_submit` alongside your normal summary. \
+             If nothing is unclear, state your assumption and continue — do not ask.\n\n",
         );
         if input.has_attachments {
             out.push_str(

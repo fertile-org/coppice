@@ -2241,6 +2241,212 @@ async fn agent_chat_turn_proposes_ticket_until_human_accepts() {
 }
 
 #[tokio::test]
+async fn agent_chat_ask_questions_answer_round_trip() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("chat_ask_questions", |_| {}).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+    let session_id = start_chat_session(&app, &cookie, &csrf, &agent_id, None).await;
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"The knowledge page feels confusing"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let questions_message_id = await_agent_questions(&app, &cookie, &csrf, &session_id).await;
+
+    // Answer turn uses a plain reply; its written context must include the answers.
+    std::env::set_var("MOCK_AGENT_RESPONSE", "backend_engineer/chat_turn");
+    let answers_body = serde_json::json!({
+        "body": "**Which screen?**\nChat\n\n**One ticket or split?**\nOne ticket",
+        "answersFor": questions_message_id,
+        "answers": ["Chat", "One ticket"],
+    });
+    let answered = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &answers_body.to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::CREATED);
+    let answered_body: serde_json::Value = common::json_body(answered).await;
+    let answer_run = answered_body["runId"].as_str().expect("runId").to_string();
+
+    let list = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let body: serde_json::Value = common::json_body(list).await;
+    let messages = body["messages"].as_array().unwrap();
+    let card = messages
+        .iter()
+        .find(|m| m["id"] == questions_message_id)
+        .expect("questions card");
+    assert_eq!(card["actionMetadata"]["questionsStatus"], "answered");
+    assert_eq!(
+        card["actionMetadata"]["answers"],
+        serde_json::json!(["Chat", "One ticket"])
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut answer_status = String::new();
+    while tokio::time::Instant::now() < deadline {
+        let run = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/agent-runs/{answer_run}"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let run_body: serde_json::Value = common::json_body(run).await;
+        answer_status = run_body["run"]["status"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        if matches!(
+            answer_status.as_str(),
+            "succeeded" | "failed" | "blocked"
+        ) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(answer_status, "succeeded", "answer turn status");
+    let chat_dir = std::path::PathBuf::from(&state.config.agent.worktrees_path)
+        .join("chat")
+        .join(&session_id);
+    let context = std::fs::read_to_string(chat_dir.join(".agent").join("context.md"))
+        .expect("answer-turn context");
+    assert!(
+        context.contains("Chat") && context.contains("One ticket"),
+        "answer missing from next context: {context}"
+    );
+
+    // Free-form skip: seed a new pending card and post without answersFor.
+    let pool = state.db.as_ref().expect("test db");
+    let skip_id = Id::new();
+    sqlx::query(
+        r#"
+        INSERT INTO chat_messages (id, session_id, seq, role, body, action_metadata, attachment_ids)
+        VALUES (
+            $1, $2,
+            (SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $2),
+            'agent', 'One more?', $3, '{}'
+        )
+        "#,
+    )
+    .bind(skip_id)
+    .bind(Id::parse_str(&session_id).unwrap())
+    .bind(serde_json::json!({
+        "questions": [{ "question": "Skip me?" }],
+        "questionsStatus": "pending"
+    }))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let skipped = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"I'll type freely instead"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(skipped.status(), StatusCode::CREATED);
+
+    let after_skip = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let after_body: serde_json::Value = common::json_body(after_skip).await;
+    let skipped_card = after_body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == skip_id.to_string())
+        .expect("skipped card");
+    assert_eq!(
+        skipped_card["actionMetadata"]["questionsStatus"],
+        "skipped"
+    );
+}
+
+/// Wait for a chat turn that attached structured questions. Returns the agent message id.
+async fn await_agent_questions(
+    app: &axum::Router,
+    cookie: &str,
+    csrf: &str,
+    session_id: &str,
+) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                cookie,
+                csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        let found = messages["messages"].as_array().unwrap().iter().find(|m| {
+            m["role"] == "agent" && m["actionMetadata"]["questions"].is_array()
+        });
+        if let Some(message) = found {
+            return message["id"].as_str().unwrap().to_string();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no questions message"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
 async fn agent_chat_turn_proposes_knowledge_until_human_accepts() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

@@ -58,7 +58,28 @@ const chatProposalMetadataSchema = z.object({
   proposals: z.array(chatProposalSchema),
 });
 
+export const chatQuestionSchema = z.object({
+  question: z.string(),
+  choices: z.array(z.string()).optional(),
+});
+
+export const chatQuestionsStatusSchema = z.enum(['pending', 'answered', 'skipped']);
+
+const chatQuestionsMetadataSchema = z.object({
+  questions: z.array(chatQuestionSchema).min(1),
+  questionsStatus: chatQuestionsStatusSchema.optional().default('pending'),
+  answers: z.array(z.string()).optional(),
+});
+
 export type ChatProposal = z.infer<typeof chatProposalSchema>;
+export type ChatQuestion = z.infer<typeof chatQuestionSchema>;
+export type ChatQuestionsStatus = z.infer<typeof chatQuestionsStatusSchema>;
+
+export interface ChatQuestionsCard {
+  questions: ChatQuestion[];
+  status: ChatQuestionsStatus;
+  answers: string[];
+}
 
 export const chatAttachmentSchema = z.object({
   id: idSchema,
@@ -127,6 +148,10 @@ export type AcceptChatProposalResponse = z.infer<
 export interface PostChatMessageInput {
   body: string;
   attachmentIds?: string[];
+  /** Agent message id whose question card this reply answers. */
+  answersFor?: string;
+  /** Per-question answers when answering a card. */
+  answers?: string[];
 }
 
 export function parseChatActionMetadata(
@@ -140,4 +165,30 @@ export function parseChatActionMetadata(
 export function parseChatProposals(value: unknown): ChatProposal[] {
   const parsed = chatProposalMetadataSchema.safeParse(value);
   return parsed.success ? parsed.data.proposals : [];
+}
+
+/** Structured questions on an agent message; invalid metadata yields null. */
+export function parseChatQuestions(value: unknown): ChatQuestionsCard | null {
+  const parsed = chatQuestionsMetadataSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return {
+    questions: parsed.data.questions,
+    status: parsed.data.questionsStatus,
+    answers: parsed.data.answers ?? [],
+  };
+}
+
+/** Format Q/A pairs for the human chat message body. */
+export function formatQuestionAnswers(
+  questions: ChatQuestion[],
+  answers: string[],
+): string {
+  return questions
+    .map((q, i) => {
+      const answer = (answers[i] ?? '').trim();
+      if (!answer) return null;
+      return `**${q.question}**\n${answer}`;
+    })
+    .filter((line): line is string => line != null)
+    .join('\n\n');
 }

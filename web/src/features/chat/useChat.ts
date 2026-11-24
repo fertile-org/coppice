@@ -105,6 +105,8 @@ async function postMessage(
         input.attachmentIds && input.attachmentIds.length > 0
           ? input.attachmentIds
           : undefined,
+      answersFor: input.answersFor,
+      answers: input.answers,
     }),
   });
   return postChatMessageResponseSchema.parse(await res.json());

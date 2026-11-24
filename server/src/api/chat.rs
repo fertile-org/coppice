@@ -103,6 +103,12 @@ struct PatchSessionBody {
 struct PostMessageBody {
     body: String,
     attachment_ids: Option<Vec<Id>>,
+    /// Agent message id whose question card this reply answers.
+    #[serde(default)]
+    answers_for: Option<Id>,
+    /// Per-question answers when `answers_for` is set (same order as the card).
+    #[serde(default)]
+    answers: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -405,7 +411,14 @@ async fn post_message(
     let pool = pool_from_state(&state).map_err(ChatApiError::Status)?;
     let attachment_ids = body.attachment_ids.unwrap_or_default();
     let result = ChatService::new(pool)
-        .post_message(session_id, user.id, &body.body, &attachment_ids)
+        .post_message(
+            session_id,
+            user.id,
+            &body.body,
+            &attachment_ids,
+            body.answers_for,
+            body.answers.unwrap_or_default(),
+        )
         .await
         .map_err(map_chat_start_error)?;
     let attachments_by_id = attachments_for_messages(pool, std::slice::from_ref(&result.message))

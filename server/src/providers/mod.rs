@@ -341,6 +341,14 @@ pub enum AgentRunResult {
             skip_serializing_if = "Vec::is_empty"
         )]
         plan_questions: Vec<PlanQuestion>,
+        /// Agent-chat turns only: 1–3 questions with optional choices (same shape as planQuestions).
+        #[serde(
+            default,
+            rename = "questions",
+            deserialize_with = "lenient_plan_questions",
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        questions: Vec<PlanQuestion>,
         /// Planning runs only. Retires the ticket's live plan-run design sets.
         #[serde(
             default,

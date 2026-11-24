@@ -214,12 +214,34 @@ fn validate_chat_actions(
     crate::domain::chat_action::parse_chat_actions(actions).map(|_| ())
 }
 
+/// Chat-only structured questions. Same shape and max as planning `planQuestions`.
+fn validate_chat_questions(
+    result: &AgentRunResult,
+    profile: ContextProfile,
+    job_type: &str,
+) -> Result<(), String> {
+    let AgentRunResult::Done { questions, .. } = result else {
+        return Ok(());
+    };
+    if questions.is_empty() {
+        return Ok(());
+    }
+    if profile != ContextProfile::Conversation || job_type != "chat_turn" {
+        return Err("questions is only allowed in agent chat".into());
+    }
+    if questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
+        return Err(crate::copy::plan::PLAN_QUESTIONS_TOO_MANY.into());
+    }
+    Ok(())
+}
+
 pub fn validate_for_profile(
     result: &AgentRunResult,
     profile: ContextProfile,
     job_type: &str,
 ) -> Result<(), String> {
     validate_chat_actions(result, profile, job_type)?;
+    validate_chat_questions(result, profile, job_type)?;
     if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
         return validate_plan_result(result);
     }
@@ -832,6 +854,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -867,6 +890,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -909,6 +933,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -949,6 +974,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -1036,6 +1062,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -1068,6 +1095,7 @@ mod tests {
             look_here_first: None,
             criteria_results: Vec::new(),
             plan_questions: Vec::new(),
+            questions: Vec::new(),
             no_visible_change: false,
             suggest_skip_human_review: false,
             advanced: None,
@@ -1154,6 +1182,42 @@ mod tests {
             let err = validate_for_profile(&result, profile, job).expect_err("actions rejected");
             assert!(err.contains("only allowed in agent chat"), "{err}");
         }
+    }
+
+    #[test]
+    fn validate_for_profile_chat_questions_max_three_and_chat_only() {
+        use crate::copy::plan::PLAN_QUESTIONS_TOO_MANY;
+        use crate::providers::PlanQuestion;
+
+        let question = |text: &str| PlanQuestion {
+            question: text.into(),
+            choices: vec![],
+        };
+        let mut ok = done_result();
+        if let AgentRunResult::Done { questions, .. } = &mut ok {
+            *questions = vec![question("Which screen?"), question("Split?")];
+        }
+        assert!(validate_for_profile(&ok, ContextProfile::Conversation, "chat_turn").is_ok());
+
+        let mut too_many = done_result();
+        if let AgentRunResult::Done { questions, .. } = &mut too_many {
+            *questions = ["a", "b", "c", "d"].iter().map(|q| question(q)).collect();
+        }
+        let err = validate_for_profile(&too_many, ContextProfile::Conversation, "chat_turn")
+            .expect_err("cap");
+        assert_eq!(err, PLAN_QUESTIONS_TOO_MANY);
+
+        let err = validate_for_profile(&ok, ContextProfile::Full, "work_on_ticket")
+            .expect_err("ticket rejected");
+        assert!(err.contains("only allowed in agent chat"), "{err}");
+
+        let err = validate_for_profile(
+            &ok,
+            ContextProfile::Full,
+            crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+        )
+        .expect_err("planning rejected");
+        assert!(err.contains("only allowed in agent chat"), "{err}");
     }
 
     #[test]
