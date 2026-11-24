@@ -24,15 +24,6 @@ const ASSETS = path.join(REPO_ROOT, 'website', 'public', 'assets');
 const OUT = path.join(VIDEO_ROOT, 'out');
 const GIF_MAX_BYTES = Math.floor(2.5 * 1024 * 1024);
 const POSTER_FRAME = 235; // Done hold near the end of Accept beat
-// Remotion ships a trimmed ffmpeg with the GIF filters this script needs.
-const FFMPEG = path.join(
-  VIDEO_ROOT,
-  'node_modules/@remotion/compositor-linux-x64-gnu/ffmpeg',
-);
-const FFPROBE = path.join(
-  VIDEO_ROOT,
-  'node_modules/@remotion/compositor-linux-x64-gnu/ffprobe',
-);
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -62,6 +53,15 @@ function runCapture(cmd, args, opts = {}) {
       else reject(new Error(`${cmd} failed (${code}): ${stderr || stdout}`));
     });
   });
+}
+
+/** Platform-portable Remotion ffmpeg (works on macOS arm64 and Linux). */
+function remotionFfmpeg(args) {
+  return run('npx', ['remotion', 'ffmpeg', ...args], { cwd: VIDEO_ROOT });
+}
+
+function remotionFfprobe(args) {
+  return runCapture('npx', ['remotion', 'ffprobe', ...args], { cwd: VIDEO_ROOT });
 }
 
 async function main() {
@@ -99,7 +99,7 @@ async function main() {
 
   console.log('hero-video: encode 960px gif');
   // Remotion's ffmpeg has no `fps` filter — use `-r`. Palette keeps size ≤ 2.5 MB.
-  await run(FFMPEG, [
+  await remotionFfmpeg([
     '-y',
     '-i',
     mp4Tmp,
@@ -115,7 +115,7 @@ async function main() {
   const gifBytes = (await stat(gifTmp)).size;
   if (gifBytes > GIF_MAX_BYTES) {
     console.log(`hero-video: gif ${gifBytes} bytes > 2.5 MB, retrying with fewer colours`);
-    await run(FFMPEG, [
+    await remotionFfmpeg([
       '-y',
       '-i',
       mp4Tmp,
@@ -148,7 +148,7 @@ async function main() {
   console.log('hero-video: web:images');
   await run('npm', ['run', 'web:images'], { cwd: path.join(REPO_ROOT, 'website') });
 
-  const probe = await runCapture(FFPROBE, [
+  const probe = await remotionFfprobe([
     '-v',
     'error',
     '-select_streams',
