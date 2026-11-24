@@ -2,6 +2,7 @@
 **/*.rs.bk
 .DS_Store
 config.toml
+!.cargo/config.toml
 deploy/config/config.toml
 e2e/screenshot/.capture-dir
 e2e/screenshot/.capture-dir.*
