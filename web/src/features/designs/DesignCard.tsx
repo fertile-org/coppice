@@ -12,11 +12,18 @@ export function DesignCard({ design, scope }: { design: DesignSet; scope?: Desig
     <section className="rounded-md border border-border bg-surface-raised px-3 py-3">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-body text-sm font-medium text-text-primary">{design.title}</h3>
-        {design.chosen ? (
-          <span className="inline-flex shrink-0 items-center rounded-full border border-border px-2 py-0.5 font-body text-xs text-text-secondary">
-            {DESIGN_COPY.chosen}
-          </span>
-        ) : null}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          {design.fromChat ? (
+            <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-body text-xs text-text-secondary">
+              {DESIGN_COPY.fromChat}
+            </span>
+          ) : null}
+          {design.chosen ? (
+            <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-body text-xs text-text-secondary">
+              {DESIGN_COPY.chosen}
+            </span>
+          ) : null}
+        </div>
       </div>
       <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
         {design.options.map((option) => (

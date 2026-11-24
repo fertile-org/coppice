@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
   openTicket: vi.fn(),
+  refetchMessages: vi.fn(),
+  onLiveFinished: null as (() => void) | null,
   sessions: [] as Array<{
     id: string;
     boardId: string | null;
@@ -136,7 +138,7 @@ vi.mock('./useChat', () => ({
   }),
   useChatMessages: () => ({
     data: { messages: mocks.messages, olderBeforeSeq: mocks.olderBeforeSeq ?? undefined },
-    refetch: vi.fn(),
+    refetch: mocks.refetchMessages,
   }),
   fetchOlderMessages: (...args: unknown[]) => mocks.fetchOlderMessages(...args),
   useCreateChatSession: () => ({
@@ -162,20 +164,26 @@ vi.mock('./useChat', () => ({
 }));
 
 vi.mock('./useChatRunLiveStream', () => ({
-  useChatRunLiveStream: (runId: string | null) => ({
-    text: runId ? 'Partial…' : '',
-    thinkingText: '',
-    replyText: runId ? 'Partial…' : '',
-    connection: 'open' as const,
-    error: null,
-    finished: false,
-    store: null,
-    consoleEntries: [],
-    awaiting: false,
-    thinkingLabel: 'Thinking…',
-    hasOpenCode: false,
-    hasConsole: false,
-  }),
+  useChatRunLiveStream: (
+    runId: string | null,
+    opts?: { onFinished?: () => void },
+  ) => {
+    mocks.onLiveFinished = opts?.onFinished ?? null;
+    return {
+      text: runId ? 'Partial…' : '',
+      thinkingText: '',
+      replyText: runId ? 'Partial…' : '',
+      connection: 'open' as const,
+      error: null,
+      finished: false,
+      store: null,
+      consoleEntries: [],
+      awaiting: false,
+      thinkingLabel: 'Thinking…',
+      hasOpenCode: false,
+      hasConsole: false,
+    };
+  },
 }));
 
 function renderChat(path = '/chat') {
@@ -220,6 +228,8 @@ describe('ChatPage', () => {
     mocks.acceptProposal.mockReset();
     mocks.rejectProposal.mockReset();
     mocks.openTicket.mockReset();
+    mocks.refetchMessages.mockReset();
+    mocks.onLiveFinished = null;
     mocks.sessions = [];
     mocks.messages = [];
     vi.stubGlobal(
@@ -322,6 +332,44 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(mocks.stopSession).toHaveBeenCalled();
     });
+  });
+
+  it('refetches chat designs when a live turn finishes', async () => {
+    const runId = '00000000-0000-4000-8000-000000000040';
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        hasActiveRun: true,
+        activeRunId: runId,
+      },
+    ];
+    mocks.messages = [
+      {
+        id: '00000000-0000-4000-8000-000000000030',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 1,
+        role: 'human',
+        body: 'Go',
+        agentRunId: runId,
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:01:00Z',
+      },
+    ];
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+    expect(mocks.onLiveFinished).toEqual(expect.any(Function));
+    act(() => {
+      mocks.onLiveFinished!();
+    });
+    await waitFor(() => {
+      expect(mocks.refetchMessages).toHaveBeenCalled();
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['designs', 'chat', ACTIVE_SESSION.id],
+      });
+    });
+    invalidateSpy.mockRestore();
   });
 
   it('shows the isolation banner only for connectors that need it', () => {

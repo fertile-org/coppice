@@ -5,6 +5,7 @@ export const DESIGN_COPY = {
   dialogTitle: 'Design options',
   recommended: 'Recommended',
   chosen: 'Chosen',
+  fromChat: 'From chat',
   yourPick: 'Your pick',
   noPreview: 'This preview has no file.',
   loadingPreview: 'Loading preview…',

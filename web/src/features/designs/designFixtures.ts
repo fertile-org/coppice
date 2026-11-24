@@ -66,6 +66,7 @@ export function makeDesignSet(overrides: Partial<DesignSet> = {}): DesignSet {
     selected: makePick(quiet),
     superseded: false,
     fromPlanRun: true,
+    fromChat: false,
     inherited: false,
     choice: { mode: 'update_plan', planOutOfDate: false },
     ...overrides,
