@@ -8,6 +8,7 @@ import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
 import { publishKeybindings, readKeybindings } from '../keyboard/keybindings';
+import { AppearanceSection } from './AppearanceSection';
 import { SettingsUi } from './SettingsUi';
 import { SETTINGS_UI_QUERY_KEY } from './settingsUiModel';
 import { TomlEditor } from './TomlEditor';
@@ -303,9 +304,12 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      <h1 className="font-display text-2xl font-semibold text-text-primary">Settings</h1>
+
+      <AppearanceSection />
+
       <header className="border-b border-border pb-6">
-        <h1 className="font-display text-2xl font-semibold text-text-primary">Settings</h1>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="font-body text-sm text-text-secondary">
             {mode === 'ui' ? (
               <>

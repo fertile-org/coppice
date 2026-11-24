@@ -5,6 +5,7 @@ import 'xterm/css/xterm.css';
 import '../../opencode-session/theme/opencode-theme.css';
 import { openCodeXtermTheme } from '../../opencode-session/theme/ayu-palette';
 import { sessionTheme } from '../../opencode-session/theme/session-theme';
+import { useTextSize } from '../theme/TextSizeProvider';
 import { LiveRunActivityBar } from './LiveRunActivityBar';
 
 interface LiveConsoleProps {
@@ -31,6 +32,8 @@ export function LiveConsole({
   shouldReconnect,
   startedAt,
 }: LiveConsoleProps) {
+  const { size: textSize } = useTextSize();
+  const initialTextSizeRef = useRef(textSize);
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -50,7 +53,7 @@ export function LiveConsole({
     const term = new Terminal({
       theme: openCodeXtermTheme,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: 15,
+      fontSize: initialTextSizeRef.current,
       scrollback: 5000,
       convertEol: true,
     });
@@ -68,6 +71,13 @@ export function LiveConsole({
       setTermReady(false);
     };
   }, []);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.fontSize = textSize;
+    fitRef.current?.fit();
+  }, [textSize]);
 
   useEffect(() => {
     if (!runId || !termReady || !termRef.current) return;

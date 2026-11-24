@@ -24,6 +24,18 @@
           document.documentElement.setAttribute('data-theme', resolved);
           document.documentElement.style.colorScheme = resolved;
         } catch (e) {}
+        try {
+          var sizeRaw = localStorage.getItem('coppice.textSize');
+          var size =
+            sizeRaw === '14' ||
+            sizeRaw === '15' ||
+            sizeRaw === '16' ||
+            sizeRaw === '17'
+              ? Number(sizeRaw)
+              : 15;
+          document.documentElement.style.fontSize =
+            'calc(16px * ' + size + ' / 14)';
+        } catch (e) {}
       })();
     </script>
   </head>

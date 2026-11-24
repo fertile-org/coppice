@@ -4,6 +4,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
+import { TEXT_SIZE_STORAGE_KEY } from '../theme/textSize';
+import { TextSizeProvider } from '../theme/TextSizeProvider';
 import { SettingsPage } from './SettingsPage';
 
 const mocks = vi.hoisted(() => ({
@@ -108,9 +110,11 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>
+      <TextSizeProvider>
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      </TextSizeProvider>
     </QueryClientProvider>,
   );
 }
@@ -159,6 +163,35 @@ describe('Settings UI mode', () => {
     expect(screen.getByRole('switch', { name: 'Edit as TOML' })).not.toBeChecked();
     expect(screen.queryByRole('textbox', { name: 'config.toml' })).not.toBeInTheDocument();
     expect(screen.getByTestId('config-path')).toHaveTextContent(disk.path);
+  });
+
+  it('shows the Appearance text size control and updates it right away', async () => {
+    renderPage();
+
+    const control = await screen.findByTestId('text-size-control');
+    const defaultBtn = within(control).getByRole('button', { name: 'Default' });
+    expect(defaultBtn).toHaveAttribute('aria-pressed', 'true');
+    const defaultRoot = document.documentElement.style.fontSize;
+    expect(defaultRoot).toMatch(/17\.14/);
+    expect(screen.getByTestId('text-size-preview')).toBeVisible();
+
+    fireEvent.click(within(control).getByRole('button', { name: 'Large' }));
+    expect(within(control).getByRole('button', { name: 'Large' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(defaultBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(localStorage.getItem(TEXT_SIZE_STORAGE_KEY)).toBe('16');
+    expect(document.documentElement.style.fontSize).not.toBe(defaultRoot);
+    expect(document.documentElement.style.fontSize).toMatch(/18\.28/);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Edit as TOML' }));
+    expect(screen.getByTestId('text-size-control')).toBeVisible();
+    expect(
+      within(screen.getByTestId('text-size-control')).getByRole('button', {
+        name: 'Large',
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('marks a key the file sets and resets it to the default', async () => {
