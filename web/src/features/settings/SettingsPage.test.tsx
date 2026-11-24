@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
+import { TextSizeProvider } from '../theme/TextSizeProvider';
 import { SettingsPage } from './SettingsPage';
 
 const mocks = vi.hoisted(() => ({
@@ -58,9 +59,11 @@ function renderPage() {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>
+      <TextSizeProvider>
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      </TextSizeProvider>
     </QueryClientProvider>,
   );
   return { client, ...view };

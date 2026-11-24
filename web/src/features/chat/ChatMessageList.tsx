@@ -56,7 +56,7 @@ export type StreamingAgentState = {
 
 const ESTIMATED_ROW_HEIGHT = 72;
 const AGENT_PROSE_CLASS =
-  '[&_h3]:text-[15px] [&_ol]:text-[15px] [&_p]:text-[15px] [&_ul]:text-[15px]';
+  '[&_h3]:text-sm [&_ol]:text-sm [&_p]:text-sm [&_ul]:text-sm';
 const SYSTEM_PROSE_CLASS =
   '[&_li]:text-text-secondary [&_ol]:text-text-secondary [&_p]:text-text-secondary [&_td]:text-text-secondary [&_ul]:text-text-secondary';
 
