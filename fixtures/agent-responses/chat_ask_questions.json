@@ -1,0 +1,16 @@
+{
+  "status": "done",
+  "summary": "Before I draft a ticket, two quick questions:",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "questions": [
+    {
+      "question": "Which screen?",
+      "choices": ["Knowledge inbox", "Chat"]
+    },
+    {
+      "question": "One ticket or split?"
+    }
+  ]
+}

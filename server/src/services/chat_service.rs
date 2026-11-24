@@ -606,6 +606,8 @@ impl<'a> ChatService<'a> {
         owner_user_id: Id,
         body: &str,
         attachment_ids: &[Id],
+        answers_for: Option<Id>,
+        answers: Vec<String>,
     ) -> Result<PostMessageResult, ChatError> {
         let body = body.trim();
         if body.is_empty() && attachment_ids.is_empty() {
@@ -627,6 +629,20 @@ impl<'a> ChatService<'a> {
 
         let mut tx = self.pool.begin().await?;
         lock_chat_session(&mut tx, session_id).await?;
+
+        if let Some(card_id) = answers_for {
+            settle_questions_card(
+                &mut tx,
+                session_id,
+                card_id,
+                crate::domain::chat_action::QUESTIONS_STATUS_ANSWERED,
+                Some(&answers),
+            )
+            .await?;
+        } else {
+            skip_latest_pending_questions(&mut tx, session_id).await?;
+        }
+
         let next_seq: i64 = sqlx::query_scalar(
             r#"
             SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
@@ -1549,6 +1565,93 @@ async fn lock_proposal_message(
     .fetch_optional(&mut **tx)
     .await?;
     row.flatten().ok_or(ChatError::NotFound)
+}
+
+/// Newest agent message in the session that still has unanswered questions.
+async fn latest_pending_questions_id(
+    tx: &mut Transaction<'_, Postgres>,
+    session_id: Id,
+) -> Result<Option<Id>, ChatError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, action_metadata FROM chat_messages
+        WHERE session_id = $1 AND role = 'agent' AND action_metadata IS NOT NULL
+        ORDER BY seq DESC
+        "#,
+    )
+    .bind(session_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let meta: Option<serde_json::Value> = row.get("action_metadata");
+        if meta
+            .as_ref()
+            .is_some_and(crate::domain::chat_action::has_pending_questions)
+        {
+            return Ok(Some(row.get("id")));
+        }
+    }
+    Ok(None)
+}
+
+async fn settle_questions_card(
+    tx: &mut Transaction<'_, Postgres>,
+    session_id: Id,
+    card_id: Id,
+    status: &str,
+    answers: Option<&[String]>,
+) -> Result<(), ChatError> {
+    let latest = latest_pending_questions_id(tx, session_id).await?;
+    if latest != Some(card_id) {
+        return Err(ChatError::Validation(
+            "answersFor must be the latest unanswered questions card".into(),
+        ));
+    }
+    let mut metadata = lock_proposal_message(tx, session_id, card_id).await?;
+    if !crate::domain::chat_action::has_pending_questions(&metadata) {
+        return Err(ChatError::Validation(
+            "that message has no unanswered questions".into(),
+        ));
+    }
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert(
+            "questionsStatus".into(),
+            serde_json::Value::String(status.into()),
+        );
+        if let Some(answers) = answers {
+            obj.insert(
+                "answers".into(),
+                serde_json::Value::Array(
+                    answers
+                        .iter()
+                        .map(|a| serde_json::Value::String(a.clone()))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    update_message_metadata(tx, card_id, &metadata).await?;
+    Ok(())
+}
+
+async fn skip_latest_pending_questions(
+    tx: &mut Transaction<'_, Postgres>,
+    session_id: Id,
+) -> Result<(), ChatError> {
+    let Some(card_id) = latest_pending_questions_id(tx, session_id).await? else {
+        return Ok(());
+    };
+    let mut metadata = lock_proposal_message(tx, session_id, card_id).await?;
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert(
+            "questionsStatus".into(),
+            serde_json::Value::String(
+                crate::domain::chat_action::QUESTIONS_STATUS_SKIPPED.into(),
+            ),
+        );
+    }
+    update_message_metadata(tx, card_id, &metadata).await?;
+    Ok(())
 }
 
 fn ensure_proposal_pending(proposal: &serde_json::Value) -> Result<(), ChatError> {

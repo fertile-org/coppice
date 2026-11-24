@@ -9,10 +9,13 @@ import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import {
+  formatQuestionAnswers,
   parseChatActionMetadata,
   parseChatProposals,
+  parseChatQuestions,
   type ChatMessage,
   type ChatProposal,
+  type ChatQuestionsCard,
 } from '../../lib/schemas/chat';
 import type { DesignSet } from '../../lib/schemas/design';
 import {
@@ -24,11 +27,23 @@ import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import '../../opencode-session/theme/opencode-theme.css';
 import { DesignCard } from '../designs/DesignCard';
 import { useDesigns, type DesignScope } from '../designs/useDesigns';
+import { QuestionsForm } from '../questions/QuestionsForm';
 import { cn } from '../../lib/utils';
 import { useBoards } from '../boards/useBoards';
 import { CommentAttachments } from '../tickets/CommentAttachments';
 import { useOpenTicket } from '../tickets/useOpenTicket';
-import { useAcceptChatProposal, useRejectChatProposal } from './useChat';
+import {
+  useAcceptChatProposal,
+  usePostChatMessage,
+  useRejectChatProposal,
+} from './useChat';
+
+const CHAT_QUESTIONS_COPY = {
+  title: 'Questions from the agent',
+  answerPlaceholder: 'Your answer',
+  sendAnswers: 'Send answers',
+  sending: 'Sending…',
+};
 
 export type StreamingAgentState = {
   runId: string;
@@ -434,6 +449,25 @@ function StreamingThinking({
   );
 }
 
+function questionsStatusLabel(card: ChatQuestionsCard): string | undefined {
+  if (card.status === 'answered') return 'Answered';
+  if (card.status === 'skipped') return 'Skipped';
+  return undefined;
+}
+
+/** Newest agent message with unanswered questions, if any. */
+export function latestPendingQuestionsMessageId(
+  messages: ChatMessage[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role !== 'agent') continue;
+    const card = parseChatQuestions(message.actionMetadata);
+    if (card?.status === 'pending') return message.id;
+  }
+  return null;
+}
+
 export function ChatMessageBubble({
   message,
   streaming,
@@ -444,6 +478,9 @@ export function ChatMessageBubble({
   proposalContext,
   designs,
   designScope,
+  questionsInteractive = false,
+  onAnswerQuestions,
+  questionsDisabled = false,
 }: {
   message?: ChatMessage;
   streaming?: boolean;
@@ -454,6 +491,10 @@ export function ChatMessageBubble({
   proposalContext?: ChatProposalContext;
   designs?: DesignSet[];
   designScope?: DesignScope;
+  /** True only for the latest unanswered questions card. */
+  questionsInteractive?: boolean;
+  onAnswerQuestions?: (answers: string[]) => void | Promise<void>;
+  questionsDisabled?: boolean;
 }) {
   if (streaming) {
     const thinking = (streamingThinking ?? '').trim();
@@ -551,6 +592,27 @@ export function ChatMessageBubble({
               />
             ))
           : null}
+        {message.role === 'agent'
+          ? (() => {
+              const card = parseChatQuestions(message.actionMetadata);
+              if (!card) return null;
+              const interactive = questionsInteractive && card.status === 'pending';
+              return (
+                <div className="mt-3">
+                  <QuestionsForm
+                    questions={card.questions}
+                    copy={CHAT_QUESTIONS_COPY}
+                    readOnly={!interactive}
+                    statusLabel={
+                      interactive ? undefined : questionsStatusLabel(card)
+                    }
+                    disabled={questionsDisabled}
+                    onSubmit={interactive ? onAnswerQuestions : undefined}
+                  />
+                </div>
+              );
+            })()
+          : null}
       </article>
       {message.role === 'agent'
         ? designs?.map((set) => (
@@ -569,16 +631,21 @@ export function ChatMessageList({
   streamingAgent,
   proposalContext,
   chatSessionId,
+  questionsDisabled = false,
 }: {
   messages: ChatMessage[];
   thinking?: boolean;
   streamingAgent?: StreamingAgentState;
   proposalContext?: ChatProposalContext;
   chatSessionId?: string;
+  /** Disable the interactive questions card (e.g. while a turn is running). */
+  questionsDisabled?: boolean;
 }) {
   const { data: designSets } = useDesigns(
     chatSessionId ? { chatSessionId } : undefined,
   );
+  const postMessage = usePostChatMessage(chatSessionId ?? '');
+  const pendingQuestionsId = latestPendingQuestionsMessageId(messages);
   const parentRef = useRef<HTMLDivElement>(null);
   const streamingRow = streamingAgent ? 1 : 0;
   const rowCount = messages.length + streamingRow;
@@ -637,6 +704,37 @@ export function ChatMessageList({
                     proposalContext={proposalContext}
                     designs={designsForRun(designSets, messages[item.index]?.agentRunId)}
                     designScope={chatSessionId ? { chatSessionId } : undefined}
+                    questionsInteractive={
+                      messages[item.index]!.id === pendingQuestionsId
+                    }
+                    questionsDisabled={
+                      questionsDisabled || postMessage.isPending
+                    }
+                    onAnswerQuestions={
+                      chatSessionId &&
+                      messages[item.index]!.id === pendingQuestionsId
+                        ? async (answers) => {
+                            const card = parseChatQuestions(
+                              messages[item.index]!.actionMetadata,
+                            );
+                            if (!card) return;
+                            const body = formatQuestionAnswers(
+                              card.questions,
+                              answers,
+                            );
+                            if (!body.trim()) return;
+                            try {
+                              await postMessage.mutateAsync({
+                                body,
+                                answersFor: messages[item.index]!.id,
+                                answers,
+                              });
+                            } catch (err) {
+                              throw new Error(parseApiErrorMessage(err));
+                            }
+                          }
+                        : undefined
+                    }
                   />
                 ) : (
                   <ChatMessageBubble

@@ -513,6 +513,7 @@ function ChatTranscript({
             thinking={awaiting && !activeRunId}
             streamingAgent={streamingAgent}
             chatSessionId={session?.id}
+            questionsDisabled={awaiting || session?.status !== 'active'}
             proposalContext={
               session
                 ? {

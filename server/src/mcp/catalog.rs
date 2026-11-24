@@ -359,6 +359,18 @@ fn result_submit_properties() -> Value {
                 "required": ["question"],
             },
         },
+        "questions": {
+            "type": "array",
+            "description": "Agent chat only. 1 to 3 short questions with optional choices. Unlike planQuestions, you may also include a normal reply body.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string" },
+                    "choices": strings("Optional short answers to pick from."),
+                },
+                "required": ["question"],
+            },
+        },
         "advanced": {
             "type": "object",
             "description": "plan_plugin_build only. Structured Advanced data (pluginName, version, description, files, skills, servers, settings, permissions, manifestPreview).",

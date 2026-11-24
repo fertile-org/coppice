@@ -1433,8 +1433,27 @@ async fn execute_chat_turn(
         _ => None,
     };
 
+    // prefer_submitted_result may skip validate_for_profile; drop bad questions instead of failing.
+    let questions = match &result {
+        AgentRunResult::Done { questions, .. } if !questions.is_empty() => {
+            if questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
+                tracing::warn!(
+                    run_id = %run.id,
+                    count = questions.len(),
+                    "dropping invalid chat questions (too many)"
+                );
+                Vec::new()
+            } else {
+                questions.clone()
+            }
+        }
+        _ => Vec::new(),
+    };
+    let action_metadata =
+        crate::domain::chat_action::merge_questions_metadata(proposals, &questions);
+
     ChatService::new(pool)
-        .append_agent_message_with_proposals(session_id, run.id, &summary, proposals)
+        .append_agent_message_with_proposals(session_id, run.id, &summary, action_metadata)
         .await
         .context("persist agent chat message")?;
 

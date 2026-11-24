@@ -145,6 +145,57 @@ pub fn parse_chat_actions(actions: &serde_json::Value) -> Result<Vec<ChatAction>
     Ok(out)
 }
 
+/// Pending / answered / skipped status for chat question cards.
+pub const QUESTIONS_STATUS_PENDING: &str = "pending";
+pub const QUESTIONS_STATUS_ANSWERED: &str = "answered";
+pub const QUESTIONS_STATUS_SKIPPED: &str = "skipped";
+
+/// Merge pending questions into agent-message `action_metadata` (alongside proposals).
+pub fn merge_questions_metadata(
+    existing: Option<serde_json::Value>,
+    questions: &[crate::providers::PlanQuestion],
+) -> Option<serde_json::Value> {
+    if questions.is_empty() {
+        return existing;
+    }
+    let mut meta = match existing {
+        Some(serde_json::Value::Object(map)) => map,
+        Some(_) | None => serde_json::Map::new(),
+    };
+    let items: Vec<serde_json::Value> = questions
+        .iter()
+        .map(|q| {
+            serde_json::json!({
+                "question": q.question,
+                "choices": q.choices,
+            })
+        })
+        .collect();
+    meta.insert("questions".into(), serde_json::Value::Array(items));
+    meta.insert(
+        "questionsStatus".into(),
+        serde_json::Value::String(QUESTIONS_STATUS_PENDING.into()),
+    );
+    Some(serde_json::Value::Object(meta))
+}
+
+/// True when metadata has unanswered chat questions.
+pub fn has_pending_questions(metadata: &serde_json::Value) -> bool {
+    let Some(questions) = metadata.get("questions").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    if questions.is_empty() {
+        return false;
+    }
+    match metadata
+        .get("questionsStatus")
+        .and_then(serde_json::Value::as_str)
+    {
+        None | Some(QUESTIONS_STATUS_PENDING) => true,
+        _ => false,
+    }
+}
+
 /// Pending proposal cards for an agent message's `action_metadata`.
 /// Returns `None` when there is nothing to propose.
 pub fn proposals_metadata(actions: &[ChatAction]) -> Option<serde_json::Value> {
@@ -384,5 +435,30 @@ mod tests {
         let transcript =
             "### Human\n\nFirst\n\n### Agent\n\nOk\n\n### Human\n\nShip the feature please\n\n";
         assert_eq!(draft_ticket_title(transcript), "Ship the feature please");
+    }
+
+    #[test]
+    fn merge_questions_keeps_proposals_and_marks_pending() {
+        use crate::providers::PlanQuestion;
+        let proposals = proposals_metadata(&[ChatAction::CreateTicket {
+            title: "T".into(),
+            description: String::new(),
+            repo_id: None,
+            board_id: None,
+            children: vec![],
+            design_set_id: None,
+        }]);
+        let merged = merge_questions_metadata(
+            proposals,
+            &[PlanQuestion {
+                question: "Which?".into(),
+                choices: vec!["A".into()],
+            }],
+        )
+        .expect("merged");
+        assert!(merged["proposals"].as_array().unwrap().len() == 1);
+        assert_eq!(merged["questionsStatus"], QUESTIONS_STATUS_PENDING);
+        assert_eq!(merged["questions"][0]["question"], "Which?");
+        assert!(has_pending_questions(&merged));
     }
 }

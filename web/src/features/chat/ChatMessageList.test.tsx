@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
@@ -11,6 +11,22 @@ import { ChatMessageBubble, ChatMessageList, ThinkingIndicator } from './ChatMes
 vi.mock('../tickets/useOpenTicket', () => ({
   useOpenTicket: () => vi.fn(),
 }));
+
+const postMessageMocks = vi.hoisted(() => ({
+  mutateAsync: vi.fn(),
+  isPending: false,
+}));
+
+vi.mock('./useChat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./useChat')>();
+  return {
+    ...actual,
+    usePostChatMessage: () => ({
+      mutateAsync: postMessageMocks.mutateAsync,
+      isPending: postMessageMocks.isPending,
+    }),
+  };
+});
 
 const messages: ChatMessage[] = Array.from({ length: 40 }, (_, index) => ({
   id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
@@ -36,6 +52,9 @@ function renderList(ui: ReactElement) {
 
 describe('ChatMessageList', () => {
   beforeEach(() => {
+    postMessageMocks.mutateAsync.mockReset();
+    postMessageMocks.mutateAsync.mockResolvedValue({});
+    postMessageMocks.isPending = false;
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,
       get() {
@@ -293,6 +312,112 @@ describe('ChatMessageList', () => {
       'href',
       '/knowledge',
     );
+  });
+
+  it('shows an interactive question card on the latest unanswered agent message only', async () => {
+    const sessionId = '00000000-0000-4000-8000-000000000099';
+    const olderId = '00000000-0000-4000-8000-000000000010';
+    const latestId = '00000000-0000-4000-8000-000000000011';
+    const withQuestions: ChatMessage[] = [
+      {
+        id: olderId,
+        sessionId,
+        seq: 1,
+        role: 'agent',
+        body: 'Earlier ask',
+        agentRunId: null,
+        actionMetadata: {
+          questions: [{ question: 'Old question?', choices: ['A'] }],
+          questionsStatus: 'pending',
+        },
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+      {
+        id: latestId,
+        sessionId,
+        seq: 2,
+        role: 'agent',
+        body: 'Before I draft a ticket:',
+        agentRunId: null,
+        actionMetadata: {
+          questions: [
+            { question: 'Which screen?', choices: ['Inbox', 'Chat'] },
+            { question: 'Split the work?' },
+          ],
+          questionsStatus: 'pending',
+        },
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:00:01Z',
+      },
+    ];
+
+    renderList(
+      <ChatMessageList messages={withQuestions} chatSessionId={sessionId} />,
+    );
+
+    const forms = screen.getAllByTestId('questions-form');
+    expect(forms).toHaveLength(2);
+    expect(forms[0]).toHaveAttribute('data-readonly', 'true');
+    expect(forms[1]).not.toHaveAttribute('data-readonly');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+    await waitFor(() =>
+      expect(postMessageMocks.mutateAsync).toHaveBeenCalledWith({
+        body: '**Which screen?**\nInbox',
+        answersFor: latestId,
+        answers: ['Inbox', ''],
+      }),
+    );
+  });
+
+  it('keeps answered and skipped question cards read-only', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000099';
+    renderList(
+      <ChatMessageList
+        chatSessionId={sessionId}
+        messages={[
+          {
+            id: '00000000-0000-4000-8000-000000000010',
+            sessionId,
+            seq: 1,
+            role: 'agent',
+            body: 'Asked',
+            agentRunId: null,
+            actionMetadata: {
+              questions: [{ question: 'Done?' }],
+              questionsStatus: 'answered',
+              answers: ['Yes'],
+            },
+            attachmentIds: [],
+            attachments: [],
+            createdAt: '2026-09-08T00:00:00Z',
+          },
+          {
+            id: '00000000-0000-4000-8000-000000000011',
+            sessionId,
+            seq: 2,
+            role: 'agent',
+            body: 'Asked again',
+            agentRunId: null,
+            actionMetadata: {
+              questions: [{ question: 'Skipped?' }],
+              questionsStatus: 'skipped',
+            },
+            attachmentIds: [],
+            attachments: [],
+            createdAt: '2026-09-08T00:00:01Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Answered')).toBeVisible();
+    expect(screen.getByText('Skipped')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
   });
 
   it('renders image preview and file attachment in the transcript bubble', () => {
