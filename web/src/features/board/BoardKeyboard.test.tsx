@@ -109,7 +109,11 @@ vi.mock('./useTickets', () => ({
 
 vi.mock('../boards/useBoards', () => ({
   setLastBoardId: vi.fn(),
-  useBoards: () => ({ data: [], isPending: false }),
+  useBoards: () => ({
+    data: [{ id: 'board-1', name: 'Launch plan', slug: 'launch', createdAt: '' }],
+    isPending: false,
+  }),
+  useCreateBoard: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../agents/useAgents', () => ({

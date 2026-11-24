@@ -135,6 +135,7 @@ const boardsState = vi.hoisted(() => ({
 vi.mock('../boards/useBoards', () => ({
   setLastBoardId: vi.fn(),
   useBoards: () => boardsState,
+  useCreateBoard: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../agents/useAgents', () => ({

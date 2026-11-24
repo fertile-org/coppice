@@ -19,7 +19,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && (user || desktopMode)) {
-    return <Navigate to="/boards" replace />;
+    return <Navigate to="/" replace />;
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -35,7 +35,7 @@ export function LoginPage() {
       });
       const data = (await res.json()) as LoginResponse;
       establishSession(data.user, data.csrfToken);
-      navigate('/boards');
+      navigate('/');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Invalid email or password.');

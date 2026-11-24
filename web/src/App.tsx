@@ -15,6 +15,7 @@ import { AuthProvider } from './features/auth/AuthProvider';
 import { useSession } from './features/auth/useSession';
 import { LoginPage } from './features/auth/LoginPage';
 import { BoardPage } from './features/board/BoardPage';
+import { BoardEntryRedirect } from './features/boards/BoardEntryRedirect';
 import { BoardPickerPage } from './features/boards/BoardPickerPage';
 import { PluginBuilderPage } from './features/plugins/PluginBuilderPage';
 import { PluginsPage } from './features/plugins/PluginsPage';
@@ -85,6 +86,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
+                <Route path="/" element={<BoardEntryRedirect />} />
                 <Route path="/boards" element={<BoardPickerPage />} />
                 <Route
                   path="/boards/:boardId"
@@ -115,7 +117,7 @@ function App() {
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/boards" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </KeyboardProvider>
         </AuthProvider>
