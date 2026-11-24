@@ -230,8 +230,26 @@ The wall-clock cost is extra test execution (~71 s unbounded vs ~129 s capped, ~
 |-----|---------|--------|
 | nextest `test-threads` | 8 | `.config/nextest.toml` profiles `default` and `ci` |
 | `threads-required` | 4 | Heavy integration binaries: `integration_plugins`, `integration_repo_git`, `integration_ticket_git`, `integration_knowledge`, `integration_knowledge_compaction`, `integration_workflow`, `integration_mcp`, `integration_desktop` |
-| cargo build jobs | 4 | `make test` / `make test-smoke` / `make test-unit` via `CARGO_BUILD_JOBS` (CI passes `--build-jobs 4`) |
+| cargo build jobs | 4 | `make test` / `make test-smoke` / `make test-unit` via `CARGO_BUILD_JOBS` (CI passes `--build-jobs 4`); `.cargo/config.toml` also sets `build.jobs = 4` for unadorned `cargo` / `clippy` |
 | test debuginfo | `line-tables-only` | root `Cargo.toml` `[profile.test]` — cuts rustc/linker RSS; backtraces still have line numbers |
+
+**Concurrent agent runs.** `make test`, `make test-smoke`, and `make web-test` take an exclusive advisory lock on `~/.cache/coppice/test-run.lock` via `scripts/with-test-lock.sh` (Python `fcntl.flock`, Linux and macOS). The wrapper process holds the lock with `CLOEXEC` and runs the suite as a child so embedded Postgres and rustc do not inherit the lock fd. A second Make target prints `Waiting for another Coppice test run to finish…` on stderr, then runs after the holder exits. `make test-unit`, `clippy`, desktop, and e2e targets are not wrapped.
+
+When `COPPICE_MCP_TOKEN` is set and the caller has not already set the variable (command line or environment), the Makefile defaults to `CARGO_BUILD_JOBS=2` and `NEXTEST_PROFILE=low-mem`. Human defaults stay `4` / `default`. Explicit Make or env overrides still win. Direct `cargo test` / `cargo nextest` bypasses the lock and the agent defaults by design.
+
+Measured with three near-simultaneous `make test` starts (`COPPICE_MCP_TOKEN` set, no overrides) so they queue on the lock (second and third prints show the waiting line). Process-tree RSS (rustc / cargo / nextest / embedded Postgres children) sampled every 250 ms during the active suite; peak total stayed under 10 GiB and tracked one `low-mem` suite rather than 3×:
+
+| Sample | Peak total RSS | Notes |
+|--------|----------------|-------|
+| Three queued agent `make test` (low-mem + lock), 2026-11-24 | **6.20 GiB** | 2288 passed; waiters blocked on `~/.cache/coppice/test-run.lock` |
+
+Breakdown by process kind at that peak sample:
+
+| Kind | Peak RSS |
+|------|----------|
+| rustc / linker | 5.90 GiB |
+| cargo / nextest | 0.17 GiB |
+| embedded Postgres | 0.13 GiB |
 
 **Low-memory override** (~8 GB):
 
@@ -248,7 +266,7 @@ Agents should not run the full suite while iterating — use targeted tests ([AG
 ```bash
 make test-unit              # parallel lib tests only (~seconds)
 make test-smoke             # lib + 3 integration smoke files (~10s warm with nextest)
-cargo test -p coppice-server result_contract   # one module
+cargo test -p coppice-server --lib --features embedded-test-db result_contract   # one module
 cargo test -p coppice-server --test integration_tickets  # one integration file
 make web-test               # frontend unit tests
 ```

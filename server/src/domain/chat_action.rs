@@ -187,13 +187,12 @@ pub fn has_pending_questions(metadata: &serde_json::Value) -> bool {
     if questions.is_empty() {
         return false;
     }
-    match metadata
-        .get("questionsStatus")
-        .and_then(serde_json::Value::as_str)
-    {
-        None | Some(QUESTIONS_STATUS_PENDING) => true,
-        _ => false,
-    }
+    matches!(
+        metadata
+            .get("questionsStatus")
+            .and_then(serde_json::Value::as_str),
+        None | Some(QUESTIONS_STATUS_PENDING)
+    )
 }
 
 /// Pending proposal cards for an agent message's `action_metadata`.

@@ -17,10 +17,25 @@ export COPPICE_GID ?= $(shell id -g)
 
 # Bound rustc parallelism so `make test` fits in 16 GB. Override for low-mem:
 #   make test CARGO_BUILD_JOBS=2 NEXTEST_PROFILE=low-mem
-CARGO_BUILD_JOBS ?= 4
-NEXTEST_PROFILE ?= default
+# Agents (COPPICE_MCP_TOKEN in the environment) default to low-mem unless the
+# caller already set the variable on the command line or in the environment.
+ifeq ($(origin CARGO_BUILD_JOBS),undefined)
+ifdef COPPICE_MCP_TOKEN
+CARGO_BUILD_JOBS := 2
+else
+CARGO_BUILD_JOBS := 4
+endif
+endif
+ifeq ($(origin NEXTEST_PROFILE),undefined)
+ifdef COPPICE_MCP_TOKEN
+NEXTEST_PROFILE := low-mem
+else
+NEXTEST_PROFILE := default
+endif
+endif
 
 CARGO_TEST = CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo test --features embedded-test-db
+WITH_TEST_LOCK = ./scripts/with-test-lock.sh
 
 # Create /tmp/smoke-repo inside the server container as COPPICE_UID (matches API process).
 define SMOKE_REPO_SETUP
@@ -68,27 +83,31 @@ tools:
 
 # Full suite in parallel via cargo-nextest (one process and database per test, ~2.5 min warm).
 # Falls back to the serial cargo test runner when nextest is not installed.
+# Machine-wide lock serializes against test-smoke / web-test (see scripts/with-test-lock.sh).
 test:
-	@if cargo nextest --version >/dev/null 2>&1; then \
-		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
-	else \
-		echo "cargo-nextest not found; running serially (install: https://nexte.st)"; \
-		$(CARGO_TEST) --workspace -- --test-threads 1; \
-	fi
+	@$(WITH_TEST_LOCK) bash -c '\
+		if cargo nextest --version >/dev/null 2>&1; then \
+			CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
+		else \
+			echo "cargo-nextest not found; running serially (install: https://nexte.st)"; \
+			$(CARGO_TEST) --workspace -- --test-threads 1; \
+		fi'
 
 # Unit tests only — isolated databases allow default parallelism (~5–15s warm).
+# Not wrapped by the test lock (lib-only; agents use this while iterating).
 test-unit:
 	$(CARGO_TEST) --workspace --lib -q
 
 # Smoke integration — lib + health + comments + tickets (~target <60s warm).
 test-smoke:
-	@if cargo nextest --version >/dev/null 2>&1; then \
-		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --lib --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS) && \
-		CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db -p coppice-server --test health --test integration_comments --test integration_tickets --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
-	else \
-		$(CARGO_TEST) --workspace --lib -q -- --test-threads 1 && \
-		$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q; \
-	fi
+	@$(WITH_TEST_LOCK) bash -c '\
+		if cargo nextest --version >/dev/null 2>&1; then \
+			CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db --workspace --lib --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS) && \
+			CARGO_BUILD_JOBS=$(CARGO_BUILD_JOBS) cargo nextest run --features embedded-test-db -p coppice-server --test health --test integration_comments --test integration_tickets --profile $(NEXTEST_PROFILE) --build-jobs $(CARGO_BUILD_JOBS); \
+		else \
+			$(CARGO_TEST) --workspace --lib -q -- --test-threads 1 && \
+			$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q; \
+		fi'
 
 # Drop session file so the next test run starts a fresh embedded Postgres (old process may linger).
 test-pg-reset:
@@ -105,7 +124,7 @@ web-install:
 	cd web && yarn install --frozen-lockfile
 
 web-test:
-	cd web && yarn install --frozen-lockfile && yarn test
+	@$(WITH_TEST_LOCK) bash -c 'cd web && yarn install --frozen-lockfile && yarn test'
 
 web-dev:
 	cd web && yarn install && yarn dev
