@@ -142,7 +142,8 @@ Two conditions stop the server at startup (`AppState::init_plugins`): the config
 | `make clippy` / `make clean` | Lint / reclaim `target/` |
 | `make release-tar` | Release tarball → `dist/` |
 | `make e2e-smoke*` | Browser/stack smokes |
-| `make screenshot` | Desktop-mode marketing stills and GIF (`coppice-screenshot` Compose project, not CI) |
+| `make hero-video` | Remotion marketing hero (mp4/webm/gif/poster); commit binaries, not CI |
+| `make screenshot` | Desktop-mode docs stills (`coppice-screenshot` Compose project, not CI); does not overwrite hero video |
 
 ## Disk usage / cleanup
 

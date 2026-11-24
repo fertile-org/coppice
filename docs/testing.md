@@ -356,4 +356,4 @@ Optional before E2E: `make compose-up` (Docker stack for browser smoke only).
 
 Optional before UI-heavy changes: `make e2e-smoke`.
 
-Marketing capture (`make screenshot`) is separate from these smokes and from CI. It uses Compose project `coppice-screenshot`, forces desktop mode, and records the homepage hero (`static/marketing.gif`, plus mp4/webm and the poster still) and the docs guide stills. See [development.md — Marketing screenshots](development.md#marketing-screenshots).
+Marketing assets are outside these smokes and CI. `make hero-video` renders the Remotion homepage hero (mp4/webm/gif/poster under `website/public/assets/` and `static/marketing.gif`). `make screenshot` uses Compose project `coppice-screenshot`, forces desktop mode, and refreshes docs stills only — it does not overwrite the Remotion hero binaries. See [development.md — Marketing screenshots](development.md#marketing-screenshots).
