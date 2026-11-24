@@ -328,13 +328,23 @@ fn result_submit_properties() -> Value {
         },
         "criteriaResults": {
             "type": "array",
-            "description": "Optional (done). One entry per acceptance criterion in the approved plan: whether this change meets it and one line of evidence (test name, command output, or file).",
+            "description": "Optional (done). One entry per acceptance criterion in the approved plan: whether this change meets it and one line of evidence (test name, command output, or file). QC may add screenshots (worktree paths under .agent/qa-evidence/, png/jpeg/gif/webp) and steps (captions).",
             "items": {
                 "type": "object",
                 "properties": {
                     "criterion": { "type": "string", "description": "The criterion text from the plan." },
                     "status": { "type": "string", "enum": ["met", "not_met", "not_checked"] },
                     "evidence": { "type": "string" },
+                    "screenshots": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Worktree-relative image paths under .agent/qa-evidence/ only.",
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Captions paired with screenshots by index when lengths match.",
+                    },
                 },
                 "required": ["criterion", "status"],
             },

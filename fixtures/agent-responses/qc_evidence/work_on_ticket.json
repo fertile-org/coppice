@@ -1,0 +1,24 @@
+{
+  "status": "done",
+  "summary": "## QC Verdict\n**Passed**: criteria checked with screenshots.",
+  "changedFiles": [],
+  "testsRun": ["make web-test"],
+  "nextStatus": null,
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": [],
+  "criteriaResults": [
+    {
+      "criterion": "Save button is disabled while saving",
+      "status": "met",
+      "evidence": "screenshot + PlanChecklist.test.tsx",
+      "screenshots": [".agent/qa-evidence/save-disabled.png"],
+      "steps": ["Open the ticket drawer", "Click Save while a save is in flight"]
+    },
+    {
+      "criterion": "Unit tests pass",
+      "status": "met",
+      "evidence": "make web-test · passed"
+    }
+  ]
+}

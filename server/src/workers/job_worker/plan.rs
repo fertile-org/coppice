@@ -575,7 +575,7 @@ async fn drive_plan_run(
 
     if verifying {
         crate::services::criteria_results::CriteriaResultsService::new(pool)
-            .record(ticket_id, &result, VERIFIED_RESULTS_SHA)
+            .record(ticket_id, &result, VERIFIED_RESULTS_SHA, None, None)
             .await
             .context("store verification results")?;
         TicketService::new(pool)

@@ -40,8 +40,9 @@ use crate::services::ticket_service::{
 use crate::services::workflow_service::DONE_REQUIRES_ACCEPT;
 use crate::AppState;
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -49,6 +50,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 pub fn routes() -> Router<Arc<AppState>> {
@@ -146,6 +148,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/tickets/{ticket_id}/children", get(list_children))
         .route("/api/tickets/{ticket_id}/archive", post(archive_ticket))
         .route("/api/tickets/{ticket_id}/unarchive", post(unarchive_ticket))
+        .route(
+            "/api/tickets/{ticket_id}/qa-evidence/{*file}",
+            get(get_qa_evidence),
+        )
 }
 
 #[derive(Serialize)]
@@ -244,6 +250,10 @@ struct ApprovedPlanResponse {
     plan_id: Id,
     markdown: String,
     steps: Vec<String>,
+    /// Commit SHA the stored criteria results were written for, when a row
+    /// exists. Present even when results are stale for the reviewed commit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    criteria_commit_sha: Option<String>,
     /// The plan's acceptance criteria, each with the latest result for the
     /// reviewed commit (or not checked).
     criteria: Vec<crate::services::criteria_results::CriterionView>,
@@ -900,6 +910,44 @@ async fn get_ticket(
     Ok(Json(response))
 }
 
+/// Signed-in only. Serves a QA evidence image for the ticket.
+async fn get_qa_evidence(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path((ticket_id, file)): Path<(Id, String)>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_error)?;
+    let artifacts = PathBuf::from(&state.config.storage.artifacts_dir);
+    let bytes = crate::services::criteria_results::read_qa_evidence(&artifacts, ticket_id, &file)
+        .map_err(|err| match err {
+            crate::services::criteria_results::QaEvidenceReadError::Invalid => {
+                StatusCode::BAD_REQUEST
+            }
+            crate::services::criteria_results::QaEvidenceReadError::NotFound => {
+                StatusCode::NOT_FOUND
+            }
+        })?;
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                crate::services::criteria_results::qa_evidence_media_type(&file).to_string(),
+            ),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; sandbox".to_string(),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        Body::from(bytes),
+    ))
+}
+
 async fn archive_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
@@ -1363,15 +1411,16 @@ async fn with_approved_plan(
     let ticket_id = ticket.ticket.id;
     let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
-    let criteria = match &plan {
+    let (criteria_commit_sha, criteria) = match &plan {
         Some(plan) => {
             let texts = crate::copy::plan::plan_criteria(&plan.markdown);
-            if texts.is_empty() {
+            let stored = crate::services::criteria_results::CriteriaResultsService::new(pool)
+                .get(ticket_id)
+                .await?;
+            let criteria_commit_sha = stored.as_ref().map(|row| row.commit_sha.clone());
+            let criteria = if texts.is_empty() {
                 Vec::new()
             } else {
-                let stored = crate::services::criteria_results::CriteriaResultsService::new(pool)
-                    .get(ticket_id)
-                    .await?;
                 let reviewed = if stored.is_none() {
                     None
                 } else if PlanningService::new(pool)
@@ -1388,9 +1437,10 @@ async fn with_approved_plan(
                     stored.as_ref(),
                     reviewed.as_deref(),
                 )
-            }
+            };
+            (criteria_commit_sha, criteria)
         }
-        None => Vec::new(),
+        None => (None, Vec::new()),
     };
     if status == TicketStatus::PlanReview && response.has_plan {
         let planning = PlanningService::new(pool);
@@ -1413,6 +1463,7 @@ async fn with_approved_plan(
         plan_id: plan.plan_id,
         markdown: plan.markdown,
         steps: plan.steps,
+        criteria_commit_sha,
         criteria,
     });
     response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
