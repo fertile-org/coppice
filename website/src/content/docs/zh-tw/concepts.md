@@ -16,7 +16,7 @@ Coppice 是一塊給寫程式工作用的看板。你寫工單，代理在各自
 2. **Plan Review**（計劃審查）。點選 **Run agent**，PM 代理就會寫計劃。讀完後，批准它，或留下評論。如果工單有不清楚的地方，PM 代理可能會先問你最多 3 個簡短問題。卡片上會顯示 "Waiting for your answers"（等待你的回答）。在工單裡回答後，點選 **Send answers**，PM 代理就會寫計劃。規劃永遠不會改動工單的程式碼。開啟 **Skip planning**（跳過規劃）後，工單會從 Backlog 直接進入 Ready。涉及流程、架構或資料模型時，計劃裡可能附一張小圖，但文字版計劃一直都在。
 3. **Ready**（就緒）。你批准的計劃會成為工單描述的一部分，放在 **Approved plan** 一節。Technical Lead（技術負責人）代理會對照程式碼檢查它，只在需要時修改這一節，然後決定由誰來做。被指派代理的執行會自動開始。若要自己啟動，在 Settings 裡設定 `auto_start_runs = false`。如果沒有 Technical Lead，或沒有合適的人選，工單會留在 Ready，保持未指派，並附上一則評論。
 4. **In Progress、In Review、In QA**（進行中、審查中、測試中）。代理在工單自己的分支上實作、審查和測試改動。你的主檢出目錄不會被改動。
-5. **Wait for Human Review**（等待人工審查）。你開啟 diff，用評論留下意見，滿意後選擇 **Accept**（接受）。如果之後代理又加了提交，工單會回到 In Review，然後再回到你這裡。
+5. **Wait for Human Review**（等待人工審查）。你開啟 diff，用評論留下意見，滿意後選擇 **Accept**（接受）。Human Review 會顯示 QC 對每條準則的結果：有瀏覽器可用時附螢幕截圖，沒有時顯示 "Not checked"。如果之後代理又加了提交，工單會回到 In Review，然後再回到你這裡。
 6. **Done**（完成）。接受不等於合併。準備好後選擇 **Merge…**，你接受的內容就是合併的內容。如果檔案衝突，Coppice 不會動 main，而是把工單送回 In Progress，由同一個代理解決衝突。合併前你需要再接受一次。
 
 卡住的工單會進入 **Blocked**（受阻），並附上一則說明原因的評論。

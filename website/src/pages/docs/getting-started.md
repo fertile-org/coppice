@@ -45,7 +45,7 @@ Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed**. Coppice c
 
 Saving turns that connector on. You'll see "{name} turned on."
 
-Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three. Add a **QC** agent too, so tickets that pass code review get verified in In QA.
+Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three. Add a **QC** agent too, so tickets that pass code review get verified in In QA. Optional: with Playwright already set up in the ticket repo's `e2e/` helpers, or with `agent-browser` already installed on this computer, QC can attach screenshots of UI changes. QC never installs either; see [Playwright](https://playwright.dev/docs/intro) and [agent-browser](https://github.com/vercel-labs/agent-browser).
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="The new agent form with a name, a role and a CLI chosen.">

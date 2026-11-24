@@ -35,7 +35,7 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示�
 
 保存すると、そのコネクタがオンになります。"{name} turned on." と表示されます。
 
-**PM** エージェント、**Technical Lead** エージェント、そして作業をするエージェント（**Frontend Engineer**、**Backend Engineer**、**Research** のいずれか）を少なくとも 1 つ追加してください。計画と引き継ぎには 3 つすべてが必要です。
+**PM** エージェント、**Technical Lead** エージェント、そして作業をするエージェント（**Frontend Engineer**、**Backend Engineer**、**Research** のいずれか）を少なくとも 1 つ追加してください。計画と引き継ぎには 3 つすべてが必要です。**QC** エージェントも追加してください。コードレビューを通過したチケットが In QA で検証されるようになります。任意：チケット用リポジトリの `e2e/` ヘルパーに Playwright が既に用意されている場合、またはこのコンピュータに `agent-browser` が既にインストールされている場合、QC は UI 変更のスクリーンショットを添付できます。QC はどちらも自分ではインストールしません。[Playwright](https://playwright.dev/docs/intro) と [agent-browser](https://github.com/vercel-labs/agent-browser) を参照してください。
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="名前、役割、CLI を選んだ新しいエージェントのフォーム。">

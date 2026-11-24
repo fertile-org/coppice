@@ -37,7 +37,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示 **Installed**（已�
 
 儲存時會啟用該連接器，你會看到 "{name} turned on."（已啟用 {name}）。
 
-請新增一個 **PM** 代理、一個 **Technical Lead**（技術負責人）代理，以及至少一個負責實作的代理（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。規劃和交接需要這三類角色都在。
+請新增一個 **PM** 代理、一個 **Technical Lead**（技術負責人）代理，以及至少一個負責實作的代理（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。規劃和交接需要這三類角色都在。也請新增一個 **QC** 代理，這樣通過程式碼審查的工單會在 In QA 中得到驗證。選用：若工單倉庫的 `e2e/` 輔助工具已設定好 Playwright，或這台電腦已安裝 `agent-browser`，QC 就能附上介面變更的螢幕截圖。QC 不會自行安裝瀏覽器；請見 [Playwright](https://playwright.dev/docs/intro) 與 [agent-browser](https://github.com/vercel-labs/agent-browser)。
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="新增代理表單，已填寫名稱，並選好角色和 CLI。">

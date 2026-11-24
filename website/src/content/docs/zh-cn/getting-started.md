@@ -35,7 +35,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已�
 
 保存时会启用该连接器，你会看到 "{name} turned on."（已启用 {name}）。
 
-请添加一个 **PM** 智能体、一个 **Technical Lead**（技术负责人）智能体，以及至少一个负责具体工作的智能体（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。规划和交接需要这三类角色都在。
+请添加一个 **PM** 智能体、一个 **Technical Lead**（技术负责人）智能体，以及至少一个负责具体工作的智能体（**Frontend Engineer**、**Backend Engineer** 或 **Research**）。规划和交接需要这三类角色都在。也请添加一个 **QC** 智能体，这样通过代码审查的工单会在 In QA 中得到验证。可选：若工单仓库的 `e2e/` 辅助工具里已经配置好 Playwright，或本机已经安装了 `agent-browser`，QC 就能附上界面改动的截图。QC 不会自行安装浏览器；参见 [Playwright](https://playwright.dev/docs/intro) 和 [agent-browser](https://github.com/vercel-labs/agent-browser)。
 
 <figure>
 <img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="新建智能体表单，已填写名称并选好角色和 CLI。">
