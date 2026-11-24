@@ -29,7 +29,6 @@
 | `e2e/` | Browser smoke tests |
 | `docs/` | Contributor docs: philosophy, milestones, development |
 | `website/` | Astro marketing site and user docs (M12). Primary product docs; `docs/` stays for contributors |
-| `website/video/` | Remotion package for the marketing hero (`make hero-video`); not part of the Astro build or website CI |
 
 ## Read on demand
 
