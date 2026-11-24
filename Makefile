@@ -192,6 +192,12 @@ e2e-smoke-m10:
 	node e2e/smoke/m10-plugin-builder.mjs
 
 # Marketing stills, GIF, and the docs guide stills. Not part of CI.
+# Remotion marketing hero (mp4/webm/gif/poster). Not run in CI — commit the
+# binaries. Requires Node 22, ffmpeg, and `website/video` deps.
+hero-video:
+	cd website/video && npm ci
+	cd website/video && npm run hero
+
 # Own Compose project (coppice-screenshot) so the seed does not touch a dev
 # database. Overlay forces auth.desktop_mode and disables auto-start so the
 # shot matches the Electron app (no login, no account email, no Sign out).
@@ -199,6 +205,7 @@ e2e-smoke-m10:
 # then mounts that directory's config and empty repos folder. It does not
 # mount the operator's home checkouts, SSH directory, or deploy/config/config.toml.
 # Postgres, the API, and the web UI are published on 127.0.0.1 only.
+# Hero video/GIF/poster are not regenerated here — use `make hero-video`.
 screenshot:
 	DOCKER_COMPOSE="$(DOCKER_COMPOSE)" ./e2e/screenshot/run.sh up
 
