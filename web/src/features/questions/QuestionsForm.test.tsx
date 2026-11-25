@@ -41,6 +41,27 @@ describe('QuestionsForm', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(['', 'Yes']));
   });
 
+  it('pre-selects suggested answers and accepts them in one click', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QuestionsForm
+        questions={[
+          { question: 'Which screen?', choices: ['Inbox', 'Chat'], recommended: 'Inbox' },
+          { question: 'Keep the old endpoint?', recommended: 'Yes' },
+        ]}
+        copy={{ ...copy, acceptAllRecommended: 'Accept all recommended', suggested: 'Suggested' }}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Inbox/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Keep the old endpoint?')).toHaveValue('Yes');
+    fireEvent.change(screen.getByLabelText('Keep the old endpoint?'), {
+      target: { value: 'No' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept all recommended' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(['Inbox', 'Yes']));
+  });
+
   it('shows a read-only status without inputs', () => {
     render(
       <QuestionsForm

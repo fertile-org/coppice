@@ -43,6 +43,9 @@ export const PLAN_COPY = {
   sendAnswers: 'Send answers',
   answerPlaceholder: 'Your answer',
   questionsTitle: 'Questions before the plan',
+  moreQuestions: 'A few more questions',
+  acceptAllRecommended: 'Accept all recommended',
+  suggested: 'Suggested',
   splitWithPlan: 'Approve plan creates these sub-tickets. Ask for changes to drop them.',
   proposedSubTickets: 'Sub-tickets · run in this order',
   proposedSubTicketNote:

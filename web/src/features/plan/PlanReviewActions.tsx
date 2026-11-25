@@ -50,10 +50,15 @@ function PlanQuestionsForm({
       <QuestionsForm
         questions={questions.questions}
         copy={{
-          title: PLAN_COPY.questionsTitle,
+          title:
+            questions.round != null && questions.round > 1
+              ? PLAN_COPY.moreQuestions
+              : PLAN_COPY.questionsTitle,
           answerPlaceholder: PLAN_COPY.answerPlaceholder,
           sendAnswers: PLAN_COPY.sendAnswers,
           sending: PLAN_COPY.sending,
+          acceptAllRecommended: PLAN_COPY.acceptAllRecommended,
+          suggested: PLAN_COPY.suggested,
         }}
         onSubmit={async (answers) => {
           try {

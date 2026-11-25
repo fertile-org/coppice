@@ -152,8 +152,8 @@ pub(crate) fn append_work_design_instruction(
     }
 }
 
-/// The plan task: template, revision context, split option, and the
-/// question round (offered once, or answered).
+/// The plan task: template, revision context, split option, and any
+/// question sets already answered (up to three before the first plan).
 async fn append_plan_sections(
     pool: &PgPool,
     ticket_id: Id,
@@ -169,27 +169,39 @@ async fn append_plan_sections(
     markdown.push_str(&format!("\n{}\n", plan::PLAN_SPLIT_INSTRUCTION));
     markdown.push_str(&format!("\n{}\n", plan::PLAN_SKIP_REVIEW_INSTRUCTION));
     let planning = PlanningService::new(pool);
-    match planning
-        .questions(ticket_id)
+    let answered = planning
+        .answered_rounds(ticket_id)
         .await
-        .context("load plan questions")?
-    {
-        Some(state) if !state.waiting => {
-            markdown.push_str(&format!(
-                "\n{}\n\n{}\n{}\n",
-                plan::ANSWERS_HEADING,
-                plan::answered_questions(&state.questions, &state.answers),
-                plan::ANSWERS_INSTRUCTION
-            ));
-        }
-        None if planning
+        .context("load plan questions")?;
+    if answered.is_empty() {
+        if planning
             .can_ask_questions(ticket_id)
             .await
-            .context("check plan questions")? =>
+            .context("check plan questions")?
         {
             markdown.push_str(&format!("\n{}\n", plan::PLAN_QUESTIONS_INSTRUCTION));
         }
-        _ => {}
+    } else {
+        markdown.push_str(&format!("\n{}\n", plan::ANSWERS_HEADING));
+        for state in &answered {
+            markdown.push_str(&format!(
+                "\n### Set {}\n{}",
+                state.round,
+                plan::answered_questions(&state.questions, &state.answers)
+            ));
+        }
+        let again = planning
+            .can_ask_questions(ticket_id)
+            .await
+            .context("check plan questions")?;
+        markdown.push_str(&format!(
+            "\n{}\n",
+            if again {
+                plan::MORE_QUESTIONS_INSTRUCTION
+            } else {
+                plan::ANSWERS_INSTRUCTION
+            }
+        ));
     }
     Ok(())
 }
@@ -497,13 +509,14 @@ async fn drive_plan_run(
     };
     result_contract::validate_for_profile(&result, run.context_profile, &run.job_type)
         .map_err(|err| anyhow::anyhow!(err))?;
-    if !questions.is_empty()
-        && !PlanningService::new(pool)
-            .can_ask_questions(ticket_id)
+    if !questions.is_empty() {
+        if let Some(reason) = PlanningService::new(pool)
+            .question_block(ticket_id)
             .await
             .context("check plan questions")?
-    {
-        anyhow::bail!(plan::PLAN_QUESTIONS_ALREADY_ASKED);
+        {
+            anyhow::bail!(reason);
+        }
     }
     let excluded = if verifying {
         PlanningService::new(pool)

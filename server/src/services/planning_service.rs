@@ -1237,37 +1237,91 @@ impl<'a> PlanningService<'a> {
         &self,
         ticket_id: Id,
     ) -> Result<Option<PlanQuestionsState>, PlanError> {
-        let row: Option<(serde_json::Value, Option<serde_json::Value>, bool)> = sqlx::query_as(
+        let row: Option<(serde_json::Value, Option<serde_json::Value>, bool, i16)> = sqlx::query_as(
             r#"
-            SELECT questions, answers, answered_at IS NULL
+            SELECT questions, answers, answered_at IS NULL, round
             FROM ticket_plan_questions
             WHERE ticket_id = $1
+            ORDER BY round DESC
+            LIMIT 1
             "#,
         )
         .bind(ticket_id)
         .fetch_optional(self.pool)
         .await?;
-        Ok(row.map(|(questions, answers, waiting)| PlanQuestionsState {
+        Ok(row.map(|(questions, answers, waiting, round)| PlanQuestionsState {
             questions: serde_json::from_value(questions).unwrap_or_default(),
             answers: answers
                 .and_then(|answers| serde_json::from_value(answers).ok())
                 .unwrap_or_default(),
             waiting,
+            round,
         }))
     }
 
-    /// Questions are allowed once, and only before the ticket's first plan.
-    pub async fn can_ask_questions(&self, ticket_id: Id) -> Result<bool, PlanError> {
-        let blocked: bool = sqlx::query_scalar(
+    /// Answered rounds, oldest first, for the next planning prompt.
+    pub async fn answered_rounds(
+        &self,
+        ticket_id: Id,
+    ) -> Result<Vec<PlanQuestionsState>, PlanError> {
+        let rows: Vec<(serde_json::Value, Option<serde_json::Value>, i16)> = sqlx::query_as(
             r#"
-            SELECT EXISTS(SELECT 1 FROM ticket_plan_questions WHERE ticket_id = $1)
-                OR EXISTS(SELECT 1 FROM ticket_plans WHERE ticket_id = $1)
+            SELECT questions, answers, round
+            FROM ticket_plan_questions
+            WHERE ticket_id = $1 AND answered_at IS NOT NULL
+            ORDER BY round
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(questions, answers, round)| PlanQuestionsState {
+                questions: serde_json::from_value(questions).unwrap_or_default(),
+                answers: answers
+                    .and_then(|answers| serde_json::from_value(answers).ok())
+                    .unwrap_or_default(),
+                waiting: false,
+                round,
+            })
+            .collect())
+    }
+
+    /// Why a new question round is refused. `None` means a round is allowed.
+    pub async fn question_block(
+        &self,
+        ticket_id: Id,
+    ) -> Result<Option<&'static str>, PlanError> {
+        let row: (bool, bool, i64) = sqlx::query_as(
+            r#"
+            SELECT
+                EXISTS(SELECT 1 FROM ticket_plans WHERE ticket_id = $1),
+                EXISTS(
+                    SELECT 1 FROM ticket_plan_questions
+                    WHERE ticket_id = $1 AND answered_at IS NULL
+                ),
+                (SELECT count(*) FROM ticket_plan_questions
+                 WHERE ticket_id = $1 AND answered_at IS NOT NULL)
             "#,
         )
         .bind(ticket_id)
         .fetch_one(self.pool)
         .await?;
-        Ok(!blocked)
+        let (has_plan, waiting, answered) = row;
+        if waiting {
+            return Ok(Some(plan::PLAN_QUESTIONS_STILL_WAITING));
+        }
+        if has_plan || answered >= i64::from(plan::MAX_PLAN_ROUNDS) {
+            return Ok(Some(plan::PLAN_QUESTIONS_ALREADY_ASKED));
+        }
+        Ok(None)
+    }
+
+    /// A new round is allowed only before the first plan, with no round
+    /// waiting, and fewer than [`plan::MAX_PLAN_ROUNDS`] answered rounds.
+    pub async fn can_ask_questions(&self, ticket_id: Id) -> Result<bool, PlanError> {
+        Ok(self.question_block(ticket_id).await?.is_none())
     }
 
     /// Store the planner's questions and move the ticket to Plan Review,
@@ -1282,25 +1336,49 @@ impl<'a> PlanningService<'a> {
         if questions.len() > plan::MAX_PLAN_QUESTIONS {
             return Err(PlanError::Validation(plan::PLAN_QUESTIONS_TOO_MANY.into()));
         }
-        let inserted = sqlx::query(
-            r#"
-            INSERT INTO ticket_plan_questions (ticket_id, run_id, comment_id, questions)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (ticket_id) DO NOTHING
-            "#,
+        if questions.iter().any(|question| {
+            question
+                .recommended
+                .as_deref()
+                .is_none_or(|answer| answer.trim().is_empty())
+        }) {
+            return Err(PlanError::Validation(
+                plan::PLAN_QUESTIONS_NEED_RECOMMENDED.into(),
+            ));
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT id FROM tickets WHERE id = $1 FOR UPDATE")
+            .bind(ticket_id)
+            .execute(&mut *tx)
+            .await?;
+        if let Some(reason) = self.question_block(ticket_id).await? {
+            return Err(PlanError::Validation(reason.into()));
+        }
+        let next_round: i16 = sqlx::query_scalar(
+            "SELECT (COALESCE(MAX(round), 0) + 1)::smallint FROM ticket_plan_questions WHERE ticket_id = $1",
         )
         .bind(ticket_id)
-        .bind(run_id)
-        .bind(comment_id)
-        .bind(serde_json::to_value(questions).unwrap_or_default())
-        .execute(self.pool)
-        .await?
-        .rows_affected();
-        if inserted == 0 {
+        .fetch_one(&mut *tx)
+        .await?;
+        if next_round > plan::MAX_PLAN_ROUNDS {
             return Err(PlanError::Validation(
                 plan::PLAN_QUESTIONS_ALREADY_ASKED.into(),
             ));
         }
+        sqlx::query(
+            r#"
+            INSERT INTO ticket_plan_questions (ticket_id, round, run_id, comment_id, questions)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(next_round)
+        .bind(run_id)
+        .bind(comment_id)
+        .bind(serde_json::to_value(questions).unwrap_or_default())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if let Some(next) = status_after_planning_run(ticket.ticket.status) {
             TicketService::new(self.pool)
@@ -1359,7 +1437,7 @@ impl<'a> PlanningService<'a> {
             r#"
             UPDATE ticket_plan_questions
             SET answers = $2, answers_comment_id = $3, answered_at = now()
-            WHERE ticket_id = $1
+            WHERE ticket_id = $1 AND answered_at IS NULL
             "#,
         )
         .bind(ticket_id)
@@ -1655,6 +1733,8 @@ pub struct PlanQuestionsState {
     pub questions: Vec<crate::providers::PlanQuestion>,
     pub answers: Vec<String>,
     pub waiting: bool,
+    /// 1-based round. Older stored rows are round 1.
+    pub round: i16,
 }
 
 /// What a revision run is told: the plan it replaces and every request.

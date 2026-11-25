@@ -287,20 +287,34 @@ pub fn verification_comment(
     out
 }
 
-/// Most questions a planning run may ask.
+/// Most questions in one round.
 pub const MAX_PLAN_QUESTIONS: usize = 3;
 
-pub const PLAN_QUESTIONS_INSTRUCTION: &str = "If something in the ticket is unclear and the answer would change the plan, you may ask instead of planning: call `result_submit` with status `done`, an empty `summary`, and 1 to 3 short `planQuestions`, each with optional `choices`. You get one round of questions. If nothing is unclear, write the plan.";
+/// Most rounds before the first plan.
+pub const MAX_PLAN_ROUNDS: i16 = 3;
+
+pub const PLAN_QUESTIONS_INSTRUCTION: &str = "Look up facts in the repository yourself (files, names, current behavior). Ask only about a decision or a preference that would change the plan, and only when the code does not already answer it. If nothing like that is unclear, write the plan and do not ask. You may ask up to 3 short rounds, 1 to 3 questions each. To ask, call `result_submit` with status `done`, an empty `summary`, and `planQuestions`. Every question needs `recommended`: the answer you would pick, in plain language. Add `choices` when a few answers are enough, and make `recommended` one of them.";
 
 pub const PLAN_QUESTIONS_TOO_MANY: &str =
-    "Ask at most 3 questions. If more is unclear, write the plan and list it under Risks.";
+    "Ask at most 3 questions in this round. If more is unclear, write the plan and list it under Risks.";
 
-pub const PLAN_QUESTIONS_ALREADY_ASKED: &str = "You already asked your questions for this ticket. Write the plan now and list anything still unclear under Risks.";
+pub const PLAN_QUESTIONS_NEED_RECOMMENDED: &str =
+    "Each question needs `recommended`: the answer you would pick.";
+
+pub const PLAN_QUESTIONS_STILL_WAITING: &str =
+    "Questions are still waiting for answers. Don't ask another round until they're answered.";
+
+pub const PLAN_QUESTIONS_ALREADY_ASKED: &str = "You already asked 3 rounds, or a plan already exists. Write the plan now and list anything still unclear under Risks.";
 
 pub const ANSWERS_HEADING: &str = "## Your questions and the answers";
 
 pub const ANSWERS_INSTRUCTION: &str =
-    "Write the plan now. Don't ask more questions; list anything still unclear under Risks.";
+    "Use these answers. Don't ask more questions. Write the plan now and list anything still unclear under Risks.";
+
+pub const MORE_QUESTIONS_INSTRUCTION: &str = "Use these answers. Look up any remaining facts in the repository. Ask another short round only if a decision or a preference is still open. Otherwise write the plan.";
+
+/// Shown under a question in the ticket comment.
+pub const SUGGESTED_ANSWER: &str = "Suggested answer:";
 
 /// Ticket comment that holds the questions.
 pub const QUESTIONS_COMMENT_TITLE: &str = "**Questions before the plan**";
@@ -323,6 +337,14 @@ pub fn questions_comment(questions: &[crate::providers::PlanQuestion]) -> String
     let mut out = format!("{QUESTIONS_COMMENT_TITLE}\n");
     for (index, question) in questions.iter().enumerate() {
         out.push_str(&format!("\n{}. {}", index + 1, question.question.trim()));
+        if let Some(recommended) = question
+            .recommended
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            out.push_str(&format!("\n   {SUGGESTED_ANSWER} {recommended}"));
+        }
         for choice in &question.choices {
             out.push_str(&format!("\n   - {}", choice.trim()));
         }
@@ -584,15 +606,19 @@ mod tests {
             PlanQuestion {
                 question: "Which database?".into(),
                 choices: vec!["Postgres".into(), "SQLite".into()],
+                recommended: Some("Postgres".into()),
             },
             PlanQuestion {
                 question: "Keep the endpoint?".into(),
                 choices: Vec::new(),
+                recommended: None,
             },
         ];
         let asked = questions_comment(&questions);
         assert!(asked.starts_with(QUESTIONS_COMMENT_TITLE));
-        assert!(asked.contains("1. Which database?\n   - Postgres\n   - SQLite"));
+        assert!(asked.contains(
+            "1. Which database?\n   Suggested answer: Postgres\n   - Postgres\n   - SQLite"
+        ));
         assert!(asked.contains("2. Keep the endpoint?"));
         let answered = answered_questions(&questions, &["Postgres".into()]);
         assert_eq!(

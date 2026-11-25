@@ -452,6 +452,9 @@ pub struct PlanQuestion {
     pub question: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<String>,
+    /// The answer the planner would pick. Required on ticket planning questions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommended: Option<String>,
 }
 
 fn lenient_criteria_results<'de, D>(deserializer: D) -> Result<Vec<CriterionResult>, D::Error>
@@ -519,8 +522,8 @@ where
     Ok(items
         .iter()
         .filter_map(|item| {
-            let (question, choices) = match item {
-                serde_json::Value::String(text) => (text.as_str(), Vec::new()),
+            let (question, choices, recommended) = match item {
+                serde_json::Value::String(text) => (text.as_str(), Vec::new(), None),
                 serde_json::Value::Object(_) => (
                     item.get("question")?.as_str()?,
                     item.get("choices")
@@ -535,6 +538,11 @@ where
                                 .collect()
                         })
                         .unwrap_or_default(),
+                    item.get("recommended")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_string),
                 ),
                 _ => return None,
             };
@@ -542,6 +550,7 @@ where
             (!question.is_empty()).then(|| PlanQuestion {
                 question: question.to_string(),
                 choices,
+                recommended,
             })
         })
         .collect())

@@ -359,12 +359,13 @@ fn result_submit_properties() -> Value {
         },
         "planQuestions": {
             "type": "array",
-            "description": "Planning runs only. 1 to 3 short questions to ask before writing the plan, when the answers would change it. Leave summary empty when you ask.",
+            "description": "Planning runs only. 1 to 3 short questions, up to 3 rounds, before the first plan. Look up facts in the repo; ask only about a decision or preference. Leave summary empty when you ask. Ticket planning requires `recommended` on every question.",
             "items": {
                 "type": "object",
                 "properties": {
                     "question": { "type": "string" },
                     "choices": strings("Optional short answers to pick from."),
+                    "recommended": { "type": "string", "description": "The answer you would pick. Required on ticket planning. Use one of `choices` when you set them." },
                 },
                 "required": ["question"],
             },
