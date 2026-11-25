@@ -37,12 +37,17 @@ const DESIGN_UI_SKILL: &str =
     include_str!("../../builtin-plugins/design/skills/design-ui-options/SKILL.md");
 const DESIGN_TECHNICAL_SKILL: &str =
     include_str!("../../builtin-plugins/design/skills/design-technical-options/SKILL.md");
+const DESIGN_SYSTEM_SKILL: &str =
+    include_str!("../../builtin-plugins/design/skills/design-system/SKILL.md");
 
 /// How agents load the UI design skill: `<plugin>:<skill>`.
 pub const DESIGN_SKILL_ID: &str = "design:design-ui-options";
 
 /// How agents load the technical options skill: `<plugin>:<skill>`.
 pub const DESIGN_TECHNICAL_SKILL_ID: &str = "design:design-technical-options";
+
+/// How agents load the DESIGN.md writer: `<plugin>:<skill>`.
+pub const DESIGN_SYSTEM_SKILL_ID: &str = "design:design-system";
 
 /// Writes the embedded built-in skills to `<dir>/coppice/skills/<name>/SKILL.md`.
 /// The `coppice/skills` subtree is replaced wholesale so an upgrade both
@@ -71,6 +76,7 @@ pub fn materialize_builtin(dir: &Path) -> io::Result<()> {
     for (name, contents) in [
         ("design-ui-options", DESIGN_UI_SKILL),
         ("design-technical-options", DESIGN_TECHNICAL_SKILL),
+        ("design-system", DESIGN_SYSTEM_SKILL),
     ] {
         let skill_dir = design_root.join("skills").join(name);
         std::fs::create_dir_all(&skill_dir)?;
@@ -88,11 +94,23 @@ mod tests {
         for (id, body) in [
             (DESIGN_SKILL_ID, DESIGN_UI_SKILL),
             (DESIGN_TECHNICAL_SKILL_ID, DESIGN_TECHNICAL_SKILL),
+            (DESIGN_SYSTEM_SKILL_ID, DESIGN_SYSTEM_SKILL),
         ] {
             let (plugin, name) = id.split_once(':').unwrap();
             assert_eq!(plugin, "design");
             assert!(body.contains(&format!("name: {name}\n")), "{id}");
         }
+    }
+
+    #[test]
+    fn design_ui_skill_reads_the_project_before_it_draws() {
+        assert!(DESIGN_UI_SKILL.contains("DESIGN.md"));
+        assert!(DESIGN_UI_SKILL.contains("design:design-system"));
+        assert!(DESIGN_UI_SKILL.contains("512 KiB"));
+        assert!(DESIGN_UI_SKILL.contains("empty"));
+        assert!(DESIGN_UI_SKILL.contains("4.5:1"));
+        assert!(DESIGN_SYSTEM_SKILL.contains("DESIGN.md"));
+        assert!(DESIGN_SYSTEM_SKILL.contains("yaml"));
     }
 
     #[test]
@@ -106,6 +124,10 @@ mod tests {
         assert!(dir
             .path()
             .join("design/skills/design-technical-options/SKILL.md")
+            .is_file());
+        assert!(dir
+            .path()
+            .join("design/skills/design-system/SKILL.md")
             .is_file());
         assert!(dir
             .path()
