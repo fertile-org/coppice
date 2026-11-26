@@ -3,6 +3,8 @@ import { useState } from 'react';
 export interface QuestionItem {
   question: string;
   choices?: string[];
+  /** The answer the planner would pick. Pre-selected when set. */
+  recommended?: string | null;
 }
 
 export interface QuestionsFormCopy {
@@ -10,6 +12,9 @@ export interface QuestionsFormCopy {
   answerPlaceholder: string;
   sendAnswers: string;
   sending: string;
+  /** When set, a one-click button submits every suggested answer. */
+  acceptAllRecommended?: string;
+  suggested?: string;
 }
 
 export function QuestionsForm({
@@ -29,11 +34,26 @@ export function QuestionsForm({
   /** Optional status line under the title when read-only (Answered / Skipped). */
   statusLabel?: string;
 }) {
-  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ''));
+  const [answers, setAnswers] = useState<string[]>(() =>
+    questions.map((question) => question.recommended?.trim() ?? ''),
+  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasAnswer = answers.some((answer) => answer.trim().length > 0);
+  const recommendedAnswers = questions.map((question) => question.recommended?.trim() ?? '');
+  const hasRecommended = recommendedAnswers.some((answer) => answer.length > 0);
   const locked = disabled || pending || readOnly;
+
+  function submit(next: string[]) {
+    if (!onSubmit || locked || !next.some((answer) => answer.trim().length > 0)) return;
+    setError(null);
+    setPending(true);
+    Promise.resolve(onSubmit(next))
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setPending(false));
+  }
 
   function setAnswer(index: number, value: string) {
     setAnswers((current) => current.map((answer, i) => (i === index ? value : answer)));
@@ -71,14 +91,7 @@ export function QuestionsForm({
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!hasAnswer || !onSubmit || locked) return;
-          setError(null);
-          setPending(true);
-          Promise.resolve(onSubmit(answers))
-            .catch((err: unknown) => {
-              setError(err instanceof Error ? err.message : String(err));
-            })
-            .finally(() => setPending(false));
+          submit(answers);
         }}
       >
         {questions.map((question, index) => {
@@ -88,6 +101,11 @@ export function QuestionsForm({
               <label htmlFor={id} className="font-body text-sm text-text-primary">
                 {question.question}
               </label>
+              {question.recommended?.trim() ? (
+                <p className="font-body text-xs text-text-secondary">
+                  {copy.suggested ?? 'Suggested'}: {question.recommended.trim()}
+                </p>
+              ) : null}
               {question.choices && question.choices.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {question.choices.map((choice) => (
@@ -100,6 +118,11 @@ export function QuestionsForm({
                       className="rounded-md border border-border px-2 py-1 font-body text-xs text-text-primary transition-colors duration-fast hover:bg-paper-200 aria-pressed:bg-paper-200 disabled:opacity-50"
                     >
                       {choice}
+                      {question.recommended?.trim() === choice ? (
+                        <span className="ml-1 text-text-secondary">
+                          ({copy.suggested ?? 'Suggested'})
+                        </span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -115,13 +138,29 @@ export function QuestionsForm({
             </div>
           );
         })}
-        <button
-          type="submit"
-          disabled={locked || !hasAnswer}
-          className="self-start rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {pending ? copy.sending : copy.sendAnswers}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {copy.acceptAllRecommended && hasRecommended ? (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => submit(recommendedAnswers)}
+              className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending ? copy.sending : copy.acceptAllRecommended}
+            </button>
+          ) : null}
+          <button
+            type="submit"
+            disabled={locked || !hasAnswer}
+            className={
+              copy.acceptAllRecommended && hasRecommended
+                ? 'self-start rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50'
+                : 'self-start rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
+            }
+          >
+            {pending ? copy.sending : copy.sendAnswers}
+          </button>
+        </div>
       </form>
       {error ? <p className="font-body text-sm text-danger">{error}</p> : null}
     </section>

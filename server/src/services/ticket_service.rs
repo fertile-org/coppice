@@ -1217,6 +1217,7 @@ impl<'a> TicketService<'a> {
                 questions.answers AS plan_answers,
                 questions.answered_at IS NULL AS plan_questions_waiting,
                 questions.ticket_id IS NOT NULL AS has_plan_questions,
+                questions.round AS plan_questions_round,
                 split.parent_ticket_id IS NOT NULL AS split_parent
             FROM tickets t
             LEFT JOIN agents agent ON agent.id = t.assignee_agent_id
@@ -1235,7 +1236,13 @@ impl<'a> TicketService<'a> {
                 ORDER BY r.created_at DESC
                 LIMIT 1
             ) plan_run ON true
-            LEFT JOIN ticket_plan_questions questions ON questions.ticket_id = t.id
+            LEFT JOIN LATERAL (
+                SELECT q.ticket_id, q.questions, q.answers, q.answered_at, q.round
+                FROM ticket_plan_questions q
+                WHERE q.ticket_id = t.id
+                ORDER BY q.round DESC
+                LIMIT 1
+            ) questions ON true
             LEFT JOIN ticket_plan_splits split ON split.parent_ticket_id = t.id
             WHERE t.id = ANY($1)
             "#,
@@ -1274,6 +1281,7 @@ impl<'a> TicketService<'a> {
                         .and_then(|answers| serde_json::from_value(answers).ok())
                         .unwrap_or_default(),
                     waiting: row.get("plan_questions_waiting"),
+                    round: row.get::<Option<i16>, _>("plan_questions_round").unwrap_or(1),
                 })
             } else {
                 None

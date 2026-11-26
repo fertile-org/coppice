@@ -66,6 +66,35 @@ describe('PlanReviewActions', () => {
     expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeDisabled();
   });
 
+  it('accepts every suggested answer in one click', async () => {
+    wrap(
+      <PlanReviewActions
+        ticketId="t1"
+        boardId="b1"
+        hasPlan={false}
+        planQuestions={{
+          questions: [
+            { question: 'Which database?', choices: ['Postgres', 'SQLite'], recommended: 'Postgres' },
+            { question: 'Keep the old endpoint?', recommended: 'No' },
+          ],
+          answers: [],
+          waiting: true,
+          round: 2,
+        }}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: PLAN_COPY.moreQuestions })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: PLAN_COPY.acceptAllRecommended }));
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        '/api/tickets/t1/plan-answers',
+        expect.objectContaining({
+          body: JSON.stringify({ answers: ['Postgres', 'No'] }),
+        }),
+      ),
+    );
+  });
+
   it('sends the answers once at least one is given', async () => {
     wrap(<PlanReviewActions ticketId="t1" boardId="b1" hasPlan={false} planQuestions={questions} />);
     fireEvent.click(screen.getByRole('button', { name: 'Postgres' }));

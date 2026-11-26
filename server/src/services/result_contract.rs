@@ -328,6 +328,14 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             if plan_questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
                 return Err(crate::copy::plan::PLAN_QUESTIONS_TOO_MANY.into());
             }
+            if plan_questions.iter().any(|question| {
+                question
+                    .recommended
+                    .as_deref()
+                    .is_none_or(|answer| answer.trim().is_empty())
+            }) {
+                return Err(crate::copy::plan::PLAN_QUESTIONS_NEED_RECOMMENDED.into());
+            }
             if updated_description
                 .as_deref()
                 .is_some_and(|value| !value.trim().is_empty())
@@ -1192,6 +1200,7 @@ mod tests {
         let question = |text: &str| PlanQuestion {
             question: text.into(),
             choices: vec![],
+            recommended: None,
         };
         let mut ok = done_result();
         if let AgentRunResult::Done { questions, .. } = &mut ok {
@@ -1206,6 +1215,36 @@ mod tests {
         let err = validate_for_profile(&too_many, ContextProfile::Conversation, "chat_turn")
             .expect_err("cap");
         assert_eq!(err, PLAN_QUESTIONS_TOO_MANY);
+
+        let mut plan_questions = done_result();
+        if let AgentRunResult::Done {
+            summary,
+            plan_questions,
+            ..
+        } = &mut plan_questions
+        {
+            summary.clear();
+            *plan_questions = vec![question("Which database?")];
+        }
+        let err = validate_for_profile(
+            &plan_questions,
+            ContextProfile::Full,
+            crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+        )
+        .expect_err("planning questions need a suggested answer");
+        assert_eq!(err, crate::copy::plan::PLAN_QUESTIONS_NEED_RECOMMENDED);
+        if let AgentRunResult::Done {
+            plan_questions, ..
+        } = &mut plan_questions
+        {
+            plan_questions[0].recommended = Some("Postgres".into());
+        }
+        assert!(validate_for_profile(
+            &plan_questions,
+            ContextProfile::Full,
+            crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+        )
+        .is_ok());
 
         let err = validate_for_profile(&ok, ContextProfile::Full, "work_on_ticket")
             .expect_err("ticket rejected");

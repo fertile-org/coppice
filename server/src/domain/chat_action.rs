@@ -452,6 +452,7 @@ mod tests {
             &[PlanQuestion {
                 question: "Which?".into(),
                 choices: vec!["A".into()],
+                recommended: None,
             }],
         )
         .expect("merged");

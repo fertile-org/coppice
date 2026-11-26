@@ -72,6 +72,8 @@ export interface PendingPlan {
 export interface PlanQuestion {
   question: string;
   choices?: string[];
+  /** The answer the planner would pick. */
+  recommended?: string | null;
 }
 
 export interface PlanQuestions {
@@ -79,6 +81,8 @@ export interface PlanQuestions {
   answers: string[];
   /** True until the answers are sent. */
   waiting: boolean;
+  /** 1-based set. Missing on older responses means the first set. */
+  round?: number;
 }
 
 /** One sub-ticket in a plan split, in run order. */

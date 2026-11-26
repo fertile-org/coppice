@@ -238,16 +238,13 @@ async fn questions_allowed(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
             "planQuestions needs a ticket.".into(),
         ));
     };
-    let allowed = crate::services::planning_service::PlanningService::new(ctx.pool)
-        .can_ask_questions(ticket_id)
+    match crate::services::planning_service::PlanningService::new(ctx.pool)
+        .question_block(ticket_id)
         .await
-        .map_err(|e| ToolError::Internal(anyhow::anyhow!("{e}")))?;
-    if allowed {
-        Ok(())
-    } else {
-        Err(ToolError::InvalidArgs(
-            crate::copy::plan::PLAN_QUESTIONS_ALREADY_ASKED.into(),
-        ))
+        .map_err(|e| ToolError::Internal(anyhow::anyhow!("{e}")))?
+    {
+        None => Ok(()),
+        Some(reason) => Err(ToolError::InvalidArgs(reason.into())),
     }
 }
 

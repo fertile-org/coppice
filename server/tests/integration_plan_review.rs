@@ -1057,6 +1057,10 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
         .as_str()
         .unwrap()
         .starts_with(QUESTIONS_COMMENT_TITLE));
+    assert!(asked["body"]
+        .as_str()
+        .unwrap()
+        .contains("Suggested answer: Postgres"));
     assert!(thread.iter().all(|note| note["intent"] != "plan"));
     wait_for_scratch_removal(&git).await;
     snapshot_ticket_git(&git);
@@ -1156,8 +1160,104 @@ async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
 }
 
 #[tokio::test]
-async fn a_second_question_round_and_more_than_three_questions_are_refused() {
-    use coppice_server::copy::plan::{PLAN_QUESTIONS_ALREADY_ASKED, PLAN_QUESTIONS_TOO_MANY};
+async fn a_second_question_set_runs_before_the_plan() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) = open_planned_repo(&app, &state, "plan_questioner", &cookie, &csrf).await;
+    common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "first question set",
+        Duration::from_secs(20),
+        |ticket| ticket["planQuestions"]["round"] == 1 && ticket["planQuestions"]["waiting"] == true,
+    )
+    .await;
+
+    let sent = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["Postgres", "No"] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(sent.status(), StatusCode::OK);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "second question set",
+        Duration::from_secs(20),
+        |ticket| ticket["planQuestions"]["round"] == 2 && ticket["planQuestions"]["waiting"] == true,
+    )
+    .await;
+    assert_eq!(ticket["hasPlan"], false);
+    assert_eq!(
+        ticket["planQuestions"]["questions"][0]["recommended"],
+        "Postgres"
+    );
+
+    let pool = state.db.as_ref().expect("db");
+    let planner: Id = sqlx::query_scalar("SELECT assignee_agent_id FROM tickets WHERE id = $1")
+        .bind(Id::parse_str(&ticket_id).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agents SET preset_source = 'plan_writer' WHERE id = $1")
+        .bind(planner)
+        .execute(pool)
+        .await
+        .unwrap();
+    let sent = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["Postgres", "No"] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(sent.status(), StatusCode::OK);
+
+    common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan after two question sets",
+        Duration::from_secs(20),
+        |ticket| ticket["hasPlan"] == true && ticket["planQuestions"]["waiting"] == false,
+    )
+    .await;
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(
+        thread
+            .iter()
+            .filter(|note| note["intent"] == "clarification_request")
+            .count(),
+        2
+    );
+    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
+    let plan = plan_runs(&listed);
+    assert_eq!(plan.len(), 3, "{plan:?}");
+    assert!(plan.iter().all(|run| run["status"] == "succeeded"));
+    wait_for_scratch_removal(&git).await;
+    snapshot_ticket_git(&git);
+}
+
+#[tokio::test]
+async fn question_rounds_stop_at_three_and_need_a_recommended_answer() {
+    use coppice_server::copy::plan::{
+        PLAN_QUESTIONS_ALREADY_ASKED, PLAN_QUESTIONS_NEED_RECOMMENDED, PLAN_QUESTIONS_STILL_WAITING,
+        PLAN_QUESTIONS_TOO_MANY,
+    };
     use coppice_server::providers::PlanQuestion;
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -1172,6 +1272,7 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
     let question = |text: &str| PlanQuestion {
         question: text.into(),
         choices: Vec::new(),
+        recommended: Some("Yes".into()),
     };
 
     let four: Vec<PlanQuestion> = ["a", "b", "c", "d"].iter().map(|q| question(q)).collect();
@@ -1191,10 +1292,70 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
         .record_questions(ticket, None, None, &[question("Again?")])
         .await
         .unwrap_err();
-    assert_eq!(err.to_string(), PLAN_QUESTIONS_ALREADY_ASKED);
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_STILL_WAITING);
     let state = planning.questions(ticket).await.unwrap().unwrap();
     assert!(state.waiting);
+    assert_eq!(state.round, 1);
     assert_eq!(state.questions[0].question, "Which?");
+    assert_eq!(state.questions[0].recommended.as_deref(), Some("Yes"));
+
+    let missing = planning
+        .record_questions(
+            ticket,
+            None,
+            None,
+            &[PlanQuestion {
+                question: "No suggestion".into(),
+                choices: Vec::new(),
+                recommended: None,
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing.to_string(), PLAN_QUESTIONS_NEED_RECOMMENDED);
+
+    sqlx::query(
+        "UPDATE ticket_plan_questions SET answers = $2::jsonb, answered_at = now() WHERE ticket_id = $1",
+    )
+    .bind(ticket)
+    .bind(serde_json::json!(["Yes"]))
+    .execute(pool)
+    .await
+    .unwrap();
+    assert!(planning.can_ask_questions(ticket).await.unwrap());
+    planning
+        .record_questions(ticket, None, None, &[question("Second?")])
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE ticket_plan_questions SET answers = $2::jsonb, answered_at = now() WHERE ticket_id = $1 AND round = 2",
+    )
+    .bind(ticket)
+    .bind(serde_json::json!(["Yes"]))
+    .execute(pool)
+    .await
+    .unwrap();
+    planning
+        .record_questions(ticket, None, None, &[question("Third?")])
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE ticket_plan_questions SET answers = $2::jsonb, answered_at = now() WHERE ticket_id = $1 AND round = 3",
+    )
+    .bind(ticket)
+    .bind(serde_json::json!(["Yes"]))
+    .execute(pool)
+    .await
+    .unwrap();
+    assert!(!planning.can_ask_questions(ticket).await.unwrap());
+    let err = planning
+        .record_questions(ticket, None, None, &[question("Fourth?")])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_ALREADY_ASKED);
+    let latest = planning.questions(ticket).await.unwrap().unwrap();
+    assert_eq!(latest.round, 3);
+    assert!(!latest.waiting);
 
     // Validation refuses four questions at submit time too.
     let four_json = serde_json::json!({
